@@ -1,5 +1,4 @@
 import { useNavigate } from 'react-router-dom';
-import cyberchunk from '../assets/cyberchunk.png';
 import Logo from './Logo'
 
 const LandingPage = () => {
@@ -25,7 +24,7 @@ const LandingPage = () => {
                         <div className="aspect-video bg-gray-100 rounded-2xl overflow-hidden">
                             <img
                                 // Replace this URL with your actual image path
-                                src={cyberchunk}
+                                src="/cyberchunk.png"
                                 alt="Moment Camera System"
                                 className="w-full h-full object-cover"
                             />
