@@ -1,0 +1,18 @@
+[toolchain]
+
+[features]
+seeds = true
+skip-lint = false
+
+[programs.devnet]
+my_solana_project = "5HFxUPQ7aZPZF8UqRSSHsoamq3X4VU1K9euMXuuGcUfj"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "Devnet"
+wallet = "/Users/azuolascompy/.config/solana/id.json"
+
+[scripts]
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"

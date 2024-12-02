@@ -1,0 +1,27 @@
+# Rust/Anchor
+target/
+**/*.rs.bk
+.anchor/
+.DS_Store
+test-ledger/
+
+# Node
+node_modules/
+dist/
+build/
+.env
+.env.local
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Keys and local config
+*keypair.json
+.idea/
+.vscode/
+*.sw*
+.env
+.env.local
+app/web/src/assets/cyberchunk.png
