@@ -11,22 +11,22 @@ config();
 const app = express();
 const httpServer = createServer(app);
 
-// Socket.io setup
+// Update the CORS configuration
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-    methods: ['GET', 'POST']
+    origin: "*",  // For development. In production, specify your domain
+    methods: ["GET", "POST", "OPTIONS"],
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization"]
   }
 });
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-
-// Basic health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
+app.use(cors({
+  origin: "*",  // For development. In production, specify your domain
+  credentials: true,
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 
 // Timeline events storage (in-memory for now)
 interface TimelineEvent {

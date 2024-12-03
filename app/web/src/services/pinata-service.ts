@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const PINATA_JWT = import.meta.env.VITE_PINATA_JWT || "";
+const PINATA_JWT = import.meta.env.VITE_PINATA_JWT;
 
 const pinataApi = axios.create({
   headers: {
@@ -30,16 +30,28 @@ interface PinataResponse {
 
 export class PinataService {
   async uploadImage(imageBlob: Blob, walletAddress: string): Promise<string> {
+    if (!PINATA_JWT) {
+      console.error('Pinata JWT is not configured');
+      throw new Error('Pinata JWT is not configured');
+    }
     return this.uploadFile(imageBlob, walletAddress, 'image');
   }
 
   async uploadVideo(videoBlob: Blob, walletAddress: string): Promise<string> {
+    if (!PINATA_JWT) {
+      console.error('Pinata JWT is not configured');
+      throw new Error('Pinata JWT is not configured');
+    }
     // Ensure we're sending an MP4 blob
     const mp4Blob = new Blob([videoBlob], { type: 'video/mp4' });
     return this.uploadFile(mp4Blob, walletAddress, 'video');
   }
 
   private async uploadFile(blob: Blob, walletAddress: string, type: 'image' | 'video'): Promise<string> {
+    if (!PINATA_JWT) {
+      console.error('Pinata JWT is not configured');
+      throw new Error('Pinata JWT is not configured');
+    }
     try {
       console.log(`Starting ${type} upload for wallet:`, walletAddress);
       
@@ -78,6 +90,10 @@ export class PinataService {
   }
 
   async getMediaForWallet(walletAddress: string): Promise<Array<any>> {
+    if (!PINATA_JWT) {
+      console.error('Pinata JWT is not configured');
+      throw new Error('Pinata JWT is not configured');
+    }
     try {
       console.log('Fetching media for wallet:', walletAddress);
       
@@ -120,6 +136,10 @@ export class PinataService {
   }
 
   async deleteMedia(ipfsHash: string, walletAddress: string): Promise<boolean> {
+    if (!PINATA_JWT) {
+      console.error('Pinata JWT is not configured');
+      throw new Error('Pinata JWT is not configured');
+    }
     try {
       const response = await pinataApi.get<PinataResponse>(
         'https://api.pinata.cloud/data/pinList',
