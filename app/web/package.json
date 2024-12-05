@@ -19,7 +19,7 @@
     "@solana/wallet-adapter-react": "^0.15.35",
     "@solana/wallet-adapter-react-ui": "^0.9.35",
     "@solana/wallet-adapter-wallets": "^0.19.32",
-    "@solana/web3.js": "^1.95.7",
+    "@solana/web3.js": "1",
     "@vercel/speed-insights": "^1.1.0",
     "axios": "^1.7.7",
     "date-fns": "^4.1.0",
@@ -50,5 +50,9 @@
     "vite": "^5.4.8",
     "vite-plugin-node-polyfills": "^0.22.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "resolutions": {
+    "rpc-websockets": "7.10.0",
+    "@solana/web3.js": "1.91.6"
+  }
 }
