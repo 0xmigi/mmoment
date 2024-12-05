@@ -1,16 +1,22 @@
 import { useNavigate } from 'react-router-dom';
 import Logo from './Logo'
+import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 
 const LandingPage = () => {
     const navigate = useNavigate();
+    const { setShowAuthFlow } = useDynamicContext();
 
     return (
         <div className="min-h-screen bg-white">
             {/* Top Navigation */}
             <div className="fixed top-0 right-0 p-4">
                 <button
-                    onClick={() => navigate('/app')}
-                    className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                    onClick={() => {
+                        setShowAuthFlow(true);
+                        console.log("Attempting to show auth flow");
+                        navigate('/app')
+                      }}
+                    className="px-6 py-2 bg-[#e7eeff] text-black rounded-lg hover:bg-[#a5bafc] transition-colors"
                 >
                     Open App
                 </button>
@@ -48,7 +54,7 @@ const LandingPage = () => {
                                 <span>Live content hubs</span>
                             </div>
                             <div className="flex items-center justify-center lg:justify-start gap-2 text-gray-600">
-                                <div className="w-2 h-2 bg-purple-500 rounded-full" />
+                                <div className="w-2 h-2 bg-[#e7eeff] rounded-full" />
                                 <span>Secured by Solana</span>
                             </div>
                         </div>

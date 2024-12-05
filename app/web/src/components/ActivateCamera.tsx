@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { useProgram } from '../anchor/setup';
-import { SystemProgram, Keypair } from '@solana/web3.js';
+import { SystemProgram, Keypair, PublicKey } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { pinataService } from '../services/pinata-service';
 import { CONFIG } from '../config';
@@ -11,12 +11,11 @@ import { Camera, Loader } from 'lucide-react';
 interface ActivateCameraProps {
   onInitialize?: () => void;
   onPhotoCapture?: () => void;
-  onCameraUpdate?: (params: { publicKey: string; isLive: boolean }) => void;
+  onCameraUpdate?: (params: { address: string; isLive: boolean }) => void;
 }
 
 export function ActivateCamera({ onInitialize, onPhotoCapture, onCameraUpdate }: ActivateCameraProps) {
-  const wallet = useWallet();
-  const { publicKey } = wallet;
+  const { primaryWallet } = useDynamicContext();
   useConnection();
   const program = useProgram();
   const [status, setStatus] = useState('');
@@ -25,13 +24,13 @@ export function ActivateCamera({ onInitialize, onPhotoCapture, onCameraUpdate }:
   const [isInitialized, setIsInitialized] = useState(false);
 
   const initializeCamera = async () => {
-    if (!publicKey || !program || isInitialized) return;
+    if (!primaryWallet?.address || !program || isInitialized) return;
     
     try {
       const initTx = await program.methods.initialize()
         .accounts({
           cameraAccount: cameraKeypair.publicKey,
-          user: publicKey,
+          user: new PublicKey(primaryWallet.address),
           systemProgram: SystemProgram.programId,
         })
         .signers([cameraKeypair])
@@ -40,7 +39,7 @@ export function ActivateCamera({ onInitialize, onPhotoCapture, onCameraUpdate }:
       console.log('Camera initialized:', initTx);
       setIsInitialized(true);
       onCameraUpdate?.({
-        publicKey: cameraKeypair.publicKey.toString(),
+        address: cameraKeypair.publicKey.toString(),
         isLive: true
       });
       onInitialize?.();
@@ -51,30 +50,30 @@ export function ActivateCamera({ onInitialize, onPhotoCapture, onCameraUpdate }:
   };
 
   const handleTakePicture = async () => {
-    if (!publicKey || !program) return;
+    console.log("Take picture clicked", {
+      hasWallet: !!primaryWallet?.address,
+      hasProgram: !!program
+    });
+  
+    if (!primaryWallet?.address || !program) return;
     setLoading(true);
     
     try {
-      // Initialize camera if not already initialized
       if (!isInitialized) {
         await initializeCamera();
       }
 
-      // Activate camera
       setStatus('Activating camera...');
       await program.methods.activateCamera(new BN(100))
         .accounts({
           cameraAccount: cameraKeypair.publicKey,
-          user: publicKey,
+          user: new PublicKey(primaryWallet.address),
           systemProgram: SystemProgram.programId,
         })
         .rpc();
   
-      // Call camera API
       setStatus('Taking picture...');
       const apiUrl = `${CONFIG.CAMERA_API_URL}/api/capture`;
-      console.log('Calling camera API at:', apiUrl);
-      
       const captureResponse = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -91,9 +90,8 @@ export function ActivateCamera({ onInitialize, onPhotoCapture, onCameraUpdate }:
       setStatus('Processing image...');
       const imageBlob = await captureResponse.blob();
       
-      // Upload to Pinata
       setStatus('Uploading to IPFS...');
-      const url = await pinataService.uploadImage(imageBlob, publicKey.toString());
+      const url = await pinataService.uploadImage(imageBlob, primaryWallet.address);
       console.log('Image uploaded to IPFS:', url);
       
       setStatus('Picture uploaded successfully!');
@@ -111,7 +109,7 @@ export function ActivateCamera({ onInitialize, onPhotoCapture, onCameraUpdate }:
     <div className="flex flex-col gap-4">
       <button
         onClick={handleTakePicture}
-        disabled={loading || !publicKey}
+        disabled={loading || !primaryWallet?.address}
         className={`flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-white
           ${loading ? 'bg-stone-400 cursor-not-allowed' : 'bg-stone-400 hover:bg-stone-500'}`}
       >

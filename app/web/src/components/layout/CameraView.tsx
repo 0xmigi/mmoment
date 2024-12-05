@@ -1,4 +1,4 @@
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { Timeline } from '../Timeline';
 import { ActivateCamera } from '../ActivateCamera';
@@ -7,7 +7,7 @@ import MediaGallery from '../ImageGallery';
 import { CONFIG } from '../../config';
 
 export function CameraView() {
-  const { publicKey } = useWallet();
+  const { primaryWallet } = useDynamicContext();
   const timelineRef = useRef<any>(null);
   const [cameraAccount, setCameraAccount] = useState<string | null>(null);
   const [isLive, setIsLive] = useState(false);
@@ -43,10 +43,10 @@ export function CameraView() {
     return () => clearInterval(interval);
   }, [checkCameraStatus]);
 
-  const handleCameraUpdate = ({ publicKey, isLive }: { publicKey: string; isLive: boolean }) => {
-    setCameraAccount(publicKey);
+  const handleCameraUpdate = ({ address, isLive }: { address: string; isLive: boolean }) => {
+    setCameraAccount(address);
     setIsLive(isLive);
-    localStorage.setItem('cameraAccount', publicKey);
+    localStorage.setItem('cameraAccount', address);
   };
   return (
     <div className="relative w-full">
@@ -95,14 +95,14 @@ export function CameraView() {
                   timelineRef.current?.addEvent({
                     type: 'initialization',
                     timestamp: Date.now(),
-                    user: { address: publicKey?.toString() || 'unknown' }
+                    user: { address: primaryWallet?.address || 'unknown'?.toString() || 'unknown' }
                   });
                 }}
                 onPhotoCapture={() => {
                   timelineRef.current?.addEvent({
                     type: 'photo_captured',
                     timestamp: Date.now(),
-                    user: { address: publicKey?.toString() || 'unknown' }
+                    user: { address: primaryWallet?.address || 'unknown'?.toString() || 'unknown' }
                   });
                 }}
               />
@@ -111,7 +111,7 @@ export function CameraView() {
                   timelineRef.current?.addEvent({
                     type: 'video_recorded',
                     timestamp: Date.now(),
-                    user: { address: publicKey?.toString() || 'unknown' }
+                    user: { address: primaryWallet?.address || 'unknown'?.toString() || 'unknown' }
                   });
                 }}
               />

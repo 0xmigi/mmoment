@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { Trash2, Download, Image, Video } from 'lucide-react';
 import { pinataService } from '../services/pinata-service';
 
@@ -18,14 +18,14 @@ interface MediaGalleryProps {
 }
 
 export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: MediaGalleryProps) {
-  const { publicKey, connected } = useWallet();
+  const { primaryWallet } = useDynamicContext();
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
   const fetchMedia = async () => {
-    if (!connected || !publicKey) {
+    if (!primaryWallet?.address) {
       setMedia([]);
       setLoading(false);
       return;
@@ -33,7 +33,7 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
 
     try {
       setError(null);
-      const walletAddress = publicKey.toString();
+      const walletAddress = primaryWallet.address;
       const allMedia = await pinataService.getMediaForWallet(walletAddress);
 
       console.log('Mode:', mode);
@@ -69,16 +69,16 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
     fetchMedia();
     const interval = setInterval(fetchMedia, 5000);
     return () => clearInterval(interval);
-  }, [publicKey, connected, mode, maxRecentItems]); // Added mode and maxRecentItems
+  }, [primaryWallet?.address, mode, maxRecentItems]);
 
   const handleDelete = async (mediaId: string) => {
-    if (!publicKey) return;
+    if (!primaryWallet?.address) return;
 
     try {
       setDeleting(mediaId);
       setError(null);
 
-      const success = await pinataService.deleteMedia(mediaId, publicKey.toString());
+      const success = await pinataService.deleteMedia(mediaId, primaryWallet.address);
 
       if (success) {
         setMedia(current => current.filter(m => m.id !== mediaId));
@@ -102,7 +102,7 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
     document.body.removeChild(a);
   };
 
-  if (!connected) {
+  if (!primaryWallet?.address) {
     return (
       <div className="text-center py-8">
         Please connect your wallet to view your media
@@ -110,12 +110,14 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
     );
   }
 
+  // Rest of your component remains exactly the same from here
   const title = mode === 'recent'
     ? `Current Session (${media.length})`
     : `Previous Sessions (${media.length})`;
 
   return (
     <div className="max-w-4xl mx-auto p-4">
+      {/* Rest of your JSX remains unchanged */}
       <h2 className="text-xl text-left font-bold text-gray-800 mb-6">{title}</h2>
 
       {error && (
@@ -160,7 +162,6 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
                   />
                 )}
                 <div className="absolute top-2 right-2 flex gap-2">
-                  {/* biome-ignore lint/a11y/useButtonType: <explanation> */}
                   <button
                     onClick={() => handleDownload(item.url, `${item.id}.${item.type === 'video' ? 'mp4' : 'jpg'}`)}
                     className="p-2 rounded-full bg-white/80 hover:bg-white
@@ -168,7 +169,6 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
                   >
                     <Download className="w-5 h-5 text-blue-500" />
                   </button>
-                  {/* biome-ignore lint/a11y/useButtonType: <explanation> */}
                   <button
                     onClick={() => handleDelete(item.id)}
                     disabled={deleting === item.id}

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { useProgram } from '../anchor/setup';
-import { SystemProgram, Keypair } from '@solana/web3.js';
+import { SystemProgram, Keypair, PublicKey } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { pinataService } from '../services/pinata-service';
 import { Video, Loader } from 'lucide-react';
@@ -15,8 +15,7 @@ interface VideoRecorderProps {
 export function VideoRecorder({ onVideoRecorded }: VideoRecorderProps) {
   const [recordingTimer, setRecordingTimer] = useState<NodeJS.Timeout | null>(null);
   const CAMERA_API_BASE = CONFIG.CAMERA_API_URL;
-  const wallet = useWallet();
-  const { publicKey } = wallet;
+  const { primaryWallet } = useDynamicContext();
   useConnection();
   const program = useProgram();
   const [status, setStatus] = useState('');
@@ -26,13 +25,13 @@ export function VideoRecorder({ onVideoRecorded }: VideoRecorderProps) {
   const [isInitialized, setIsInitialized] = useState(false);
 
   const initializeCamera = async () => {
-    if (!publicKey || !program || isInitialized) return;
+    if (!primaryWallet?.address || !program || isInitialized) return;
     
     try {
       const initTx = await program.methods.initialize()
         .accounts({
           cameraAccount: cameraKeypair.publicKey,
-          user: publicKey,
+          user: new PublicKey(primaryWallet.address),
           systemProgram: SystemProgram.programId,
         })
         .signers([cameraKeypair])
@@ -47,9 +46,12 @@ export function VideoRecorder({ onVideoRecorded }: VideoRecorderProps) {
   };
 
   const startRecording = async () => {
-    if (!publicKey || !program) return;
+    console.log("Start recording clicked", {
+      hasWallet: !!primaryWallet?.address,
+      hasProgram: !!program
+    });
+    if (!primaryWallet?.address || !program) return;
     setLoading(true);
-    // let recordingTimer: NodeJS.Timeout;
 
     try {
       // Initialize if needed
@@ -62,7 +64,7 @@ export function VideoRecorder({ onVideoRecorded }: VideoRecorderProps) {
       await program.methods.activateCamera(new BN(100))
         .accounts({
           cameraAccount: cameraKeypair.publicKey,
-          user: publicKey,
+          user: new PublicKey(primaryWallet.address),
           systemProgram: SystemProgram.programId,
         })
         .rpc();
@@ -102,7 +104,7 @@ export function VideoRecorder({ onVideoRecorded }: VideoRecorderProps) {
             resolve();
           }
         }, 1000);
-        setRecordingTimer(timer);  // Save timer to state
+        setRecordingTimer(timer);
       });
 
       // Add a small delay after recording completes
@@ -113,7 +115,7 @@ export function VideoRecorder({ onVideoRecorded }: VideoRecorderProps) {
       const videoBlob = await downloadVideo(filename);
 
       setStatus('Uploading to IPFS...');
-      const ipfsUrl = await pinataService.uploadVideo(videoBlob, publicKey.toString());
+      const ipfsUrl = await pinataService.uploadVideo(videoBlob, primaryWallet.address);
       console.log('Video uploaded to IPFS:', ipfsUrl);
 
       onVideoRecorded?.();
@@ -164,7 +166,7 @@ export function VideoRecorder({ onVideoRecorded }: VideoRecorderProps) {
     <div className="flex flex-col gap-4">
       <button
         onClick={startRecording}
-        disabled={loading || !publicKey}
+        disabled={loading || !primaryWallet?.address}
         className={`flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-white
           ${loading ? 'bg-gray-500 cursor-not-allowed' : 'bg-gray-400 hover:bg-gray-500'}`}
       >

@@ -1,6 +1,6 @@
 // src/config.ts
 
-export const CAMERA_API_URL = "https://b624-2603-7000-9400-2792-00-12c8.ngrok-free.app";
+export const CAMERA_API_URL = "https://camera.mmoment.xyz";
 export const CONFIG = {
     // Use window.location.origin to dynamically get the current origin
     // This helps with both localhost and local network IP testing
