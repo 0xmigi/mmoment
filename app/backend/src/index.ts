@@ -11,18 +11,19 @@ config();
 const app = express();
 const httpServer = createServer(app);
 
-// Update the CORS configuration
+// Update CORS configuration for Socket.IO
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",  // For development. In production, specify your domain
-    methods: ["GET", "POST", "OPTIONS"],
+    origin: true, // Allows all origins
     credentials: true,
+    methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"]
   }
 });
 
+// Update Express CORS configuration
 app.use(cors({
-  origin: "*",  // For development. In production, specify your domain
+  origin: true, // Allows all origins
   credentials: true,
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]

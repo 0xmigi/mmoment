@@ -1,23 +1,24 @@
 // app/web/src/services/timeline-service.ts
 import { io, Socket } from 'socket.io-client';
 import { TimelineEvent } from '../types/timeline';
+import { CONFIG, timelineConfig } from '../config';
 
 class TimelineService {
   private socket: Socket;
   private listeners: Set<(event: TimelineEvent) => void> = new Set();
-  private events: TimelineEvent[] = [];  // Store events locally
+  private events: TimelineEvent[] = [];
   private isConnected: boolean = false;
 
   constructor() {
-    this.socket = io('http://localhost:3001', {
-      reconnectionDelay: 1000,
-      reconnection: true,
-      transports: ['websocket'],
-    });
+    this.socket = io(CONFIG.BACKEND_URL, timelineConfig.wsOptions);
 
     this.socket.on('connect', () => {
       this.isConnected = true;
       console.log('Connected to timeline service');
+    });
+
+    this.socket.on('connect_error', (error) => {
+      console.error('Connection error:', error);
     });
 
     this.socket.on('timelineEvent', (event: TimelineEvent) => {

@@ -1,26 +1,18 @@
 // src/config.ts
-
-export const CAMERA_API_URL = "https://camera.mmoment.xyz";
 export const CONFIG = {
-    // Use window.location.origin to dynamically get the current origin
-    // This helps with both localhost and local network IP testing
-    baseUrl: window.location.origin,
-    
-    // RPC endpoints
-    rpcEndpoint: "https://api.devnet.solana.com",
-    
-    // Camera API
-    CAMERA_API_URL,
-    
-    // Add any other config values here
-  };
-  
-  // Wallet adapter configuration
-  export const walletConfig = {
-    // List of allowed origins for wallet connections
-    allowedOrigins: [
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-      window.location.origin, // Dynamically add current origin
-    ],
-  };
+  baseUrl: window.location.origin,
+  rpcEndpoint: "https://api.devnet.solana.com",
+  CAMERA_API_URL: "https://camera.mmoment.xyz", // Make sure this matches your actual camera API URL
+  BACKEND_URL: process.env.VITE_BACKEND_URL || "https://your-backend-url.com" // Add your actual backend URL here
+};
+
+// Timeline service configuration
+export const timelineConfig = {
+  wsUrl: CONFIG.BACKEND_URL,
+  wsOptions: {
+    reconnectionDelay: 1000,
+    reconnection: true,
+    transports: ['websocket'],
+    secure: true
+  }
+};
