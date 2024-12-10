@@ -5,18 +5,21 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import { config } from 'dotenv';
 
-// Load environment variables
 config();
 
 const app = express();
 const httpServer = createServer(app);
 
-// Update CORS configuration for Socket.IO
+// Add basic health check endpoint
+app.get('/', (req, res) => {
+  res.json({ status: 'healthy' });
+});
+
 const io = new Server(httpServer, {
   cors: {
-    origin: true, // Allows all origins
-    credentials: true,
+    origin: "*",
     methods: ["GET", "POST", "OPTIONS"],
+    credentials: true,
     allowedHeaders: ["Content-Type", "Authorization"]
   }
 });

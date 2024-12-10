@@ -3,7 +3,7 @@ export const CONFIG = {
   baseUrl: window.location.origin,
   rpcEndpoint: "https://api.devnet.solana.com",
   CAMERA_API_URL: "https://camera.mmoment.xyz", // Make sure this matches your actual camera API URL
-  BACKEND_URL: "mmoment-production.up.railway.app" // Add your actual backend URL here
+  BACKEND_URL: "https://mmoment-production.up.railway.app" // Add your actual backend URL here
 };
 
 // Timeline service configuration
