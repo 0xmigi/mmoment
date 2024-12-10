@@ -46,7 +46,7 @@ const LandingPage = () => {
                             </h1>
                         </div>
                         <p className="text-xl text-gray-600 mb-8 max-w-md mx-auto lg:mx-0">
-                            Capture group moments instantly with a NFC-enabled camera system. Just tap your phone or buy one to get started.
+                            Capture moments and context instantly with a NFC-enabled camera system. Just tap your phone and record.
                         </p>
                         <div className="space-y-4">
                             <div className="flex items-center justify-center lg:justify-start gap-2 text-gray-600">
@@ -54,7 +54,7 @@ const LandingPage = () => {
                                 <span>Live content hubs</span>
                             </div>
                             <div className="flex items-center justify-center lg:justify-start gap-2 text-gray-600">
-                                <div className="w-2 h-2 bg-[#e7eeff] rounded-full" />
+                                <div className="w-2 h-2 bg-pink-300 rounded-full" />
                                 <span>Secured by Solana</span>
                             </div>
                         </div>

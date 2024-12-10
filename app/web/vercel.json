@@ -1,0 +1,13 @@
+{
+    "rewrites": [
+      {
+        "source": "/(.*)",
+        "destination": "/index.html"
+      }
+    ],
+    "build": {
+      "env": {
+        "YARN_ENABLE_IMMUTABLE_INSTALLS": "false"
+      }
+    }
+  }
