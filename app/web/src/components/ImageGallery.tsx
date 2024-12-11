@@ -122,8 +122,8 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
 
   // Rest of your component remains exactly the same from here
   const title = mode === 'recent'
-    ? `Current Session (${media.length})`
-    : `Previous Sessions (${media.length})`;
+    ? `Recent (${media.length})`
+    : `Gallery (${media.length})`;
 
   return (
     <div className="max-w-3xl mx-auto">

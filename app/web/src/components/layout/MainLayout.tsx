@@ -19,7 +19,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
   return (
     <div className="flex flex-col h-screen bg-white">
       {/* Top Bar */}
-      <div className="flex-none z-50">
+      <div className="flex-none z-[40]">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           {/* Left side - Logo and Desktop Nav */}
           <div className="flex items-center gap-8">
@@ -87,7 +87,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
 
       {/* Mobile Navigation Menu */}
       {isLoggedIn && isOpen && (
-        <div className="fixed inset-x-0 top-0 z-50 sm:hidden">
+        <div className="fixed inset-x-0 z-[50] sm:hidden">
           {/* Semi-transparent overlay */}
           <div
             className="fixed inset-0 bg-black/50"

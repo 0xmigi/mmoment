@@ -144,7 +144,7 @@ export function CameraView() {
             </div>
 
             {/* Main Camera Controls Frame */}
-            <div className="relative ml-16 mt-8 w-[calc(100%-4rem)] bg-white z-20">
+            <div className="relative ml-16 mt-8 w-[calc(100%-4rem)] bg-white">
               <div className="px-6">
                 {/* Use grid to maintain consistent widths */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -195,7 +195,7 @@ export function CameraView() {
               </div>
 
               {/* Media Gallery */}
-              <div className="relative z-20 px-6 mt-6">
+              <div className="relative px-6 mt-6">
                 <MediaGallery mode="recent" maxRecentItems={6} />
               </div>
             </div>
