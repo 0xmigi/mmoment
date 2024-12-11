@@ -10,6 +10,7 @@ class TimelineService {
   private isConnected: boolean = false;
 
   constructor() {
+    // Use the config URL instead of hardcoded localhost
     this.socket = io(CONFIG.BACKEND_URL, timelineConfig.wsOptions);
 
     this.socket.on('connect', () => {
@@ -18,7 +19,7 @@ class TimelineService {
     });
 
     this.socket.on('connect_error', (error) => {
-      console.error('Connection error:', error);
+      console.log('Connection error:', error);
     });
 
     this.socket.on('timelineEvent', (event: TimelineEvent) => {
@@ -37,7 +38,6 @@ class TimelineService {
     });
   }
 
-  // Add method to get current state
   getState() {
     return {
       events: this.events,
