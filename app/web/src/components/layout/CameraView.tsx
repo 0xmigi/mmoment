@@ -95,110 +95,113 @@ export function CameraView() {
     <>
       <MobileControls
         onTakePicture={() => {
-          // Use the same handlers as desktop buttons
           handleTakePicture && handleTakePicture();
         }}
         onRecordVideo={() => {
-          // Use the same handlers as desktop buttons
           handleRecordVideo && handleRecordVideo();
         }}
         isLoading={loading}
       />
-      <div className="relative w-full">
-        <ToastContainer message={currentToast} onDismiss={dismissToast} />
-        <div className="max-w-3xl mt-40 mx-auto flex flex-col justify-top relative">
-          {/* Camera Status Header */}
-          <div className="relative mb-40">
-            <div className="flex items-center gap-2">
-              {isLive && (
-                <div className="flex items-center gap-2">
-                  <span className="relative flex h-3 w-3 -ml-1">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-                  </span>
-                  <span className="text-red-500 font-medium">LIVE</span>
-                </div>
-              )}
-              <span className="text-sm text-gray-600">
-                {cameraAccount
-                  ? `Camera: ${cameraAccount.slice(0, 8)}...`
-                  : 'No Camera Connected'
-                }
-              </span>
-            </div>
-          </div>
+      {/* Add just the outer scrollable container */}
+      <div className="h-full overflow-y-auto pb-20">
+        {/* Keep your existing layout exactly as is */}
+        <div className="relative w-full pl-6">
+          <ToastContainer message={currentToast} onDismiss={dismissToast} />
+          <div className="max-w-3xl mt-40 mx-auto flex flex-col justify-top relative">
 
-          {/* Timeline Events */}
-          <div className="absolute mt-12 left-0 w-full">
-            <Timeline ref={timelineRef} 
-            // maxEvents={18} 
-            />
-            <div
-              className="top-0 left-0 right-0 pointer-events-none"
-              style={{
-                background: 'linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 100%)'
-              }}
-            />
-          </div>
-
-          {/* Main Camera Controls Frame */}
-          <div className="relative ml-16 mt-8 w-[calc(100%-4rem)] bg-white z-20">
-            <div className="px-6">
-              {/* Preview and Controls Layout */}
-              <div className="flex flex-col md:flex-row gap-6">
-                {/* Preview Frame */}
-                <div className="relative w-full md:w-2/3 aspect-video bg-gray-200 rounded-lg overflow-hidden">
-                  <div className="absolute top-4 right-4">
-                    <span className="px-2 py-1 bg-red-500 text-white text-xs opacity-20 rounded-full">
-                      PREVIEW
+            {/* Camera Status Header */}
+            <div className="relative mb-40">
+              <div className="flex items-center gap-2">
+                {isLive && (
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-3 w-3 -ml-1">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
                     </span>
+                    <span className="text-red-500 font-medium">LIVE</span>
                   </div>
-                </div>
-
-                {/* Camera Controls */}
-                <div className="hidden sm:block w-full md:w-1/3 space-y-4">
-                  <ActivateCamera
-                    ref={activateCameraRef}
-                    onCameraUpdate={handleCameraUpdate}
-                    onInitialize={() => {
-                      timelineRef.current?.addEvent({
-                        type: 'initialization',
-                        timestamp: Date.now(),
-                        user: { address: primaryWallet?.address?.toString() || 'unknown' }
-                      });
-                    }}
-                    onPhotoCapture={() => {
-                      timelineRef.current?.addEvent({
-                        type: 'photo_captured',
-                        timestamp: Date.now(),
-                        user: { address: primaryWallet?.address?.toString() || 'unknown' }
-                      });
-                    }}
-                    onStatusUpdate={({ type, message }) => updateToast(type, message)}
-                  />
-
-                  <VideoRecorder
-                    ref={videoRecorderRef}
-                    onVideoRecorded={() => {
-                      timelineRef.current?.addEvent({
-                        type: 'video_recorded',
-                        timestamp: Date.now(),
-                        user: { address: primaryWallet?.address?.toString() || 'unknown' }
-                      });
-                    }}
-                    onStatusUpdate={({ type, message }) => updateToast(type, message)}
-                  />
-                </div>
+                )}
+                <span className="text-sm text-gray-600">
+                  {cameraAccount
+                    ? `Camera: ${cameraAccount.slice(0, 8)}...`
+                    : 'No Camera Connected'
+                  }
+                </span>
               </div>
             </div>
 
-            {/* Media Gallery */}
-            <div className="relative z-20 px-6 mt-6">
-              <MediaGallery mode="recent" maxRecentItems={6} />
+            {/* Timeline Events */}
+            <div className="absolute mt-12 left-0 w-full">
+              <Timeline ref={timelineRef}
+              // maxEvents={18} 
+              />
+              <div
+                className="top-0 left-0 right-0 pointer-events-none"
+                style={{
+                  background: 'linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 100%)'
+                }}
+              />
+            </div>
+
+            {/* Main Camera Controls Frame */}
+            <div className="relative ml-16 mt-8 w-[calc(100%-4rem)] bg-white z-20">
+              <div className="px-6">
+                {/* Use grid to maintain consistent widths */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Preview Frame - takes up 2 columns */}
+                  <div className="md:col-span-2 relative aspect-video bg-gray-200 rounded-lg overflow-hidden">
+                    <div className="absolute top-4 right-4">
+                      <span className="px-2 py-1 bg-red-500 text-white text-xs opacity-20 rounded-full">
+                        PREVIEW
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Camera Controls - takes up 1 column */}
+                  <div className="hidden sm:flex flex-col justify-center space-y-4">
+                    <ActivateCamera
+                      ref={activateCameraRef}
+                      onCameraUpdate={handleCameraUpdate}
+                      onInitialize={() => {
+                        timelineRef.current?.addEvent({
+                          type: 'initialization',
+                          timestamp: Date.now(),
+                          user: { address: primaryWallet?.address?.toString() || 'unknown' }
+                        });
+                      }}
+                      onPhotoCapture={() => {
+                        timelineRef.current?.addEvent({
+                          type: 'photo_captured',
+                          timestamp: Date.now(),
+                          user: { address: primaryWallet?.address?.toString() || 'unknown' }
+                        });
+                      }}
+                      onStatusUpdate={({ type, message }) => updateToast(type, message)}
+                    />
+
+                    <VideoRecorder
+                      ref={videoRecorderRef}
+                      onVideoRecorded={() => {
+                        timelineRef.current?.addEvent({
+                          type: 'video_recorded',
+                          timestamp: Date.now(),
+                          user: { address: primaryWallet?.address?.toString() || 'unknown' }
+                        });
+                      }}
+                      onStatusUpdate={({ type, message }) => updateToast(type, message)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Media Gallery */}
+              <div className="relative z-20 px-6 mt-6">
+                <MediaGallery mode="recent" maxRecentItems={6} />
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </div >
     </>
   );
 }

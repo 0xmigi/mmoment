@@ -40,12 +40,12 @@ const LandingPage = () => {
                     {/* Right side - Content */}
                     <div className="w-full lg:w-1/2 order-1 lg:order-2 text-center lg:text-left">
                         <div className="flex items-center justify-center lg:justify-start gap-4 mb-6">
-                            <Logo width={60} height={42} className="text-gray-900" />
-                            <h1 className="text-6xl font-bold text-gray-900">
+                            <Logo width={50} height={42} className="text-gray-900" />
+                            <h1 className="text-5xl font-bold text-gray-900">
                                 Moment
                             </h1>
                         </div>
-                        <p className="text-xl text-gray-600 mb-8 max-w-md mx-auto lg:mx-0">
+                        <p className="text-l text-gray-600 mb-8 max-w-md mx-auto lg:mx-0">
                             Capture moments and context instantly with a NFC-enabled camera system. Just tap your phone and record.
                         </p>
                         <div className="space-y-4">

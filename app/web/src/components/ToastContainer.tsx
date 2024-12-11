@@ -49,7 +49,6 @@ interface ToastMessage {
             sm:min-w-[320px] 
             sm:max-w-md 
             rounded-lg 
-            shadow-lg 
             ${bgColors[message.type]}
           `}
         >

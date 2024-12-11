@@ -33,6 +33,9 @@ body {
   body {
     height: -webkit-fill-available;
   }
+  .min-h-screen {
+    min-height: -webkit-fill-available;
+  }
 }
 
 button {

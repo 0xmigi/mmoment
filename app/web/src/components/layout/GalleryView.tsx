@@ -4,7 +4,7 @@ import MediaGallery from '../ImageGallery';
 export function GalleryView() {
   console.log('Rendering GalleryView with mode: archive');
   return (
-    <div className="flex flex-col items-center w-full max-w-md mx-auto">
+    <div className="h-full overflow-y-auto pb-20">
       <MediaGallery mode="archive" />
     </div>
   );

@@ -7,8 +7,8 @@ import Logo from '../Logo';
 
 interface MainLayoutProps {
   children: React.ReactNode;
-  activeTab: 'camera' | 'gallery';
-  onTabChange: (tab: 'camera' | 'gallery') => void;
+  activeTab: 'camera' | 'gallery' | 'activities';  // Add activities
+  onTabChange: (tab: 'camera' | 'gallery' | 'activities') => void;
 }
 
 export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps) {
@@ -17,9 +17,9 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen bg-white w-full overflow-y-auto">
+    <div className="flex flex-col h-screen bg-white">
       {/* Top Bar */}
-      <div className="w-full flex-none">
+      <div className="flex-none z-50">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           {/* Left side - Logo and Desktop Nav */}
           <div className="flex items-center gap-8">
@@ -37,24 +37,32 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                 <button
                   type='button'
                   onClick={() => onTabChange('camera')}
-                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
-                    activeTab === 'camera'
-                      ? 'bg-white text-stone-500 hover:text-stone-800'
-                      : 'bg-white text-stone-200 hover:text-stone-500'
-                  }`}
+                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'camera'
+                    ? 'bg-white text-stone-500 hover:text-stone-800'
+                    : 'bg-white text-stone-200 hover:text-stone-500'
+                    }`}
                 >
                   Camera
                 </button>
                 <button
                   type='button'
                   onClick={() => onTabChange('gallery')}
-                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
-                    activeTab === 'gallery'
-                      ? 'bg-white text-stone-500 hover:text-stone-800'
-                      : 'bg-white text-stone-200 hover:text-stone-500'
-                  }`}
+                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'gallery'
+                    ? 'bg-white text-stone-500 hover:text-stone-800'
+                    : 'bg-white text-stone-200 hover:text-stone-500'
+                    }`}
                 >
                   Gallery
+                </button>
+                <button
+                  type='button'
+                  onClick={() => onTabChange('activities')}
+                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'activities'
+                    ? 'bg-white text-stone-500 hover:text-stone-800'
+                    : 'bg-white text-stone-200 hover:text-stone-500'
+                    }`}
+                >
+                  Activities
                 </button>
               </div>
             )}
@@ -63,11 +71,12 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
           {/* Right side - Auth button and mobile menu */}
           <div className="flex items-center gap-2">
             <DynamicAuthButton />
+            {/* Update the mobile menu trigger button style */}
             {isLoggedIn && (
               <button
                 type='button'
                 onClick={() => setIsOpen(true)}
-                className="sm:hidden p-2 rounded-s bg-[#e7eeff]"
+                className="sm:hidden p-2 rounded-lg bg-[#e7eeff] hover:bg-[#d1dfff] transition-colors"
               >
                 <Menu className="w-5 h-5 text-gray-700" />
               </button>
@@ -78,62 +87,101 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
 
       {/* Mobile Navigation Menu */}
       {isLoggedIn && isOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 sm:hidden">
-          <div className="absolute right-0 top-0 h-full w-64 bg-[#e7eeff] p-4">
-            <button
-              type='button'
-              onClick={() => setIsOpen(false)}
-              className="absolute top-4 right-4"
-            >
-              <X className="w-6 h-6 text-gray-700" />
-            </button>
+        <div className="fixed inset-x-0 top-0 z-50 sm:hidden">
+          {/* Semi-transparent overlay */}
+          <div
+            className="fixed inset-0 bg-black/50"
+            onClick={() => setIsOpen(false)}
+          />
 
-            <div className="pt-16 flex flex-col gap-4">
-              <div className="border-t pt-4">
+          <div className="relative">
+            {/* Keep header visible when menu is open */}
+            <div className="bg-white px-4 h-16 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Logo width={30} height={21} className="text-black" />
+                <h1 className="text-2xl text-black font-bold">Moment</h1>
+              </div>
+              <button
+                type='button'
+                onClick={() => setIsOpen(false)}
+                className="p-2 rounded-lg bg-[#e7eeff] hover:bg-[#d1dfff] transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-700" />
+              </button>
+            </div>
+
+            {/* Navigation Card */}
+            <div className="w-full bg-white shadow-lg">
+              {/* Navigation Links */}
+              <div className="p-6 space-y-4">
                 <button
                   type='button'
                   onClick={() => {
                     onTabChange('camera');
                     setIsOpen(false);
                   }}
-                  className={`w-full text-left px-4 py-2 rounded-lg ${
-                    activeTab === 'camera'
-                      ? 'bg-purple-100 text-purple-700'
-                      : 'text-gray-700 hover:bg-gray-100'
-                  }`}
+                  className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${activeTab === 'camera'
+                      ? 'bg-[#e7eeff] text-black'
+                      : 'text-gray-600 hover:bg-gray-50'
+                    }`}
                 >
                   Camera
                 </button>
+
                 <button
                   type='button'
                   onClick={() => {
                     onTabChange('gallery');
                     setIsOpen(false);
                   }}
-                  className={`w-full text-left px-4 py-2 rounded-lg ${
-                    activeTab === 'gallery'
-                      ? 'bg-purple-100 text-purple-700'
-                      : 'text-gray-700 hover:bg-gray-100'
-                  }`}
+                  className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${activeTab === 'gallery'
+                      ? 'bg-[#e7eeff] text-black'
+                      : 'text-gray-600 hover:bg-gray-50'
+                    }`}
                 >
                   Gallery
                 </button>
+
+                <button
+                  type='button'
+                  onClick={() => {
+                    onTabChange('activities');
+                    setIsOpen(false);
+                  }}
+                  className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${activeTab === 'activities'
+                      ? 'bg-[#e7eeff] text-black'
+                      : 'text-gray-600 hover:bg-gray-50'
+                    }`}
+                >
+                  Activities
+                </button>
+
+                {/* Divider */}
+                <div className="my-4 border-t border-gray-200" />
+
+                {/* Footer Info */}
+                <div className="px-4 flex justify-center py-2">
+                  <p className="text-sm text-gray-500">
+                    Moment is a secure content network
+                  </p>
+                </div>
               </div>
             </div>
           </div>
         </div>
       )}
-
       {/* Main Content */}
+      <div className="flex-1 overflow-y-auto relative">
       {isLoggedIn ? (
-        <div className="w-full mx-auto px-4">
+        <div className="h-full">
           {children}
         </div>
       ) : (
-        <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
+        <div className="flex items-center justify-center h-full">
           <p className="text-gray-600">Please connect your wallet to continue</p>
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { Trash2, Download, Image, Video } from 'lucide-react';
 import { pinataService } from '../services/pinata-service';
+import MediaViewer from './MediaViewer';
 
 interface MediaItem {
   id: string;
@@ -23,6 +24,15 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
+
+  // Add click handler for media items
+  const handleMediaClick = (media: MediaItem) => {
+    setSelectedMedia(media);
+    setIsViewerOpen(true);
+  };
+
 
   const fetchMedia = async () => {
     if (!primaryWallet?.address) {
@@ -116,7 +126,7 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
     : `Previous Sessions (${media.length})`;
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-3xl mx-auto">
       {/* Rest of your JSX remains unchanged */}
       <h2 className="text-xl text-left font-bold text-gray-800 mb-6">{title}</h2>
 
@@ -135,7 +145,11 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           {media.map((item) => (
-            <div key={item.id} className="bg-white rounded-lg shadow-sm relative group">
+            <div
+              key={item.id}
+              className="bg-white rounded-lg shadow-sm relative group cursor-pointer"
+              onClick={() => handleMediaClick(item)}
+            >
               <div className="relative h-48">
                 {item.type === 'video' ? (
                   // biome-ignore lint/a11y/useMediaCaption: <explanation>
@@ -194,9 +208,18 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
                 <p className="text-xs text-gray-400 truncate">ID: {item.id}</p>
               </div>
             </div>
+
           ))}
         </div>
       )}
+      <MediaViewer
+        isOpen={isViewerOpen}
+        onClose={() => {
+          setIsViewerOpen(false);
+          setSelectedMedia(null);
+        }}
+        media={selectedMedia}
+      />
     </div>
   );
 }
