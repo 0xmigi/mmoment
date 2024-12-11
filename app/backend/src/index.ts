@@ -21,7 +21,9 @@ const io = new Server(httpServer, {
     methods: ["GET", "POST", "OPTIONS"],
     credentials: true,
     allowedHeaders: ["Content-Type", "Authorization"]
-  }
+  },
+  allowEIO3: true,  // Added for compatibility
+  path: '/socket.io/' // Make sure path is explicit
 });
 
 // Update Express CORS configuration
