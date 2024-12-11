@@ -1,6 +1,7 @@
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react';
 import { Camera, Video, Power, User } from 'lucide-react';
 import { io } from 'socket.io-client';
+import { CONFIG, timelineConfig } from '../config'; 
 
 export type TimelineEventType =
   | 'initialization'
@@ -29,7 +30,16 @@ export interface TimelineHandle {
 }
 
 // Connect to your backend
-const socket = io('http://localhost:3001');
+const socket = io(CONFIG.BACKEND_URL, timelineConfig.wsOptions);
+
+// Log connection events for debugging
+socket.on('connect', () => {
+  console.log('Connected to timeline service at:', CONFIG.BACKEND_URL);
+});
+
+socket.on('connect_error', (error) => {
+  console.log('Connection error:', error);
+});
 
 export const Timeline = forwardRef<any, TimelineProps>(({ maxEvents = 18 }, ref) => {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
