@@ -13,6 +13,7 @@
     "@coral-xyz/anchor": "0.29",
     "@dynamic-labs/sdk-react-core": "^3.8.5",
     "@dynamic-labs/solana": "^3.8.5",
+    "@livepeer/react": "^4.2.9",
     "@pinata/sdk": "^2.1.0",
     "@privy-io/react-auth": "^1.95.2",
     "@solana/wallet-adapter-base": "^0.9.23",

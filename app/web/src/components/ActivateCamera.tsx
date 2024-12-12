@@ -1,5 +1,6 @@
 // ActivateCamera.tsx
-import { useState, forwardRef, useImperativeHandle } from 'react';
+import { useState, forwardRef, useImperativeHandle, useRef } from 'react';
+import TooltipPortal from './TooltipPortal';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { useProgram } from '../anchor/setup';
@@ -25,6 +26,8 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
     }));
     const program = useProgram();
     const [loading, setLoading] = useState(false);
+    const [showTooltip, setShowTooltip] = useState(false);
+    const buttonRef = useRef<HTMLButtonElement>(null);
     const [cameraKeypair] = useState(() => Keypair.generate());
     const [isInitialized, setIsInitialized] = useState(false);
 
@@ -104,22 +107,29 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
     };
 
     return (
-      <div className="flex flex-col gap-4">
+      <>
         <button
+          ref={buttonRef}
           onClick={handleTakePicture}
+          onMouseEnter={() => setShowTooltip(true)}
+          onMouseLeave={() => setShowTooltip(false)}
           disabled={loading || !primaryWallet?.address}
-          className={`flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-white
-        ${loading ? 'bg-stone-400 cursor-not-allowed' : 'bg-stone-400 hover:bg-stone-500'}`}
+          className="w-16 h-full flex items-center justify-center bg-gray-300 hover:bg-gray-400 text-white transition-colors rounded-tr-xl"
         >
           {loading ? (
             <Loader className="w-5 h-5 animate-spin" />
           ) : (
             <Camera className="w-5 h-5" />
           )}
-          {loading ? 'Processing...' : 'Take Picture'}
         </button>
-      </div>
+        <TooltipPortal
+          show={showTooltip}
+          text={loading ? 'Processing...' : 'Take Picture'}
+          anchorRef={buttonRef}
+        />
+      </>
     );
   });
+  
 
   ActivateCamera.displayName = 'ActivateCamera';

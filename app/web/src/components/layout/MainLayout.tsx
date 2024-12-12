@@ -87,7 +87,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
 
       {/* Mobile Navigation Menu */}
       {isLoggedIn && isOpen && (
-        <div className="fixed inset-x-0 z-[50] sm:hidden">
+        <div className="fixed inset-x-0 z-[80] sm:hidden">
           {/* Semi-transparent overlay */}
           <div
             className="fixed inset-0 bg-black/50"
@@ -111,7 +111,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
             </div>
 
             {/* Navigation Card */}
-            <div className="w-full bg-white shadow-lg">
+            <div className="w-full bg-white shadow-lg rounded-b-xl">
               {/* Navigation Links */}
               <div className="p-6 space-y-4">
                 <button

@@ -1,4 +1,4 @@
-import { useEffect, useState, forwardRef, useImperativeHandle } from 'react';
+import { useEffect, useState, forwardRef, useImperativeHandle, useRef } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { useProgram } from '../anchor/setup';
@@ -7,6 +7,7 @@ import { BN } from '@coral-xyz/anchor';
 import { pinataService } from '../services/pinata-service';
 import { Video, Loader } from 'lucide-react';
 import { CONFIG } from '../config';
+import TooltipPortal from './TooltipPortal';
 
 interface VideoRecorderProps {
   onVideoRecorded?: () => void;
@@ -21,7 +22,10 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
     useConnection();
     const program = useProgram();
     const [loading, setLoading] = useState(false);
-    const [timeLeft, setTimeLeft] = useState<number | null>(null);
+
+  const [showTooltip, setShowTooltip] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+    const [, setTimeLeft] = useState<number | null>(null);
     const [cameraKeypair] = useState(() => Keypair.generate());
     const [isInitialized, setIsInitialized] = useState(false);
 
@@ -174,23 +178,28 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
     }, [recordingTimer]);
 
     return (
-      <div className="flex flex-col gap-4">
+      <>
         <button
+          ref={buttonRef}
           onClick={startRecording}
-          disabled={loading || !primaryWallet?.address}
-          className={`flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-white
-        ${loading ? 'bg-gray-500 cursor-not-allowed' : 'bg-gray-400 hover:bg-gray-500'}`}
+          onMouseEnter={() => setShowTooltip(true)}
+          onMouseLeave={() => setShowTooltip(false)}
+          disabled={loading}
+          className="w-16 h-full flex items-center justify-center bg-gray-300 hover:bg-gray-400 text-white transition-colors rounded-br-xl"
         >
           {loading ? (
             <Loader className="w-5 h-5 animate-spin" />
           ) : (
             <Video className="w-5 h-5" />
           )}
-          {loading && timeLeft !== null ? `Recording (${timeLeft}s)` : 'Record Video'}
         </button>
-      </div>
+        <TooltipPortal
+          show={showTooltip}
+          text={loading ? 'Recording...' : 'Record Video'}
+          anchorRef={buttonRef}
+        />
+      </>
     );
-  }
-);
+  });
 
 VideoRecorder.displayName = 'VideoRecorder';

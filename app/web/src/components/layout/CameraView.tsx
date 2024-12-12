@@ -105,60 +105,26 @@ export function CameraView() {
       {/* Add just the outer scrollable container */}
       <div className="h-full overflow-y-auto pb-20">
         {/* Keep your existing layout exactly as is */}
-        <div className="relative w-full pl-6">
+        <div className="relative max-w-3xl mx-auto pt-8 ">
           <ToastContainer message={currentToast} onDismiss={dismissToast} />
-          <div className="max-w-3xl mt-40 mx-auto flex flex-col justify-top relative">
-
-            {/* Camera Status Header */}
-            <div className="relative mb-40">
-              <div className="flex items-center gap-2">
-                {isLive && (
-                  <div className="flex items-center gap-2">
-                    <span className="relative flex h-3 w-3 -ml-1">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+          <div className="px-6">
+            {/* Use grid to maintain consistent widths */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Wrapper for both preview and controls */}
+              <div className="md:col-span-3 relative">
+                {/* Preview Frame */}
+                <div className="aspect-video border-2 border-gray-300 bg-gray-200 rounded-lg z-[60] relative">
+                  {/* Preview Label */}
+                  <div className="absolute top-4 right-4">
+                    <span className="px-2 py-1 bg-red-500 text-white text-xs opacity-20 rounded-full">
+                      PREVIEW
                     </span>
-                    <span className="text-red-500 font-medium">LIVE</span>
                   </div>
-                )}
-                <span className="text-sm text-gray-600">
-                  {cameraAccount
-                    ? `Camera: ${cameraAccount.slice(0, 8)}...`
-                    : 'No Camera Connected'
-                  }
-                </span>
-              </div>
-            </div>
+                </div>
 
-            {/* Timeline Events */}
-            <div className="absolute mt-12 left-0 w-full">
-              <Timeline ref={timelineRef}
-              // maxEvents={18} 
-              />
-              <div
-                className="top-0 left-0 right-0 pointer-events-none"
-                style={{
-                  background: 'linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 100%)'
-                }}
-              />
-            </div>
-
-            {/* Main Camera Controls Frame */}
-            <div className="relative ml-16 mt-8 w-[calc(100%-4rem)] bg-white">
-              <div className="px-6">
-                {/* Use grid to maintain consistent widths */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {/* Preview Frame - takes up 2 columns */}
-                  <div className="md:col-span-2 relative aspect-video bg-gray-200 rounded-lg overflow-hidden">
-                    <div className="absolute top-4 right-4">
-                      <span className="px-2 py-1 bg-red-500 text-white text-xs opacity-20 rounded-full">
-                        PREVIEW
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Camera Controls - takes up 1 column */}
-                  <div className="hidden sm:flex flex-col justify-center space-y-4">
+                {/* Camera Controls - full height */}
+                <div className="hidden sm:flex absolute -right-14 top-0 flex-col h-full z-[45]">
+                  <div className="group h-1/2 relative">
                     <ActivateCamera
                       ref={activateCameraRef}
                       onCameraUpdate={handleCameraUpdate}
@@ -178,7 +144,13 @@ export function CameraView() {
                       }}
                       onStatusUpdate={({ type, message }) => updateToast(type, message)}
                     />
+                    {/* Hover label */}
+                    <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-2 bg-black/75 text-white text-sm rounded opacity-0 group-hover:opacity-100 whitespace-nowrap transition-opacity">
+                      {loading ? 'Processing...' : 'Take Picture'}
+                    </span>
+                  </div>
 
+                  <div className="group h-1/2 relative">
                     <VideoRecorder
                       ref={videoRecorderRef}
                       onVideoRecorded={() => {
@@ -190,9 +162,55 @@ export function CameraView() {
                       }}
                       onStatusUpdate={({ type, message }) => updateToast(type, message)}
                     />
+                    {/* Hover label */}
+                    <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-2 bg-black/75 text-white text-sm rounded opacity-0 group-hover:opacity-100 whitespace-nowrap transition-opacity">
+                      {loading ? 'Recording...' : 'Record Video'}
+                    </span>
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+          <div className="max-w-3xl mt-6 mx-auto flex flex-col justify-top relative">
+
+
+            {/* Camera Status Header */}
+            <div className="relative mb-40">
+              <div className="flex pl-6 items-center gap-2">
+                {isLive && (
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-3 w-3 -ml-1">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                    </span>
+                    <span className="text-red-500 font-medium">LIVE</span>
+                  </div>
+                )}
+                <span className="text-sm text-gray-600">
+                  {cameraAccount
+                    ? `Camera: ${cameraAccount.slice(0, 8)}...`
+                    : 'No Camera Connected'
+                  }
+                </span>
+              </div>
+            </div>
+
+            {/* Timeline Events */}
+            <div className="absolute mt-12 pl-6 left-0 w-full">
+              <Timeline ref={timelineRef}
+              // maxEvents={18} 
+              />
+              <div
+                className="top-0 left-0 right-0 pointer-events-none"
+                style={{
+                  background: 'linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 100%)'
+                }}
+              />
+            </div>
+
+            {/* Main Camera Controls Frame */}
+            <div className="relative ml-16 w-[calc(100%-4rem)] bg-white">
+
 
               {/* Media Gallery */}
               <div className="relative px-6 mt-6">
