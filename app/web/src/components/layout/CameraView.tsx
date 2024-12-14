@@ -9,6 +9,7 @@ import { CONFIG } from '../../config';
 import { MobileControls } from './MobileControls';
 import { ToastMessage } from '../../types/toast';
 import { ToastContainer } from '../../components/ToastContainer';
+import { StreamPlayer } from '../StreamPlayer';
 
 export function CameraView() {
   const { primaryWallet } = useDynamicContext();
@@ -107,20 +108,16 @@ export function CameraView() {
         {/* Keep your existing layout exactly as is */}
         <div className="relative max-w-3xl mx-auto pt-8 ">
           <ToastContainer message={currentToast} onDismiss={dismissToast} />
+          <div className="bg-white rounded-lg px-6">
+            <h2 className="text-xl font-semibold mb-6">Camera</h2>
+          </div>
           <div className="px-6">
             {/* Use grid to maintain consistent widths */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Wrapper for both preview and controls */}
               <div className="md:col-span-3 relative">
                 {/* Preview Frame */}
-                <div className="aspect-video border-2 border-gray-300 bg-gray-200 rounded-lg z-[60] relative">
-                  {/* Preview Label */}
-                  <div className="absolute top-4 right-4">
-                    <span className="px-2 py-1 bg-red-500 text-white text-xs opacity-20 rounded-full">
-                      PREVIEW
-                    </span>
-                  </div>
-                </div>
+                <StreamPlayer />
 
                 {/* Camera Controls - full height */}
                 <div className="hidden sm:flex absolute -right-14 top-0 flex-col h-full z-[45]">

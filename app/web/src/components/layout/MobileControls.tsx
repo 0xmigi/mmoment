@@ -13,7 +13,7 @@ export function MobileControls({ onTakePicture, onRecordVideo, isLoading }: Mobi
       <button 
         onClick={onTakePicture}
         disabled={isLoading}
-        className={`w-12 h-12 rounded-lg ${isLoading ? 'bg-stone-400 cursor-not-allowed' : 'bg-stone-400 hover:bg-stone-500'} shadow-lg flex items-center justify-center`}
+        className={`w-11 h-11 rounded-lg ${isLoading ? 'bg-stone-400 cursor-not-allowed' : 'bg-stone-400 hover:bg-stone-500'} shadow-lg flex items-center justify-center`}
         aria-label="Take Picture"
       >
         <Camera className="w-6 h-6 text-white" />
@@ -22,7 +22,7 @@ export function MobileControls({ onTakePicture, onRecordVideo, isLoading }: Mobi
       <button
         onClick={onRecordVideo}
         disabled={isLoading}
-        className={`w-12 h-12 rounded-lg ${isLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-400 hover:bg-gray-500'} shadow-lg flex items-center justify-center`}
+        className={`w-11 h-11 rounded-lg ${isLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-400 hover:bg-gray-500'} shadow-lg flex items-center justify-center`}
         aria-label="Record Video"
       >
         <Video className="w-6 h-6 text-white" />
