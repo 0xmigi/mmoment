@@ -38,23 +38,33 @@ const Toast = ({ message, onDismiss }: { message: ToastMessage; onDismiss: () =>
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: -20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      className={`
-            flex items-center gap-2 
-            px-4 py-3
-            w-full
-            sm:w-auto 
-            sm:min-w-[320px] 
-            sm:max-w-md 
-            rounded-lg 
-            ${bgColors[message.type]}
-          `}
+  initial={{ opacity: 0, y: -20 }}
+  animate={{ opacity: 1, y: 0 }}
+  exit={{ opacity: 0, scale: 0.95 }}
+  className={`
+    flex items-center justify-between gap-2 
+    px-4 py-3
+    w-full
+    sm:w-auto 
+    sm:min-w-[320px] 
+    sm:max-w-md 
+    rounded-lg 
+    ${bgColors[message.type]}
+  `}
+>
+  <div className="flex items-center gap-2">
+    {icons[message.type]}
+    <span className="text-sm text-gray-600">{message.message}</span>
+  </div>
+  {message.type === 'error' && (
+    <button
+      onClick={onDismiss}
+      className="text-gray-400 hover:text-gray-600"
     >
-      {icons[message.type]}
-      <span className="text-sm text-gray-600">{message.message}</span>
-    </motion.div>
+      ×
+    </button>
+  )}
+</motion.div>
   );
 };
 

@@ -143,7 +143,10 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
           {mode === 'recent' ? 'No media in current session' : 'No archived media found'}
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div 
+          className="grid grid-cols-2 md:grid-cols-3 gap-4"
+          data-testid="media-gallery"
+        >
           {media.map((item) => (
             <div
               key={item.id}

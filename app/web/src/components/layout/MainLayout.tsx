@@ -38,8 +38,8 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                   type='button'
                   onClick={() => onTabChange('camera')}
                   className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'camera'
-                    ? 'bg-white text-stone-500 hover:text-stone-800'
-                    : 'bg-white text-stone-200 hover:text-stone-500'
+                    ? 'bg-white text-stone-800'
+                    : 'bg-white text-stone-400 hover:text-stone-800'
                     }`}
                 >
                   Camera
@@ -48,8 +48,8 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                   type='button'
                   onClick={() => onTabChange('gallery')}
                   className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'gallery'
-                    ? 'bg-white text-stone-500 hover:text-stone-800'
-                    : 'bg-white text-stone-200 hover:text-stone-500'
+                    ? 'bg-white text-stone-800'
+                    : 'bg-white text-stone-400 hover:text-stone-800'
                     }`}
                 >
                   Gallery
@@ -58,8 +58,8 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                   type='button'
                   onClick={() => onTabChange('activities')}
                   className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'activities'
-                    ? 'bg-white text-stone-500 hover:text-stone-800'
-                    : 'bg-white text-stone-200 hover:text-stone-500'
+                    ? 'bg-white text-stone-800'
+                    : 'bg-white text-stone-400 hover:text-stone-800'
                     }`}
                 >
                   Activities

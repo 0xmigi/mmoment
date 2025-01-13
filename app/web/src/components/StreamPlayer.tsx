@@ -15,6 +15,7 @@ export function StreamPlayer() {
     fetch(`${CONFIG.CAMERA_API_URL}/api/stream/info`)
       .then(res => res.json())
       .then(data => {
+        console.log('Received stream info:', data);  // Add this debug log
         if (data.playbackId) {
           setStreamInfo({
             playbackId: data.playbackId,
@@ -31,7 +32,7 @@ export function StreamPlayer() {
 
   if (isLoading) {
     return (
-      <div className="aspect-video bg-gray-200 rounded-lg flex items-center justify-center">
+      <div className="aspect-video border-2 border-gray-200 rounded-lg flex items-center justify-center">
         <p className="text-gray-500">Loading stream...</p>
       </div>
     );
@@ -39,7 +40,7 @@ export function StreamPlayer() {
 
   if (!streamInfo?.playbackId) {
     return (
-      <div className="aspect-video bg-gray-200 rounded-lg flex items-center justify-center">
+      <div className="aspect-video border-2 border-gray-200 rounded-lg flex items-center justify-center">
         <p className="text-gray-500">Stream not available</p>
       </div>
     );

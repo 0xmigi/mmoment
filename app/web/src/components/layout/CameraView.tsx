@@ -10,6 +10,7 @@ import { MobileControls } from './MobileControls';
 import { ToastMessage } from '../../types/toast';
 import { ToastContainer } from '../../components/ToastContainer';
 import { StreamPlayer } from '../StreamPlayer';
+import { StreamControls } from '../StreamControls';
 
 export function CameraView() {
   const { primaryWallet } = useDynamicContext();
@@ -121,6 +122,7 @@ export function CameraView() {
 
                 {/* Camera Controls - full height */}
                 <div className="hidden sm:flex absolute -right-14 top-0 flex-col h-full z-[45]">
+                  <StreamControls />
                   <div className="group h-1/2 relative">
                     <ActivateCamera
                       ref={activateCameraRef}
@@ -194,9 +196,7 @@ export function CameraView() {
 
             {/* Timeline Events */}
             <div className="absolute mt-12 pl-6 left-0 w-full">
-              <Timeline ref={timelineRef}
-              // maxEvents={18} 
-              />
+            <Timeline ref={timelineRef} variant="camera" />
               <div
                 className="top-0 left-0 right-0 pointer-events-none"
                 style={{

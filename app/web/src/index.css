@@ -12,7 +12,6 @@ body {
   padding: 0;
   width: 100%;
   height: 100%;
-  overflow: hidden;
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -25,7 +24,30 @@ body {
   height: 100%;
   margin: 0;
   padding: 0;
-  overflow: hidden; /* Lock the root container */
+}
+
+/* Grid Pattern Background */
+.grid-pattern {
+  background-size: 20px 20px;
+  background-image: 
+    linear-gradient(to right, rgba(0, 0, 0, 0.1) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.1) 1px, transparent 1px);
+  position: relative;
+}
+
+.grid-pattern::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 150px;
+  background: linear-gradient(to bottom, 
+    rgb(255, 255, 255) 0%,
+    rgba(255, 255, 255, 0.9) 20%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  pointer-events: none;
 }
 
 /* iOS Safari specific */
@@ -39,7 +61,6 @@ body {
 }
 
 button {
-  /* border-radius: 8px; */
   border: 1px solid transparent;
   font-family: inherit;
   cursor: pointer;
@@ -47,6 +68,11 @@ button {
 
 button:focus {
   outline: none;
+}
+
+/* Apply overflow hidden only to app routes */
+.flex.flex-col.h-screen {
+  overflow: hidden;
 }
 
 @media (max-width: 1024px) {
@@ -59,6 +85,7 @@ button:focus {
   .main-content {
     padding-left: 0;
   }
+  
   /* Add this for your main app container */
   .app-container {
     width: 100%;

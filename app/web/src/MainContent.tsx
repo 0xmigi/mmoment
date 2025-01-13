@@ -4,6 +4,7 @@ import { MainLayout } from './components/layout/MainLayout';
 import { CameraView } from './components/layout/CameraView';
 import { GalleryView } from './components/layout/GalleryView';
 import LandingPage from './components/LandingPage';
+import ProductPage from './components/ProductPage';
 import QuickStartView from './components/QuickStartView';
 import { ActivitiesView } from './components/layout/ActivitiesView';
 
@@ -14,6 +15,9 @@ function MainContent() {
     <Routes>
       {/* Make landing page the default route */}
       <Route path="/" element={<LandingPage />} />
+      
+      {/* Add product route */}
+      <Route path="/product" element={<ProductPage />} />
 
       {/* Move app interface to /app route */}
       <Route
@@ -26,8 +30,6 @@ function MainContent() {
           </MainLayout>
         }
       />
-
-
 
       {/* Update quickstart route for NFC taps */}
       <Route
