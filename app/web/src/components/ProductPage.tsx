@@ -1,6 +1,5 @@
 import { useNavigate } from 'react-router-dom';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import Logo from './Logo';
 
 const StepIcon = ({ children }: { children: React.ReactNode }) => (
     <div className="w-16 h-16 flex items-center justify-center rounded-full bg-[#e7eeff] mb-6 mx-auto">

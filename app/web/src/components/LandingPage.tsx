@@ -2,58 +2,11 @@ import { useNavigate } from 'react-router-dom';
 import Logo from './Logo'
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 
-const StepIcon = ({ children }: { children: React.ReactNode }) => (
-    <div className="w-16 h-16 flex items-center justify-center rounded-full bg-[#e7eeff] mb-6 mx-auto">
-        <div className="w-8 h-8 text-[#4b5563]">
-            {children}
-        </div>
-    </div>
-);
 
 const LandingPage = () => {
     const navigate = useNavigate();
     const { setShowAuthFlow } = useDynamicContext();
 
-    const steps = [
-        {
-            title: "Find a Moment Camera",
-            description: "Locate a Moment camera at your favorite social spots - gyms, restaurants, parties, or bars. Our network of cameras is growing every day.",
-            icon: (
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-            )
-        },
-        {
-            title: "Tap to Connect",
-            description: "Simply tap your phone on the camera's NFC reader - just like using contactless payment. Quick, secure, and hassle-free.",
-            icon: (
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                </svg>
-            )
-        },
-        {
-            title: "Capture Your Moment",
-            description: "Get a live preview to frame your perfect shot or record a message. Our high-quality cameras ensure you look your best.",
-            icon: (
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-            )
-        },
-        {
-            title: "Share & Download",
-            description: "Instantly access your captures - download them directly to your phone or share them on your favorite social platforms.",
-            icon: (
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                </svg>
-            )
-        }
-    ];
 
     return (
         <div className="bg-white min-h-screen overflow-auto">
