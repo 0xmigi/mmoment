@@ -1,24 +1,19 @@
-import { useMemo } from "react";
 import { BrowserRouter } from 'react-router-dom';
 import MainContent from './MainContent';
 import { DynamicContextProvider } from "@dynamic-labs/sdk-react-core";
-import { SolanaWalletConnectors, SolanaWalletConnectorsWithConfig } from "@dynamic-labs/solana";
-import { clusterApiUrl } from '@solana/web3.js';
+import { SolanaWalletConnectors } from "@dynamic-labs/solana";
 import {
   LivepeerConfig,
   createReactClient,
   studioProvider,
 } from "@livepeer/react";
+import { CameraProvider } from './components/CameraProvider';
 
 function App() {
-  const solanaDevnetConfig = useMemo(() => ({
-    rpcUrl: clusterApiUrl('devnet'),
-    network: 'devnet'
-  }), []);
 
   // Create Livepeer client with studio provider
   const livepeerClient = createReactClient({
-    provider: studioProvider({ 
+    provider: studioProvider({
       apiKey: '7019f80b-f416-45d4-9b90-1ea130039e97'
     }),
   });
@@ -28,14 +23,17 @@ function App() {
       <DynamicContextProvider
         settings={{
           environmentId: "93e6248c-4446-4f78-837d-fedf6391d174",
-          walletConnectors: [
-            SolanaWalletConnectors,
-            SolanaWalletConnectorsWithConfig(solanaDevnetConfig as any)
-          ],
-          initialAuthenticationMode: "connect-only",
+          walletConnectors: [SolanaWalletConnectors],
           eventsCallbacks: {
             onAuthSuccess: (args) => {
               console.log("Auth Success:", args);
+              // Check if the user connected with Farcaster
+              const farcasterCred = args.user?.verifiedCredentials?.find(
+                cred => cred.oauthProvider === 'farcaster'
+              );
+              if (farcasterCred) {
+                console.log("Farcaster connected:", farcasterCred);
+              }
             },
             onAuthFailure: (args) => {
               console.error("Auth Error:", args);
@@ -46,12 +44,19 @@ function App() {
             onAuthFlowClose: () => {
               console.log("Auth flow closed");
             }
+          },
+          // Show both Phantom wallet and social logins
+          walletsFilter: (wallets) => {
+            const phantomWallet = wallets.find(w => w.name.toLowerCase() === 'phantom');
+            return phantomWallet ? [phantomWallet] : [];
           }
         }}
       >
-        <BrowserRouter>
-          <MainContent />
-        </BrowserRouter>
+        <CameraProvider>
+          <BrowserRouter>
+            <MainContent />
+          </BrowserRouter>
+        </CameraProvider>
       </DynamicContextProvider>
     </LivepeerConfig>
   );

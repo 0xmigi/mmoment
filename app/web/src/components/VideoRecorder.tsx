@@ -2,12 +2,12 @@ import { useEffect, useState, forwardRef, useImperativeHandle, useRef } from 're
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { useProgram } from '../anchor/setup';
-import { SystemProgram, Keypair, PublicKey } from '@solana/web3.js';
+import { SystemProgram, PublicKey } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { pinataService } from '../services/pinata-service';
 import { Video, Loader } from 'lucide-react';
 import { CONFIG } from '../config';
-import TooltipPortal from './TooltipPortal';
+import { useCamera } from './CameraProvider';
 
 interface VideoRecorderProps {
   onVideoRecorded?: () => void;
@@ -22,55 +22,28 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
     useConnection();
     const program = useProgram();
     const [loading, setLoading] = useState(false);
-
-  const [showTooltip, setShowTooltip] = useState(false);
-  const buttonRef = useRef<HTMLButtonElement>(null);
+    const [, setShowTooltip] = useState(false);
+    const buttonRef = useRef<HTMLButtonElement>(null);
     const [, setTimeLeft] = useState<number | null>(null);
-    const [cameraKeypair] = useState(() => Keypair.generate());
-    const [isInitialized, setIsInitialized] = useState(false);
+    
+    // Use the shared camera context
+    const { cameraKeypair, isInitialized, loading: initLoading } = useCamera();
 
     useImperativeHandle(ref, () => ({
       startRecording
     }));
-
-    const initializeCamera = async () => {
-      if (!primaryWallet?.address || !program || isInitialized) return;
-
-      try {
-        const initTx = await program.methods.initialize()
-          .accounts({
-            cameraAccount: cameraKeypair.publicKey,
-            user: new PublicKey(primaryWallet.address),
-            systemProgram: SystemProgram.programId,
-          })
-          .signers([cameraKeypair])
-          .rpc();
-
-        console.log('Camera initialized:', initTx);
-        setIsInitialized(true);
-      } catch (error) {
-        console.error('Failed to initialize camera:', error);
-        throw error;
-      }
-    };
 
     const startRecording = async () => {
       console.log("Start recording clicked", {
         hasWallet: !!primaryWallet?.address,
         hasProgram: !!program
       });
-      if (!primaryWallet?.address || !program) return;
+      if (!primaryWallet?.address || !program || !isInitialized) return;
       setLoading(true);
 
       try {
-        // Initialize if needed
-        if (!isInitialized) {
-          await initializeCamera();
-        }
-
-        // Activate camera
+        // Now we only need the activate camera call since initialization is handled by the provider
         onStatusUpdate?.({ type: 'info', message: 'Activating camera...' });
-        // setStatus('Activating camera...');
         await program.methods.activateCamera(new BN(100))
           .accounts({
             cameraAccount: cameraKeypair.publicKey,
@@ -80,7 +53,6 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
           .rpc();
 
         // Start Recording
-        // setStatus('Starting recording...');
         onStatusUpdate?.({ type: 'info', message: 'Starting recording...' });
         const duration = 30;
         setTimeLeft(duration);
@@ -122,22 +94,18 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
         await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Download and upload
-        // setStatus('Downloading video...');
         onStatusUpdate?.({ type: 'info', message: 'Downloading video...' });
         const videoBlob = await downloadVideo(filename);
 
-        // setStatus('Uploading to IPFS...');
         onStatusUpdate?.({ type: 'info', message: 'Uploading to IPFS...' });
         const ipfsUrl = await pinataService.uploadVideo(videoBlob, primaryWallet.address);
         console.log('Video uploaded to IPFS:', ipfsUrl);
 
         onVideoRecorded?.();
-        // setStatus('Video uploaded successfully!');
-        onStatusUpdate?.({ type: 'info', message: 'Video uploaded successfully!' });
+        onStatusUpdate?.({ type: 'success', message: 'Video uploaded successfully!' });
 
       } catch (error) {
         console.error('Recording error:', error);
-        // setStatus(`Error: ${error instanceof Error ? error.message : String(error)}`);
         onStatusUpdate?.({ type: 'error', message: `${error instanceof Error ? error.message : String(error)}` });
       } finally {
         setLoading(false);
@@ -184,21 +152,15 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
           onClick={startRecording}
           onMouseEnter={() => setShowTooltip(true)}
           onMouseLeave={() => setShowTooltip(false)}
-          disabled={loading}
+          disabled={loading || initLoading || !isInitialized}
           className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-gray-800 transition-colors rounded-xl"
-          // className="w-16 h-full flex items-center justify-center border-2 border-gray-100 bg-white hover:bg-gray-200 text-black transition-colors rounded-xl"
         >
-          {loading ? (
+          {loading || initLoading ? (
             <Loader className="w-5 h-5 animate-spin" />
           ) : (
             <Video className="w-5 h-5" />
           )}
         </button>
-        <TooltipPortal
-          show={showTooltip}
-          text={loading ? 'Recording...' : 'Record Video'}
-          anchorRef={buttonRef}
-        />
       </>
     );
   });

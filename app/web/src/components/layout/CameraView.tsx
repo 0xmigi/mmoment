@@ -1,4 +1,3 @@
-
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { Timeline } from '../Timeline';
@@ -17,6 +16,7 @@ export function CameraView() {
   const timelineRef = useRef<any>(null);
   const [cameraAccount, setCameraAccount] = useState<string | null>(null);
   const [isLive, setIsLive] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [currentToast, setCurrentToast] = useState<ToastMessage | null>(null);
   const [loading, setLoading] = useState(false);
   const activateCameraRef = useRef<{
@@ -27,17 +27,33 @@ export function CameraView() {
   }>(null);
 
   const checkCameraStatus = useCallback(async () => {
-    if (!cameraAccount) return;
+    if (!cameraAccount) {
+      setIsLive(false);
+      setIsStreaming(false);
+      return;
+    }
+
+    let succeeded = false;
 
     try {
-      const response = await fetch(`${CONFIG.CAMERA_API_URL}/api/health`);
-      if (response.ok) {
-        setIsLive(true);
-      } else {
-        setIsLive(false);
-      }
+      const healthResponse = await fetch(`${CONFIG.CAMERA_API_URL}/api/health`);
+      if (!healthResponse.ok) return;  // Exit if health check fails
+
+      const streamResponse = await fetch(`${CONFIG.CAMERA_API_URL}/api/stream/info`);
+      if (!streamResponse.ok) return;  // Exit if stream info fails
+
+      const data = await streamResponse.json();
+      succeeded = true;  // Only set this if we get here without any errors
+      setIsLive(true);
+      setIsStreaming(data.isActive);
     } catch (error) {
-      setIsLive(false);
+      console.error('Failed to check camera status:', error);
+    } finally {
+      // If anything failed, ensure we're marked as offline
+      if (!succeeded) {
+        setIsLive(false);
+        setIsStreaming(false);
+      }
     }
   }, [cameraAccount]);
 
@@ -50,7 +66,7 @@ export function CameraView() {
 
   useEffect(() => {
     checkCameraStatus();
-    const interval = setInterval(checkCameraStatus, 30000);
+    const interval = setInterval(checkCameraStatus, 3000);
     return () => clearInterval(interval);
   }, [checkCameraStatus]);
 
@@ -78,9 +94,8 @@ export function CameraView() {
     }
   };
 
-  const handleCameraUpdate = ({ address, isLive }: { address: string; isLive: boolean }) => {
+  const handleCameraUpdate = ({ address }: { address: string; isLive: boolean }) => {
     setCameraAccount(address);
-    setIsLive(isLive);
     localStorage.setItem('cameraAccount', address);
   };
 
@@ -105,7 +120,7 @@ export function CameraView() {
         isLoading={loading}
       />
       {/* Add just the outer scrollable container */}
-      <div className="h-full overflow-y-auto pb-20">
+      <div className="h-full overflow-y-auto pb-40">
         {/* Keep your existing layout exactly as is */}
         <div className="relative max-w-3xl mx-auto pt-8 ">
           <ToastContainer message={currentToast} onDismiss={dismissToast} />
@@ -176,13 +191,27 @@ export function CameraView() {
             {/* Camera Status Header */}
             <div className="relative mb-40">
               <div className="flex pl-6 items-center gap-2">
-                {isLive && (
+                {!isLive ? (
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-3 w-3 -ml-1">
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-gray-400"></span>
+                    </span>
+                    <span className="text-gray-500 font-medium">Offline</span>
+                  </div>
+                ) : isStreaming ? (
                   <div className="flex items-center gap-2">
                     <span className="relative flex h-3 w-3 -ml-1">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                       <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
                     </span>
                     <span className="text-red-500 font-medium">LIVE</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-3 w-3 -ml-1">
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                    </span>
+                    <span className="text-green-500 font-medium">Online</span>
                   </div>
                 )}
                 <span className="text-sm text-gray-600">
@@ -206,11 +235,11 @@ export function CameraView() {
             </div>
 
             {/* Main Camera Controls Frame */}
-            <div className="relative ml-16 w-[calc(100%-4rem)] bg-white">
+            <div className="relative md:ml-20 ml-16 bg-white">
 
 
               {/* Media Gallery */}
-              <div className="relative px-6 mt-6">
+              <div className="relative px-6">
                 <MediaGallery mode="recent" maxRecentItems={6} />
               </div>
             </div>

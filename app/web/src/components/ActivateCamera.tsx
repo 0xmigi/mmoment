@@ -1,6 +1,4 @@
-// ActivateCamera.tsx
-import { useState, forwardRef, useImperativeHandle, useRef } from 'react';
-import TooltipPortal from './TooltipPortal';
+import { useState, forwardRef, useImperativeHandle, useRef, useEffect } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { useProgram } from '../anchor/setup';
@@ -17,55 +15,80 @@ interface ActivateCameraProps {
   onStatusUpdate?: (status: { type: 'success' | 'error' | 'info', message: string }) => void;
 }
 
-export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void> }, ActivateCameraProps>(({ onCameraUpdate, onInitialize, onPhotoCapture, onStatusUpdate }, ref) => {
-
+export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void> }, ActivateCameraProps>(
+  ({ onCameraUpdate, onInitialize, onPhotoCapture, onStatusUpdate }, ref) => {
     const { primaryWallet } = useDynamicContext();
     useConnection();
+    const program = useProgram();
+    const [loading, setLoading] = useState(false);
+    const [, setShowTooltip] = useState(false);
+    const buttonRef = useRef<HTMLButtonElement>(null);
+    
+    // Persist camera keypair
+    const [cameraKeypair] = useState(() => {
+      const stored = localStorage.getItem('cameraKeypair');
+      if (stored) {
+        const keypairData = new Uint8Array(JSON.parse(stored));
+        return Keypair.fromSecretKey(keypairData);
+      }
+      const newKeypair = Keypair.generate();
+      localStorage.setItem('cameraKeypair', JSON.stringify(Array.from(newKeypair.secretKey)));
+      return newKeypair;
+    });
+    
+    const [isInitialized, setIsInitialized] = useState(false);
+
+    // Check initialization when wallet connects
+    useEffect(() => {
+      const checkInitialization = async () => {
+        if (!primaryWallet?.address || !program) return;
+
+        try {
+          const account = await program.account.cameraAccount.fetch(cameraKeypair.publicKey);
+          setIsInitialized(!!account);
+          if (account) {
+            onCameraUpdate?.({
+              address: cameraKeypair.publicKey.toString(),
+              isLive: true
+            });
+          }
+        } catch {
+          // Account doesn't exist, need to initialize
+          try {
+            onStatusUpdate?.({ type: 'info', message: 'Initializing camera...' });
+            await program.methods.initialize()
+              .accounts({
+                cameraAccount: cameraKeypair.publicKey,
+                user: new PublicKey(primaryWallet.address),
+                systemProgram: SystemProgram.programId,
+              })
+              .signers([cameraKeypair])
+              .rpc();
+
+            setIsInitialized(true);
+            onCameraUpdate?.({
+              address: cameraKeypair.publicKey.toString(),
+              isLive: true
+            });
+            onInitialize?.();
+          } catch (error) {
+            onStatusUpdate?.({ type: 'error', message: `Failed to initialize: ${error}` });
+          }
+        }
+      };
+
+      checkInitialization();
+    }, [primaryWallet?.address, program]);
+
     useImperativeHandle(ref, () => ({
       handleTakePicture
     }));
-    const program = useProgram();
-    const [loading, setLoading] = useState(false);
-    const [showTooltip, setShowTooltip] = useState(false);
-    const buttonRef = useRef<HTMLButtonElement>(null);
-    const [cameraKeypair] = useState(() => Keypair.generate());
-    const [isInitialized, setIsInitialized] = useState(false);
-
-    const initializeCamera = async () => {
-      if (!primaryWallet?.address || !program || isInitialized) return;
-
-      try {
-        onStatusUpdate?.({ type: 'info', message: 'Initializing camera...' });
-        await program.methods.initialize()
-          .accounts({
-            cameraAccount: cameraKeypair.publicKey,
-            user: new PublicKey(primaryWallet.address),
-            systemProgram: SystemProgram.programId,
-          })
-          .signers([cameraKeypair])
-          .rpc();
-
-        setIsInitialized(true);
-        onCameraUpdate?.({
-          address: cameraKeypair.publicKey.toString(),
-          isLive: true
-        });
-        onInitialize?.();
-      } catch (error) {
-        onStatusUpdate?.({ type: 'error', message: `Failed to initialize: ${error}` });
-        throw error;
-      }
-    };
 
     const handleTakePicture = async () => {
-      if (!primaryWallet?.address || !program) return;
+      if (!primaryWallet?.address || !program || !isInitialized) return;
       setLoading(true);
 
       try {
-        if (!isInitialized) {
-          await initializeCamera();
-        }
-
         onStatusUpdate?.({ type: 'info', message: 'Activating camera...' });
         await program.methods.activateCamera(new BN(100))
           .accounts({
@@ -107,30 +130,22 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
     };
 
     return (
-      <>
-        <button
-          ref={buttonRef}
-          onClick={handleTakePicture}
-          onMouseEnter={() => setShowTooltip(true)}
-          onMouseLeave={() => setShowTooltip(false)}
-          disabled={loading || !primaryWallet?.address}
-          className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-gray-800 transition-colors rounded-xl"
-          // className="w-16 h-full flex items-center justify-center border-2 border-black bg-white hover:bg-gray-200 text-black transition-colors rounded-tr-xl"
-        >
-          {loading ? (
-            <Loader className="w-5 h-5 animate-spin" />
-          ) : (
-            <Camera className="w-5 h-5" />
-          )}
-        </button>
-        <TooltipPortal
-          show={showTooltip}
-          text={loading ? 'Processing...' : 'Take Picture'}
-          anchorRef={buttonRef}
-        />
-      </>
+      <button
+        ref={buttonRef}
+        onClick={handleTakePicture}
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+        disabled={loading || !primaryWallet?.address}
+        className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-gray-800 transition-colors rounded-xl"
+      >
+        {loading ? (
+          <Loader className="w-5 h-5 animate-spin" />
+        ) : (
+          <Camera className="w-5 h-5" />
+        )}
+      </button>
     );
-  });
-  
+  }
+);
 
-  ActivateCamera.displayName = 'ActivateCamera';
+ActivateCamera.displayName = 'ActivateCamera';

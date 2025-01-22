@@ -1,17 +1,22 @@
 import { useEffect, useState, forwardRef, useImperativeHandle, useRef } from 'react';
-import { Camera, Video, Power, User } from 'lucide-react';
+import { Camera, Video, Power, User, Radio, Signal } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { CONFIG, timelineConfig } from '../config';
+import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 
 export type TimelineEventType =
   | 'initialization'
   | 'user_connected'
   | 'photo_captured'
-  | 'video_recorded';
+  | 'video_recorded'
+  | 'stream_started'
+  | 'stream_ended';
 
 interface TimelineUser {
   address: string;
   username?: string;
+  displayName?: string;
+  pfpUrl?: string;
 }
 
 interface TimelineEvent {
@@ -24,22 +29,41 @@ interface TimelineEvent {
 interface TimelineProps {
   filter?: 'all' | 'camera' | 'my';
   userAddress?: string;
-  variant?: 'camera' | 'full'; // Add variant prop to distinguish between views
+  variant?: 'camera' | 'full';
 }
 
 // Connect to your backend
 const socket = io(CONFIG.BACKEND_URL, timelineConfig.wsOptions);
 
+// Add this function before the Timeline component
+const getEventText = (type: TimelineEventType): string => {
+  switch (type) {
+    case 'photo_captured':
+      return 'took a photo';
+    case 'video_recorded':
+      return 'recorded a video';
+    case 'initialization':
+      return 'initialized';
+    case 'user_connected':
+      return 'connected';
+    case 'stream_started':
+      return 'started the stream';
+    case 'stream_ended':
+      return 'ended the stream';
+  }
+};
+
 export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full' }, ref) => {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const { user } = useDynamicContext();
 
   // Get the display count based on screen width
   const getDisplayCount = () => {
     if (variant !== 'camera') return Infinity;
     if (typeof window === 'undefined') return 13;
     
-    return window.innerWidth < 640 ? 23 : 13; // 640px is Tailwind's 'sm' breakpoint
+    return window.innerWidth < 640 ? 23 : 13;
   };
 
   const [displayCount, setDisplayCount] = useState(getDisplayCount());
@@ -67,6 +91,20 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     }
 
     socket.on('timelineEvent', (event: TimelineEvent) => {
+      // Enrich the event with Farcaster profile if available
+      const farcasterCred = user?.verifiedCredentials?.find(
+        cred => cred.oauthProvider === 'farcaster'
+      );
+      
+      if (farcasterCred && event.user.address === user?.verifiedCredentials?.[0]?.address) {
+        event.user = {
+          ...event.user,
+          displayName: farcasterCred.oauthDisplayName || undefined,
+          username: farcasterCred.oauthUsername,
+          pfpUrl: farcasterCred.oauthAccountPhotos?.[0] || undefined
+        };
+      }
+
       setEvents(prev => {
         const newEvents = [event, ...prev];
         localStorage.setItem('timelineEvents', JSON.stringify(newEvents));
@@ -75,8 +113,29 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     });
 
     socket.on('recentEvents', (events: TimelineEvent[]) => {
+      // Enrich events with Farcaster profiles if available
+      const enrichedEvents = events.map(event => {
+        const farcasterCred = user?.verifiedCredentials?.find(
+          cred => cred.oauthProvider === 'farcaster' && 
+          event.user.address === user?.verifiedCredentials?.[0]?.address
+        );
+        
+        if (farcasterCred) {
+          return {
+            ...event,
+            user: {
+              ...event.user,
+              displayName: farcasterCred.oauthDisplayName || undefined,
+              username: farcasterCred.oauthUsername,
+              pfpUrl: farcasterCred.oauthAccountPhotos?.[0] || undefined
+            }
+          };
+        }
+        return event;
+      });
+
       // Sort events by timestamp, newest first
-      const sortedEvents = [...events].sort((a, b) => b.timestamp - a.timestamp);
+      const sortedEvents = [...enrichedEvents].sort((a, b) => b.timestamp - a.timestamp);
       setEvents(sortedEvents);
       localStorage.setItem('timelineEvents', JSON.stringify(sortedEvents));
     });
@@ -85,10 +144,24 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       socket.off('recentEvents');
       socket.off('timelineEvent');
     };
-  }, []);
+  }, [user?.verifiedCredentials]);
 
   useImperativeHandle(ref, () => ({
     addEvent: (event: Omit<TimelineEvent, 'id'>) => {
+      // Enrich the event with Farcaster profile if available
+      const farcasterCred = user?.verifiedCredentials?.find(
+        cred => cred.oauthProvider === 'farcaster'
+      );
+      
+      if (farcasterCred) {
+        event.user = {
+          ...event.user,
+          displayName: farcasterCred.oauthDisplayName || undefined,
+          username: farcasterCred.oauthUsername,
+          pfpUrl: farcasterCred.oauthAccountPhotos?.[0] || undefined
+        };
+      }
+
       socket.emit('newTimelineEvent', event);
     },
     getState: () => ({
@@ -117,6 +190,10 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
         return <Camera className="w-4 h-4" />;
       case 'video_recorded':
         return <Video className="w-4 h-4" />;
+      case 'stream_started':
+        return <Radio className="w-4 h-4 text-red-500" />;
+      case 'stream_ended':
+        return <Signal className="w-4 h-4 text-gray-400" />;
       default:
         return <User className="w-4 h-4" />;
     }
@@ -139,8 +216,16 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                   <div className="w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-white border border-gray-200 -ml-[4px] sm:-ml-[4px] mr-2 flex items-center justify-center">
                     {getEventIcon(event.type)}
                   </div>
-                  <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gray-100 flex items-center justify-center">
-                    <User className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600" />
+                  <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden">
+                    {event.user.pfpUrl ? (
+                      <img 
+                        src={event.user.pfpUrl} 
+                        alt={event.user.displayName || event.user.username || 'User'} 
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <User className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600" />
+                    )}
                   </div>
                 </div>
 
@@ -150,10 +235,11 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                 }`}>
                   <p className="text-xs sm:text-sm text-gray-800">
                     <span className="font-medium">
-                      {event.user.address.slice(0, 6)}...
+                      {event.user.displayName || event.user.username || 
+                       `${event.user.address.slice(0, 6)}...${event.user.address.slice(-4)}`}
                     </span>
                     {' '}
-                    {event.type.replace(/_/g, ' ')}
+                    {getEventText(event.type)}
                   </p>
                   <p className="text-xs text-gray-500">
                     {event.timestamp > Date.now() - 60000 
@@ -174,15 +260,26 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                     {/* Get unique users from all events, not just displayed ones */}
                     {Array.from(new Set(events.map(e => e.user.address)))
                       .slice(0, 6)
-                      .map((address, i) => (
-                        <div
-                          key={address}
-                          className="relative w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center"
-                          style={{ zIndex: 6 - i }}
-                        >
-                          <User className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600" />
-                        </div>
-                      ))}
+                      .map((address, i) => {
+                        const event = events.find(e => e.user.address === address);
+                        return (
+                          <div
+                            key={address}
+                            className="relative w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center overflow-hidden"
+                            style={{ zIndex: 6 - i }}
+                          >
+                            {event?.user.pfpUrl ? (
+                              <img 
+                                src={event.user.pfpUrl} 
+                                alt={event.user.displayName || event.user.username || 'User'} 
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <User className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600" />
+                            )}
+                          </div>
+                        );
+                      })}
                   </div>
                   {/* Count of total unique users */}
                   <span className="ml-3 text-xs sm:text-sm text-gray-600 font-medium">
