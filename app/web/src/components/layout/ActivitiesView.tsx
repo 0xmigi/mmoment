@@ -47,13 +47,6 @@ export function ActivitiesView() {
                                 variant="full"
                             />
                         </div>
-
-                        <div className="bg-gray-50 rounded-lg p-4">
-                            <h3 className="text-sm font-medium text-gray-600 mb-4">
-                                Wallet Activity ({primaryWallet?.address?.slice(0, 6)}...{primaryWallet?.address?.slice(-4)})
-                            </h3>
-                            <p className="text-sm text-gray-500">Wallet activity coming soon...</p>
-                        </div>
                     </div>
                 </div>
             </div>

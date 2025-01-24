@@ -61,9 +61,9 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   // Get the display count based on screen width
   const getDisplayCount = () => {
     if (variant !== 'camera') return Infinity;
-    if (typeof window === 'undefined') return 13;
+    if (typeof window === 'undefined') return 14;
     
-    return window.innerWidth < 640 ? 23 : 13;
+    return window.innerWidth < 640 ? 23 : 14;
   };
 
   const [displayCount, setDisplayCount] = useState(getDisplayCount());
@@ -201,96 +201,118 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
 
   return (
     <div className="w-full relative" ref={timelineRef}>
-      {/* Vertical timeline line - adjust positioning */}
-      <div className="absolute left-[4px] sm:left-[6px] top-0 bottom-16 w-px bg-gray-200" />
-      
-      <div className="space-y-4 sm:space-y-6 w-full">
-        {displayEvents.length === 0 ? (
-          <p className="text-gray-500 text-sm pl-16">No activity yet</p>
-        ) : (
-          <>
-            {displayEvents.map((event, index) => (
-              <div key={event.id} className="flex items-center">
-                {/* User avatar and action icon - always visible */}
-                <div className="relative flex items-center mr-3 sm:mr-5 z-10">
-                  <div className="w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-white border border-gray-200 -ml-[4px] sm:-ml-[4px] mr-2 flex items-center justify-center">
-                    {getEventIcon(event.type)}
+      {/* Container with fixed height based on display count */}
+      <div 
+        className="relative"
+        style={{ 
+          height: `${displayCount * (window.innerWidth < 640 ? 3 : 3.5)}rem`
+        }}
+      >
+        {/* Vertical timeline line */}
+        <div className="absolute left-[4px] sm:left-[6px] top-0 h-full w-px bg-gray-200" />
+        
+        <div className="space-y-4 sm:space-y-6 w-full">
+          {displayEvents.length === 0 ? (
+            <p className="text-gray-500 text-sm pl-16">No activity yet</p>
+          ) : (
+            <>
+              {displayEvents.map((event, index) => (
+                <div key={event.id} className="flex items-center">
+                  {/* User avatar and action icon - always visible */}
+                  <div className="relative flex items-center mr-3 sm:mr-5 z-10">
+                    <div className="w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-white border border-gray-200 -ml-[4px] sm:-ml-[4px] mr-2 flex items-center justify-center">
+                      {getEventIcon(event.type)}
+                    </div>
+                    <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden">
+                      {event.user.pfpUrl ? (
+                        <img 
+                          src={event.user.pfpUrl} 
+                          alt={event.user.displayName || event.user.username || 'User'} 
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <User className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600" />
+                      )}
+                    </div>
                   </div>
-                  <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden">
-                    {event.user.pfpUrl ? (
-                      <img 
-                        src={event.user.pfpUrl} 
-                        alt={event.user.displayName || event.user.username || 'User'} 
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <User className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600" />
-                    )}
-                  </div>
-                </div>
 
-                {/* Event details - fade out only in camera view */}
-                <div className={`ml-2 sm:ml-3 flex-left bg-white transition-opacity ${
-                  variant === 'camera' && index > 1 ? 'opacity-0' : ''
-                }`}>
-                  <p className="text-xs sm:text-sm text-gray-800">
-                    <span className="font-medium">
-                      {event.user.displayName || event.user.username || 
-                       `${event.user.address.slice(0, 6)}...${event.user.address.slice(-4)}`}
-                    </span>
-                    {' '}
-                    {getEventText(event.type)}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {event.timestamp > Date.now() - 60000 
-                      ? 'less than a minute ago'
-                      : `${Math.floor((Date.now() - event.timestamp) / 60000)} minutes ago`
-                    }
-                  </p>
-                </div>
-              </div>
-            ))}
-
-            {/* Profile Stack - only show in camera variant */}
-            {variant === 'camera' && (
-              <div className="relative pl-4 sm:pl-5 mt-6 sm:mt-8">
-                {/* Profile stack */}
-                <div className="flex items-center">
-                  <div className="flex -space-x-1.5 sm:-space-x-2">
-                    {/* Get unique users from all events, not just displayed ones */}
-                    {Array.from(new Set(events.map(e => e.user.address)))
-                      .slice(0, 6)
-                      .map((address, i) => {
-                        const event = events.find(e => e.user.address === address);
-                        return (
-                          <div
-                            key={address}
-                            className="relative w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center overflow-hidden"
-                            style={{ zIndex: 6 - i }}
-                          >
-                            {event?.user.pfpUrl ? (
-                              <img 
-                                src={event.user.pfpUrl} 
-                                alt={event.user.displayName || event.user.username || 'User'} 
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <User className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600" />
-                            )}
-                          </div>
-                        );
-                      })}
+                  {/* Event details - fade out only in camera view */}
+                  <div className={`ml-2 sm:ml-3 flex-left bg-white transition-opacity ${
+                    variant === 'camera' && index > 1 ? 'opacity-0' : ''
+                  }`}>
+                    <p className="text-xs sm:text-sm text-gray-800">
+                      <span className="font-medium">
+                        {event.user.displayName || event.user.username || 
+                         `${event.user.address.slice(0, 6)}...${event.user.address.slice(-4)}`}
+                      </span>
+                      {' '}
+                      {getEventText(event.type)}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {event.timestamp > Date.now() - 60000 
+                        ? 'less than a minute ago'
+                        : `${Math.floor((Date.now() - event.timestamp) / 60000)} minutes ago`
+                      }
+                    </p>
                   </div>
-                  {/* Count of total unique users */}
-                  <span className="ml-3 text-xs sm:text-sm text-gray-600 font-medium">
-                    {new Set(events.map(e => e.user.address)).size} Recently active
-                  </span>
                 </div>
-              </div>
-            )}
-          </>
-        )}
+              ))}
+            </>
+          )}
+        </div>
       </div>
+
+      {/* Profile Stack with connected timeline */}
+      {variant === 'camera' && (
+        <div className="relative">
+          {/* Corner and horizontal line container */}
+          <div className="absolute left-0 top-0 w-full">
+            {/* L-shaped corner with rounded curve using CSS */}
+            <div className="absolute left-[4px] sm:left-[6px] w-[12px] h-[12px]">
+              {/* Curved corner */}
+              <div 
+                className="absolute left-0 bottom-0 w-[12px] h-[12px] border-b border-l border-gray-200 rounded-bl-[12px]"
+                style={{ borderBottomLeftRadius: '12px' }}
+              />
+              {/* Horizontal part of the L - made longer */}
+              <div className="absolute left-[11px] bottom-0 w-[32px] h-px bg-gray-200" />
+            </div>
+          </div>
+
+          {/* Profile stack - adjusted padding to align with curve */}
+          <div className="pl-10 sm:pl-14">
+            <div className="flex items-center">
+              <div className="flex -space-x-1.5 sm:-space-x-2">
+                {Array.from(new Set(events.map(e => e.user.address)))
+                  .slice(0, 6)
+                  .map((address, i) => {
+                    const event = events.find(e => e.user.address === address);
+                    return (
+                      <div
+                        key={address}
+                        className="relative w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center overflow-hidden"
+                        style={{ zIndex: 6 - i }}
+                      >
+                        {event?.user.pfpUrl ? (
+                          <img 
+                            src={event.user.pfpUrl} 
+                            alt={event.user.displayName || event.user.username || 'User'} 
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <User className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600" />
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+              <span className="ml-3 text-xs sm:text-sm text-gray-600 font-medium">
+                {new Set(events.map(e => e.user.address)).size || 0} Recently active
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
