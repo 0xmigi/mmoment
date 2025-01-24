@@ -26,33 +26,21 @@ export const StreamControls = ({ timelineRef }: StreamControlsProps) => {
         return () => clearInterval(interval);
     }, []);
 
-    // Add this to your checkStreamStatus function
     const checkStreamStatus = async () => {
-        console.log("Checking stream status...");
         try {
             const response = await fetch(`${CONFIG.CAMERA_API_URL}/api/stream/info`);
-            console.log("Stream status response:", response.status);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
-            console.log("Stream status data:", data);
             setIsStreaming(data.isActive);
         } catch (error) {
             console.error('Failed to check stream status:', error);
         }
     };
 
-    console.log("Camera API URL:", CONFIG.CAMERA_API_URL);
-
     const handleStartStream = async () => {
-        console.log("Starting stream...");
         if (!primaryWallet?.address || !program || !isInitialized) {
-            console.log("Precondition check failed:", {
-                hasWallet: !!primaryWallet?.address,
-                hasProgram: !!program,
-                isInitialized
-            });
             return;
         }
         setIsLoading(true);
@@ -71,16 +59,16 @@ export const StreamControls = ({ timelineRef }: StreamControlsProps) => {
             });
 
             if (response.ok) {
-                const data = await response.json();
-                console.log("Stream start response data:", data);
                 setIsStreaming(true);
                 
-                // Add timeline event for stream start
-                timelineRef?.current?.addEvent({
-                    type: 'stream_started',
-                    timestamp: Date.now(),
-                    user: { address: primaryWallet.address }
-                });
+                if (timelineRef?.current) {
+                    const event = {
+                        type: 'stream_started' as const,
+                        timestamp: Date.now(),
+                        user: { address: primaryWallet.address }
+                    };
+                    timelineRef.current.addEvent(event);
+                }
             } else {
                 const errorText = await response.text();
                 console.error("Stream start failed:", errorText);
@@ -111,12 +99,14 @@ export const StreamControls = ({ timelineRef }: StreamControlsProps) => {
             if (response.ok) {
                 setIsStreaming(false);
                 
-                // Add timeline event for stream end
-                timelineRef?.current?.addEvent({
-                    type: 'stream_ended',
-                    timestamp: Date.now(),
-                    user: { address: primaryWallet.address }
-                });
+                if (timelineRef?.current) {
+                    const event = {
+                        type: 'stream_ended' as const,
+                        timestamp: Date.now(),
+                        user: { address: primaryWallet.address }
+                    };
+                    timelineRef.current.addEvent(event);
+                }
             }
         } catch (error) {
             console.error('Failed to stop stream:', error);

@@ -103,7 +103,8 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
         const captureResponse = await fetch(apiUrl, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${primaryWallet.address}`
           },
           mode: 'cors',
           credentials: 'omit'
@@ -135,7 +136,7 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
         onClick={handleTakePicture}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
-        disabled={loading || !primaryWallet?.address}
+        disabled={loading || !primaryWallet?.address || !isInitialized}
         className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-gray-800 transition-colors rounded-xl"
       >
         {loading ? (

@@ -11,7 +11,7 @@ const StepIcon = ({ children }: { children: React.ReactNode }) => (
 
 const ProductPage = () => {
     const navigate = useNavigate();
-    const { setShowAuthFlow } = useDynamicContext();
+    const { setShowAuthFlow, primaryWallet } = useDynamicContext();
 
     const steps = [
         {
@@ -54,6 +54,14 @@ const ProductPage = () => {
         }
     ];
 
+    const handleGetStarted = () => {
+        if (!primaryWallet) {
+            setShowAuthFlow(true);
+        } else {
+            navigate('/app');
+        }
+    };
+
     return (
         <div className="bg-white min-h-screen overflow-auto">
             {/* Navigation */}
@@ -70,11 +78,7 @@ const ProductPage = () => {
                         <div className="absolute -bottom-1 left-1/2 w-1 h-1 bg-black rounded-full transform -translate-x-1/2" />
                     </div>
                     <button
-                        onClick={() => {
-                            setShowAuthFlow(true);
-                            console.log("Attempting to show auth flow");
-                            navigate('/app')
-                        }}
+                        onClick={handleGetStarted}
                         className="px-6 py-2 bg-[#e7eeff] text-black rounded-lg hover:bg-[#a5bafc] transition-colors"
                     >
                         Open App

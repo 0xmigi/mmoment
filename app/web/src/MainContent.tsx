@@ -7,7 +7,7 @@ import LandingPage from './components/LandingPage';
 import ProductPage from './components/ProductPage';
 import QuickStartView from './components/QuickStartView';
 import { ActivitiesView } from './components/layout/ActivitiesView';
-import { TestPage } from './components/headless/TestPage';
+import { Settings } from './components/settings/Settings';
 
 function MainContent() {
   const [activeTab, setActiveTab] = useState<'camera' | 'gallery' | 'activities'>('camera');
@@ -16,7 +16,7 @@ function MainContent() {
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/product" element={<ProductPage />} />
-      <Route path="/test-headless" element={<TestPage />} />
+      <Route path="/settings" element={<Settings />} />
       <Route
         path="/app"
         element={
@@ -33,6 +33,5 @@ function MainContent() {
       />
     </Routes>
   );
-}
+}export default MainContent;
 
-export default MainContent;

@@ -3,12 +3,12 @@ import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useProgram } from '../anchor/setup';
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 
-export type QuickActionType = 'photo' | 'video' | 'custom';
+export type QuickActionType = 'photo' | 'video' | 'stream';
 
 interface QuickActions {
   photo: boolean;
   video: boolean;
-  custom: boolean;
+  stream: boolean;
 }
 
 interface CameraContextType {
@@ -45,7 +45,7 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
     return {
       photo: false,
       video: false,
-      custom: false
+      stream: false
     };
   });
   

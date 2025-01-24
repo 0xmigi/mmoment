@@ -5,8 +5,15 @@ import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 
 const LandingPage = () => {
     const navigate = useNavigate();
-    const { setShowAuthFlow } = useDynamicContext();
+    const { setShowAuthFlow, primaryWallet } = useDynamicContext();
 
+    const handleGetStarted = () => {
+        if (!primaryWallet) {
+            setShowAuthFlow(true);
+        } else {
+            navigate('/app');
+        }
+    };
 
     return (
         <div className="bg-white min-h-screen overflow-auto">
@@ -20,11 +27,7 @@ const LandingPage = () => {
                         Product
                     </button> */}
                     <button
-                        onClick={() => {
-                            setShowAuthFlow(true);
-                            console.log("Attempting to show auth flow");
-                            navigate('/app')
-                        }}
+                        onClick={handleGetStarted}
                         className="px-6 py-2 bg-[#e7eeff] text-black rounded-lg hover:bg-[#a5bafc] transition-colors"
                     >
                         Open App

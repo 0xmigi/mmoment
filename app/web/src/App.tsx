@@ -1,6 +1,6 @@
 import { BrowserRouter } from 'react-router-dom';
 import MainContent from './MainContent';
-import { DynamicContextProvider } from "@dynamic-labs/sdk-react-core";
+import { DynamicContextProvider, type WalletOption } from "@dynamic-labs/sdk-react-core";
 import { SolanaWalletConnectors } from "@dynamic-labs/solana";
 import {
   LivepeerConfig,
@@ -10,7 +10,6 @@ import {
 import { CameraProvider } from './components/CameraProvider';
 
 function App() {
-
   // Create Livepeer client with studio provider
   const livepeerClient = createReactClient({
     provider: studioProvider({
@@ -24,29 +23,8 @@ function App() {
         settings={{
           environmentId: "93e6248c-4446-4f78-837d-fedf6391d174",
           walletConnectors: [SolanaWalletConnectors],
-          eventsCallbacks: {
-            onAuthSuccess: (args) => {
-              console.log("Auth Success:", args);
-              // Check if the user connected with Farcaster
-              const farcasterCred = args.user?.verifiedCredentials?.find(
-                cred => cred.oauthProvider === 'farcaster'
-              );
-              if (farcasterCred) {
-                console.log("Farcaster connected:", farcasterCred);
-              }
-            },
-            onAuthFailure: (args) => {
-              console.error("Auth Error:", args);
-            },
-            onLogout: () => {
-              console.log("User logged out");
-            },
-            onAuthFlowClose: () => {
-              console.log("Auth flow closed");
-            }
-          },
           // Show both Phantom wallet and social logins
-          walletsFilter: (wallets) => {
+          walletsFilter: (wallets: WalletOption[]) => {
             const phantomWallet = wallets.find(w => w.name.toLowerCase() === 'phantom');
             return phantomWallet ? [phantomWallet] : [];
           }
@@ -61,5 +39,4 @@ function App() {
     </LivepeerConfig>
   );
 }
-
 export default App;

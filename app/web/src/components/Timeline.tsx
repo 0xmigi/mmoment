@@ -61,9 +61,17 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   // Get the display count based on screen width
   const getDisplayCount = () => {
     if (variant !== 'camera') return Infinity;
-    if (typeof window === 'undefined') return 14;
+    if (typeof window === 'undefined') return 13;
     
-    return window.innerWidth < 640 ? 23 : 14;
+    return window.innerWidth < 640 ? 23 : 13;  // Show 13 items
+  };
+
+  // Get the container height based on screen width (one more than display count)
+  const getContainerHeight = () => {
+    if (variant !== 'camera') return 'auto';
+    if (typeof window === 'undefined') return '49rem'; // 14 * 3.5rem
+    
+    return window.innerWidth < 640 ? `${23 * 3}rem` : `${14 * 3.5}rem`;  // Height for 14 slots
   };
 
   const [displayCount, setDisplayCount] = useState(getDisplayCount());
@@ -90,7 +98,16 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       setEvents(sortedEvents);
     }
 
+    socket.on('connect', () => {
+      console.log('Timeline socket connected');
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Timeline socket disconnected');
+    });
+
     socket.on('timelineEvent', (event: TimelineEvent) => {
+      console.log('Received timeline event:', event);
       // Enrich the event with Farcaster profile if available
       const farcasterCred = user?.verifiedCredentials?.find(
         cred => cred.oauthProvider === 'farcaster'
@@ -107,12 +124,14 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
 
       setEvents(prev => {
         const newEvents = [event, ...prev];
+        console.log('Updated timeline events:', newEvents);
         localStorage.setItem('timelineEvents', JSON.stringify(newEvents));
         return newEvents;
       });
     });
 
     socket.on('recentEvents', (events: TimelineEvent[]) => {
+      console.log('Received recent events:', events);
       // Enrich events with Farcaster profiles if available
       const enrichedEvents = events.map(event => {
         const farcasterCred = user?.verifiedCredentials?.find(
@@ -136,6 +155,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
 
       // Sort events by timestamp, newest first
       const sortedEvents = [...enrichedEvents].sort((a, b) => b.timestamp - a.timestamp);
+      console.log('Setting sorted events:', sortedEvents);
       setEvents(sortedEvents);
       localStorage.setItem('timelineEvents', JSON.stringify(sortedEvents));
     });
@@ -143,11 +163,14 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     return () => {
       socket.off('recentEvents');
       socket.off('timelineEvent');
+      socket.off('connect');
+      socket.off('disconnect');
     };
   }, [user?.verifiedCredentials]);
 
   useImperativeHandle(ref, () => ({
     addEvent: (event: Omit<TimelineEvent, 'id'>) => {
+      console.log('Adding event through ref:', event);
       // Enrich the event with Farcaster profile if available
       const farcasterCred = user?.verifiedCredentials?.find(
         cred => cred.oauthProvider === 'farcaster'
@@ -162,6 +185,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
         };
       }
 
+      console.log('Emitting newTimelineEvent:', event);
       socket.emit('newTimelineEvent', event);
     },
     getState: () => ({
@@ -173,7 +197,10 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   // Filter events based on selected filter
   const filteredEvents = events.filter(event => {
     if (filter === 'all') return true;
-    if (filter === 'camera') return event.type === 'photo_captured' || event.type === 'video_recorded';
+    if (filter === 'camera') return event.type === 'photo_captured' || 
+                                   event.type === 'video_recorded' || 
+                                   event.type === 'stream_started' || 
+                                   event.type === 'stream_ended';
     if (filter === 'my' && userAddress) return event.user.address === userAddress;
     return true;
   });
@@ -201,11 +228,11 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
 
   return (
     <div className="w-full relative" ref={timelineRef}>
-      {/* Container with fixed height based on display count */}
+      {/* Container with fixed height based on display count + 1 */}
       <div 
         className="relative"
         style={{ 
-          height: `${displayCount * (window.innerWidth < 640 ? 3 : 3.5)}rem`
+          height: getContainerHeight()
         }}
       >
         {/* Vertical timeline line */}

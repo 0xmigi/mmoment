@@ -4,18 +4,18 @@ import { useConnection } from '@solana/wallet-adapter-react';
 import { useProgram } from '../anchor/setup';
 import { SystemProgram, PublicKey } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
-import { pinataService } from '../services/pinata-service';
 import { Video, Loader } from 'lucide-react';
+import { pinataService } from '../services/pinata-service';
 import { CONFIG } from '../config';
 import { useCamera } from './CameraProvider';
 
 interface VideoRecorderProps {
   onVideoRecorded?: () => void;
-  onStatusUpdate?: (status: { type: 'success' | 'error' | 'info', message: string }) => void;
+  onStatusUpdate?: (status: { type: 'success' | 'error' | 'info'; message: string }) => void;
 }
 
 export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> }, VideoRecorderProps>(
-  ({ onVideoRecorded, onStatusUpdate }, ref) => {
+  ({ onVideoRecorded, onStatusUpdate: updateToast }, ref) => {
     const [recordingTimer, setRecordingTimer] = useState<NodeJS.Timeout | null>(null);
     const CAMERA_API_BASE = CONFIG.CAMERA_API_URL;
     const { primaryWallet } = useDynamicContext();
@@ -34,16 +34,12 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
     }));
 
     const startRecording = async () => {
-      console.log("Start recording clicked", {
-        hasWallet: !!primaryWallet?.address,
-        hasProgram: !!program
-      });
       if (!primaryWallet?.address || !program || !isInitialized) return;
       setLoading(true);
 
       try {
-        // Now we only need the activate camera call since initialization is handled by the provider
-        onStatusUpdate?.({ type: 'info', message: 'Activating camera...' });
+        // First activate camera on-chain
+        updateToast?.({ type: 'info', message: 'Activating camera...' });
         await program.methods.activateCamera(new BN(100))
           .accounts({
             cameraAccount: cameraKeypair.publicKey,
@@ -53,14 +49,15 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
           .rpc();
 
         // Start Recording
-        onStatusUpdate?.({ type: 'info', message: 'Starting recording...' });
+        updateToast?.({ type: 'info', message: 'Starting recording...' });
         const duration = 30;
         setTimeLeft(duration);
 
         const response = await fetch(`${CAMERA_API_BASE}/api/video/start`, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${primaryWallet.address}`
           },
           body: JSON.stringify({ duration }),
           mode: 'cors',
@@ -94,19 +91,19 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
         await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Download and upload
-        onStatusUpdate?.({ type: 'info', message: 'Downloading video...' });
+        updateToast?.({ type: 'info', message: 'Downloading video...' });
         const videoBlob = await downloadVideo(filename);
 
-        onStatusUpdate?.({ type: 'info', message: 'Uploading to IPFS...' });
+        updateToast?.({ type: 'info', message: 'Uploading to IPFS...' });
         const ipfsUrl = await pinataService.uploadVideo(videoBlob, primaryWallet.address);
         console.log('Video uploaded to IPFS:', ipfsUrl);
 
         onVideoRecorded?.();
-        onStatusUpdate?.({ type: 'success', message: 'Video uploaded successfully!' });
+        updateToast?.({ type: 'success', message: 'Video uploaded successfully!' });
 
       } catch (error) {
         console.error('Recording error:', error);
-        onStatusUpdate?.({ type: 'error', message: `${error instanceof Error ? error.message : String(error)}` });
+        updateToast?.({ type: 'error', message: `${error instanceof Error ? error.message : String(error)}` });
       } finally {
         setLoading(false);
         setTimeLeft(null);
@@ -137,6 +134,7 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
       return blob;
     };
 
+
     useEffect(() => {
       return () => {
         if (recordingTimer) {
@@ -163,6 +161,7 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
         </button>
       </>
     );
-  });
+  }
+);
 
 VideoRecorder.displayName = 'VideoRecorder';

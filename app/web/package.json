@@ -11,8 +11,8 @@
   },
   "dependencies": {
     "@coral-xyz/anchor": "0.29",
-    "@dynamic-labs/sdk-react-core": "^3.8.5",
-    "@dynamic-labs/solana": "^3.8.5",
+    "@dynamic-labs/sdk-react-core": "^4.3.0",
+    "@dynamic-labs/solana": "^4.3.0",
     "@livepeer/react": "3.0.1",
     "@pinata/sdk": "^2.1.0",
     "@privy-io/react-auth": "^1.95.2",

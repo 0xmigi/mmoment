@@ -1,4 +1,4 @@
-import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
+import { useDynamicContext, useEmbeddedWallet } from '@dynamic-labs/sdk-react-core';
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { Timeline } from '../Timeline';
 import { ActivateCamera } from '../ActivateCamera';
@@ -10,21 +10,49 @@ import { ToastMessage } from '../../types/toast';
 import { ToastContainer } from '../../components/ToastContainer';
 import { StreamPlayer } from '../StreamPlayer';
 import { StreamControls } from '../StreamControls';
+import { TransactionModal } from '../../components/headless/auth/TransactionModal';
+import { useCamera } from '../CameraProvider';
 
 export function CameraView() {
   const { primaryWallet } = useDynamicContext();
+  const { userHasEmbeddedWallet, isSessionActive, sendOneTimeCode, createOrRestoreSession } = useEmbeddedWallet();
+  const { cameraKeypair, quickActions } = useCamera();
   const timelineRef = useRef<any>(null);
   const [cameraAccount, setCameraAccount] = useState<string | null>(null);
   const [isLive, setIsLive] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentToast, setCurrentToast] = useState<ToastMessage | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [currentAction, setCurrentAction] = useState<{
+    type: 'photo' | 'video' | 'stream' | 'initialize';
+    cameraAccount: string;
+  } | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [isMobileView, setIsMobileView] = useState(window.innerWidth <= 768);
+
   const activateCameraRef = useRef<{
     handleTakePicture: () => Promise<void>;
   }>(null);
   const videoRecorderRef = useRef<{
     startRecording: () => Promise<void>;
   }>(null);
+
+  // Debug the wallet type
+  useEffect(() => {
+    if (primaryWallet) {
+      const isEmbedded = primaryWallet.connector?.name.toLowerCase() !== 'phantom';
+      // Only log critical wallet info
+      if (isEmbedded) {
+        console.log('Using embedded wallet:', primaryWallet.connector?.name);
+      }
+    }
+  }, [primaryWallet]);
+
+  // Check if the user is using an embedded wallet
+  const isEmbeddedWallet = userHasEmbeddedWallet();
 
   const checkCameraStatus = useCallback(async () => {
     if (!cameraAccount) {
@@ -33,28 +61,35 @@ export function CameraView() {
       return;
     }
 
-    let succeeded = false;
+    let retryCount = 0;
+    const MAX_RETRIES = 2;
+    const RETRY_DELAY = 3000; // 3 seconds
 
-    try {
-      const healthResponse = await fetch(`${CONFIG.CAMERA_API_URL}/api/health`);
-      if (!healthResponse.ok) return;  // Exit if health check fails
+    const checkWithRetry = async () => {
+      try {
+        const healthResponse = await fetch(`${CONFIG.CAMERA_API_URL}/api/health`);
+        if (!healthResponse.ok) throw new Error('Health check failed');
 
-      const streamResponse = await fetch(`${CONFIG.CAMERA_API_URL}/api/stream/info`);
-      if (!streamResponse.ok) return;  // Exit if stream info fails
+        const streamResponse = await fetch(`${CONFIG.CAMERA_API_URL}/api/stream/info`);
+        if (!streamResponse.ok) throw new Error('Stream info check failed');
 
-      const data = await streamResponse.json();
-      succeeded = true;  // Only set this if we get here without any errors
-      setIsLive(true);
-      setIsStreaming(data.isActive);
-    } catch (error) {
-      console.error('Failed to check camera status:', error);
-    } finally {
-      // If anything failed, ensure we're marked as offline
-      if (!succeeded) {
+        const data = await streamResponse.json();
+        setIsLive(true);
+        setIsStreaming(data.isActive);
+      } catch (error) {
+        console.error('Failed to check camera status:', error);
+        if (retryCount < MAX_RETRIES) {
+          retryCount++;
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+          return checkWithRetry();
+        }
+        // If all retries failed, set camera as offline
         setIsLive(false);
         setIsStreaming(false);
       }
-    }
+    };
+
+    await checkWithRetry();
   }, [cameraAccount]);
 
   useEffect(() => {
@@ -65,30 +100,134 @@ export function CameraView() {
   }, []);
 
   useEffect(() => {
+    // Initial check
     checkCameraStatus();
-    const interval = setInterval(checkCameraStatus, 3000);
+    
+    // Set up polling with a longer interval (5 seconds)
+    const interval = setInterval(checkCameraStatus, 5000);
+    
     return () => clearInterval(interval);
   }, [checkCameraStatus]);
 
-  const handleTakePicture = async () => {
-    // Call the same functionality that's in your ActivateCamera component
-    setLoading(true);
-    try {
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileView(window.innerWidth <= 768);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const handleAction = async (type: 'photo' | 'video' | 'stream') => {
+    if (!cameraKeypair || !primaryWallet?.address) {
+      return;
+    }
+  
+    // For embedded wallets
+    if (isEmbeddedWallet && !isMobileView) {
+      // Only show custom modal for desktop view
+      if (!isSessionActive) {
+        try {
+          setIsVerifying(true);
+          await sendOneTimeCode();
+          return; // Exit and wait for OTP verification
+        } catch (error) {
+          console.error('Failed to send OTP:', error);
+          updateToast('error', 'Failed to send verification code');
+          return;
+        }
+      }
+  
+      // Show our custom modal (desktop only)
+      setCurrentAction({
+        type,
+        cameraAccount: cameraKeypair.publicKey.toString()
+      });
+      setIsModalOpen(true);
+      return;
+    }
+  
+    // For mobile view or Phantom wallet, use direct action
+    if (isMobileView || quickActions[type]) {
+      if (type === 'photo') {
+        await activateCameraRef.current?.handleTakePicture();
+      } else if (type === 'video') {
+        await videoRecorderRef.current?.startRecording();
+      }
+      return;
+    }
+  
+    // Regular flow for desktop
+    if (type === 'photo') {
       await activateCameraRef.current?.handleTakePicture();
+    } else if (type === 'video') {
+      await videoRecorderRef.current?.startRecording();
+    }
+  };
+
+  const handleTakePicture = async (skipTransaction = false) => {
+    console.log('Starting picture capture, skipTransaction:', skipTransaction);
+    setLoading(true);
+    
+    try {
+      const response = await fetch(`${CONFIG.CAMERA_API_URL}/api/capture`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${primaryWallet?.address}`
+        }
+      });
+  
+      console.log('Capture response:', response.status);
+  
+      if (!response.ok) {
+        throw new Error(`Failed to take photo: ${response.statusText}`);
+      }
+  
+      // Add delay before notification
+      await new Promise(resolve => setTimeout(resolve, 1000));
+  
+      timelineRef.current?.addEvent({
+        type: 'photo_captured',
+        timestamp: Date.now(),
+        user: { address: primaryWallet?.address?.toString() || 'unknown' }
+      });
+      
+      updateToast('success', 'Photo captured successfully');
     } catch (error) {
       console.error('Failed to take picture:', error);
+      updateToast('error', error instanceof Error ? error.message : 'Failed to take picture');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleRecordVideo = async () => {
-    // Call the same functionality that's in your VideoRecorder component
+  const handleRecordVideo = async (_skipTransaction = false) => {
     setLoading(true);
     try {
-      await videoRecorderRef.current?.startRecording();
+      // Call camera API after transaction is confirmed
+      const response = await fetch(`${CONFIG.CAMERA_API_URL}/api/video/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${primaryWallet?.address}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to start recording: ${response.statusText}`);
+      }
+
+      timelineRef.current?.addEvent({
+        type: 'video_recorded',
+        timestamp: Date.now(),
+        user: { address: primaryWallet?.address?.toString() || 'unknown' }
+      });
+      
+      updateToast('success', 'Video recording started');
     } catch (error) {
       console.error('Failed to record video:', error);
+      updateToast('error', error instanceof Error ? error.message : 'Failed to record video');
     } finally {
       setLoading(false);
     }
@@ -108,15 +247,46 @@ export function CameraView() {
     setCurrentToast(null);
   };
 
+  const handleTransactionSuccess = async () => {
+    if (!currentAction) return;
+    console.log('Transaction succeeded, handling action:', currentAction.type);
+    
+    try {
+      setLoading(true);
+      if (currentAction.type === 'photo') {
+        await handleTakePicture(true);
+      } else if (currentAction.type === 'video') {
+        await handleRecordVideo(true);
+      }
+    } catch (error) {
+      console.error('API call failed:', error);
+      updateToast('error', 'Failed to complete action after transaction');
+    } finally {
+      setLoading(false);
+      setIsModalOpen(false);
+      setCurrentAction(null);
+    }
+  };
+
+  const handleVerifyOtp = async (otp: string) => {
+    try {
+      await createOrRestoreSession({ oneTimeCode: otp });
+      setIsVerifying(false);
+      setOtpSent(false);
+      setOtpError(null);
+      // Now show the transaction modal
+      setIsModalOpen(true);
+    } catch (error) {
+      console.error('Failed to verify OTP:', error);
+      setOtpError('Invalid verification code');
+    }
+  };
+
   return (
     <>
       <MobileControls
-        onTakePicture={() => {
-          handleTakePicture && handleTakePicture();
-        }}
-        onRecordVideo={() => {
-          handleRecordVideo && handleRecordVideo();
-        }}
+        onTakePicture={() => handleAction('photo')}
+        onRecordVideo={() => handleAction('video')}
         isLoading={loading}
       />
       {/* Add just the outer scrollable container */}
@@ -124,10 +294,16 @@ export function CameraView() {
         {/* Keep your existing layout exactly as is */}
         <div className="relative max-w-3xl mx-auto pt-8 ">
           <ToastContainer message={currentToast} onDismiss={dismissToast} />
-          <div className="bg-white rounded-lg px-6">
-            <h2 className="text-xl font-semibold mb-6">Camera</h2>
+          <div className="bg-white rounded-lg mb-6 px-6">
+            <h2 className="text-xl font-semibold">Camera</h2>
+            <span className="text-[11px] text-gray-600">
+              {cameraAccount
+                ? `id: ${cameraAccount.slice(0, 4)}...${cameraAccount.slice(-4)}`
+                : 'No Camera Connected'
+              }
+            </span>
           </div>
-          <div className="px-6">
+          <div className="px-2">
             {/* Use grid to maintain consistent widths */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Wrapper for both preview and controls */}
@@ -137,7 +313,7 @@ export function CameraView() {
 
                 {/* Camera Controls - full height */}
                 <div className="hidden sm:flex absolute -right-14 top-0 flex-col h-full z-[45]">
-                  <StreamControls />
+                  <StreamControls timelineRef={timelineRef} />
                   <div className="group h-1/2 relative">
                     <ActivateCamera
                       ref={activateCameraRef}
@@ -214,18 +390,18 @@ export function CameraView() {
                     <span className="text-green-500 font-medium">Online</span>
                   </div>
                 )}
-                <span className="text-sm text-gray-600">
+                {/* <span className="text-sm text-gray-600">
                   {cameraAccount
                     ? `Camera: ${cameraAccount.slice(0, 8)}...`
                     : 'No Camera Connected'
                   }
-                </span>
+                </span> */}
               </div>
             </div>
 
             {/* Timeline Events */}
             <div className="absolute mt-12 pl-6 left-0 w-full">
-            <Timeline ref={timelineRef} variant="camera" />
+              <Timeline ref={timelineRef} variant="camera" />
               <div
                 className="top-0 left-0 right-0 pointer-events-none"
                 style={{
@@ -246,6 +422,89 @@ export function CameraView() {
           </div>
         </div>
       </div >
+
+      {/* OTP Verification Modal */}
+      {isVerifying && (
+        <div className="fixed inset-0 z-[9999] overflow-y-auto">
+          <div className="flex min-h-screen items-center justify-center px-4">
+            <div 
+              className="fixed inset-0 bg-black bg-opacity-30 transition-opacity"
+              onClick={() => {
+                setIsVerifying(false);
+                setOtpSent(false);
+                setOtpError(null);
+              }}
+            />
+            <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Verify Your Action</h2>
+                <button 
+                  onClick={() => {
+                    setIsVerifying(false);
+                    setOtpSent(false);
+                    setOtpError(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-500"
+                >
+                  <span className="sr-only">Close</span>
+                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {!otpSent ? (
+                  <div className="text-sm text-gray-600">
+                    Sending verification code...
+                  </div>
+                ) : (
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    const otp = (e.currentTarget.elements.namedItem('otp') as HTMLInputElement).value;
+                    await handleVerifyOtp(otp);
+                  }}>
+                    <div className="space-y-4">
+                      <div>
+                        <label htmlFor="otp" className="block text-sm font-medium text-gray-700">
+                          Enter verification code
+                        </label>
+                        <input
+                          type="text"
+                          name="otp"
+                          id="otp"
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                          placeholder="Enter code"
+                          required
+                        />
+                      </div>
+                      {otpError && (
+                        <div className="text-sm text-red-600">
+                          {otpError}
+                        </div>
+                      )}
+                      <button
+                        type="submit"
+                        className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                      >
+                        Verify
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transaction Modal */}
+      <TransactionModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        transactionData={currentAction || undefined}
+        onSuccess={handleTransactionSuccess}
+      />
     </>
   );
 }

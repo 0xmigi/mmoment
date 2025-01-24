@@ -34,52 +34,79 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
   };
 
 
-  const fetchMedia = async () => {
-    if (!primaryWallet?.address) {
-      setMedia([]);
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setError(null);
-      const walletAddress = primaryWallet.address;
-      const allMedia = await pinataService.getMediaForWallet(walletAddress);
-
-      console.log('Mode:', mode);
-      console.log('Total media items:', allMedia.length);
-
-      // Sort by timestamp, newest first
-      const sortedMedia = allMedia.sort((a, b) =>
-        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      );
-
-      console.log('Sorted media length:', sortedMedia.length);
-
-      // Filter based on mode
-      let filteredMedia;
-      if (mode === 'recent') {
-        filteredMedia = sortedMedia.slice(0, maxRecentItems);
-        console.log('Recent media (first 5):', filteredMedia.length);
-      } else {
-        filteredMedia = sortedMedia.slice(maxRecentItems);
-        console.log('Archived media (after 5):', filteredMedia.length);
-      }
-
-      setMedia(filteredMedia);
-    } catch (err) {
-      console.error('Failed to fetch media:', err);
-      setError('Failed to load media. Please try again later.');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   useEffect(() => {
-    fetchMedia();
-    const interval = setInterval(fetchMedia, 5000);
-    return () => clearInterval(interval);
+    let isSubscribed = true;
+    let retryCount = 0;
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 5000; // 5 seconds
+    const POLL_INTERVAL = 10000; // 10 seconds
+
+    const fetchMediaWithRetry = async () => {
+      if (!primaryWallet?.address) {
+        if (isSubscribed) {
+          setMedia([]);
+          setLoading(false);
+        }
+        return;
+      }
+
+      try {
+        setError(null);
+        const walletAddress = primaryWallet.address;
+        const allMedia = await pinataService.getMediaForWallet(walletAddress);
+
+        if (!isSubscribed) return;
+
+        // Reset retry count on success
+        retryCount = 0;
+
+        // Sort by timestamp, newest first
+        const sortedMedia = allMedia.sort((a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        );
+
+        // Filter based on mode
+        let filteredMedia;
+        if (mode === 'recent') {
+          filteredMedia = sortedMedia.slice(0, maxRecentItems);
+        } else {
+          filteredMedia = sortedMedia.slice(maxRecentItems);
+        }
+
+        setMedia(filteredMedia);
+      } catch (err) {
+        console.error('Failed to fetch media:', err);
+        
+        // Only retry if we haven't exceeded MAX_RETRIES
+        if (retryCount < MAX_RETRIES) {
+          retryCount++;
+          setTimeout(fetchMediaWithRetry, RETRY_DELAY);
+        } else {
+          if (isSubscribed) {
+            setError('Failed to load media. Please try again later.');
+          }
+        }
+      } finally {
+        if (isSubscribed) {
+          setLoading(false);
+        }
+      }
+    };
+
+    // Initial fetch
+    fetchMediaWithRetry();
+
+    // Set up polling with a longer interval
+    const interval = setInterval(fetchMediaWithRetry, POLL_INTERVAL);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+    };
   }, [primaryWallet?.address, mode, maxRecentItems]);
+
+  // Add a manual refresh function
 
   const handleDelete = async (mediaId: string) => {
     if (!primaryWallet?.address) return;

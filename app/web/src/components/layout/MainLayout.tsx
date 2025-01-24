@@ -70,6 +70,15 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
 
           {/* Right side - Auth button and mobile menu */}
           <div className="flex items-center gap-2">
+            {/* {isLoggedIn && (
+              <button
+                onClick={() => navigate('/settings')}
+                className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                aria-label="Settings"
+              >
+                <SettingsIcon className="w-5 h-5 text-gray-600" />
+              </button>
+            )} */}
             <DynamicAuthButton />
             {/* Update the mobile menu trigger button style */}
             {isLoggedIn && (
@@ -121,8 +130,8 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                     setIsOpen(false);
                   }}
                   className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${activeTab === 'camera'
-                      ? 'bg-[#e7eeff] text-black'
-                      : 'text-gray-600 hover:bg-gray-50'
+                    ? 'bg-[#e7eeff] text-black'
+                    : 'text-gray-600 hover:bg-gray-50'
                     }`}
                 >
                   Camera
@@ -135,8 +144,8 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                     setIsOpen(false);
                   }}
                   className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${activeTab === 'gallery'
-                      ? 'bg-[#e7eeff] text-black'
-                      : 'text-gray-600 hover:bg-gray-50'
+                    ? 'bg-[#e7eeff] text-black'
+                    : 'text-gray-600 hover:bg-gray-50'
                     }`}
                 >
                   Gallery
@@ -149,11 +158,22 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                     setIsOpen(false);
                   }}
                   className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${activeTab === 'activities'
-                      ? 'bg-[#e7eeff] text-black'
-                      : 'text-gray-600 hover:bg-gray-50'
+                    ? 'bg-[#e7eeff] text-black'
+                    : 'text-gray-600 hover:bg-gray-50'
                     }`}
                 >
                   Activities
+                </button>
+
+                <button
+                  type='button'
+                  onClick={() => {
+                    navigate('/settings');
+                    setIsOpen(false);
+                  }}
+                  className="w-full text-left px-4 py-3 rounded-lg transition-colors text-gray-600 hover:bg-gray-50"
+                >
+                  Settings
                 </button>
 
                 {/* Divider */}
