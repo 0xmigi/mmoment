@@ -12,11 +12,15 @@ import { StreamPlayer } from '../StreamPlayer';
 import { StreamControls } from '../StreamControls';
 import { TransactionModal } from '../../components/headless/auth/TransactionModal';
 import { useCamera } from '../CameraProvider';
+import { PublicKey, SystemProgram } from '@solana/web3.js';
+import { BN } from '@coral-xyz/anchor';
+import { useProgram } from '../../anchor/setup';
 
 export function CameraView() {
   const { primaryWallet } = useDynamicContext();
   const { userHasEmbeddedWallet, isSessionActive, sendOneTimeCode, createOrRestoreSession } = useEmbeddedWallet();
-  const { cameraKeypair, quickActions } = useCamera();
+  const { cameraKeypair, quickActions, isInitialized } = useCamera();
+  const program = useProgram();
   const timelineRef = useRef<any>(null);
   const [cameraAccount, setCameraAccount] = useState<string | null>(null);
   const [isLive, setIsLive] = useState(false);
@@ -102,10 +106,10 @@ export function CameraView() {
   useEffect(() => {
     // Initial check
     checkCameraStatus();
-    
+
     // Set up polling with a longer interval (5 seconds)
     const interval = setInterval(checkCameraStatus, 5000);
-    
+
     return () => clearInterval(interval);
   }, [checkCameraStatus]);
 
@@ -122,7 +126,7 @@ export function CameraView() {
     if (!cameraKeypair || !primaryWallet?.address) {
       return;
     }
-  
+
     // For embedded wallets
     if (isEmbeddedWallet && !isMobileView) {
       // Only show custom modal for desktop view
@@ -137,7 +141,7 @@ export function CameraView() {
           return;
         }
       }
-  
+
       // Show our custom modal (desktop only)
       setCurrentAction({
         type,
@@ -146,29 +150,80 @@ export function CameraView() {
       setIsModalOpen(true);
       return;
     }
-  
+
     // For mobile view or Phantom wallet, use direct action
     if (isMobileView || quickActions[type]) {
       if (type === 'photo') {
         await activateCameraRef.current?.handleTakePicture();
       } else if (type === 'video') {
         await videoRecorderRef.current?.startRecording();
+      } else if (type === 'stream') {
+        await handleStream();
       }
       return;
     }
-  
+
     // Regular flow for desktop
     if (type === 'photo') {
       await activateCameraRef.current?.handleTakePicture();
     } else if (type === 'video') {
       await videoRecorderRef.current?.startRecording();
+    } else if (type === 'stream') {
+      await handleStream();
+    }
+  };
+
+  const handleStream = async () => {
+    if (!primaryWallet?.address || !program || !isInitialized) return;
+    setLoading(true);
+
+    try {
+      // First activate camera on-chain
+      await program.methods.activateCamera(new BN(100))
+        .accounts({
+          cameraAccount: cameraKeypair.publicKey,
+          user: new PublicKey(primaryWallet.address),
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+
+      // Start or stop stream based on current state
+      const endpoint = isStreaming ? '/api/stream/stop' : '/api/stream/start';
+      const response = await fetch(`${CONFIG.CAMERA_API_URL}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${primaryWallet.address}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to ${isStreaming ? 'stop' : 'start'} stream: ${response.statusText}`);
+      }
+
+      // Update streaming state
+      setIsStreaming(!isStreaming);
+      
+      // Add timeline event
+      timelineRef.current?.addEvent({
+        type: isStreaming ? 'stream_ended' : 'stream_started',
+        timestamp: Date.now(),
+        user: { address: primaryWallet.address }
+      });
+
+      updateToast('success', `Stream ${isStreaming ? 'stopped' : 'started'} successfully`);
+    } catch (error) {
+      console.error('Stream control error:', error);
+      updateToast('error', error instanceof Error ? error.message : 'Failed to control stream');
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleTakePicture = async (skipTransaction = false) => {
     console.log('Starting picture capture, skipTransaction:', skipTransaction);
     setLoading(true);
-    
+
     try {
       const response = await fetch(`${CONFIG.CAMERA_API_URL}/api/capture`, {
         method: 'POST',
@@ -177,22 +232,22 @@ export function CameraView() {
           'Authorization': `Bearer ${primaryWallet?.address}`
         }
       });
-  
+
       console.log('Capture response:', response.status);
-  
+
       if (!response.ok) {
         throw new Error(`Failed to take photo: ${response.statusText}`);
       }
-  
+
       // Add delay before notification
       await new Promise(resolve => setTimeout(resolve, 1000));
-  
+
       timelineRef.current?.addEvent({
         type: 'photo_captured',
         timestamp: Date.now(),
         user: { address: primaryWallet?.address?.toString() || 'unknown' }
       });
-      
+
       updateToast('success', 'Photo captured successfully');
     } catch (error) {
       console.error('Failed to take picture:', error);
@@ -223,7 +278,7 @@ export function CameraView() {
         timestamp: Date.now(),
         user: { address: primaryWallet?.address?.toString() || 'unknown' }
       });
-      
+
       updateToast('success', 'Video recording started');
     } catch (error) {
       console.error('Failed to record video:', error);
@@ -250,7 +305,7 @@ export function CameraView() {
   const handleTransactionSuccess = async () => {
     if (!currentAction) return;
     console.log('Transaction succeeded, handling action:', currentAction.type);
-    
+
     try {
       setLoading(true);
       if (currentAction.type === 'photo') {
@@ -287,9 +342,11 @@ export function CameraView() {
       <MobileControls
         onTakePicture={() => handleAction('photo')}
         onRecordVideo={() => handleAction('video')}
+        onToggleStream={() => handleAction('stream')}
         isLoading={loading}
+        isStreaming={isStreaming}
       />
-      {/* Add just the outer scrollable container */}
+      {/* Keep your existing layout exactly as is */}
       <div className="h-full overflow-y-auto pb-40">
         {/* Keep your existing layout exactly as is */}
         <div className="relative max-w-3xl mx-auto pt-8 ">
@@ -390,121 +447,123 @@ export function CameraView() {
                     <span className="text-green-500 font-medium">Online</span>
                   </div>
                 )}
-                {/* <span className="text-sm text-gray-600">
+              {/* <span className="text-sm text-gray-600">
                   {cameraAccount
                     ? `Camera: ${cameraAccount.slice(0, 8)}...`
                     : 'No Camera Connected'
                   }
                 </span> */}
-              </div>
-            </div>
-
-            {/* Timeline Events */}
-            <div className="absolute mt-12 pl-6 left-0 w-full">
-              <Timeline ref={timelineRef} variant="camera" />
-              <div
-                className="top-0 left-0 right-0 pointer-events-none"
-                style={{
-                  background: 'linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 100%)'
-                }}
-              />
-            </div>
-
-            {/* Main Camera Controls Frame */}
-            <div className="relative md:ml-20 ml-16 bg-white">
-
-
-              {/* Media Gallery */}
-              <div className="relative px-6">
-                <MediaGallery mode="recent" maxRecentItems={6} />
-              </div>
             </div>
           </div>
-        </div>
-      </div >
 
-      {/* OTP Verification Modal */}
-      {isVerifying && (
-        <div className="fixed inset-0 z-[9999] overflow-y-auto">
-          <div className="flex min-h-screen items-center justify-center px-4">
-            <div 
-              className="fixed inset-0 bg-black bg-opacity-30 transition-opacity"
-              onClick={() => {
-                setIsVerifying(false);
-                setOtpSent(false);
-                setOtpError(null);
+          {/* Timeline Events */}
+          <div className="absolute mt-12 pl-6 left-0 w-full">
+            <Timeline ref={timelineRef} variant="camera" />
+            <div
+              className="top-0 left-0 right-0 pointer-events-none"
+              style={{
+                background: 'linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 100%)'
               }}
             />
-            <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-semibold">Verify Your Action</h2>
-                <button 
-                  onClick={() => {
-                    setIsVerifying(false);
-                    setOtpSent(false);
-                    setOtpError(null);
-                  }}
-                  className="text-gray-400 hover:text-gray-500"
-                >
-                  <span className="sr-only">Close</span>
-                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
+          </div>
 
-              <div className="space-y-4">
-                {!otpSent ? (
-                  <div className="text-sm text-gray-600">
-                    Sending verification code...
-                  </div>
-                ) : (
-                  <form onSubmit={async (e) => {
-                    e.preventDefault();
-                    const otp = (e.currentTarget.elements.namedItem('otp') as HTMLInputElement).value;
-                    await handleVerifyOtp(otp);
-                  }}>
-                    <div className="space-y-4">
-                      <div>
-                        <label htmlFor="otp" className="block text-sm font-medium text-gray-700">
-                          Enter verification code
-                        </label>
-                        <input
-                          type="text"
-                          name="otp"
-                          id="otp"
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                          placeholder="Enter code"
-                          required
-                        />
-                      </div>
-                      {otpError && (
-                        <div className="text-sm text-red-600">
-                          {otpError}
-                        </div>
-                      )}
-                      <button
-                        type="submit"
-                        className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                      >
-                        Verify
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
+          {/* Main Camera Controls Frame */}
+          <div className="relative md:ml-20 ml-16 bg-white">
+
+
+            {/* Media Gallery */}
+            <div className="relative px-6">
+              <MediaGallery mode="recent" maxRecentItems={6} />
             </div>
           </div>
         </div>
-      )}
+      </div>
+    </div >
 
-      {/* Transaction Modal */}
-      <TransactionModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        transactionData={currentAction || undefined}
-        onSuccess={handleTransactionSuccess}
-      />
+      {/* OTP Verification Modal */ }
+  {
+    isVerifying && (
+      <div className="fixed inset-0 z-[9999] overflow-y-auto">
+        <div className="flex min-h-screen items-center justify-center px-4">
+          <div
+            className="fixed inset-0 bg-black bg-opacity-30 transition-opacity"
+            onClick={() => {
+              setIsVerifying(false);
+              setOtpSent(false);
+              setOtpError(null);
+            }}
+          />
+          <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold">Verify Your Action</h2>
+              <button
+                onClick={() => {
+                  setIsVerifying(false);
+                  setOtpSent(false);
+                  setOtpError(null);
+                }}
+                className="text-gray-400 hover:text-gray-500"
+              >
+                <span className="sr-only">Close</span>
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {!otpSent ? (
+                <div className="text-sm text-gray-600">
+                  Sending verification code...
+                </div>
+              ) : (
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const otp = (e.currentTarget.elements.namedItem('otp') as HTMLInputElement).value;
+                  await handleVerifyOtp(otp);
+                }}>
+                  <div className="space-y-4">
+                    <div>
+                      <label htmlFor="otp" className="block text-sm font-medium text-gray-700">
+                        Enter verification code
+                      </label>
+                      <input
+                        type="text"
+                        name="otp"
+                        id="otp"
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                        placeholder="Enter code"
+                        required
+                      />
+                    </div>
+                    {otpError && (
+                      <div className="text-sm text-red-600">
+                        {otpError}
+                      </div>
+                    )}
+                    <button
+                      type="submit"
+                      className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                    >
+                      Verify
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  {/* Transaction Modal */ }
+  <TransactionModal
+    isOpen={isModalOpen}
+    onClose={() => setIsModalOpen(false)}
+    transactionData={currentAction || undefined}
+    onSuccess={handleTransactionSuccess}
+  />
     </>
   );
 }

@@ -71,9 +71,9 @@ button:focus {
 }
 
 /* Apply overflow hidden only to app routes */
-.flex.flex-col.h-screen {
+/* .flex.flex-col.h-screen {
   overflow: hidden;
-}
+} */
 
 @media (max-width: 1024px) {
   .timeline-container {
