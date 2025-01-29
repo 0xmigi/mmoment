@@ -38,7 +38,7 @@ const LandingPage = () => {
             {/* Main Content */}
             <main>
                 {/* Top Section */}
-                <section className="min-h-screen flex items-center relative pt-20 sm:pt-0">
+                <section className="h-[90vh] flex items-center relative pt-20 sm:pt-0">
                     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
                         <div className="flex flex-col lg:flex-row items-center justify-between gap-8 lg:gap-12">
                             {/* Left side - Image */}
@@ -54,16 +54,16 @@ const LandingPage = () => {
 
                             {/* Right side - Content */}
                             <div className="w-full lg:w-1/2 text-center lg:text-left">
-                                <div className="flex items-center justify-center lg:justify-start gap-4 mb-6 lg:mb-8">
+                                <div className="flex items-center justify-center lg:justify-start gap-4 mb-6">
                                     <Logo width={40} height={32} className="text-gray-900 sm:w-[50px] sm:h-[42px]" />
                                     <h1 className="text-3xl sm:text-5xl font-bold text-gray-900">
                                         Moment
                                     </h1>
                                 </div>
-                                <p className="text-base sm:text-xl text-gray-600 mb-6 lg:mb-8 max-w-md mx-auto lg:mx-0">
+                                <p className="text-base sm:text-xl text-gray-600 mb-6 max-w-md mx-auto lg:mx-0">
                                     Capture moments and their context instantly with a NFC-enabled camera system. Just tap your phone and record.
                                 </p>
-                                <div className="space-y-3 sm:space-y-4">
+                                <div className="space-y-3">
                                     <div className="flex items-center justify-center lg:justify-start gap-2 text-sm sm:text-base text-gray-600">
                                         <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
                                         <span>Live content hubs</span>
@@ -76,19 +76,13 @@ const LandingPage = () => {
                             </div>
                         </div>
                     </div>
-                    {/* Scroll indicator - only visible on desktop */}
-                    <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 hidden lg:flex flex-col items-center text-gray-400">
-                        <svg className="w-6 h-6 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                        </svg>
-                    </div>
                 </section>
 
                 {/* Grid Pattern Section */}
-                <section className="bg-gray-50 py-20 sm:py-32 relative mt-[-5vh] grid-pattern">
+                <section className="bg-gray-50 py-16 sm:py-24 relative mt-0 grid-pattern">
                     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-                        <h3 className="text-2xl sm:text-4xl font-bold text-center mb-3 sm:mb-4">Learn more?</h3>
-                        <p className="text-sm sm:text-base text-gray-600 text-center mb-10 sm:mb-16 max-w-2xl mx-auto">
+                        <h3 className="text-2xl sm:text-4xl font-bold text-center mb-3">Learn more?</h3>
+                        <p className="text-sm sm:text-base text-gray-600 text-center mb-8 sm:mb-12 max-w-2xl mx-auto">
                             Read the blog post that inspired our project
                         </p>
                         <div className="flex justify-center">

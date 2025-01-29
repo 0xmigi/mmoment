@@ -133,7 +133,7 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
     return (
       <button
         ref={buttonRef}
-        onClick={handleTakePicture}
+        onClick={() => onPhotoCapture?.()}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
         disabled={loading || !primaryWallet?.address || !isInitialized}

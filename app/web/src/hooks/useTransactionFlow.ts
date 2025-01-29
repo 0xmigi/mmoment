@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
+import { useDynamicContext, useEmbeddedWallet } from '@dynamic-labs/sdk-react-core';
 
 type CameraActionType = 'photo' | 'video' | 'stream' | 'initialize';
 
@@ -10,6 +10,7 @@ interface TransactionData {
 
 export const useTransactionFlow = () => {
   const { primaryWallet } = useDynamicContext();
+  const { userHasEmbeddedWallet } = useEmbeddedWallet();
   const [showTransactionModal, setShowTransactionModal] = useState(false);
   const [pendingTransaction, setPendingTransaction] = useState<TransactionData | null>(null);
 
@@ -18,8 +19,18 @@ export const useTransactionFlow = () => {
       throw new Error('No wallet connected');
     }
 
+    // For embedded wallets, we need to show our UI first
+    if (userHasEmbeddedWallet()) {
+      setPendingTransaction({ type, cameraAccount });
+      setShowTransactionModal(true);
+      return;
+    }
+
+    // For EOA wallets like Phantom, we can proceed directly with their UI
+    // Just set the transaction data, the parent component should handle the actual transaction
     setPendingTransaction({ type, cameraAccount });
-    setShowTransactionModal(true);
+    // Don't show our modal for EOA wallets
+    setShowTransactionModal(false);
   };
 
   const closeTransactionModal = () => {
@@ -32,5 +43,6 @@ export const useTransactionFlow = () => {
     pendingTransaction,
     initiateCameraAction,
     closeTransactionModal,
+    isEmbeddedWallet: userHasEmbeddedWallet(),
   };
 }; 

@@ -1,7 +1,7 @@
 import { Camera, Video, Play, Square } from 'lucide-react';
 
-// In MobileControls.tsx
-interface MobileControlsProps {
+// Renamed from MobileControls to CameraControls
+interface CameraControlsProps {
   onTakePicture: () => void;
   onRecordVideo: () => void;
   onToggleStream?: () => void;
@@ -9,38 +9,46 @@ interface MobileControlsProps {
   isStreaming?: boolean;
 }
 
-export function MobileControls({ onTakePicture, onRecordVideo, onToggleStream, isLoading, isStreaming }: MobileControlsProps) {
+export function CameraControls({ onTakePicture, onRecordVideo, onToggleStream, isLoading, isStreaming }: CameraControlsProps) {
   return (
-    <div className="sm:hidden fixed right-4 bottom-10 flex flex-col gap-4 z-50">
+    <div className="sm:hidden flex gap-2">
       <button 
         onClick={onTakePicture}
         disabled={isLoading}
-        className={`w-11 h-11 rounded-lg ${isLoading ? 'bg-stone-400 cursor-not-allowed' : ' bg-[#e7eeff] hover:bg-stone-500'} drop-shadow-lg flex items-center justify-center`}
+        className={`flex-1 h-10 rounded-lg ${isLoading ? 'bg-gray-200 cursor-not-allowed' : 'bg-[#e7eeff] hover:bg-gray-50'} flex items-center justify-center gap-2`}
         aria-label="Take Picture"
       >
-        <Camera className="w-6 h-6 text-gray-800" />
+        <Camera className="w-4 h-4 text-gray-700" />
+        <span className="text-sm font-medium text-gray-700">Photo</span>
       </button>
       
       <button
         onClick={onRecordVideo}
         disabled={isLoading}
-        className={`w-11 h-11 rounded-lg ${isLoading ? 'bg-gray-400 cursor-not-allowed' : ' bg-[#e7eeff] hover:bg-gray-500'} drop-shadow-lg flex items-center justify-center`}
+        className={`flex-1 h-10 rounded-lg ${isLoading ? 'bg-gray-200 cursor-not-allowed' : 'bg-[#e7eeff] hover:bg-gray-50'} flex items-center justify-center gap-2`}
         aria-label="Record Video"
       >
-        <Video className="w-6 h-6 text-gray-800" />
+        <Video className="w-4 h-4 text-gray-700" />
+        <span className="text-sm font-medium text-gray-700">Video</span>
       </button>
 
       {onToggleStream && (
         <button
           onClick={onToggleStream}
           disabled={isLoading}
-          className={`w-11 h-11 rounded-lg ${isLoading ? 'bg-gray-400 cursor-not-allowed' : ' bg-[#e7eeff] hover:bg-gray-500'} drop-shadow-lg flex items-center justify-center`}
+          className={`flex-1 h-10 rounded-lg ${isLoading ? 'bg-gray-200 cursor-not-allowed' : 'bg-[#e7eeff] hover:bg-gray-50'} flex items-center justify-center gap-2`}
           aria-label={isStreaming ? "Stop Stream" : "Start Stream"}
         >
           {isStreaming ? (
-            <Square className="w-6 h-6 text-gray-800" />
+            <>
+              <Square className="w-4 h-4 text-gray-700" />
+              <span className="text-sm font-medium text-gray-700">Stop</span>
+            </>
           ) : (
-            <Play className="w-6 h-6 text-gray-800" />
+            <>
+              <Play className="w-4 h-4 text-gray-700" />
+              <span className="text-sm font-medium text-gray-700">Stream</span>
+            </>
           )}
         </button>
       )}

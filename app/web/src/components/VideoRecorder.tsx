@@ -147,7 +147,7 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
       <>
         <button
           ref={buttonRef}
-          onClick={startRecording}
+          onClick={() => onVideoRecorded?.()}
           onMouseEnter={() => setShowTooltip(true)}
           onMouseLeave={() => setShowTooltip(false)}
           disabled={loading || initLoading || !isInitialized}
