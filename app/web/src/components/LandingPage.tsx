@@ -1,37 +1,49 @@
 import { useNavigate } from 'react-router-dom';
-import Logo from './Logo'
+import Logo from './Logo';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
+import { useState } from 'react';
+import { AuthModal } from './headless/auth/AuthModal';
 
-
-const LandingPage = () => {
+function GetStartedButton() {
+    const { primaryWallet } = useDynamicContext();
+    const [showAuthModal, setShowAuthModal] = useState(false);
     const navigate = useNavigate();
-    const { setShowAuthFlow, primaryWallet } = useDynamicContext();
 
-    const handleGetStarted = () => {
-        if (!primaryWallet) {
-            setShowAuthFlow(true);
-        } else {
+    const handleClick = () => {
+        if (primaryWallet?.address) {
             navigate('/app');
+        } else {
+            setShowAuthModal(true);
         }
     };
+
+    return (
+        <>
+            <button
+                onClick={handleClick}
+                className="px-6 py-2 bg-gray-100 text-black rounded-lg hover:bg-gray-200 transition-colors"
+            >
+                {primaryWallet?.address ? 'Open App' : 'Get Started'}
+            </button>
+            <AuthModal 
+                isOpen={showAuthModal} 
+                onClose={() => {
+                    setShowAuthModal(false);
+                    navigate('/app');
+                }} 
+            />
+        </>
+    );
+}
+
+export default function LandingPage() {
 
     return (
         <div className="bg-white min-h-screen overflow-auto">
             {/* Navigation */}
             <div className="fixed top-0 right-0 p-4 z-50">
                 <div className="flex items-center gap-4">
-                    {/* <button
-                        onClick={() => navigate('/product')}
-                        className="px-2 text-sm py-2 text-gray-600 hover:text-gray-900"
-                    >
-                        Product
-                    </button> */}
-                    <button
-                        onClick={handleGetStarted}
-                        className="px-6 py-2 bg-[#e7eeff] text-black rounded-md hover:bg-[#a5bafc] transition-colors"
-                    >
-                        Sign In
-                    </button>
+                    <GetStartedButton />
                 </div>
             </div>
 
@@ -98,6 +110,4 @@ const LandingPage = () => {
             </main>
         </div>
     );
-};
-
-export default LandingPage;
+}

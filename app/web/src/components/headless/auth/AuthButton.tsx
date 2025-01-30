@@ -13,7 +13,7 @@ export const HeadlessAuthButton = () => {
       <>
         <button
           onClick={() => setShowWalletModal(true)}
-          className="px-6 py-2 bg-[#e7eeff] text-black rounded-lg hover:bg-[#a5bafc] transition-colors"
+          className="px-6 py-2 bg-gray-100 text-black rounded-lg hover:bg-gray-200 transition-colors"
         >
           Connect Wallet
         </button>
@@ -29,7 +29,7 @@ export const HeadlessAuthButton = () => {
     <div className="relative">
       <button
         onClick={() => setShowDropdown(!showDropdown)}
-        className="px-4 py-2 bg-[#e7eeff] text-black rounded-lg hover:bg-[#a5bafc] transition-colors flex items-center gap-2"
+        className="px-4 py-2 bg-gray-100 text-black rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
       >
         <span>{primaryWallet.address.slice(0, 4)}...{primaryWallet.address.slice(-4)}</span>
         <svg

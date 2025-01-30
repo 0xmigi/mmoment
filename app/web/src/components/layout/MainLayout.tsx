@@ -1,4 +1,4 @@
-import { DynamicAuthButton } from '../DynamicAuthButton';
+import { HeadlessAuthButton } from '../headless/auth/HeadlessAuthButton';
 import { useIsLoggedIn } from '@dynamic-labs/sdk-react-core';
 import { Menu, X } from 'lucide-react';
 import { useState } from 'react';
@@ -7,8 +7,8 @@ import Logo from '../Logo';
 
 interface MainLayoutProps {
   children: React.ReactNode;
-  activeTab: 'camera' | 'gallery' | 'activities';  // Add activities
-  onTabChange: (tab: 'camera' | 'gallery' | 'activities') => void;
+  activeTab: 'camera' | 'gallery' | 'activities' | 'account';
+  onTabChange: (tab: 'camera' | 'gallery' | 'activities' | 'account') => void;
 }
 
 export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps) {
@@ -32,7 +32,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                 Moment
               </h1>
             </div>
-            {isLoggedIn && (
+            {isLoggedIn && activeTab !== 'account' && (
               <div className="hidden sm:flex items-center space-x-1">
                 <button
                   type='button'
@@ -70,32 +70,34 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
 
           {/* Right side - Auth button and mobile menu */}
           <div className="flex items-center gap-2">
-            {/* {isLoggedIn && (
-              <button
-                onClick={() => navigate('/settings')}
-                className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-                aria-label="Settings"
-              >
-                <SettingsIcon className="w-5 h-5 text-gray-600" />
-              </button>
-            )} */}
-            <DynamicAuthButton />
-            {/* Update the mobile menu trigger button style */}
-            {isLoggedIn && (
+            {activeTab === 'account' ? (
               <button
                 type='button'
-                onClick={() => setIsOpen(true)}
-                className="sm:hidden p-2 rounded-lg bg-[#e7eeff] hover:bg-[#d1dfff] transition-colors"
+                onClick={() => navigate('/app')}
+                className="p-2 rounded-lg bg-[#999999] hover:bg-[#d1dfff] transition-colors"
               >
-                <Menu className="w-5 h-5 text-gray-700" />
+                <X className="w-5 h-5 text-gray-50" />
               </button>
+            ) : (
+              <>
+                <HeadlessAuthButton />
+                {isLoggedIn && (
+                  <button
+                    type='button'
+                    onClick={() => setIsOpen(true)}
+                    className="sm:hidden p-2 rounded-lg bg-[#999999] hover:bg-[#d1dfff] transition-colors"
+                  >
+                    <Menu className="w-5 h-5 text-gray-50" />
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
       </div>
 
-      {/* Mobile Navigation Menu */}
-      {isLoggedIn && isOpen && (
+      {/* Mobile Navigation Menu - Don't show on account page */}
+      {isLoggedIn && isOpen && activeTab !== 'account' && (
         <div className="fixed inset-x-0 z-[80] sm:hidden">
           {/* Semi-transparent overlay */}
           <div
@@ -113,7 +115,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
               <button
                 type='button'
                 onClick={() => setIsOpen(false)}
-                className="p-2 rounded-lg bg-[#e7eeff] hover:bg-[#d1dfff] transition-colors"
+                className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
               >
                 <X className="w-5 h-5 text-gray-700" />
               </button>
@@ -130,7 +132,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                     setIsOpen(false);
                   }}
                   className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${activeTab === 'camera'
-                    ? 'bg-[#e7eeff] text-black'
+                    ? 'bg-gray-100 text-black'
                     : 'text-gray-600 hover:bg-gray-50'
                     }`}
                 >
@@ -144,7 +146,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                     setIsOpen(false);
                   }}
                   className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${activeTab === 'gallery'
-                    ? 'bg-[#e7eeff] text-black'
+                    ? 'bg-gray-100 text-black'
                     : 'text-gray-600 hover:bg-gray-50'
                     }`}
                 >
@@ -158,7 +160,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                     setIsOpen(false);
                   }}
                   className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${activeTab === 'activities'
-                    ? 'bg-[#e7eeff] text-black'
+                    ? 'bg-gray-100 text-black'
                     : 'text-gray-600 hover:bg-gray-50'
                     }`}
                 >

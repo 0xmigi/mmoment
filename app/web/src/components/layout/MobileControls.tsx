@@ -15,39 +15,39 @@ export function CameraControls({ onTakePicture, onRecordVideo, onToggleStream, i
       <button 
         onClick={onTakePicture}
         disabled={isLoading}
-        className={`flex-1 h-10 rounded-lg ${isLoading ? 'bg-gray-200 cursor-not-allowed' : 'bg-[#e7eeff] hover:bg-gray-50'} flex items-center justify-center gap-2`}
+        className={`flex-1 h-10 rounded-lg ${isLoading ? 'bg-gray-200 cursor-not-allowed' : 'bg-gray-50'} flex items-center justify-center gap-2`}
         aria-label="Take Picture"
       >
-        <Camera className="w-4 h-4 text-gray-700" />
-        <span className="text-sm font-medium text-gray-700">Photo</span>
+        <Camera className="w-4 h-4 text-gray-600 hover:text-stone-800" />
+        <span className="text-sm font-medium text-gray-600 hover:text-stone-800">Photo</span>
       </button>
       
       <button
         onClick={onRecordVideo}
         disabled={isLoading}
-        className={`flex-1 h-10 rounded-lg ${isLoading ? 'bg-gray-200 cursor-not-allowed' : 'bg-[#e7eeff] hover:bg-gray-50'} flex items-center justify-center gap-2`}
+        className={`flex-1 h-10 rounded-lg ${isLoading ? 'bg-gray-200 cursor-not-allowed' : 'bg-gray-50'} flex items-center justify-center gap-2`}
         aria-label="Record Video"
       >
-        <Video className="w-4 h-4 text-gray-700" />
-        <span className="text-sm font-medium text-gray-700">Video</span>
+        <Video className="w-4 h-4 text-gray-600 hover:text-stone-800" />
+        <span className="text-sm font-medium text-gray-600 hover:text-stone-800">Video</span>
       </button>
 
       {onToggleStream && (
         <button
           onClick={onToggleStream}
           disabled={isLoading}
-          className={`flex-1 h-10 rounded-lg ${isLoading ? 'bg-gray-200 cursor-not-allowed' : 'bg-[#e7eeff] hover:bg-gray-50'} flex items-center justify-center gap-2`}
+          className={`flex-1 h-10 rounded-lg ${isLoading ? 'bg-gray-200 cursor-not-allowed' : 'bg-gray-50'} flex items-center justify-center gap-2`}
           aria-label={isStreaming ? "Stop Stream" : "Start Stream"}
         >
           {isStreaming ? (
             <>
-              <Square className="w-4 h-4 text-gray-700" />
-              <span className="text-sm font-medium text-gray-700">Stop</span>
+              <Square className="w-4 h-4 text-white" />
+              <span className="text-sm font-medium text-white">Stop</span>
             </>
           ) : (
             <>
-              <Play className="w-4 h-4 text-gray-700" />
-              <span className="text-sm font-medium text-gray-700">Stream</span>
+              <Play className="w-4 h-4 text-gray-600 hover:text-stone-800" />
+              <span className="text-sm font-medium text-gray-600 hover:text-stone-800">Stream</span>
             </>
           )}
         </button>

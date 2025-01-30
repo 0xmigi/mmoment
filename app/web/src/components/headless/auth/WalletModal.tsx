@@ -191,10 +191,6 @@ export const WalletModal = ({ isOpen, onClose }: WalletModalProps) => {
                 </form>
               </>
             )}
-
-            <div className="text-center text-xs text-gray-500">
-              Powered by Dynamic
-            </div>
           </div>
         </div>
       </div>

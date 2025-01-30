@@ -450,7 +450,7 @@ export function CameraView() {
               </div>
             </div>
 
-            <div className="absolute mt-12 pl-6 left-0 w-full">
+            <div className="absolute mt-12 pb-20 pl-6 left-0 w-full">
               <Timeline ref={timelineRef} variant="camera" />
               <div
                 className="top-0 left-0 right-0 pointer-events-none"
