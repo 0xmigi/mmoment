@@ -1,5 +1,8 @@
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { User } from 'lucide-react';
+import { AuthModal } from './AuthModal';
 
 interface FarcasterCredential {
   oauthProvider: string;
@@ -11,9 +14,23 @@ interface FarcasterCredential {
 export function HeadlessAuthButton() {
   const { primaryWallet, user } = useDynamicContext();
   const navigate = useNavigate();
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   if (!primaryWallet?.address) {
-    return null;
+    return (
+      <>
+        <button
+          onClick={() => setShowAuthModal(true)}
+          className="px-4 py-2 bg-gray-100 text-black rounded-lg hover:bg-gray-200 transition-colors"
+        >
+          Log in
+        </button>
+        <AuthModal 
+          isOpen={showAuthModal} 
+          onClose={() => setShowAuthModal(false)} 
+        />
+      </>
+    );
   }
 
   // Find Farcaster credentials if they exist
@@ -47,7 +64,10 @@ export function HeadlessAuthButton() {
       onClick={() => navigate('/account')}
       className="px-4 py-2 bg-gray-100 text-black rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
     >
-      <span className="font-mono">{primaryWallet.address.slice(0, 4)}...{primaryWallet.address.slice(-4)}</span>
+      <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center">
+        <User className="w-4 h-4 text-gray-500" />
+      </div>
+      <span className="font-mono text-sm">{primaryWallet.address.slice(0, 3)}..{primaryWallet.address.slice(-3)}</span>
     </button>
   );
 } 

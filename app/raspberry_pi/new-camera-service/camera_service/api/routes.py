@@ -14,14 +14,18 @@ logger = logging.getLogger(__name__)
 
 def create_app():
     app = Flask(__name__)
-    # Configure CORS to allow all methods and headers
+    # Configure CORS to allow specific origins
     CORS(app, resources={
         r"/*": {
-            "origins": "*",
+            "origins": [
+                "https://mmoment.xyz",
+                "https://www.mmoment.xyz",
+                "http://localhost:5173"
+            ],
             "methods": ["GET", "POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Accept"],
             "expose_headers": ["Content-Type"],
-            "supports_credentials": True,
+            "supports_credentials": False,  # Changed to false since we're using Bearer token
             "max_age": 600
         }
     })

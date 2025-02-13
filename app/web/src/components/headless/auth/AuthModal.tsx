@@ -87,9 +87,10 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
       {showOtpInput ? (
         <form onSubmit={handleOtpSubmit} className="space-y-4">
           <div>
-            <label htmlFor="otp" className="block text-sm font-medium text-gray-700">
-              Enter verification code
-            </label>
+            <h3 className="text-sm font-medium mb-2">Enter verification code</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              We sent a code to your email address
+            </p>
             <input
               type="text"
               id="otp"
@@ -194,10 +195,10 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
       {/* Full-screen container */}
       <div className="fixed inset-0 flex items-center justify-center p-4">
-        <Dialog.Panel className="mx-auto max-w-sm rounded-xl bg-white p-6 shadow-xl">
+        <Dialog.Panel className="mx-auto w-[400px] rounded-xl bg-white p-6 shadow-xl">
           <div className="flex items-center justify-between mb-4">
             <Dialog.Title className="text-lg font-medium">
-              Sign In
+              {showOtpInput ? 'Verify Email' : 'Sign In'}
             </Dialog.Title>
             <button
               onClick={onClose}

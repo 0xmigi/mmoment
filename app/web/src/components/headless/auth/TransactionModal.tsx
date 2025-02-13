@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import { Dialog } from '@headlessui/react';
+import { X } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { useProgram } from '../../../anchor/setup';
-import { SystemProgram, PublicKey } from '@solana/web3.js';
+import { SystemProgram, PublicKey, ComputeBudgetProgram, Transaction } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
+import { useState } from 'react';
 
 interface TransactionModalProps {
   isOpen: boolean;
@@ -12,7 +14,7 @@ interface TransactionModalProps {
     type: 'photo' | 'video' | 'stream' | 'initialize';
     cameraAccount: string;
   };
-  onSuccess?: () => void;
+  onSuccess?: (data: { transactionId: string }) => void;
 }
 
 export const TransactionModal: React.FC<TransactionModalProps> = ({
@@ -27,7 +29,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [status, setStatus] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fee, setFee] = useState<number>(100); // Default fee in lamports
+  const [fee] = useState<number>(100); // Default fee in lamports
 
   const handleConfirmTransaction = async () => {
     if (!primaryWallet?.address || !program || !transactionData) {
@@ -42,26 +44,48 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       const cameraPublicKey = new PublicKey(transactionData.cameraAccount);
       setStatus('Preparing transaction...');
       
-      // Simulate a brief delay to show the signing process
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Create the transaction instruction
+      const ix = await program.methods.activateCamera(new BN(100))
+        .accounts({
+          cameraAccount: cameraPublicKey,
+          user: new PublicKey(primaryWallet.address),
+          systemProgram: SystemProgram.programId,
+        })
+        .instruction();
+      
+      // Add priority fee
+      const addPriorityFee = ComputeBudgetProgram.setComputeUnitPrice({
+        microLamports: 1,
+      });
+      
+      // Set compute unit limit
+      const modifyComputeUnits = ComputeBudgetProgram.setComputeUnitLimit({
+        units: 1000000,
+      });
+      
+      // Create new transaction and add instructions
+      const transaction = new Transaction();
+      transaction.add(addPriorityFee, modifyComputeUnits, ix);
+      
       setStatus('Signing transaction...');
       
-      // Send the transaction
-      await program.methods.activateCamera(new BN(fee))
+      // Use program's rpc method which will handle the transaction through Dynamic's wallet
+      const signature = await program.methods.activateCamera(new BN(100))
         .accounts({
           cameraAccount: cameraPublicKey,
           user: new PublicKey(primaryWallet.address),
           systemProgram: SystemProgram.programId,
         })
         .rpc();
-
-      // Add a small delay to show confirmation
-      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      if (!signature) {
+        throw new Error('Failed to get transaction signature');
+      }
+      
       setStatus('Transaction confirmed');
       
-      // Add another small delay before closing
-      await new Promise(resolve => setTimeout(resolve, 500));
-      onSuccess?.();
+      // Pass back the transaction signature
+      onSuccess?.({ transactionId: signature });
       onClose();
     } catch (err) {
       console.error('Transaction error:', err);
@@ -73,106 +97,102 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
   if (!isOpen) return null;
 
+  const formatActionType = (type: string) => {
+    return type.split('_').map(word => 
+      word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    ).join(' ');
+  };
+
   return (
-    <div className="fixed inset-0 z-[9999] overflow-y-auto bg-black bg-opacity-50 backdrop-blur-sm">
-      <div className="flex min-h-screen items-center justify-center px-4">
-        <div className="relative bg-white rounded-xl shadow-2xl max-w-md w-full p-6 transform transition-all duration-200 ease-out scale-100 animate-in fade-in slide-in-from-bottom-4">
-          <div className="flex justify-between items-center mb-6">
-            <div>
-              <h2 className="text-xl font-semibold">
-                Confirm {transactionData?.type || ''} Action
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Review and approve the transaction
-              </p>
-            </div>
+    <Dialog
+      open={isOpen}
+      onClose={onClose}
+      className="relative z-[100]"
+    >
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
+
+      {/* Full-screen container */}
+      <div className="fixed inset-0 flex items-end sm:items-center justify-center p-2 sm:p-0">
+        <Dialog.Panel className="mx-auto w-full sm:w-[360px] rounded-xl bg-white shadow-xl">
+          {/* Header with close button */}
+          <div className="flex items-center justify-between p-3 border-b border-gray-100">
+            <Dialog.Title className="text-base font-medium">
+              Confirm {transactionData?.type || ''} Action
+            </Dialog.Title>
             {!loading && (
-              <button 
+              <button
                 onClick={onClose}
-                className="text-gray-400 hover:text-gray-500 transition-colors"
+                className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
               >
-                <span className="sr-only">Close</span>
-                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <X className="w-4 h-4 text-gray-500" />
               </button>
             )}
           </div>
 
-          <div className="space-y-6">
+          {/* Transaction Content */}
+          <div className="p-3 space-y-4">
             {/* Transaction Details */}
-            <div className="bg-gray-50 rounded-lg p-4 space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-500">Action</span>
-                <span className="font-medium capitalize">{transactionData?.type || 'Unknown'}</span>
-              </div>
-
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-500">Network</span>
-                <span className="font-medium">Solana Devnet</span>
-              </div>
-
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-500">Account</span>
-                <span className="font-medium font-mono text-xs">
-                  {primaryWallet?.address ? `${primaryWallet.address.slice(0, 4)}...${primaryWallet.address.slice(-4)}` : 'Not connected'}
-                </span>
-              </div>
-            </div>
-
-            {/* Fee Adjustment */}
             <div className="space-y-2">
-              <label htmlFor="fee" className="block text-sm font-medium text-gray-700">
-                Transaction Fee (lamports)
-              </label>
-              <input
-                type="number"
-                id="fee"
-                value={fee}
-                onChange={(e) => setFee(Number(e.target.value))}
-                min="0"
-                step="1"
-                disabled={loading}
-                className="block w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-              />
+              <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
+                <div>
+                  <div className="text-xs font-medium text-gray-500">Action</div>
+                  <div className="text-sm text-gray-900">
+                    {formatActionType(transactionData?.type || '')}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
+                <div>
+                  <div className="text-xs font-medium text-gray-500">Network</div>
+                  <div className="text-sm text-gray-900">Solana Devnet</div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
+                <div>
+                  <div className="text-xs font-medium text-gray-500">Fee</div>
+                  <div className="text-sm text-gray-900">{fee} lamports</div>
+                </div>
+              </div>
             </div>
 
+            {/* Status Messages */}
             {status && (
-              <div className="bg-blue-50 text-blue-700 p-3 rounded-lg text-sm flex items-center">
-                <svg className="animate-spin -ml-1 mr-3 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
+              <div className="bg-blue-50 text-blue-700 px-2 py-1.5 rounded-lg text-xs flex items-center">
+                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current mr-2" />
                 {status}
               </div>
             )}
 
             {error && (
-              <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">
+              <div className="bg-red-50 text-red-700 px-2 py-1.5 rounded-lg text-xs">
                 {error}
               </div>
             )}
 
-            <div className="flex gap-3 pt-2">
+            {/* Action Buttons */}
+            <div className="flex gap-2 pt-2">
               <button
                 onClick={handleConfirmTransaction}
                 disabled={loading}
-                className="flex-1 bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                className="flex-1 bg-blue-600 text-white py-2 px-3 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loading ? 'Processing...' : 'Confirm Transaction'}
+                {loading ? 'Processing...' : 'Confirm'}
               </button>
               {!loading && (
                 <button
                   onClick={onClose}
-                  className="flex-1 bg-gray-100 text-gray-700 py-3 px-4 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+                  className="flex-1 bg-gray-100 text-gray-700 py-2 px-3 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors"
                 >
                   Cancel
                 </button>
               )}
             </div>
           </div>
-        </div>
+        </Dialog.Panel>
       </div>
-    </div>
+    </Dialog>
   );
 }; 

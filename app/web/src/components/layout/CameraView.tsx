@@ -17,8 +17,26 @@ import { BN } from '@coral-xyz/anchor';
 import { useProgram } from '../../anchor/setup';
 import { pinataService } from '../../services/pinata-service';
 
+type TimelineEventType =
+  | 'photo_captured'
+  | 'video_recorded'
+  | 'stream_started'
+  | 'stream_ended';
+
+interface TimelineEvent {
+  type: TimelineEventType;
+  user: {
+    address: string;
+    username?: string;
+    displayName?: string;
+    pfpUrl?: string;
+  };
+  timestamp: number;
+  transactionId?: string;
+}
+
 export function CameraView() {
-  const { primaryWallet } = useDynamicContext();
+  const { primaryWallet, user } = useDynamicContext();
   useEmbeddedWallet();
   const { cameraKeypair, isInitialized } = useCamera();
   const program = useProgram();
@@ -270,9 +288,6 @@ export function CameraView() {
     setIsModalOpen(true);
   };
 
-
-
-
   const handleCameraUpdate = ({ address }: { address: string; isLive: boolean }) => {
     setCameraAccount(address);
     localStorage.setItem('cameraAccount', address);
@@ -287,30 +302,19 @@ export function CameraView() {
     setCurrentToast(null);
   };
 
-  const handleTransactionSuccess = async () => {
-    if (!currentAction) return;
-    console.log('Transaction succeeded, handling action:', currentAction.type);
+  const handleTransactionSuccess = async ({ transactionId }: { transactionId: string }) => {
+    if (!currentAction || !timelineRef.current) return;
 
     try {
       setLoading(true);
-      // For embedded wallets, we've already signed the transaction in the modal
-      // Just execute the camera action directly
+
+      // Handle the camera action based on type
       if (currentAction.type === 'photo') {
         await activateCameraRef.current?.handleTakePicture();
-        timelineRef.current?.addEvent({
-          type: 'photo_captured',
-          timestamp: Date.now(),
-          user: { address: primaryWallet?.address?.toString() || 'unknown' }
-        });
       } else if (currentAction.type === 'video') {
         await videoRecorderRef.current?.startRecording();
-        timelineRef.current?.addEvent({
-          type: 'video_recorded',
-          timestamp: Date.now(),
-          user: { address: primaryWallet?.address?.toString() || 'unknown' }
-        });
       } else if (currentAction.type === 'stream') {
-        // For stream, we need to call the API directly without another transaction
+        // For stream, we need to call the API directly
         const endpoint = isStreaming ? '/api/stream/stop' : '/api/stream/start';
         const response = await fetch(`${CONFIG.CAMERA_API_URL}${endpoint}`, {
           method: 'POST',
@@ -325,12 +329,26 @@ export function CameraView() {
         }
 
         setIsStreaming(!isStreaming);
-        timelineRef.current?.addEvent({
-          type: isStreaming ? 'stream_ended' : 'stream_started',
-          timestamp: Date.now(),
-          user: { address: primaryWallet?.address?.toString() || 'unknown' }
-        });
       }
+
+      // Create the timeline event with transaction ID
+      const event: TimelineEvent = {
+        type: getEventType(currentAction.type),
+        user: {
+          address: primaryWallet?.address || '',
+          username: user?.verifiedCredentials?.[0]?.oauthUsername || undefined,
+          displayName: user?.verifiedCredentials?.[0]?.oauthDisplayName || undefined,
+          pfpUrl: user?.verifiedCredentials?.[0]?.oauthAccountPhotos?.[0] || undefined
+        },
+        timestamp: Date.now(),
+        transactionId
+      };
+
+      // Add the event to the timeline
+      timelineRef.current.addEvent(event);
+
+      // Show success message
+      updateToast('success', 'Action completed successfully');
     } catch (error) {
       console.error('API call failed:', error);
       updateToast('error', 'Failed to complete action after transaction');
@@ -341,6 +359,19 @@ export function CameraView() {
     }
   };
 
+  // Helper function to convert action type to event type
+  const getEventType = (actionType: string): TimelineEventType => {
+    switch (actionType) {
+      case 'photo':
+        return 'photo_captured';
+      case 'video':
+        return 'video_recorded';
+      case 'stream':
+        return isStreaming ? 'stream_ended' : 'stream_started';
+      default:
+        return 'photo_captured';
+    }
+  };
 
   return (
     <>

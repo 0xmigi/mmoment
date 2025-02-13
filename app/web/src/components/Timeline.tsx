@@ -3,6 +3,7 @@ import { Camera, Video, Power, User, Radio, Signal } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { CONFIG, timelineConfig } from '../config';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
+import { ProfileModal } from './ProfileModal';
 
 export type TimelineEventType =
   | 'initialization'
@@ -24,6 +25,7 @@ interface TimelineEvent {
   type: TimelineEventType;
   user: TimelineUser;
   timestamp: number;
+  transactionId?: string;
 }
 
 interface TimelineProps {
@@ -55,6 +57,8 @@ const getEventText = (type: TimelineEventType): string => {
 
 export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full' }, ref) => {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
+  const [selectedUser, setSelectedUser] = useState<TimelineUser | null>(null);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
   const { user } = useDynamicContext();
 
@@ -226,6 +230,11 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     }
   };
 
+  const handleProfileClick = (event: TimelineEvent) => {
+    setSelectedUser(event.user);
+    setIsProfileModalOpen(true);
+  };
+
   return (
     <div className="w-full relative" ref={timelineRef}>
       {/* Container with fixed height based on display count + 1 */}
@@ -250,7 +259,10 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                     <div className="w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-white border border-gray-200 -ml-[4px] sm:-ml-[4px] mr-2 flex items-center justify-center">
                       {getEventIcon(event.type)}
                     </div>
-                    <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden">
+                    <div 
+                      onClick={() => handleProfileClick(event)}
+                      className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
+                    >
                       {event.user.pfpUrl ? (
                         <img 
                           src={event.user.pfpUrl} 
@@ -268,7 +280,10 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                     variant === 'camera' && index > 1 ? 'opacity-0' : ''
                   }`}>
                     <p className="text-xs sm:text-sm text-gray-800">
-                      <span className="font-medium">
+                      <span 
+                        onClick={() => handleProfileClick(event)}
+                        className="font-medium cursor-pointer hover:text-blue-600 transition-colors"
+                      >
                         {event.user.displayName || event.user.username || 
                          `${event.user.address.slice(0, 6)}...${event.user.address.slice(-4)}`}
                       </span>
@@ -339,6 +354,26 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
             </div>
           </div>
         </div>
+      )}
+
+      {/* Profile Modal */}
+      {selectedUser && (
+        <ProfileModal
+          isOpen={isProfileModalOpen}
+          onClose={() => {
+            setIsProfileModalOpen(false);
+            setSelectedUser(null);
+          }}
+          user={{
+            ...selectedUser,
+            farcasterUsername: selectedUser.username
+          }}
+          action={{
+            type: events.find(e => e.user.address === selectedUser.address)?.type || 'photo_captured',
+            timestamp: events.find(e => e.user.address === selectedUser.address)?.timestamp || Date.now(),
+            transactionId: events.find(e => e.user.address === selectedUser.address)?.transactionId
+          }}
+        />
       )}
     </div>
   );
