@@ -14,36 +14,17 @@ logger = logging.getLogger(__name__)
 
 def create_app():
     app = Flask(__name__)
-    # Configure CORS to allow specific origins
+    # Simple CORS configuration
     CORS(app, resources={
         r"/*": {
-            "origins": [
-                "https://mmoment.xyz",
-                "https://www.mmoment.xyz",
-                "http://localhost:5173"
-            ],
+            "origins": "*",
             "methods": ["GET", "POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept", "Origin"],
-            "expose_headers": ["Content-Type"],
-            "supports_credentials": False,
-            "max_age": 600
+            "allow_headers": "*"
         }
     })
 
     camera_service = CameraService()
     stream_service = LivepeerStreamService()
-
-    @app.before_request
-    def before_request():
-        # Force HTTPS in production
-        if not request.is_secure and not app.debug:
-            url = request.url.replace('http://', 'https://', 1)
-            return redirect(url, code=301)
-
-        # Log Cloudflare headers for debugging
-        cf_headers = {k: v for k, v in request.headers.items() if k.startswith('CF-')}
-        if cf_headers:
-            logger.debug(f"Cloudflare headers: {cf_headers}")
 
     @app.after_request
     def after_request(response):

@@ -142,13 +142,18 @@ export function CameraView() {
       return;
     }
 
+    // Dispatch camera operation start
+    window.dispatchEvent(new CustomEvent('cameraOperation', { 
+      detail: { inProgress: true } 
+    }));
+
     // For EOA wallets (like Phantom), handle the transaction flow directly
     const isEmbedded = primaryWallet.connector?.name.toLowerCase() !== 'phantom';
     if (!isEmbedded) {
       try {
         setLoading(true);
         // First sign the transaction
-        await program.methods.activateCamera(new BN(100))
+        const txId = await program.methods.activateCamera(new BN(100))
           .accounts({
             cameraAccount: cameraKeypair.publicKey,
             user: new PublicKey(primaryWallet.address),
@@ -183,7 +188,13 @@ export function CameraView() {
           timelineRef.current?.addEvent({
             type: 'photo_captured',
             timestamp: Date.now(),
-            user: { address: primaryWallet.address }
+            user: { 
+              address: primaryWallet.address,
+              username: user?.verifiedCredentials?.[0]?.oauthUsername,
+              displayName: user?.verifiedCredentials?.[0]?.oauthDisplayName,
+              pfpUrl: user?.verifiedCredentials?.[0]?.oauthAccountPhotos?.[0]
+            },
+            transactionId: txId
           });
           updateToast('success', 'Photo captured and uploaded successfully');
         } else if (type === 'video') {
@@ -245,7 +256,13 @@ export function CameraView() {
           timelineRef.current?.addEvent({
             type: 'video_recorded',
             timestamp: Date.now(),
-            user: { address: primaryWallet.address }
+            user: { 
+              address: primaryWallet.address,
+              username: user?.verifiedCredentials?.[0]?.oauthUsername,
+              displayName: user?.verifiedCredentials?.[0]?.oauthDisplayName,
+              pfpUrl: user?.verifiedCredentials?.[0]?.oauthAccountPhotos?.[0]
+            },
+            transactionId: txId
           });
           updateToast('success', 'Video recorded and uploaded successfully');
         } else if (type === 'stream') {
@@ -267,7 +284,13 @@ export function CameraView() {
           timelineRef.current?.addEvent({
             type: isStreaming ? 'stream_ended' : 'stream_started',
             timestamp: Date.now(),
-            user: { address: primaryWallet.address }
+            user: { 
+              address: primaryWallet.address,
+              username: user?.verifiedCredentials?.[0]?.oauthUsername,
+              displayName: user?.verifiedCredentials?.[0]?.oauthDisplayName,
+              pfpUrl: user?.verifiedCredentials?.[0]?.oauthAccountPhotos?.[0]
+            },
+            transactionId: txId
           });
           updateToast('success', `Stream ${isStreaming ? 'stopped' : 'started'} successfully`);
         }
@@ -276,6 +299,10 @@ export function CameraView() {
         updateToast('error', error instanceof Error ? error.message : 'Action failed');
       } finally {
         setLoading(false);
+        // Dispatch camera operation end
+        window.dispatchEvent(new CustomEvent('cameraOperation', { 
+          detail: { inProgress: false } 
+        }));
       }
       return;
     }

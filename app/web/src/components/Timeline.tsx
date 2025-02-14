@@ -1,4 +1,4 @@
-import { useEffect, useState, forwardRef, useImperativeHandle, useRef } from 'react';
+import { useEffect, useState, forwardRef, useImperativeHandle, useRef, useCallback } from 'react';
 import { Camera, Video, Power, User, Radio, Signal } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { CONFIG, timelineConfig } from '../config';
@@ -34,8 +34,22 @@ interface TimelineProps {
   variant?: 'camera' | 'full';
 }
 
+// Debounce function to limit update frequency
+const debounce = (fn: Function, ms = 300) => {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  return function (this: any, ...args: any[]) {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn.apply(this, args), ms);
+  };
+};
+
 // Connect to your backend
-const socket = io(CONFIG.BACKEND_URL, timelineConfig.wsOptions);
+const socket = io(CONFIG.BACKEND_URL, {
+  ...timelineConfig.wsOptions,
+  // Reduce WebSocket traffic
+  transports: ['websocket'],
+  upgrade: false
+});
 
 // Add this function before the Timeline component
 const getEventText = (type: TimelineEventType): string => {
@@ -60,7 +74,59 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   const [selectedUser, setSelectedUser] = useState<TimelineUser | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const updatePending = useRef(false);
   const { user } = useDynamicContext();
+  const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
+
+  // Batch updates using requestAnimationFrame
+  const batchUpdate = useCallback((newEvents: TimelineEvent[]) => {
+    if (!updatePending.current) {
+      updatePending.current = true;
+      requestAnimationFrame(() => {
+        setEvents(newEvents);
+        // Save to localStorage in the background
+        setTimeout(() => {
+          try {
+            localStorage.setItem('timelineEvents', JSON.stringify(newEvents));
+          } catch (e) {
+            console.warn('Failed to save timeline events:', e);
+          }
+          updatePending.current = false;
+        }, 0);
+      });
+    }
+  }, []);
+
+  // Debounced version of batchUpdate
+  const debouncedUpdate = useCallback(debounce(batchUpdate, 1000), [batchUpdate]);
+
+  useEffect(() => {
+    // Load stored events on mount
+    try {
+      const storedEvents = localStorage.getItem('timelineEvents');
+      if (storedEvents) {
+        const parsedEvents = JSON.parse(storedEvents);
+        batchUpdate(parsedEvents);
+      }
+    } catch (e) {
+      console.warn('Failed to load timeline events:', e);
+    }
+
+    // Socket event handlers
+    const handleNewEvent = (event: TimelineEvent) => {
+      setEvents(prev => {
+        const newEvents = [event, ...prev].slice(0, 100); // Limit to 100 events
+        debouncedUpdate(newEvents);
+        return newEvents;
+      });
+    };
+
+    socket.on('timelineEvent', handleNewEvent);
+
+    return () => {
+      socket.off('timelineEvent', handleNewEvent);
+    };
+  }, [batchUpdate, debouncedUpdate]);
 
   // Get the display count based on screen width
   const getDisplayCount = () => {
@@ -93,45 +159,12 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   }, [variant]);
 
   useEffect(() => {
-    // Load stored events on mount
-    const storedEvents = localStorage.getItem('timelineEvents');
-    if (storedEvents) {
-      const parsedEvents = JSON.parse(storedEvents);
-      // Sort stored events by timestamp, newest first
-      const sortedEvents = [...parsedEvents].sort((a, b) => b.timestamp - a.timestamp);
-      setEvents(sortedEvents);
-    }
-
     socket.on('connect', () => {
       console.log('Timeline socket connected');
     });
 
     socket.on('disconnect', () => {
       console.log('Timeline socket disconnected');
-    });
-
-    socket.on('timelineEvent', (event: TimelineEvent) => {
-      console.log('Received timeline event:', event);
-      // Enrich the event with Farcaster profile if available
-      const farcasterCred = user?.verifiedCredentials?.find(
-        cred => cred.oauthProvider === 'farcaster'
-      );
-      
-      if (farcasterCred && event.user.address === user?.verifiedCredentials?.[0]?.address) {
-        event.user = {
-          ...event.user,
-          displayName: farcasterCred.oauthDisplayName || undefined,
-          username: farcasterCred.oauthUsername,
-          pfpUrl: farcasterCred.oauthAccountPhotos?.[0] || undefined
-        };
-      }
-
-      setEvents(prev => {
-        const newEvents = [event, ...prev];
-        console.log('Updated timeline events:', newEvents);
-        localStorage.setItem('timelineEvents', JSON.stringify(newEvents));
-        return newEvents;
-      });
     });
 
     socket.on('recentEvents', (events: TimelineEvent[]) => {
@@ -166,7 +199,6 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
 
     return () => {
       socket.off('recentEvents');
-      socket.off('timelineEvent');
       socket.off('connect');
       socket.off('disconnect');
     };
@@ -233,6 +265,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   const handleProfileClick = (event: TimelineEvent) => {
     setSelectedUser(event.user);
     setIsProfileModalOpen(true);
+    setSelectedEvent(event);
   };
 
   return (
@@ -357,21 +390,22 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       )}
 
       {/* Profile Modal */}
-      {selectedUser && (
+      {selectedUser && selectedEvent && (
         <ProfileModal
           isOpen={isProfileModalOpen}
           onClose={() => {
             setIsProfileModalOpen(false);
             setSelectedUser(null);
+            setSelectedEvent(null);
           }}
           user={{
             ...selectedUser,
             farcasterUsername: selectedUser.username
           }}
           action={{
-            type: events.find(e => e.user.address === selectedUser.address)?.type || 'photo_captured',
-            timestamp: events.find(e => e.user.address === selectedUser.address)?.timestamp || Date.now(),
-            transactionId: events.find(e => e.user.address === selectedUser.address)?.transactionId
+            type: selectedEvent.type,
+            timestamp: selectedEvent.timestamp,
+            transactionId: selectedEvent.transactionId
           }}
         />
       )}
