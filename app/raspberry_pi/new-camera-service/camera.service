@@ -1,0 +1,15 @@
+[Unit]
+Description=Camera Service
+After=network.target cloudflared.service
+
+[Service]
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/learning/boulderframe/my_solana_project/app/raspberry_pi/new-camera-service
+Environment="PATH=/home/pi/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/pi/.local/bin/gunicorn --worker-class eventlet --workers 1 --bind 127.0.0.1:8000 wsgi:app --log-level debug
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target 

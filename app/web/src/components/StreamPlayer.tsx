@@ -11,6 +11,7 @@ export function StreamPlayer() {
   const [streamInfo, setStreamInfo] = useState<StreamInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isMobile] = useState(() => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
 
   const fetchStreamInfo = async () => {
     try {
@@ -61,8 +62,17 @@ export function StreamPlayer() {
       <Player 
         title="Camera Stream"
         playbackId={streamInfo.playbackId}
-        autoPlay
+        autoPlay={!isMobile}
         muted
+        controls={{
+          autohide: 3000,
+          hotkeys: true
+        }}
+        aspectRatio="16to9"
+        showPipButton
+        objectFit="contain"
+        priority
+        poster={isMobile ? `https://lvpr.tv/?playbackId=${streamInfo.playbackId}` : undefined}
       />
     </div>
   );

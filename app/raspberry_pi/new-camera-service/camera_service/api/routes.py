@@ -1,6 +1,6 @@
 # camera_service/api/routes.py
 import os
-from flask import Flask, jsonify, send_file, request
+from flask import Flask, jsonify, send_file, request, redirect
 from flask_cors import CORS
 import io
 import logging
@@ -23,15 +23,27 @@ def create_app():
                 "http://localhost:5173"
             ],
             "methods": ["GET", "POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "Origin"],
             "expose_headers": ["Content-Type"],
-            "supports_credentials": False,  # Changed to false since we're using Bearer token
+            "supports_credentials": False,
             "max_age": 600
         }
     })
 
     camera_service = CameraService()
     stream_service = LivepeerStreamService()
+
+    @app.before_request
+    def before_request():
+        # Force HTTPS in production
+        if not request.is_secure and not app.debug:
+            url = request.url.replace('http://', 'https://', 1)
+            return redirect(url, code=301)
+
+        # Log Cloudflare headers for debugging
+        cf_headers = {k: v for k, v in request.headers.items() if k.startswith('CF-')}
+        if cf_headers:
+            logger.debug(f"Cloudflare headers: {cf_headers}")
 
     @app.after_request
     def after_request(response):
