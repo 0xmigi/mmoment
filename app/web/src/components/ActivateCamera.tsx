@@ -103,15 +103,23 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
         const captureResponse = await fetch(apiUrl, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${primaryWallet.address}`
+            'Authorization': `Bearer ${primaryWallet.address}`,
+            // Remove Content-Type header to let browser set it automatically
+            // This helps with mobile browser compatibility
           },
-          mode: 'cors',
-          credentials: 'omit'
+          // Remove mode and credentials as they can cause issues in some mobile browsers
+          cache: 'no-cache',
+          referrerPolicy: 'no-referrer'
         });
 
         if (!captureResponse.ok) {
-          throw new Error(`Server responded with status: ${captureResponse.status}`);
+          const errorText = await captureResponse.text();
+          console.error('Camera response error:', {
+            status: captureResponse.status,
+            statusText: captureResponse.statusText,
+            body: errorText
+          });
+          throw new Error(`Camera error: ${captureResponse.status} ${captureResponse.statusText}`);
         }
 
         onStatusUpdate?.({ type: 'info', message: 'Processing image...' });
@@ -124,6 +132,7 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
         onPhotoCapture?.();
 
       } catch (error) {
+        console.error('Camera operation error:', error);
         onStatusUpdate?.({ type: 'error', message: `Error: ${error instanceof Error ? error.message : String(error)}` });
       } finally {
         setLoading(false);

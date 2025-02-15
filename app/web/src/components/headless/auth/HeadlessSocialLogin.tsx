@@ -23,10 +23,12 @@ export function HeadlessSocialLogin({ onSuccess }: HeadlessSocialLoginProps) {
       <button
         onClick={handleFarcasterLogin}
         disabled={isProcessing}
-        className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-[#855DCD] text-white rounded-lg hover:bg-[#6f4eb3] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full flex items-center p-3 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        <FarcasterIcon className="w-5 h-5" />
-        <span>{isProcessing ? 'Connecting...' : 'Continue with Farcaster'}</span>
+        <div className="w-6 h-6 mr-3">
+          <FarcasterIcon className="w-full h-full" />
+        </div>
+        <span className="flex-1 text-left text-sm font-medium">Farcaster</span>
       </button>
       
       {error && (
