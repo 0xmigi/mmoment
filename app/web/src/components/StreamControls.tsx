@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Play, StopCircle, Loader } from 'lucide-react';
-import { CONFIG } from '../config';
 import { useCamera } from './CameraProvider';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
+import { cameraStatus } from '../services/camera-status';
 
 interface StreamControlsProps {
     timelineRef?: React.MutableRefObject<any>;
@@ -15,26 +15,15 @@ export const StreamControls = ({ onStreamToggle }: StreamControlsProps) => {
     const { isInitialized, loading: initLoading } = useCamera();
     useDynamicContext();
 
-    // Check stream status on mount
     useEffect(() => {
-        checkStreamStatus();
-        // Poll every 10 seconds
-        const interval = setInterval(checkStreamStatus, 10000);
-        return () => clearInterval(interval);
-    }, []);
+        const unsubscribe = cameraStatus.subscribe(({ isStreaming: streaming }) => {
+            setIsStreaming(streaming);
+        });
 
-    const checkStreamStatus = async () => {
-        try {
-            const response = await fetch(`${CONFIG.CAMERA_API_URL}/api/stream/info`);
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const data = await response.json();
-            setIsStreaming(data.isActive);
-        } catch (error) {
-            console.error('Failed to check stream status:', error);
-        }
-    };
+        return () => {
+            unsubscribe();
+        };
+    }, []);
 
     return (
         <div className="group h-1/2 relative">

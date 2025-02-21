@@ -1,5 +1,5 @@
 import { useDynamicContext, useEmbeddedWallet } from '@dynamic-labs/sdk-react-core';
-import { useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { Timeline } from '../Timeline';
 import { ActivateCamera } from '../ActivateCamera';
 import { VideoRecorder } from '../VideoRecorder';
@@ -16,6 +16,7 @@ import { PublicKey, SystemProgram } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { useProgram } from '../../anchor/setup';
 import { unifiedIpfsService } from '../../services/unified-ipfs-service';
+import { cameraStatus } from '../../services/camera-status';
 
 type TimelineEventType =
   | 'photo_captured'
@@ -73,85 +74,16 @@ export function CameraView() {
 
   // Check if the user is using an embedded wallet
 
-  const checkCameraStatus = useCallback(async () => {
-    if (!cameraAccount) {
-      setIsLive(false);
-      setIsStreaming(false);
-      return;
-    }
-
-    let retryCount = 0;
-    const MAX_RETRIES = 2;
-    const RETRY_DELAY = 3000; // 3 seconds
-
-    const checkWithRetry = async () => {
-      try {
-        const healthResponse = await fetch(`${CONFIG.CAMERA_API_URL}/api/health`);
-        if (!healthResponse.ok) throw new Error('Health check failed');
-
-        const streamResponse = await fetch(`${CONFIG.CAMERA_API_URL}/api/stream/info`);
-        if (!streamResponse.ok) throw new Error('Stream info check failed');
-
-        const data = await streamResponse.json();
-        setIsLive(true);
-        setIsStreaming(data.isActive);
-      } catch (error) {
-        console.error('Failed to check camera status:', error);
-        if (retryCount < MAX_RETRIES) {
-          retryCount++;
-          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
-          return checkWithRetry();
-        }
-        // If all retries failed, set camera as offline
-        setIsLive(false);
-        setIsStreaming(false);
-      }
-    };
-
-    await checkWithRetry();
-  }, [cameraAccount]);
-
-  useEffect(() => {
-    const storedCamera = localStorage.getItem('cameraAccount');
-    if (storedCamera) {
-      setCameraAccount(storedCamera);
-    }
-  }, []);
-
-  useEffect(() => {
-    // Initial check
-    checkCameraStatus();
-
-    // Set up polling with a longer interval (5 seconds)
-    const interval = setInterval(checkCameraStatus, 5000);
-
-    return () => clearInterval(interval);
-  }, [checkCameraStatus]);
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobileView(window.innerWidth <= 768);
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
   const handleAction = async (type: 'photo' | 'video' | 'stream') => {
     if (!cameraKeypair || !primaryWallet?.address || !program || !isInitialized) {
       return;
     }
 
-    // Dispatch camera operation start
-    window.dispatchEvent(new CustomEvent('cameraOperation', { 
-      detail: { inProgress: true } 
-    }));
-
-    // For EOA wallets (like Phantom), handle the transaction flow directly
     const isEmbedded = primaryWallet.connector?.name.toLowerCase() !== 'phantom';
     if (!isEmbedded) {
       try {
         setLoading(true);
+
         // First sign the transaction
         const txId = await program.methods.activateCamera(new BN(100))
           .accounts({
@@ -161,15 +93,15 @@ export function CameraView() {
           })
           .rpc();
 
-        // Then execute the camera action without another transaction
+        // Then execute the camera action
         if (type === 'photo') {
-          // Call the camera API directly
           updateToast('info', 'Taking picture...');
           const response = await fetch(`${CONFIG.CAMERA_API_URL}/api/capture`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${primaryWallet.address}`
+              'Authorization': `Bearer ${primaryWallet.address}`,
+              'Cache-Control': 'no-cache'
             }
           });
 
@@ -177,11 +109,9 @@ export function CameraView() {
             throw new Error('Failed to capture photo');
           }
 
-          // Download the image
           updateToast('info', 'Processing image...');
           const imageBlob = await response.blob();
 
-          // Upload to IPFS
           updateToast('info', 'Uploading to IPFS...');
           const results = await unifiedIpfsService.uploadFile(imageBlob, primaryWallet.address, 'image');
           
@@ -202,14 +132,14 @@ export function CameraView() {
           });
           updateToast('success', 'Photo captured and uploaded successfully');
         } else if (type === 'video') {
-          // Call the video API directly
           updateToast('info', 'Starting recording...');
           const duration = 30; // Match the original duration
           const response = await fetch(`${CONFIG.CAMERA_API_URL}/api/video/start`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${primaryWallet.address}`
+              'Authorization': `Bearer ${primaryWallet.address}`,
+              'Cache-Control': 'no-cache'
             },
             body: JSON.stringify({ duration })
           });
@@ -243,6 +173,7 @@ export function CameraView() {
           const downloadResponse = await fetch(`${CONFIG.CAMERA_API_URL}/api/video/download/${mp4filename}`, {
             headers: {
               'Accept': 'video/mp4',
+              'Cache-Control': 'no-cache'
             },
           });
 
@@ -273,13 +204,13 @@ export function CameraView() {
           });
           updateToast('success', 'Video recorded and uploaded successfully');
         } else if (type === 'stream') {
-          // For stream, use the existing handleStream function but skip its transaction
           const endpoint = isStreaming ? '/api/stream/stop' : '/api/stream/start';
           const response = await fetch(`${CONFIG.CAMERA_API_URL}${endpoint}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${primaryWallet.address}`
+              'Authorization': `Bearer ${primaryWallet.address}`,
+              'Cache-Control': 'no-cache'
             }
           });
 
@@ -287,7 +218,6 @@ export function CameraView() {
             throw new Error(`Failed to ${isStreaming ? 'stop' : 'start'} stream`);
           }
 
-          setIsStreaming(!isStreaming);
           timelineRef.current?.addEvent({
             type: isStreaming ? 'stream_ended' : 'stream_started',
             timestamp: Date.now(),
@@ -299,17 +229,12 @@ export function CameraView() {
             },
             transactionId: txId
           });
-          updateToast('success', `Stream ${isStreaming ? 'stopped' : 'started'} successfully`);
         }
       } catch (error) {
         console.error('Action failed:', error);
         updateToast('error', error instanceof Error ? error.message : 'Action failed');
       } finally {
         setLoading(false);
-        // Dispatch camera operation end
-        window.dispatchEvent(new CustomEvent('cameraOperation', { 
-          detail: { inProgress: false } 
-        }));
       }
       return;
     }
@@ -406,6 +331,26 @@ export function CameraView() {
         return 'photo_captured';
     }
   };
+
+  useEffect(() => {
+    const unsubscribe = cameraStatus.subscribe(({ isLive: live, isStreaming: streaming }) => {
+      setIsLive(live);
+      setIsStreaming(streaming);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileView(window.innerWidth <= 768);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   return (
     <>

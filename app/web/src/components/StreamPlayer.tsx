@@ -1,5 +1,5 @@
 import { Player } from "@livepeer/react";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { CONFIG } from "../config";
 
 interface StreamInfo {
@@ -7,12 +7,11 @@ interface StreamInfo {
   isActive: boolean;
 }
 
-export function StreamPlayer() {
+const StreamPlayer = memo(() => {
   const [streamInfo, setStreamInfo] = useState<StreamInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isMobile] = useState(() => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
-  const [] = useState(() => /iPhone|iPad|iPod/i.test(navigator.userAgent));
   const pollInterval = useRef<NodeJS.Timeout>();
   const lastFetchTime = useRef(0);
   const isCameraOperation = useRef(false);
@@ -27,13 +26,18 @@ export function StreamPlayer() {
     lastFetchTime.current = now;
 
     try {
-      const response = await fetch(`${CONFIG.CAMERA_API_URL}/api/stream/info`);
+      const response = await fetch(`${CONFIG.CAMERA_API_URL}/api/stream/info`, {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
+      
       if (!response.ok) {
         throw new Error('Failed to fetch stream info');
       }
-      const data = await response.json();
       
-      // Only update if data has changed and we're not in a camera operation
+      const data = await response.json();
       setStreamInfo(prev => {
         if (prev?.playbackId === data.playbackId && prev?.isActive === data.isActive) {
           return prev;
@@ -70,9 +74,7 @@ export function StreamPlayer() {
 
   useEffect(() => {
     fetchStreamInfo();
-    
-    // Use a longer polling interval
-    pollInterval.current = setInterval(fetchStreamInfo, 10000);
+    pollInterval.current = setInterval(fetchStreamInfo, 5000);
     
     return () => {
       if (pollInterval.current) {
@@ -83,16 +85,16 @@ export function StreamPlayer() {
 
   if (isLoading) {
     return (
-      <div className="aspect-video border-2 border-gray-200 rounded-lg flex items-center justify-center">
-        <p className="text-gray-500">Loading stream...</p>
+      <div className="aspect-video bg-gray-900 rounded-lg flex items-center justify-center">
+        <p className="text-gray-400">Loading stream...</p>
       </div>
     );
   }
 
-  if (error || !streamInfo?.playbackId) {
+  if (error || !streamInfo?.playbackId || !streamInfo.isActive) {
     return (
-      <div className="aspect-video border-2 border-gray-200 rounded-lg flex items-center justify-center">
-        <p className="text-gray-500">Stream not available</p>
+      <div className="aspect-video bg-gray-900 rounded-lg flex items-center justify-center">
+        <p className="text-gray-400">Stream is offline</p>
       </div>
     );
   }
@@ -102,21 +104,24 @@ export function StreamPlayer() {
       <Player 
         title="Camera Stream"
         playbackId={streamInfo.playbackId}
-        autoPlay={true}
+        autoPlay
         muted
         controls={{
           autohide: 3000,
           hotkeys: false,
-          defaultVolume: 0.6
+          defaultVolume: 0
         }}
         aspectRatio="16to9"
         showPipButton={!isMobile}
         objectFit="contain"
         priority
-        poster={`https://lvpr.tv/?playbackId=${streamInfo.playbackId}`}
         showLoadingSpinner={true}
         lowLatency
       />
     </div>
   );
-}
+});
+
+StreamPlayer.displayName = 'StreamPlayer';
+
+export { StreamPlayer };

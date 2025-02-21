@@ -1,6 +1,6 @@
 import { useEffect, useState, forwardRef, useImperativeHandle, useRef, useCallback } from 'react';
 import { Camera, Video, Power, User, Radio, Signal } from 'lucide-react';
-import { io } from 'socket.io-client';
+import { io, Socket } from 'socket.io-client';
 import { CONFIG, timelineConfig } from '../config';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { ProfileModal } from './ProfileModal';
@@ -43,14 +43,6 @@ const debounce = (fn: Function, ms = 300) => {
   };
 };
 
-// Connect to your backend
-const socket = io(CONFIG.BACKEND_URL, {
-  ...timelineConfig.wsOptions,
-  // Reduce WebSocket traffic
-  transports: ['websocket'],
-  upgrade: false
-});
-
 // Add this function before the Timeline component
 const getEventText = (type: TimelineEventType): string => {
   switch (type) {
@@ -69,6 +61,66 @@ const getEventText = (type: TimelineEventType): string => {
   }
 };
 
+let socket: Socket | null = null;
+let connectionAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 3;
+
+const initializeSocket = () => {
+  // Don't try to reconnect if we've exceeded attempts
+  if (connectionAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    console.log('Max WebSocket reconnection attempts reached, falling back to polling');
+    return null;
+  }
+
+  // If we already have a connected socket, return it
+  if (socket?.connected) {
+    return socket;
+  }
+
+  // Clean up existing socket if any
+  if (socket) {
+    socket.removeAllListeners();
+    socket.close();
+    socket = null;
+  }
+
+  try {
+    socket = io(CONFIG.WS_URL, {
+      ...timelineConfig.wsOptions,
+      timeout: 5000, // Shorter timeout for faster failure detection
+      reconnectionAttempts: 2, // Limit reconnection attempts
+      reconnectionDelay: 1000,
+      autoConnect: false // We'll handle connection manually
+    });
+
+    socket.on('connect', () => {
+      console.log('Timeline WebSocket connected');
+      connectionAttempts = 0; // Reset attempts on successful connection
+    });
+
+    socket.on('connect_error', (error) => {
+      console.warn('Timeline WebSocket connection error:', error);
+      connectionAttempts++;
+      if (connectionAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        console.log('Max reconnection attempts reached, falling back to polling');
+        socket?.close();
+        socket = null;
+      }
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.log('Timeline WebSocket disconnected:', reason);
+    });
+
+    // Attempt connection
+    socket.connect();
+    return socket;
+  } catch (error) {
+    console.warn('Failed to initialize WebSocket:', error);
+    return null;
+  }
+};
+
 export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full' }, ref) => {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [selectedUser, setSelectedUser] = useState<TimelineUser | null>(null);
@@ -77,6 +129,24 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   const updatePending = useRef(false);
   const { user } = useDynamicContext();
   const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout>();
+
+  // Function to fetch events via HTTP if WebSocket isn't available
+  const fetchEvents = useCallback(async () => {
+    try {
+      const response = await fetch(`${CONFIG.CAMERA_API_URL}/api/timeline/events`);
+      if (response.ok) {
+        const data = await response.json();
+        setEvents(prev => {
+          const newEvents = [...data, ...prev].slice(0, 100);
+          return newEvents;
+        });
+      }
+    } catch (error) {
+      console.warn('Failed to fetch events:', error);
+    }
+  }, []);
 
   // Batch updates using requestAnimationFrame
   const batchUpdate = useCallback((newEvents: TimelineEvent[]) => {
@@ -101,6 +171,16 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   const debouncedUpdate = useCallback(debounce(batchUpdate, 1000), [batchUpdate]);
 
   useEffect(() => {
+    // Try to initialize WebSocket
+    socketRef.current = initializeSocket();
+
+    // If WebSocket fails, fall back to polling
+    if (!socketRef.current) {
+      console.log('WebSocket unavailable, using polling fallback');
+      fetchEvents();
+      pollIntervalRef.current = setInterval(fetchEvents, 10000);
+    }
+
     // Load stored events on mount
     try {
       const storedEvents = localStorage.getItem('timelineEvents');
@@ -121,12 +201,19 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       });
     };
 
-    socket.on('timelineEvent', handleNewEvent);
-
+    socketRef.current?.on('timelineEvent', handleNewEvent);
     return () => {
-      socket.off('timelineEvent', handleNewEvent);
+      if (socketRef.current) {
+        socketRef.current.off('timelineEvent', handleNewEvent);
+        socketRef.current.removeAllListeners();
+        socketRef.current.close();
+        socketRef.current = null;
+      }
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
     };
-  }, [batchUpdate, debouncedUpdate]);
+  }, [batchUpdate, debouncedUpdate, fetchEvents]);
 
   // Get the display count based on screen width
   const getDisplayCount = () => {
@@ -159,15 +246,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   }, [variant]);
 
   useEffect(() => {
-    socket.on('connect', () => {
-      console.log('Timeline socket connected');
-    });
-
-    socket.on('disconnect', () => {
-      console.log('Timeline socket disconnected');
-    });
-
-    socket.on('recentEvents', (events: TimelineEvent[]) => {
+    socketRef.current?.on('recentEvents', (events: TimelineEvent[]) => {
       console.log('Received recent events:', events);
       // Enrich events with Farcaster profiles if available
       const enrichedEvents = events.map(event => {
@@ -196,12 +275,6 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       setEvents(sortedEvents);
       localStorage.setItem('timelineEvents', JSON.stringify(sortedEvents));
     });
-
-    return () => {
-      socket.off('recentEvents');
-      socket.off('connect');
-      socket.off('disconnect');
-    };
   }, [user?.verifiedCredentials]);
 
   useImperativeHandle(ref, () => ({
@@ -222,11 +295,11 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       }
 
       console.log('Emitting newTimelineEvent:', event);
-      socket.emit('newTimelineEvent', event);
+      socketRef.current?.emit('newTimelineEvent', event);
     },
     getState: () => ({
       events,
-      isConnected: socket.connected
+      isConnected: socketRef.current?.connected
     })
   }));
 
