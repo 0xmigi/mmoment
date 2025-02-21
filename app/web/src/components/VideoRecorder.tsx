@@ -2,12 +2,10 @@ import { useEffect, useState, forwardRef, useImperativeHandle, useRef } from 're
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { useProgram } from '../anchor/setup';
-import { SystemProgram, PublicKey } from '@solana/web3.js';
-import { BN } from '@coral-xyz/anchor';
 import { Video, Loader } from 'lucide-react';
-import { pinataService } from '../services/pinata-service';
 import { CONFIG } from '../config';
 import { useCamera } from './CameraProvider';
+import { unifiedIpfsService } from '../services/unified-ipfs-service';
 
 interface VideoRecorderProps {
   onVideoRecorded?: () => void;
@@ -27,7 +25,7 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
     const [, setTimeLeft] = useState<number | null>(null);
     
     // Use the shared camera context
-    const { cameraKeypair, isInitialized, loading: initLoading } = useCamera();
+    const { isInitialized, loading: initLoading } = useCamera();
 
     useImperativeHandle(ref, () => ({
       startRecording
@@ -36,74 +34,59 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
     const startRecording = async () => {
       if (!primaryWallet?.address || !program || !isInitialized) return;
       setLoading(true);
+      setTimeLeft(null);
 
       try {
-        // First activate camera on-chain
-        updateToast?.({ type: 'info', message: 'Activating camera...' });
-        await program.methods.activateCamera(new BN(100))
-          .accounts({
-            cameraAccount: cameraKeypair.publicKey,
-            user: new PublicKey(primaryWallet.address),
-            systemProgram: SystemProgram.programId,
-          })
-          .rpc();
-
-        // Start Recording
         updateToast?.({ type: 'info', message: 'Starting recording...' });
-        const duration = 30;
-        setTimeLeft(duration);
-
-        const response = await fetch(`${CAMERA_API_BASE}/api/video/start`, {
+        const duration = 30; // 30 seconds recording
+        const response = await fetch(`${CONFIG.CAMERA_API_URL}/api/video/start`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${primaryWallet.address}`
           },
-          body: JSON.stringify({ duration }),
-          mode: 'cors',
-          credentials: 'omit'
+          body: JSON.stringify({ duration })
         });
 
         if (!response.ok) {
-          throw new Error(`Failed to start recording: ${response.statusText}`);
+          throw new Error('Failed to start recording');
         }
 
         const { filename } = await response.json();
         console.log('Recording started with filename:', filename);
 
+        // Start countdown timer
+        let timeRemaining = duration;
+        const timer = setInterval(() => {
+          timeRemaining -= 1;
+          setTimeLeft(timeRemaining);
+          if (timeRemaining <= 0) {
+            clearInterval(timer);
+          }
+        }, 1000);
+        setRecordingTimer(timer);
+
         // Wait for recording to complete
         await new Promise<void>((resolve) => {
-          let timeRemaining = duration;
-          const timer = setInterval(() => {
-            timeRemaining -= 1;
-            setTimeLeft(timeRemaining);
-
-            if (timeRemaining <= 0) {
-              if (timer) clearInterval(timer);
-              setRecordingTimer(null);
-              resolve();
-            }
-          }, 1000);
-          setRecordingTimer(timer);
+          setTimeout(resolve, duration * 1000 + 2000); // Add 2 seconds buffer
         });
 
-        // Add a small delay after recording completes
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Download and upload
-        updateToast?.({ type: 'info', message: 'Downloading video...' });
+        updateToast?.({ type: 'info', message: 'Processing video...' });
         const videoBlob = await downloadVideo(filename);
 
         updateToast?.({ type: 'info', message: 'Uploading to IPFS...' });
-        const ipfsUrl = await pinataService.uploadVideo(videoBlob, primaryWallet.address);
-        console.log('Video uploaded to IPFS:', ipfsUrl);
+        const results = await unifiedIpfsService.uploadFile(videoBlob, primaryWallet.address, 'video');
+        
+        if (results.length === 0) {
+          throw new Error('Failed to upload video to any IPFS provider');
+        }
 
         onVideoRecorded?.();
         updateToast?.({ type: 'success', message: 'Video uploaded successfully!' });
 
       } catch (error) {
         console.error('Recording error:', error);
-        updateToast?.({ type: 'error', message: `${error instanceof Error ? error.message : String(error)}` });
+        updateToast?.({ type: 'error', message: error instanceof Error ? error.message : 'Failed to record video' });
       } finally {
         setLoading(false);
         setTimeLeft(null);

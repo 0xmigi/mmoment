@@ -4,16 +4,42 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { config } from 'dotenv';
+import * as path from 'path';
+import mediaRoutes from './routes/media.routes';
 
-config();
+// Load environment variables from .env file
+config({ path: path.resolve(__dirname, '../.env') });
+
+// Log environment variables (without secrets)
+console.log('Environment loaded:', {
+  PORT: process.env.PORT,
+  FILEBASE_BUCKET: process.env.FILEBASE_BUCKET,
+  FILEBASE_KEY_EXISTS: !!process.env.FILEBASE_KEY,
+  FILEBASE_SECRET_EXISTS: !!process.env.FILEBASE_SECRET
+});
 
 const app = express();
 const httpServer = createServer(app);
+
+// Add middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Update CORS configuration to be more permissive for development
+app.use(cors({
+  origin: '*', // Be more permissive with CORS during development
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 
 // Add basic health check endpoint
 app.get('/', (req, res) => {
   res.json({ status: 'healthy' });
 });
+
+// Mount media routes under /api prefix
+app.use('/api', mediaRoutes);
 
 const io = new Server(httpServer, {
   cors: {
@@ -25,14 +51,6 @@ const io = new Server(httpServer, {
   allowEIO3: true,  // Added for compatibility
   path: '/socket.io/' // Make sure path is explicit
 });
-
-// Update Express CORS configuration
-app.use(cors({
-  origin: true, // Allows all origins
-  credentials: true,
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
 
 // Timeline events storage (in-memory for now)
 interface TimelineEvent {

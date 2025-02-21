@@ -21,7 +21,9 @@ export const CONFIG = {
   baseUrl: forceHttps(window.location.origin),
   rpcEndpoint: "https://api.devnet.solana.com",
   CAMERA_API_URL: forceHttps("https://camera.mmoment.xyz"),
-  BACKEND_URL: forceHttps("https://mmoment-production.up.railway.app"),
+  BACKEND_URL: isProduction 
+    ? forceHttps("https://mmoment-production.up.railway.app")
+    : "http://localhost:3001",
   isProduction,
   isCloudflareProxy: isCloudflareProxy()
 };
@@ -31,7 +33,7 @@ export const timelineConfig = {
   wsOptions: {
     reconnectionDelay: 1000,
     reconnection: true,
-    secure: true,
+    secure: isProduction, // Only use secure in production
     path: '/socket.io/',
     rejectUnauthorized: !import.meta.env.DEV, // Allow self-signed certificates in development
     transports: ['websocket'], // Prefer WebSocket transport

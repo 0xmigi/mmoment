@@ -15,7 +15,7 @@ import { useCamera } from '../CameraProvider';
 import { PublicKey, SystemProgram } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { useProgram } from '../../anchor/setup';
-import { pinataService } from '../../services/pinata-service';
+import { unifiedIpfsService } from '../../services/unified-ipfs-service';
 
 type TimelineEventType =
   | 'photo_captured'
@@ -183,7 +183,11 @@ export function CameraView() {
 
           // Upload to IPFS
           updateToast('info', 'Uploading to IPFS...');
-          await pinataService.uploadImage(imageBlob, primaryWallet.address);
+          const results = await unifiedIpfsService.uploadFile(imageBlob, primaryWallet.address, 'image');
+          
+          if (results.length === 0) {
+            throw new Error('Failed to upload image to any IPFS provider');
+          }
 
           timelineRef.current?.addEvent({
             type: 'photo_captured',
@@ -234,7 +238,7 @@ export function CameraView() {
           await new Promise(resolve => setTimeout(resolve, 2000));
 
           // Download and upload
-          updateToast('info', 'Downloading video...');
+          updateToast('info', 'Processing video...');
           const mp4filename = filename.replace('.h264', '.mp4');
           const downloadResponse = await fetch(`${CONFIG.CAMERA_API_URL}/api/video/download/${mp4filename}`, {
             headers: {
@@ -250,8 +254,11 @@ export function CameraView() {
           console.log('Downloaded video size:', videoBlob.size);
 
           updateToast('info', 'Uploading to IPFS...');
-          const ipfsUrl = await pinataService.uploadVideo(videoBlob, primaryWallet.address);
-          console.log('Video uploaded to IPFS:', ipfsUrl);
+          const results = await unifiedIpfsService.uploadFile(videoBlob, primaryWallet.address, 'video');
+          
+          if (results.length === 0) {
+            throw new Error('Failed to upload video to any IPFS provider');
+          }
 
           timelineRef.current?.addEvent({
             type: 'video_recorded',
@@ -519,7 +526,7 @@ export function CameraView() {
             </div>
 
             <div className="relative md:ml-20 ml-16 bg-white">
-              <div className="relative px-6">
+              <div className="relative pl-4 pr-2 sm:px-4">
                 <MediaGallery mode="recent" maxRecentItems={6} />
               </div>
             </div>

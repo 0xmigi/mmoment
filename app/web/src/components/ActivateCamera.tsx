@@ -4,9 +4,9 @@ import { useConnection } from '@solana/wallet-adapter-react';
 import { useProgram } from '../anchor/setup';
 import { SystemProgram, Keypair, PublicKey } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
-import { pinataService } from '../services/pinata-service';
 import { Camera, Loader } from 'lucide-react';
 import { CONFIG } from '../config';
+import { unifiedIpfsService } from '../services/unified-ipfs-service';
 
 interface ActivateCameraProps {
   onCameraUpdate?: (params: { address: string; isLive: boolean }) => void;
@@ -104,10 +104,7 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${primaryWallet.address}`,
-            // Remove Content-Type header to let browser set it automatically
-            // This helps with mobile browser compatibility
           },
-          // Remove mode and credentials as they can cause issues in some mobile browsers
           cache: 'no-cache',
           referrerPolicy: 'no-referrer'
         });
@@ -126,14 +123,21 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
         const imageBlob = await captureResponse.blob();
 
         onStatusUpdate?.({ type: 'info', message: 'Uploading to IPFS...' });
-        await pinataService.uploadImage(imageBlob, primaryWallet.address);
+        const results = await unifiedIpfsService.uploadFile(imageBlob, primaryWallet.address, 'image');
+        
+        if (results.length === 0) {
+          throw new Error('Failed to upload image to any IPFS provider');
+        }
 
         onStatusUpdate?.({ type: 'success', message: 'Picture uploaded successfully!' });
         onPhotoCapture?.();
 
       } catch (error) {
-        console.error('Camera operation error:', error);
-        onStatusUpdate?.({ type: 'error', message: `Error: ${error instanceof Error ? error.message : String(error)}` });
+        console.error('Failed to take picture:', error);
+        onStatusUpdate?.({ 
+          type: 'error', 
+          message: error instanceof Error ? error.message : 'Failed to take picture' 
+        });
       } finally {
         setLoading(false);
       }

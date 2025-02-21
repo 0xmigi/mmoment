@@ -1,17 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { Trash2, Download, Image, Video } from 'lucide-react';
-import { pinataService } from '../services/pinata-service';
 import MediaViewer from './MediaViewer';
-
-interface MediaItem {
-  id: string;
-  url: string;
-  type: 'image' | 'video';
-  timestamp: string;
-  walletAddress: string;
-  backupUrls?: string[];
-}
+import { unifiedIpfsService } from '../services/unified-ipfs-service';
+import { IPFSMedia } from '../services/ipfs-service';
 
 interface MediaGalleryProps {
   mode?: 'recent' | 'archive';
@@ -20,20 +12,18 @@ interface MediaGalleryProps {
 
 export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: MediaGalleryProps) {
   const { primaryWallet } = useDynamicContext();
-  const [media, setMedia] = useState<MediaItem[]>([]);
+  const [media, setMedia] = useState<IPFSMedia[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
+  const [selectedMedia, setSelectedMedia] = useState<IPFSMedia | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
 
   // Add click handler for media items
-  const handleMediaClick = (media: MediaItem) => {
+  const handleMediaClick = (media: IPFSMedia) => {
     setSelectedMedia(media);
     setIsViewerOpen(true);
   };
-
-
 
   useEffect(() => {
     let isSubscribed = true;
@@ -53,8 +43,7 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
 
       try {
         setError(null);
-        const walletAddress = primaryWallet.address;
-        const allMedia = await pinataService.getMediaForWallet(walletAddress);
+        const allMedia = await unifiedIpfsService.getMediaForWallet(primaryWallet.address);
 
         if (!isSubscribed) return;
 
@@ -106,8 +95,6 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
     };
   }, [primaryWallet?.address, mode, maxRecentItems]);
 
-  // Add a manual refresh function
-
   const handleDelete = async (mediaId: string) => {
     if (!primaryWallet?.address) return;
 
@@ -115,7 +102,7 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
       setDeleting(mediaId);
       setError(null);
 
-      const success = await pinataService.deleteMedia(mediaId, primaryWallet.address);
+      const success = await unifiedIpfsService.deleteMedia(mediaId, primaryWallet.address);
 
       if (success) {
         setMedia(current => current.filter(m => m.id !== mediaId));
@@ -147,14 +134,12 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
     );
   }
 
-  // Rest of your component remains exactly the same from here
   const title = mode === 'recent'
     ? `Recent (${media.length})`
     : `Gallery (${media.length})`;
 
   return (
     <div className="max-w-3xl mx-auto">
-      {/* Rest of your JSX remains unchanged */}
       <h2 className="text-xl text-left font-bold text-gray-800 mb-6">{title}</h2>
 
       {error && (
@@ -171,28 +156,28 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
         </div>
       ) : (
         <div 
-          className="grid grid-cols-2 md:grid-cols-3 gap-4"
+          className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3"
           data-testid="media-gallery"
         >
           {media.map((item) => (
             <div
               key={item.id}
-              className="bg-white rounded-lg shadow-sm relative group cursor-pointer"
+              className="relative group cursor-pointer aspect-square"
               onClick={() => handleMediaClick(item)}
             >
-              <div className="relative h-48">
+              <div className="absolute inset-0 rounded-lg overflow-hidden">
                 {item.type === 'video' ? (
                   // biome-ignore lint/a11y/useMediaCaption: <explanation>
                   <video
                     src={item.url}
-                    className="absolute inset-0 w-full h-full object-cover rounded-t-lg"
+                    className="w-full h-full object-cover"
                     controls
                   />
                 ) : (
                   <img
                     src={item.url}
                     alt={`Captured moment`}
-                    className="absolute inset-0 w-full h-full object-cover rounded-t-lg"
+                    className="w-full h-full object-cover"
                     loading="lazy"
                     onError={(e) => {
                       const img = e.target as HTMLImageElement;
@@ -205,40 +190,39 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
                     }}
                   />
                 )}
-                <div className="absolute top-2 right-2 flex gap-2">
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+                <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
-                    onClick={() => handleDownload(item.url, `${item.id}.${item.type === 'video' ? 'mp4' : 'jpg'}`)}
-                    className="p-2 rounded-full bg-white/80 hover:bg-white
-                      opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDownload(item.url, `${item.id}.${item.type === 'video' ? 'mp4' : 'jpg'}`);
+                    }}
+                    className="p-1.5 rounded-full bg-white/80 hover:bg-white transition-colors"
                   >
-                    <Download className="w-5 h-5 text-blue-500" />
+                    <Download className="w-4 h-4 text-blue-500" />
                   </button>
                   <button
-                    onClick={() => handleDelete(item.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(item.id);
+                    }}
                     disabled={deleting === item.id}
-                    className="p-2 rounded-full bg-white/80 hover:bg-white
-                      opacity-0 group-hover:opacity-100 transition-opacity duration-200
-                      disabled:opacity-50"
+                    className="p-1.5 rounded-full bg-white/80 hover:bg-white transition-colors disabled:opacity-50"
                   >
                     <Trash2
-                      className={`w-5 h-5 text-red-500 ${deleting === item.id ? 'animate-spin' : ''}`}
+                      className={`w-4 h-4 text-red-500 ${deleting === item.id ? 'animate-spin' : ''}`}
                     />
                   </button>
                 </div>
                 <div className="absolute top-2 left-2">
                   {item.type === 'video' ? (
-                    <Video className="w-5 h-5 text-white drop-shadow" />
+                    <Video className="w-4 h-4 text-white drop-shadow" />
                   ) : (
-                    <Image className="w-5 h-5 text-white drop-shadow" />
+                    <Image className="w-4 h-4 text-white drop-shadow" />
                   )}
                 </div>
               </div>
-              <div className="p-2">
-                <p className="text-sm text-gray-600">{item.timestamp}</p>
-                <p className="text-xs text-gray-400 truncate">ID: {item.id}</p>
-              </div>
             </div>
-
           ))}
         </div>
       )}

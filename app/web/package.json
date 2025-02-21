@@ -10,12 +10,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.750.0",
     "@coral-xyz/anchor": "0.29",
     "@dynamic-labs/sdk-react-core": "^4.3.0",
     "@dynamic-labs/solana": "^4.3.0",
     "@livepeer/react": "3.0.1",
     "@pinata/sdk": "^2.1.0",
     "@privy-io/react-auth": "^1.95.2",
+    "@smithy/protocol-http": "^5.0.1",
     "@solana/wallet-adapter-base": "^0.9.23",
     "@solana/wallet-adapter-react": "^0.15.35",
     "@solana/wallet-adapter-react-ui": "^0.9.35",
