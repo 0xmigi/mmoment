@@ -37,16 +37,20 @@ const getApiUrl = async (): Promise<string> => {
 
 // Get WebSocket URL based on environment and protocol
 const getWebSocketUrl = () => {
-  // Check if we're on HTTPS
-  const isSecure = window.location.protocol === 'https:' || isProduction;
-  
-  if (isProduction || isSecure) {
-    // Use WSS for production or when on HTTPS
+  if (isProduction) {
+    // Always use WSS in production
     return "wss://camera.mmoment.xyz";
   }
 
-  // For local development on HTTP
-  return "ws://localhost:3001";
+  // For local development
+  const localUrl = "ws://localhost:3001";
+  
+  // If we're accessing the dev environment through HTTPS, use WSS
+  if (window.location.protocol === 'https:') {
+    return "wss://camera.mmoment.xyz";
+  }
+
+  return localUrl;
 };
 
 export const CONFIG = {

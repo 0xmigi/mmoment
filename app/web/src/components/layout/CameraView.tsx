@@ -34,6 +34,7 @@ interface TimelineEvent {
   };
   timestamp: number;
   transactionId?: string;
+  mediaUrl?: string;
 }
 
 export function CameraView() {
@@ -93,6 +94,19 @@ export function CameraView() {
           })
           .rpc();
 
+        // Get Farcaster credentials
+        const farcasterCred = user?.verifiedCredentials?.find(cred => 
+          cred.oauthProvider === 'farcaster'
+        );
+
+        // Create user object with Farcaster credentials if available
+        const userObject = {
+          address: primaryWallet.address,
+          username: farcasterCred?.oauthUsername,
+          displayName: farcasterCred?.oauthDisplayName || undefined,
+          pfpUrl: farcasterCred?.oauthAccountPhotos?.[0]
+        };
+
         // Then execute the camera action
         if (type === 'photo') {
           updateToast('info', 'Taking picture...');
@@ -119,16 +133,13 @@ export function CameraView() {
             throw new Error('Failed to upload image to any IPFS provider');
           }
 
+          // Create the timeline event with transaction ID and mediaUrl
           timelineRef.current?.addEvent({
             type: 'photo_captured',
             timestamp: Date.now(),
-            user: { 
-              address: primaryWallet.address,
-              username: user?.verifiedCredentials?.[0]?.oauthUsername,
-              displayName: user?.verifiedCredentials?.[0]?.oauthDisplayName,
-              pfpUrl: user?.verifiedCredentials?.[0]?.oauthAccountPhotos?.[0]
-            },
-            transactionId: txId
+            user: userObject,
+            transactionId: txId,
+            mediaUrl: results[0].url
           });
           updateToast('success', 'Photo captured and uploaded successfully');
         } else if (type === 'video') {
@@ -191,16 +202,13 @@ export function CameraView() {
             throw new Error('Failed to upload video to any IPFS provider');
           }
 
+          // Create the timeline event with transaction ID and mediaUrl
           timelineRef.current?.addEvent({
             type: 'video_recorded',
             timestamp: Date.now(),
-            user: { 
-              address: primaryWallet.address,
-              username: user?.verifiedCredentials?.[0]?.oauthUsername,
-              displayName: user?.verifiedCredentials?.[0]?.oauthDisplayName,
-              pfpUrl: user?.verifiedCredentials?.[0]?.oauthAccountPhotos?.[0]
-            },
-            transactionId: txId
+            user: userObject,
+            transactionId: txId,
+            mediaUrl: results[0].url
           });
           updateToast('success', 'Video recorded and uploaded successfully');
         } else if (type === 'stream') {
@@ -221,12 +229,7 @@ export function CameraView() {
           timelineRef.current?.addEvent({
             type: isStreaming ? 'stream_ended' : 'stream_started',
             timestamp: Date.now(),
-            user: { 
-              address: primaryWallet.address,
-              username: user?.verifiedCredentials?.[0]?.oauthUsername,
-              displayName: user?.verifiedCredentials?.[0]?.oauthDisplayName,
-              pfpUrl: user?.verifiedCredentials?.[0]?.oauthAccountPhotos?.[0]
-            },
+            user: userObject,
             transactionId: txId
           });
         }
@@ -267,6 +270,19 @@ export function CameraView() {
     try {
       setLoading(true);
 
+      // Get Farcaster credentials
+      const farcasterCred = user?.verifiedCredentials?.find(cred => 
+        cred.oauthProvider === 'farcaster'
+      );
+
+      // Create user object with Farcaster credentials if available
+      const userObject = {
+        address: primaryWallet?.address || '',
+        username: farcasterCred?.oauthUsername,
+        displayName: farcasterCred?.oauthDisplayName || undefined,
+        pfpUrl: farcasterCred?.oauthAccountPhotos?.[0]
+      };
+
       // Handle the camera action based on type
       if (currentAction.type === 'photo') {
         await activateCameraRef.current?.handleTakePicture();
@@ -293,12 +309,7 @@ export function CameraView() {
       // Create the timeline event with transaction ID
       const event: TimelineEvent = {
         type: getEventType(currentAction.type),
-        user: {
-          address: primaryWallet?.address || '',
-          username: user?.verifiedCredentials?.[0]?.oauthUsername || undefined,
-          displayName: user?.verifiedCredentials?.[0]?.oauthDisplayName || undefined,
-          pfpUrl: user?.verifiedCredentials?.[0]?.oauthAccountPhotos?.[0] || undefined
-        },
+        user: userObject,
         timestamp: Date.now(),
         transactionId
       };

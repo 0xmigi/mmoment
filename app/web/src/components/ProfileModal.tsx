@@ -1,5 +1,5 @@
 import { Dialog } from '@headlessui/react';
-import { User, X, ExternalLink } from 'lucide-react';
+import { X, ExternalLink, Download } from 'lucide-react';
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -11,26 +11,53 @@ interface ProfileModalProps {
     pfpUrl?: string;
     farcasterUsername?: string;
     bio?: string;
+    verifiedCredentials?: {
+      oauthProvider: string;
+      oauthDisplayName?: string;
+      oauthUsername?: string;
+      oauthAccountPhotos?: string[];
+    }[];
+    walletAddress?: string;
   };
   action?: {
     type: string;
     timestamp: number;
     transactionId?: string;
+    mediaUrl?: string;
   };
 }
 
 export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProps) {
   if (!isOpen) return null;
 
+  // Get Farcaster identity
+  const farcasterCred = user?.verifiedCredentials?.find(cred => cred.oauthProvider === 'farcaster');
+  const displayName = user.displayName || farcasterCred?.oauthDisplayName || farcasterCred?.oauthUsername;
+  const profileImage = user.pfpUrl || farcasterCred?.oauthAccountPhotos?.[0];
+  
+  // Only use wallet as fallback
+  const displayIdentity = displayName || `${user.address.slice(0, 4)}...${user.address.slice(-4)}`;
+
   const handleWarpcastClick = () => {
-    if (user.farcasterUsername) {
-      window.open(`https://warpcast.com/${user.farcasterUsername.replace('@', '')}`, '_blank');
+    if (farcasterCred?.oauthUsername) {
+      window.open(`https://warpcast.com/${farcasterCred.oauthUsername.replace('@', '')}`, '_blank');
     }
   };
 
   const handleExplorerClick = () => {
     if (action?.transactionId) {
-      window.open(`https://explorer.solana.com/tx/${action.transactionId}?cluster=devnet`, '_blank');
+      window.open(`https://solscan.io/tx/${action.transactionId}?cluster=devnet`, '_blank');
+    }
+  };
+
+  const handleDownload = () => {
+    if (action?.mediaUrl) {
+      const link = document.createElement('a');
+      link.href = action.mediaUrl;
+      link.download = `${action.type}_${Date.now()}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     }
   };
 
@@ -46,9 +73,6 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
     }).format(date);
   };
 
-  const formatTxHash = (hash: string) => {
-    return `${hash.slice(0, 8)}...${hash.slice(-8)}`;
-  };
 
   return (
     <Dialog
@@ -78,24 +102,26 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
           {/* Profile Content */}
           <div className="p-3 space-y-4">
             {/* Core Identity Section */}
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="text-sm font-medium mb-0.5">Name</div>
-                <div className="text-sm text-gray-900">
-                  {user.displayName || user.username || `${user.address.slice(0, 6)}...${user.address.slice(-4)}`}
-                </div>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-gray-100 overflow-hidden">
+                {profileImage && (
+                  <img
+                    src={profileImage}
+                    alt={displayIdentity}
+                    className="w-full h-full object-cover"
+                  />
+                )}
               </div>
-              {user.pfpUrl ? (
-                <img
-                  src={user.pfpUrl}
-                  alt={user.displayName || 'Profile'}
-                  className="w-12 h-12 rounded-full"
-                />
-              ) : (
-                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
-                  <User className="w-6 h-6 text-gray-400" />
+              <div>
+                <div className="text-sm font-medium">
+                  {displayIdentity}
                 </div>
-              )}
+                {farcasterCred && (
+                  <div className="text-xs text-gray-500">
+                    Farcaster
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Connected Account */}
@@ -107,10 +133,10 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
                     <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">source</span>
                   </div>
                   <div className="text-xs text-gray-500">
-                    {user.farcasterUsername ? user.farcasterUsername : 'Not connected'}
+                    {farcasterCred?.oauthUsername ? farcasterCred.oauthUsername : 'Not connected'}
                   </div>
                 </div>
-                {user.farcasterUsername && (
+                {farcasterCred?.oauthUsername && (
                   <button 
                     onClick={handleWarpcastClick}
                     className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
@@ -135,19 +161,29 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
                         {formatDate(action.timestamp)}
                       </div>
                     </div>
-                    {action.transactionId && (
-                      <div className="flex items-center justify-between pt-1 border-t border-gray-200/75">
-                        <div className="text-[10px] font-mono text-gray-500">
-                          {formatTxHash(action.transactionId)}
-                        </div>
-                        <button
-                          onClick={handleExplorerClick}
-                          className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
-                        >
-                          View Tx <ExternalLink className="w-3 h-3" />
-                        </button>
+                    <div className="flex items-center justify-between pt-1 border-t border-gray-200/75">
+                      <div className="text-[10px] font-mono text-gray-500">
+                        {action.transactionId ? `${action.transactionId.slice(0, 8)}...${action.transactionId.slice(-8)}` : 'Processing...'}
                       </div>
-                    )}
+                      <div className="flex items-center gap-2">
+                        {action.mediaUrl && (
+                          <button
+                            onClick={handleDownload}
+                            className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
+                          >
+                            Download <Download className="w-3 h-3" />
+                          </button>
+                        )}
+                        {action.transactionId && (
+                          <button
+                            onClick={handleExplorerClick}
+                            className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
+                          >
+                            View Tx <ExternalLink className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

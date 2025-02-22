@@ -1,244 +1,171 @@
-import { Dialog, Transition } from '@headlessui/react';
-import { Fragment } from 'react';
-import { X, Calendar, ExternalLink, Camera } from 'lucide-react';
+import { Dialog } from '@headlessui/react';
+import { X, ArrowUpRight } from 'lucide-react';
 import { IPFSMedia } from '../services/ipfs-service';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
+
+// Copy the necessary types
+type TimelineEventType =
+  | 'initialization'
+  | 'user_connected'
+  | 'photo_captured'
+  | 'video_recorded'
+  | 'stream_started'
+  | 'stream_ended';
+
+interface TimelineUser {
+  address: string;
+  username?: string;
+  displayName?: string;
+  pfpUrl?: string;
+}
+
+interface TimelineEvent {
+  id: string;
+  type: TimelineEventType;
+  user: TimelineUser;
+  timestamp: number;
+  transactionId?: string;
+  mediaUrl?: string;
+}
 
 interface MediaViewerProps {
   isOpen: boolean;
   onClose: () => void;
   media: IPFSMedia | null;
+  event?: TimelineEvent;
 }
 
-export default function MediaViewer({ isOpen, onClose, media }: MediaViewerProps) {
-  const { user, primaryWallet } = useDynamicContext();
+export default function MediaViewer({ isOpen, onClose, media, event }: MediaViewerProps) {
+  const { user } = useDynamicContext();
+  console.log('MediaViewer received media:', media);
+  console.log('Transaction ID in MediaViewer:', media?.transactionId);
+
   if (!media) return null;
 
-  // Get user details from Dynamic auth
-  const username = user?.verifiedCredentials?.[0]?.oauthUsername;
-  const displayName = user?.verifiedCredentials?.[0]?.oauthDisplayName;
-  const profileImage = user?.verifiedCredentials?.[0]?.oauthAccountPhotos?.[0];
-  
-  // Format wallet address for display
-  const walletAddress = primaryWallet?.address || media.walletAddress;
-  const truncatedAddress = walletAddress ? 
-    `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}` : 
-    'Unknown';
-
-  const ActionInfo = () => (
-    <div className="border-t border-gray-100 pt-3 space-y-2">
-      <div className="text-sm text-gray-600">Action</div>
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="text-sm">
-            {media.type === 'video' ? 'Video Recorded' : 'Photo Captured'}
-          </div>
-          <a
-            href={`${media.provider === 'Filebase' ? 'https://console.filebase.com/object/' : 'https://gateway.pinata.cloud/ipfs/'}${media.id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-blue-500 hover:text-blue-600 flex items-center gap-1"
-          >
-            View Source
-            <ExternalLink className="h-3 w-3" />
-          </a>
-        </div>
-
-        <div className="flex flex-col gap-1.5 text-xs text-gray-500">
-          <div className="flex items-center justify-between">
-            <span className="flex items-center gap-1">
-              <Camera className="h-3 w-3" />
-              Camera Source
-            </span>
-            <a
-              href={media.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-500 hover:text-blue-600"
-            >
-              View
-            </a>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <span>Transaction</span>
-            <a
-              href={`https://solscan.io/tx/${media.id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-500 hover:text-blue-600"
-            >
-              View Tx
-            </a>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <span>IPFS Storage ({media.provider})</span>
-            <span className="text-gray-400 font-mono">
-              {media.id.slice(0, 6)}...{media.id.slice(-6)}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
+  // Get Farcaster identity from user's verified credentials
+  const farcasterCred = user?.verifiedCredentials?.find(cred => 
+    cred.oauthProvider === 'farcaster'
   );
+  
+  const displayName = farcasterCred?.oauthDisplayName || farcasterCred?.oauthUsername;
+  const profileImage = farcasterCred?.oauthAccountPhotos?.[0];
+  
+  // Only use wallet address as fallback if no Farcaster identity
+  const displayIdentity = displayName || `${media.walletAddress.slice(0, 4)}...${media.walletAddress.slice(-4)}`;
+
+  // Use event's transaction ID if available, fallback to media's transaction ID
+  const transactionId = event?.transactionId || media.transactionId;
 
   return (
-    <Transition appear show={isOpen} as={Fragment}>
-      <Dialog as="div" className="relative z-50" onClose={onClose}>
-        {/* Background overlay */}
-        <Transition.Child
-          as={Fragment}
-          enter="ease-out duration-300"
-          enterFrom="opacity-0"
-          enterTo="opacity-100"
-          leave="ease-in duration-200"
-          leaveFrom="opacity-100"
-          leaveTo="opacity-0"
-        >
-          <div className="fixed inset-0 bg-black/25" />
-        </Transition.Child>
+    <Dialog
+      open={isOpen}
+      onClose={onClose}
+      className="relative z-[100]"
+    >
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
 
-        <div className="fixed inset-0">
-          {/* Mobile layout */}
-          <div className="absolute inset-x-0 bottom-0 sm:hidden p-2">
-            <div className="relative w-full bg-white rounded-2xl overflow-hidden shadow-xl">
-              {/* Media section */}
-              <div className="w-full">
-                {media.type === 'video' ? (
-                  <video
-                    src={media.url}
-                    className="w-full max-h-[70vh] object-contain"
-                    controls
-                    autoPlay
-                  />
-                ) : (
-                  <img
-                    src={media.url}
-                    alt="Media preview"
-                    className="w-full max-h-[70vh] object-contain"
-                  />
-                )}
+      {/* Full-screen container */}
+      <div className="fixed inset-0 flex items-end sm:items-center justify-center p-2 sm:p-0">
+        <Dialog.Panel className="mx-auto w-full sm:w-[480px] md:w-[640px] rounded-xl bg-white shadow-xl">
+          {/* Header with close button */}
+          <div className="flex items-center justify-between p-3 border-b border-gray-100">
+            <Dialog.Title className="text-base font-medium">
+              Media
+            </Dialog.Title>
+            <button
+              onClick={onClose}
+              className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
+            >
+              <X className="w-4 h-4 text-gray-500" />
+            </button>
+          </div>
+
+          {/* Media Content */}
+          <div className="space-y-4">
+            {/* Media preview - removed padding */}
+            <div className="w-full">
+              {media.type === 'video' ? (
+                <video
+                  src={media.url}
+                  className="w-full max-h-[60vh] object-contain"
+                  controls
+                  autoPlay
+                  playsInline
+                />
+              ) : (
+                <img
+                  src={media.url}
+                  alt="Media preview"
+                  className="w-full max-h-[60vh] object-contain"
+                />
+              )}
+            </div>
+
+            {/* Info sections with padding */}
+            <div className="px-3 pb-3 space-y-4">
+              {/* Core Identity Section */}
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-gray-100 overflow-hidden">
+                  {profileImage && (
+                    <img
+                      src={profileImage}
+                      alt={displayIdentity}
+                      className="w-full h-full object-cover"
+                    />
+                  )}
+                </div>
+                <div>
+                  <div className="text-sm font-medium">
+                    {displayIdentity}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    Farcaster {farcasterCred && <span className="text-blue-500">source</span>}
+                  </div>
+                </div>
               </div>
 
-              {/* Close button - top right */}
-              <div className="absolute right-2 top-2">
-                <button
-                  onClick={onClose}
-                  className="rounded-full p-2 bg-white/80 hover:bg-white/90"
-                >
-                  <X className="h-5 w-5 text-gray-600" />
-                </button>
-              </div>
-
-              {/* Info section */}
-              <div className="px-4 py-4 space-y-4 bg-white">
-                {/* Timestamp */}
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-gray-400" />
-                  <span className="text-sm text-gray-600">
+              {/* Action Details */}
+              <div>
+                <div className="text-[13px] font-medium text-gray-900">Action</div>
+                <div className="mt-1 bg-gray-50 px-3 py-2 rounded-lg">
+                  <div className="text-sm text-gray-600">Photo Captured</div>
+                  <div className="text-xs text-gray-500 mt-0.5">
                     {new Date(media.timestamp).toLocaleString()}
-                  </span>
-                </div>
-
-                {/* Profile info */}
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-gray-100 overflow-hidden flex-shrink-0">
-                    {profileImage && (
-                      <img 
-                        src={profileImage} 
-                        alt={username || truncatedAddress}
-                        className="w-full h-full object-cover"
-                      />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">
-                      {displayName || username || truncatedAddress}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      Wallet
-                    </div>
                   </div>
                 </div>
+              </div>
 
-                <ActionInfo />
+              {/* Transaction */}
+              <div>
+                <div className="text-[13px] font-medium text-gray-900">Transaction</div>
+                <div className="mt-1 bg-gray-50 px-3 py-2 rounded-lg flex items-center justify-between">
+                  {transactionId ? (
+                    <>
+                      <span className="text-xs font-mono text-gray-600 truncate max-w-[180px]">
+                        {`${transactionId.slice(0, 8)}...${transactionId.slice(-8)}`}
+                      </span>
+                      <a
+                        href={`https://solscan.io/tx/${transactionId}?cluster=devnet`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
+                      >
+                        View Tx <ArrowUpRight className="w-3 h-3" />
+                      </a>
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className="animate-pulse w-2 h-2 bg-blue-400 rounded-full"></div>
+                      <span className="text-xs text-gray-500">Processing transaction...</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
-
-          {/* Desktop layout */}
-          <div className="hidden sm:flex min-h-full items-center justify-center p-4">
-            <Transition.Child
-              as={Fragment}
-              enter="ease-out duration-300"
-              enterFrom="opacity-0 scale-95"
-              enterTo="opacity-100 scale-100"
-              leave="ease-in duration-200"
-              leaveFrom="opacity-100 scale-100"
-              leaveTo="opacity-0 scale-95"
-            >
-              <Dialog.Panel className="w-full max-w-2xl transform overflow-hidden rounded-xl bg-white shadow-xl">
-                <div className="relative">
-                  <button
-                    onClick={onClose}
-                    className="absolute right-4 top-4 z-10 rounded-full bg-white/80 p-2 hover:bg-white/90"
-                  >
-                    <X className="h-5 w-5 text-gray-600" />
-                  </button>
-                  
-                  {media.type === 'video' ? (
-                    <video
-                      src={media.url}
-                      className="w-full object-contain max-h-[80vh]"
-                      controls
-                      autoPlay
-                    />
-                  ) : (
-                    <img
-                      src={media.url}
-                      alt="Media preview"
-                      className="w-full object-contain max-h-[80vh]"
-                    />
-                  )}
-
-                  {/* Info section - Desktop */}
-                  <div className="px-6 py-4 space-y-4 bg-white">
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4 text-gray-400" />
-                      <span className="text-sm text-gray-600">
-                        {new Date(media.timestamp).toLocaleString()}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-gray-100 overflow-hidden">
-                        {profileImage && (
-                          <img 
-                            src={profileImage} 
-                            alt={username || truncatedAddress}
-                            className="w-full h-full object-cover"
-                          />
-                        )}
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium">
-                          {displayName || username || truncatedAddress}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          Wallet
-                        </div>
-                      </div>
-                    </div>
-
-                    <ActionInfo />
-                  </div>
-                </div>
-              </Dialog.Panel>
-            </Transition.Child>
-          </div>
-        </div>
-      </Dialog>
-    </Transition>
+        </Dialog.Panel>
+      </div>
+    </Dialog>
   );
 }

@@ -28,6 +28,7 @@ export interface IPFSMedia {
   timestamp: string;
   backupUrls: string[];
   provider: string;
+  transactionId?: string;
 }
 
 export class IPFSService {
