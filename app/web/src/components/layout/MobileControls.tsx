@@ -36,7 +36,13 @@ export function CameraControls({ onTakePicture, onRecordVideo, onToggleStream, i
         <button
           onClick={onToggleStream}
           disabled={isLoading}
-          className={`flex-1 h-10 rounded-lg ${isLoading ? 'bg-gray-200 cursor-not-allowed' : 'bg-gray-50'} flex items-center justify-center gap-2`}
+          className={`flex-1 h-10 rounded-lg ${
+            isLoading 
+              ? 'bg-gray-200 cursor-not-allowed' 
+              : isStreaming 
+                ? 'bg-red-500 hover:bg-red-600' 
+                : 'bg-gray-50'
+          } flex items-center justify-center gap-2`}
           aria-label={isStreaming ? "Stop Stream" : "Start Stream"}
         >
           {isStreaming ? (

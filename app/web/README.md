@@ -1,50 +1,91 @@
-# React + TypeScript + Vite
+# Solana Project Web Scripts
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This directory contains scripts for interacting with your Solana program.
 
-Currently, two official plugins are available:
+## Module Format Issues
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+When working with Node.js v23.0.0 and Solana/Anchor libraries, you may encounter issues with module formats (CommonJS vs ES Modules). Here's how to resolve them:
 
-## Expanding the ESLint configuration
+### Solution 1: Use CommonJS (.cjs) Files
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
+The most reliable approach is to use CommonJS format with `.cjs` file extensions:
 
-- Configure the top-level `parserOptions` property like this:
+```javascript
+// Example: get_pda.cjs
+const { PublicKey } = require('@solana/web3.js');
 
-```js
-export default tseslint.config({
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+// Self-executing async function
+(async () => {
+  const programId = new PublicKey('7BYuxsNyaxxsxwzcRzFd6UJGnUctN6V1vDQxjGPaK2L4');
+  const [pda, bump] = PublicKey.findProgramAddressSync(
+    [Buffer.from("camera-registry")],
+    programId
+  );
+  console.log('CameraRegistry PDA:', pda.toString());
+  console.log('Bump:', bump);
+})().catch(err => {
+  console.error('Error:', err);
+});
 ```
 
-- Replace `tseslint.configs.recommended` to `tseslint.configs.recommendedTypeChecked` or `tseslint.configs.strictTypeChecked`
-- Optionally add `...tseslint.configs.stylisticTypeChecked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and update the config:
+### Solution 2: ES Modules with package.json Configuration
 
-```js
-// eslint.config.js
-import react from 'eslint-plugin-react'
+If you prefer ES Modules, ensure your package.json has `"type": "module"` and use the correct import syntax:
 
-export default tseslint.config({
-  // Set the react version
-  settings: { react: { version: '18.3' } },
-  plugins: {
-    // Add the react plugin
-    react,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended rules
-    ...react.configs.recommended.rules,
-    ...react.configs['jsx-runtime'].rules,
-  },
-})
+```javascript
+// Example: get_pda.js
+import { PublicKey } from '@solana/web3.js';
+
+(async () => {
+  const programId = new PublicKey('7BYuxsNyaxxsxwzcRzFd6UJGnUctN6V1vDQxjGPaK2L4');
+  const [pda, bump] = PublicKey.findProgramAddressSync(
+    [Buffer.from("camera-registry")],
+    programId
+  );
+  console.log('CameraRegistry PDA:', pda.toString());
+  console.log('Bump:', bump);
+})();
 ```
+
+## Working with Anchor Programs
+
+When initializing Anchor programs, you may encounter compatibility issues between @solana/web3.js and @coral-xyz/anchor. Here are some approaches:
+
+### Using Direct Transactions
+
+For more reliable interaction, you can use direct transactions with the correct instruction format:
+
+```javascript
+const instructionData = Buffer.from([
+  175, 175, 109, 31, 13, 152, 155, 237, // "initialize" discriminator for Anchor
+  // Additional data if needed
+]);
+
+const instruction = new TransactionInstruction({
+  keys: [
+    { pubkey: keypair.publicKey, isSigner: true, isWritable: true },
+    { pubkey: registryPDA, isSigner: false, isWritable: true },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }
+  ],
+  programId: programId,
+  data: instructionData
+});
+```
+
+## Available Scripts
+
+- `get_pda.cjs` - Get the Program Derived Address (PDA) for your camera registry
+- `simple_initialize.cjs` - Display PDA information and instructions for manual initialization
+- `direct_initialize.cjs` - Attempt to initialize the program using direct transaction creation
+
+## Running Scripts
+
+```bash
+node get_pda.cjs
+node simple_initialize.cjs
+node direct_initialize.cjs
+```
+
+## Troubleshooting
+
+If you encounter errors with the Anchor Program class, try using the direct transaction approach or downgrade Node.js to a version that's more compatible with the Solana libraries.

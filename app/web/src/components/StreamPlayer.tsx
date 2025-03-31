@@ -1,6 +1,15 @@
 import { Player } from "@livepeer/react";
 import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { CONFIG } from "../config";
+import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from '../anchor/setup';
+import { useCamera } from './CameraProvider';
+
+// Simple cache for stream info to reduce API calls
+const streamInfoCache = { 
+  data: null as any, 
+  timestamp: 0 
+};
+const STREAM_CACHE_TTL = 10000; // 10 seconds
 
 interface StreamInfo {
   playbackId: string;
@@ -15,6 +24,8 @@ const StreamPlayer = memo(() => {
   const pollInterval = useRef<NodeJS.Timeout>();
   const lastFetchTime = useRef(0);
   const isCameraOperation = useRef(false);
+  const { program } = useProgram();
+  const { selectedCamera } = useCamera();
 
   const fetchStreamInfo = useCallback(async () => {
     // Skip fetching during camera operations
@@ -22,10 +33,21 @@ const StreamPlayer = memo(() => {
 
     // Prevent multiple rapid fetches
     const now = Date.now();
-    if (now - lastFetchTime.current < 2000) return;
+    if (now - lastFetchTime.current < 3000) return; // Increased minimum time between fetches
+    
+    // Check cache first
+    if (streamInfoCache.data && now - streamInfoCache.timestamp < STREAM_CACHE_TTL) {
+      console.log('[StreamPlayer] Using cached stream info');
+      setStreamInfo(streamInfoCache.data);
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
+    
     lastFetchTime.current = now;
 
     try {
+      console.log('[StreamPlayer] Fetching fresh stream info');
       const response = await fetch(`${CONFIG.CAMERA_API_URL}/api/stream/info`, {
         headers: {
           'Cache-Control': 'no-cache',
@@ -38,14 +60,21 @@ const StreamPlayer = memo(() => {
       }
       
       const data = await response.json();
+      const newStreamInfo = {
+        playbackId: data.playbackId,
+        isActive: data.isActive
+      };
+      
+      // Update cache
+      streamInfoCache.data = newStreamInfo;
+      streamInfoCache.timestamp = now;
+      
+      // Update state only if different
       setStreamInfo(prev => {
         if (prev?.playbackId === data.playbackId && prev?.isActive === data.isActive) {
           return prev;
         }
-        return {
-          playbackId: data.playbackId,
-          isActive: data.isActive
-        };
+        return newStreamInfo;
       });
       setError(null);
     } catch (err) {
@@ -74,7 +103,7 @@ const StreamPlayer = memo(() => {
 
   useEffect(() => {
     fetchStreamInfo();
-    pollInterval.current = setInterval(fetchStreamInfo, 5000);
+    pollInterval.current = setInterval(fetchStreamInfo, 15000); // Increased polling interval to 15 seconds
     
     return () => {
       if (pollInterval.current) {
@@ -82,6 +111,18 @@ const StreamPlayer = memo(() => {
       }
     };
   }, [fetchStreamInfo]);
+
+  // Add debug logging for program and camera availability
+  useEffect(() => {
+    console.log(`[StreamPlayer] Program ID: ${CAMERA_ACTIVATION_PROGRAM_ID.toString()}`);
+    console.log(`[StreamPlayer] Program available: ${!!program}`);
+    
+    if (selectedCamera) {
+      console.log(`[StreamPlayer] Camera loaded: ${selectedCamera.publicKey}`);
+    } else {
+      console.log(`[StreamPlayer] No camera loaded`);
+    }
+  }, [program, selectedCamera]);
 
   if (isLoading) {
     return (
@@ -93,8 +134,8 @@ const StreamPlayer = memo(() => {
 
   if (error || !streamInfo?.playbackId || !streamInfo.isActive) {
     return (
-      <div className="aspect-video bg-gray-900 rounded-lg flex items-center justify-center">
-        <p className="text-gray-400">Stream is offline</p>
+      <div className="aspect-video w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
+        <p className="text-center text-gray-400">Stream is offline</p>
       </div>
     );
   }

@@ -4,8 +4,8 @@ import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { useProgram } from '../../../anchor/setup';
 import { SystemProgram, PublicKey, ComputeBudgetProgram, Transaction } from '@solana/web3.js';
-import { BN } from '@coral-xyz/anchor';
 import { useState } from 'react';
+import { isSolanaWallet } from '@dynamic-labs/solana';
 
 interface TransactionModalProps {
   isOpen: boolean;
@@ -14,7 +14,7 @@ interface TransactionModalProps {
     type: 'photo' | 'video' | 'stream' | 'initialize';
     cameraAccount: string;
   };
-  onSuccess?: (data: { transactionId: string }) => void;
+  onSuccess?: (data: { transactionId: string; cameraId: string }) => void;
 }
 
 export const TransactionModal: React.FC<TransactionModalProps> = ({
@@ -25,7 +25,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 }) => {
   const { primaryWallet } = useDynamicContext();
   useConnection();
-  const program = useProgram();
+  const { program } = useProgram();
   const [status, setStatus] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,24 +43,57 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     try {
       const cameraPublicKey = new PublicKey(transactionData.cameraAccount);
       setStatus('Preparing transaction...');
-      
-      // Create the transaction instruction
-      const ix = await program.methods.activateCamera(new BN(100))
+
+      // Check if it's a Solana wallet
+      if (!isSolanaWallet(primaryWallet)) {
+        throw new Error('This is not a Solana wallet');
+      }
+
+      // Create activity type based on transaction type
+      let activityType;
+      switch (transactionData.type) {
+        case 'photo':
+          activityType = { photoCapture: {} };
+          break;
+        case 'video':
+          activityType = { videoRecord: {} };
+          break;
+        case 'stream':
+          activityType = { liveStream: {} };
+          break;
+        default:
+          activityType = { custom: {} };
+      }
+
+      // Create metadata with timestamp and other relevant info
+      const metadata = JSON.stringify({
+        timestamp: new Date().toISOString(),
+        action: `${transactionData.type}_capture`,
+        userAddress: primaryWallet.address,
+        cameraId: transactionData.cameraAccount
+      });
+
+      // Create the recordActivity instruction
+      const ix = await program.methods
+        .recordActivity({
+          activityType,
+          metadata
+        })
         .accounts({
-          cameraAccount: cameraPublicKey,
-          user: new PublicKey(primaryWallet.address),
+          owner: new PublicKey(primaryWallet.address),
+          camera: cameraPublicKey,
           systemProgram: SystemProgram.programId,
         })
         .instruction();
       
       // Add priority fee
       const addPriorityFee = ComputeBudgetProgram.setComputeUnitPrice({
-        microLamports: 1,
+        microLamports: 375000, // 0.375 lamports per compute unit
       });
       
       // Set compute unit limit
       const modifyComputeUnits = ComputeBudgetProgram.setComputeUnitLimit({
-        units: 1000000,
+        units: 200000,
       });
       
       // Create new transaction and add instructions
@@ -69,23 +102,25 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       
       setStatus('Signing transaction...');
       
-      // Use program's rpc method which will handle the transaction through Dynamic's wallet
-      const signature = await program.methods.activateCamera(new BN(100))
-        .accounts({
-          cameraAccount: cameraPublicKey,
-          user: new PublicKey(primaryWallet.address),
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
+      // Get the signer
+      const signer = await primaryWallet.getSigner();
       
-      if (!signature) {
-        throw new Error('Failed to get transaction signature');
-      }
+      // Set recent blockhash and fee payer
+      const walletConnection = await primaryWallet.getConnection();
+      transaction.recentBlockhash = (await walletConnection.getLatestBlockhash()).blockhash;
+      transaction.feePayer = new PublicKey(primaryWallet.address);
+      
+      // Sign and send the transaction
+      const result = await signer.signAndSendTransaction(transaction);
+      const signature = result.signature;
       
       setStatus('Transaction confirmed');
       
-      // Pass back the transaction signature
-      onSuccess?.({ transactionId: signature });
+      // Pass back the transaction signature and camera ID
+      onSuccess?.({
+        transactionId: signature,
+        cameraId: transactionData.cameraAccount
+      });
       onClose();
     } catch (err) {
       console.error('Transaction error:', err);

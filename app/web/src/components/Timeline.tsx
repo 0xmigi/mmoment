@@ -1,4 +1,4 @@
-import { useEffect, useState, forwardRef, useImperativeHandle, useRef, useCallback } from 'react';
+import { useEffect, useState, forwardRef, useImperativeHandle, useRef, useCallback, useMemo } from 'react';
 import { Camera, Video, Power, User, Radio, Signal } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { CONFIG, timelineConfig } from '../config';
@@ -29,12 +29,14 @@ interface TimelineEvent {
   timestamp: number;
   transactionId?: string;
   mediaUrl?: string;
+  cameraId?: string;
 }
 
 interface TimelineProps {
   filter?: 'all' | 'camera' | 'my';
   userAddress?: string;
   variant?: 'camera' | 'full';
+  cameraId?: string;
 }
 
 // Debounce function to limit update frequency
@@ -71,7 +73,6 @@ const MAX_RECONNECT_ATTEMPTS = 3;
 const initializeSocket = () => {
   // Don't try to reconnect if we've exceeded attempts
   if (connectionAttempts >= MAX_RECONNECT_ATTEMPTS) {
-    console.warn('[Timeline] Max WebSocket reconnection attempts reached, falling back to polling');
     return null;
   }
 
@@ -88,8 +89,10 @@ const initializeSocket = () => {
   }
 
   try {
-    console.log('[Timeline] Initializing WebSocket connection to:', CONFIG.WS_URL);
-    socket = io(CONFIG.WS_URL, {
+    // In production, use the same origin for WebSocket to avoid CORS
+    const wsUrl = CONFIG.isProduction ? window.location.origin : CONFIG.WS_URL;
+    
+    socket = io(wsUrl, {
       ...timelineConfig.wsOptions,
       timeout: 5000,
       reconnectionAttempts: 2,
@@ -98,45 +101,31 @@ const initializeSocket = () => {
     });
 
     socket.on('connect', () => {
-      console.log('[Timeline] WebSocket connected successfully');
       connectionAttempts = 0;
+      console.log('Timeline socket connected successfully');
     });
 
-    socket.on('connect_error', (error) => {
-      console.warn('[Timeline] WebSocket connection error:', error, 'URL:', CONFIG.WS_URL);
+    socket.on('connect_error', (err) => {
+      console.warn('Timeline socket connection error:', err);
       connectionAttempts++;
       
       if (connectionAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        console.warn('[Timeline] Max reconnection attempts reached, falling back to polling');
+        console.error('Timeline socket max reconnection attempts reached');
         socket?.close();
         socket = null;
       }
     });
 
-    socket.on('error', (error) => {
-      console.error('[Timeline] WebSocket error:', error);
-    });
-
-    socket.on('disconnect', (reason) => {
-      console.warn('[Timeline] WebSocket disconnected:', reason);
-    });
-
-    // Log all incoming events for debugging
-    socket.onAny((eventName, ...args) => {
-      console.log('[Timeline] Received event:', eventName, args);
-    });
-
     // Attempt connection
     socket.connect();
-    console.log('[Timeline] Connection attempt initiated');
     return socket;
   } catch (error) {
-    console.error('[Timeline] Failed to initialize WebSocket:', error);
+    console.error('Timeline socket initialization error:', error);
     return null;
   }
 };
 
-export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full' }, ref) => {
+export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full', cameraId }, ref) => {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [selectedUser, setSelectedUser] = useState<TimelineUser | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -152,7 +141,9 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   // Function to fetch events via HTTP if WebSocket isn't available
   const fetchEvents = useCallback(async () => {
     try {
-      const response = await fetch(`${CONFIG.CAMERA_API_URL}/api/timeline/events`);
+      // Use same origin request to avoid CORS issues
+      const apiUrl = window.location.origin + '/api/timeline/events';
+      const response = await fetch(apiUrl);
       if (response.ok) {
         const data = await response.json();
         setEvents(prev => {
@@ -161,7 +152,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
         });
       }
     } catch (error) {
-      console.warn('Failed to fetch events:', error);
+      // Silent fail
     }
   }, []);
 
@@ -170,16 +161,23 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     if (!updatePending.current) {
       updatePending.current = true;
       requestAnimationFrame(() => {
-        setEvents(newEvents);
-        // Save to localStorage in the background
-        setTimeout(() => {
-          try {
-            localStorage.setItem('timelineEvents', JSON.stringify(newEvents));
-          } catch (e) {
-            console.warn('Failed to save timeline events:', e);
+        setEvents(prev => {
+          // Only update if the events are different
+          if (JSON.stringify(prev) === JSON.stringify(newEvents)) {
+            updatePending.current = false;
+            return prev;
           }
-          updatePending.current = false;
-        }, 0);
+          // Save to localStorage in the background
+          setTimeout(() => {
+            try {
+              localStorage.setItem('timelineEvents', JSON.stringify(newEvents));
+            } catch (e) {
+              // Silent fail
+            }
+            updatePending.current = false;
+          }, 0);
+          return newEvents;
+        });
       });
     }
   }, []);
@@ -187,14 +185,36 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   // Debounced version of batchUpdate
   const debouncedUpdate = useCallback(debounce(batchUpdate, 1000), [batchUpdate]);
 
+  // Enrich event with Farcaster info if available
+  const enrichEventWithUserInfo = useCallback((event: TimelineEvent): TimelineEvent => {
+    if (!user?.verifiedCredentials) return event;
+    
+    // Find matching Farcaster credential
+    const farcasterCred = user.verifiedCredentials.find(
+      cred => cred.oauthProvider === 'farcaster' && 
+              cred.address === event.user.address
+    );
+    
+    if (!farcasterCred) return event;
+    
+    // Return enriched event with Farcaster profile info
+    return {
+      ...event,
+      user: {
+        ...event.user,
+        displayName: farcasterCred.oauthDisplayName || event.user.displayName,
+        username: farcasterCred.oauthUsername || event.user.username,
+        pfpUrl: farcasterCred.oauthAccountPhotos?.[0] || event.user.pfpUrl
+      }
+    };
+  }, [user?.verifiedCredentials]);
+
   useEffect(() => {
-    console.log('[Timeline] Component mounted, initializing connection');
     // Try to initialize WebSocket
     socketRef.current = initializeSocket();
 
     // If WebSocket fails, fall back to polling
     if (!socketRef.current) {
-      console.log('[Timeline] WebSocket unavailable, using polling fallback');
       fetchEvents();
       pollIntervalRef.current = setInterval(fetchEvents, 10000);
     }
@@ -204,10 +224,10 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       const storedEvents = localStorage.getItem('timelineEvents');
       if (storedEvents) {
         const parsedEvents = JSON.parse(storedEvents);
-        batchUpdate(parsedEvents);
+        setEvents(parsedEvents); // Direct state update instead of using batchUpdate
       }
     } catch (e) {
-      console.warn('Failed to load timeline events:', e);
+      // Silent fail
     }
 
     // Socket event handlers
@@ -221,14 +241,10 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
 
     socketRef.current?.on('timelineEvent', handleNewEvent);
 
-    // Add event emission logging
+    // Add event emission
     const addEvent = (event: Omit<TimelineEvent, 'id'>) => {
-      console.log('[Timeline] Attempting to emit event:', event);
       if (socketRef.current?.connected) {
         socketRef.current.emit('newTimelineEvent', event);
-        console.log('[Timeline] Event emitted successfully');
-      } else {
-        console.warn('[Timeline] Cannot emit event - socket not connected');
       }
     };
 
@@ -238,7 +254,6 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     }
 
     return () => {
-      console.log('[Timeline] Component unmounting, cleaning up connections');
       if (socketRef.current) {
         socketRef.current.off('timelineEvent', handleNewEvent);
         socketRef.current.removeAllListeners();
@@ -249,7 +264,35 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
         clearInterval(pollIntervalRef.current);
       }
     };
-  }, [fetchEvents]);
+  }, [debouncedUpdate]); // Only depend on debouncedUpdate
+
+  useEffect(() => {
+    if (!socketRef.current?.connected) return;
+
+    const handleRecentEvents = (events: TimelineEvent[]) => {
+      try {
+        // Enrich events with Farcaster profiles using our utility function
+        const enrichedEvents = events.map(event => enrichEventWithUserInfo(event));
+
+        // Sort events by timestamp, newest first
+        const sortedEvents = [...enrichedEvents].sort((a, b) => b.timestamp - a.timestamp);
+        setEvents(sortedEvents);
+        try {
+          localStorage.setItem('timelineEvents', JSON.stringify(sortedEvents));
+        } catch (e) {
+          console.warn('Failed to save timeline events to localStorage:', e);
+        }
+      } catch (err) {
+        console.error('Error processing recent events:', err);
+      }
+    };
+
+    socketRef.current.on('recentEvents', handleRecentEvents);
+
+    return () => {
+      socketRef.current?.off('recentEvents', handleRecentEvents);
+    };
+  }, [user?.verifiedCredentials, socketRef.current?.connected, enrichEventWithUserInfo]);
 
   // Get the display count based on screen width
   const getDisplayCount = () => {
@@ -281,42 +324,8 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     return () => window.removeEventListener('resize', handleResize);
   }, [variant]);
 
-  useEffect(() => {
-    socketRef.current?.on('recentEvents', (events: TimelineEvent[]) => {
-      console.log('Received recent events:', events);
-      // Enrich events with Farcaster profiles if available
-      const enrichedEvents = events.map(event => {
-        const farcasterCred = user?.verifiedCredentials?.find(
-          cred => cred.oauthProvider === 'farcaster' && 
-          event.user.address === cred.address
-        );
-        
-        if (farcasterCred) {
-          return {
-            ...event,
-            user: {
-              ...event.user,
-              displayName: farcasterCred.oauthDisplayName || undefined,
-              username: farcasterCred.oauthUsername,
-              pfpUrl: farcasterCred.oauthAccountPhotos?.[0] || undefined
-            }
-          };
-        }
-        return event;
-      });
-
-      // Sort events by timestamp, newest first
-      const sortedEvents = [...enrichedEvents].sort((a, b) => b.timestamp - a.timestamp);
-      console.log('Setting sorted events:', sortedEvents);
-      setEvents(sortedEvents);
-      localStorage.setItem('timelineEvents', JSON.stringify(sortedEvents));
-    });
-  }, [user?.verifiedCredentials]);
-
   useImperativeHandle(ref, () => ({
     addEvent: (event: Omit<TimelineEvent, 'id'>) => {
-      console.log('[Timeline] Adding event:', event);
-      
       // Generate a unique ID for the event
       const eventWithId = {
         ...event,
@@ -330,26 +339,25 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
         try {
           localStorage.setItem('timelineEvents', JSON.stringify(newEvents));
         } catch (e) {
-          console.warn('[Timeline] Failed to save to localStorage:', e);
+          // Silent fail
         }
         return newEvents;
       });
 
       // Try to emit via WebSocket if available
       if (socketRef.current?.connected) {
-        console.log('[Timeline] Emitting event via WebSocket');
         socketRef.current.emit('newTimelineEvent', event);
       } else {
-        console.log('[Timeline] WebSocket not connected, falling back to HTTP');
-        // Optionally send via HTTP if WebSocket is not available
-        fetch(`${CONFIG.CAMERA_API_URL}/api/timeline/events`, {
+        // Use same-origin request to avoid CORS issues
+        const apiUrl = window.location.origin + '/api/timeline/events';
+        fetch(apiUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify(event)
-        }).catch(error => {
-          console.warn('[Timeline] Failed to send event via HTTP:', error);
+        }).catch(() => {
+          // Silent fail
         });
       }
     },
@@ -359,20 +367,45 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     })
   }));
 
-  // Filter events based on selected filter
-  const filteredEvents = events.filter(event => {
-    if (filter === 'all') return true;
-    if (filter === 'camera') return event.type === 'photo_captured' || 
-                                   event.type === 'video_recorded' || 
-                                   event.type === 'stream_started' || 
-                                   event.type === 'stream_ended';
-    if (filter === 'my' && userAddress) return event.user.address === userAddress;
-    return true;
-  });
+  // Apply enrichment to all events
+  const enrichedEvents = useMemo(() => {
+    return events.map(event => enrichEventWithUserInfo(event));
+  }, [events, enrichEventWithUserInfo]);
 
-  const displayEvents = variant === 'camera' 
-    ? filteredEvents.slice(0, displayCount)
-    : filteredEvents;
+  // Filter events based on selected filter and cameraId if provided
+  const filteredEvents = useMemo(() => {
+    // Apply filters to enriched events instead of raw events
+    return enrichedEvents.filter(event => {
+      // First apply the regular filter
+      const matchesFilter = 
+        filter === 'all' ? true :
+        filter === 'camera' ? (event.type === 'photo_captured' || 
+                              event.type === 'video_recorded' || 
+                              event.type === 'stream_started' || 
+                              event.type === 'stream_ended') :
+        filter === 'my' && userAddress ? event.user.address === userAddress :
+        true;
+      
+      // Then filter by cameraId if provided
+      if (cameraId && matchesFilter) {
+        // If the event has a cameraId field, check if it matches
+        if (event.cameraId) {
+          return event.cameraId === cameraId;
+        }
+        
+        // If no cameraId on the event, don't include it in camera-specific views
+        return false;
+      }
+      
+      return matchesFilter;
+    });
+  }, [enrichedEvents, filter, userAddress, cameraId]);
+  
+  const displayEvents = useMemo(() => {
+    return variant === 'camera' 
+      ? filteredEvents.slice(0, displayCount)
+      : filteredEvents;
+  }, [filteredEvents, displayCount, variant]);
 
   const getEventIcon = (type: TimelineEventType) => {
     switch (type) {
@@ -392,7 +425,6 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   };
 
   const handleProfileClick = (event: TimelineEvent) => {
-    console.log('Profile click event:', event);
     setSelectedUser(event.user);
     setIsProfileModalOpen(true);
     setSelectedEvent(event);
@@ -515,10 +547,10 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
           <div className="pl-10 sm:pl-14">
             <div className="flex items-center">
               <div className="flex -space-x-1.5 sm:-space-x-2">
-                {Array.from(new Set(events.map(e => e.user.address)))
+                {Array.from(new Set(enrichedEvents.map(e => e.user.address)))
                   .slice(0, 6)
                   .map((address, i) => {
-                    const event = events.find(e => e.user.address === address);
+                    const event = enrichedEvents.find(e => e.user.address === address);
                     return (
                       <div
                         key={address}
@@ -539,7 +571,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                   })}
               </div>
               <span className="ml-3 text-xs sm:text-sm text-gray-600 font-medium">
-                {new Set(events.map(e => e.user.address)).size || 0} Recently active
+                {new Set(enrichedEvents.map(e => e.user.address)).size || 0} Recently active
               </span>
             </div>
           </div>

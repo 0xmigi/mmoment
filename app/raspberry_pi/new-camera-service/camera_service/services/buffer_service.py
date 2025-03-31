@@ -7,11 +7,14 @@ import numpy as np
 import logging
 import os
 from picamera2 import Picamera2
+import libcamera
 from threading import Lock
 from ..config.settings import Settings
 from collections import deque
 from queue import Queue
 from typing import Optional, Tuple, List
+import glob
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +54,16 @@ class BufferService:
         self.last_temp_check = 0
         self.temp_check_interval = 1  # Check temp every second
         
+        # Cleanup settings
+        self.max_video_age_days = 1  # Delete videos older than 1 day
+        self.max_videos_to_keep = 50  # Keep at most 50 videos
+        self.cleanup_interval = 3600  # Run cleanup every hour
+        self.last_cleanup_time = 0
+        
         logger.info("Buffer Service initialized with lower resolution and frame rate")
+        
+        # Start buffering automatically
+        self.start_buffering()
 
     def _check_temperature(self) -> float:
         """Check CPU temperature"""
@@ -61,6 +73,11 @@ class BufferService:
         except Exception as e:
             logger.error(f"Failed to read temperature: {e}")
             return 0.0
+
+    def get_frame_count(self) -> int:
+        """Get the current number of frames in the buffer"""
+        with self.buffer_lock:
+            return len(self.frame_buffer)
 
     def start_buffering(self):
         """Start the camera capture and buffering"""
@@ -74,27 +91,46 @@ class BufferService:
                     self.picam2.close()
                     self.picam2 = None
                     time.sleep(0.5)
+                    
+                # Additional delay to ensure camera is released
+                time.sleep(1.0)
 
                 self.picam2 = Picamera2()
                 config = self.picam2.create_video_configuration(
                     main={"size": (self.width, self.height), "format": "RGB888"},
                     controls={
                         "FrameRate": self.frame_rate,
-                        "ExposureTime": 25000,  # Further reduced from 50000
-                        "AnalogueGain": 1.5,    # Further reduced from 2.0
-                        "NoiseReductionMode": 2, # Increased noise reduction
-                        "Brightness": 0.1,       # Reduced from 0.2
-                        "Contrast": 1.1,         # Reduced from 1.2
-                        "Saturation": 1.0,       # Reduced from 1.1
-                        "Sharpness": 0.8,        # Reduced from 1.0
-                        "AeEnable": True,
-                        "AwbEnable": True,
+                        "AfMode": 2,                  # Continuous auto focus (2 is better than 1)
+                        "AfMetering": 0,              # Auto focus metering mode
+                        "AfRange": 0,                 # Normal range
+                        "AfSpeed": 1,                 # Normal AF speed
+                        "Sharpness": 1.5,             # Normal sharpness
+                        "NoiseReductionMode": 1,
                     },
-                    buffer_count=2  # Reduced from 3
+                    transform=libcamera.Transform(vflip=True, hflip=True),
+                    buffer_count=4
                 )
+                
                 self.picam2.configure(config)
+                
+                # Try to apply controls after configuration as well
+                try:
+                    logger.info("Setting camera controls after configuration")
+                    self.picam2.set_controls({
+                        "AfMode": 2,                # Continuous autofocus mode
+                        "AfTrigger": 0              # Trigger autofocus now
+                    })
+                    logger.info("Successfully set controls after configuration")
+                except Exception as e:
+                    logger.warning(f"Could not set controls after configuration: {e}")
+                
+                # Start the camera and wait for it to initialize
                 self.picam2.start()
-                time.sleep(0.5)
+                time.sleep(1.0)  # Give it more time to initialize
+                
+                # Log the actual camera configuration
+                logger.info(f"Camera started with configuration: {self.picam2.camera_configuration()}")
+                logger.info(f"Camera controls: {self.picam2.camera_controls}")
 
                 self.is_running = True
                 self.shutdown_event.clear()
@@ -112,11 +148,70 @@ class BufferService:
                 self.cleanup()
                 return False
 
+    def cleanup_old_videos(self, force=False):
+        """Clean up old videos to save disk space"""
+        current_time = time.time()
+        
+        # Only run cleanup at intervals unless forced
+        if not force and (current_time - self.last_cleanup_time) < self.cleanup_interval:
+            return
+            
+        self.last_cleanup_time = current_time
+        
+        try:
+            logger.info("Running video cleanup...")
+            
+            # List all video files in the videos directory
+            video_files = glob.glob(os.path.join(Settings.VIDEOS_DIR, "video_*.mov"))
+            
+            if not video_files:
+                logger.info("No video files to clean up")
+                return
+                
+            # Sort by modification time (oldest first)
+            video_files.sort(key=lambda x: os.path.getmtime(x))
+            
+            # Remove files older than max_video_age_days
+            cutoff_time = time.time() - (self.max_video_age_days * 86400)
+            deleted_count = 0
+            
+            # First pass: delete by age
+            for video_file in video_files[:]:
+                if os.path.getmtime(video_file) < cutoff_time:
+                    try:
+                        os.remove(video_file)
+                        deleted_count += 1
+                        video_files.remove(video_file)
+                        logger.debug(f"Deleted old video: {video_file}")
+                    except Exception as e:
+                        logger.error(f"Failed to delete {video_file}: {e}")
+            
+            # Second pass: delete excess files if there are still too many
+            if len(video_files) > self.max_videos_to_keep:
+                # Calculate how many to delete
+                to_delete = len(video_files) - self.max_videos_to_keep
+                
+                for video_file in video_files[:to_delete]:
+                    try:
+                        os.remove(video_file)
+                        deleted_count += 1
+                        logger.debug(f"Deleted excess video: {video_file}")
+                    except Exception as e:
+                        logger.error(f"Failed to delete {video_file}: {e}")
+            
+            logger.info(f"Video cleanup completed: {deleted_count} files deleted")
+            
+        except Exception as e:
+            logger.error(f"Error during video cleanup: {e}")
+
     def get_video_segment(self, duration_seconds: int = 5) -> Optional[dict]:
         """Extract video segment directly to MOV format"""
         logger.info("Starting video extraction")
         
         try:
+            # Run cleanup to ensure we have disk space
+            self.cleanup_old_videos(force=True)
+            
             num_frames = min(duration_seconds * self.frame_rate, len(self.frame_buffer))
             if num_frames < 15:  # Minimum frames needed
                 raise RuntimeError("Insufficient frames in buffer")
@@ -125,14 +220,21 @@ class BufferService:
                 frames = list(self.frame_buffer)[-num_frames:]
             
             timestamp = int(time.time())
-            mov_path = os.path.join(Settings.VIDEOS_DIR, f"video_{timestamp}.mov")
+            mov_filename = f"video_{timestamp}.mov"
+            
+            # Ensure videos directory exists
+            os.makedirs(Settings.VIDEOS_DIR, exist_ok=True)
+            mov_path = os.path.join(Settings.VIDEOS_DIR, mov_filename)
+            logger.info(f"Will save video to: {mov_path}")
 
             # Create a temporary file for frames
-            with open("/tmp/frames.raw", "wb") as temp_file:
+            temp_path = f"/tmp/frames_{timestamp}.raw"
+            logger.info(f"Writing frames to temporary file: {temp_path}")
+            with open(temp_path, "wb") as temp_file:
                 for frame, _ in frames:
                     temp_file.write(frame.tobytes())
 
-            # Use the temporary file as input with optimized libx264 settings
+            # Use the temporary file as input with web-optimized settings
             ffmpeg_cmd = [
                 "ffmpeg", "-y",
                 "-f", "rawvideo",
@@ -140,52 +242,60 @@ class BufferService:
                 "-s", f"{self.width}x{self.height}",
                 "-pix_fmt", "rgb24",
                 "-r", str(self.frame_rate),
-                "-i", "/tmp/frames.raw",
+                "-i", temp_path,
                 "-c:v", "libx264",
-                "-preset", "ultrafast",
+                "-preset", "veryfast",
                 "-tune", "zerolatency",
-                "-profile:v", "baseline",
-                "-level", "3.0",
+                "-profile:v", "main",
+                "-level", "4.0",
                 "-pix_fmt", "yuv420p",
-                "-b:v", "1.5M",
-                "-bufsize", "2M",
-                "-maxrate", "2M",
+                "-b:v", "2M",
+                "-bufsize", "4M",
+                "-maxrate", "2.5M",
                 "-movflags", "+faststart",
+                "-brand", "mp42",
                 mov_path
             ]
 
+            logger.info(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
             process = subprocess.Popen(
                 ffmpeg_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
 
-            _, stderr = process.communicate(timeout=10)
-
+            stdout, stderr = process.communicate(timeout=10)
+            
             if process.returncode != 0:
+                logger.error(f"FFmpeg error: {stderr.decode()}")
                 raise RuntimeError(f"FFmpeg error: {stderr.decode()}")
 
             # Clean up temp file
             try:
-                os.remove("/tmp/frames.raw")
-            except:
-                pass
+                os.remove(temp_path)
+                logger.info("Cleaned up temporary file")
+            except Exception as e:
+                logger.warning(f"Failed to clean up temp file: {e}")
 
+            # Verify the file exists and has content
+            if not os.path.exists(mov_path):
+                raise RuntimeError("Video file was not created")
+            
+            file_size = os.path.getsize(mov_path)
+            if file_size == 0:
+                raise RuntimeError("Video file is empty")
+                
+            logger.info(f"Successfully created video: {mov_filename} (size: {file_size} bytes)")
             return {
-                "mov_path": mov_path,
-                "mov_filename": os.path.basename(mov_path),
-                "frame_count": len(frames)
+                "mov_filename": mov_filename,
+                "frame_count": num_frames,
+                "duration": duration_seconds,
+                "path": mov_path
             }
 
         except Exception as e:
-            logger.error(f"Failed to create video: {e}", exc_info=True)
-            if 'mov_path' in locals() and os.path.exists(mov_path):
-                os.remove(mov_path)
-            try:
-                os.remove("/tmp/frames.raw")
-            except:
-                pass
-            return None
+            logger.error(f"Failed to create video segment: {e}")
+            raise
 
     def _buffer_frames(self):
         """Continuously buffer frames from the camera"""

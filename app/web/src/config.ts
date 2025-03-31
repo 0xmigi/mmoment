@@ -17,53 +17,81 @@ const isCloudflareProxy = () => {
      window.location.hostname === 'camera.mmoment.xyz');
 };
 
+// Get the cluster from environment variable, defaults to devnet if not specified
+const cluster = import.meta.env.VITE_CLUSTER || 'devnet';
+
+// Define alternative RPC endpoints for failover
+const devnetEndpoints = [
+  'https://api.devnet.solana.com',
+  'https://devnet.helius-rpc.com/?api-key=15319106-7d8e-4cf6-8cbe-d3976e537de0',
+  'https://devnet.rpcpool.com'
+];
+
+let currentEndpointIndex = 0;
+
+// Simple endpoint rotation
+const getNextEndpoint = () => {
+  currentEndpointIndex = (currentEndpointIndex + 1) % devnetEndpoints.length;
+  return devnetEndpoints[currentEndpointIndex];
+};
+
+// Set RPC endpoint based on the cluster
+const rpcEndpoint = cluster === 'localnet' ? 'http://localhost:8899' : devnetEndpoints[0];
+
 // Get the appropriate API URL based on environment
 const getApiUrl = async (): Promise<string> => {
   if (isProduction) {
-    return forceHttps("https://camera.mmoment.xyz");
+    return "https://middleware.mmoment.xyz";
   }
-  // In development, check if we're running the API locally
-  const localApi = "http://localhost:3001";
+  // In development, check if we're running the middleware locally
+  const localApi = "http://localhost:5002"; // Using middleware port (5002)
   try {
-    await fetch(`${localApi}/health`, { 
+    await fetch(`${localApi}/api/health`, { 
       method: 'HEAD',
       headers: { 'Cache-Control': 'no-cache' }
     });
     return localApi;
   } catch {
-    return forceHttps("https://camera.mmoment.xyz");
+    // If not running locally, use the middleware domain
+    return "https://middleware.mmoment.xyz";
   }
 };
 
 // Get WebSocket URL based on environment and protocol
 const getWebSocketUrl = () => {
   if (isProduction) {
-    // Always use WSS in production
+    // Always use WSS in production with the camera domain
     return "wss://camera.mmoment.xyz";
   }
 
   // For local development
-  const localUrl = "ws://localhost:3001";
+  const localUrl = "ws://localhost:5001"; // Direct to camera API for websockets
   
   // If we're accessing the dev environment through HTTPS, use WSS
   if (window.location.protocol === 'https:') {
     return "wss://camera.mmoment.xyz";
   }
-
+  
   return localUrl;
 };
 
+// Export configuration
 export const CONFIG = {
   baseUrl: forceHttps(window.location.origin),
-  rpcEndpoint: "https://api.devnet.solana.com",
-  CAMERA_API_URL: forceHttps("https://camera.mmoment.xyz"), // Will be updated after initialization
+  rpcEndpoint,
+  devnetEndpoints,
+  getNextEndpoint,
+  CAMERA_API_URL: isProduction 
+    ? "https://middleware.mmoment.xyz"  // Always use the middleware URL in production
+    : "http://localhost:5002",
   BACKEND_URL: isProduction 
     ? forceHttps("https://mmoment-production.up.railway.app")
     : "http://localhost:3001",
   isProduction,
   isCloudflareProxy: isCloudflareProxy(),
   LIVEPEER_PLAYBACK_ID: process.env.REACT_APP_LIVEPEER_PLAYBACK_ID || '',
-  WS_URL: getWebSocketUrl()
+  WS_URL: getWebSocketUrl(),
+  CAMERA_PDA: import.meta.env.VITE_CAMERA_PDA || '5onKAv5c6VdBZ8a7D11XqF79Hdzuv3tnysjv4B2pQWZ2'
 };
 
 export const timelineConfig = {
@@ -85,8 +113,3 @@ export const timelineConfig = {
     forceNew: true
   }
 };
-
-// Initialize the configuration
-(async () => {
-  CONFIG.CAMERA_API_URL = await getApiUrl();
-})();

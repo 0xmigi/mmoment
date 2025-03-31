@@ -40,7 +40,7 @@ class CameraService:
         self._recording_active = False
         self._recording_start_time = None
 
-    def _check_system_resources(self) -> bool:
+    def _check_system_resources(self, streaming_active=False) -> bool:
         """Check if system has enough resources to perform operations"""
         current_time = time.time()
         if current_time - self._last_resource_check < self._resource_check_interval:
@@ -114,63 +114,68 @@ class CameraService:
             logger.error(f"Error determining recording duration: {e}")
             return 5  # Fall back to safe duration
 
-    def start_recording(self):
-        """Start video recording with enhanced resource management"""
+    def start_recording(self, duration_seconds=5) -> dict:
+        """
+        Start video recording. 
+        If recording is already active, returns its info.
+        If resources are insufficient, returns error info.
+        """
+        logger.info(f"Starting recording for {duration_seconds} seconds")
+        
         with self._lock:
+            if self._recording_active:
+                logger.info("Recording already in progress")
+                return {"status": "recorded", "filename": self._recording_start_time, "duration": duration_seconds}
+            
+            # Check if we have enough system resources to record
+            if not self._check_system_resources():
+                logger.error("Insufficient system resources for recording")
+                return {"status": "error", "message": "Insufficient resources for recording"}
+            
+            # Check if we're streaming, and if so, can we record simultaneously
+            if self.stream_service.is_streaming:
+                # More stringent resource check when streaming is active
+                if not self._check_system_resources(streaming_active=True):
+                    logger.error("Insufficient resources for recording while streaming")
+                    return {"status": "error", "message": "Insufficient resources for recording while streaming"}
+            
+            # Get safe recording duration based on system resources
+            safe_duration = self._get_safe_recording_duration()
+            if duration_seconds > safe_duration:
+                logger.warning(f"Requested duration {duration_seconds}s exceeds safe duration {safe_duration}s, limiting recording")
+                duration_seconds = safe_duration
+            
             try:
-                logger.info("=== Starting Video Recording ===")
-                
-                # Check if recording is already active
-                if self._recording_active:
-                    raise RuntimeError("Recording already in progress")
-                
-                # Extra strict resource check for recording during streaming
-                if self.stream_service.is_streaming:
-                    if not self._can_handle_simultaneous_operations():
-                        raise RuntimeError("Insufficient resources for recording while streaming")
-                    # Add a small delay to let the system stabilize
-                    time.sleep(0.5)
-                
-                # Regular resource check
-                if not self._check_system_resources():
-                    raise RuntimeError("Insufficient system resources for recording")
-                
-                # Check buffer status
-                if not self.buffer_service.is_running:
-                    raise RuntimeError("Buffer service not active")
-                
-                buffer_size = len(self.buffer_service.frame_buffer)
-                logger.info(f"Current buffer size: {buffer_size} frames")
-                
-                if buffer_size < 30:
-                    raise RuntimeError("Buffer too small for recording")
-                
-                # Determine safe recording duration
-                duration = self._get_safe_recording_duration()
-                logger.info(f"Recording duration set to {duration} seconds")
-                
-                # Start recording
+                # Set recording flag first to prevent race conditions
                 self._recording_active = True
                 self._recording_start_time = time.time()
                 
-                try:
-                    # Get video segment with adaptive duration
-                    video_data = self.buffer_service.get_video_segment(duration_seconds=duration)
-                    
-                    if not video_data:
-                        raise RuntimeError("Failed to get video segment from buffer")
-                    
-                    logger.info(f"Recording completed: {video_data['frame_count']} frames, Duration: {duration}s")
-                    return {"status": "recorded", "filename": video_data['mov_filename']}
-                finally:
-                    self._recording_active = False
-                    # Add a small delay after recording
-                    time.sleep(0.5)
-
-            except Exception as e:
-                logger.error(f"Recording failed: {str(e)}", exc_info=True)
+                # Get video segment directly
+                video_info = self.buffer_service.get_video_segment(duration_seconds)
+                
+                # Set recording status to completed and return info
                 self._recording_active = False
-                raise
+                
+                if not video_info:
+                    logger.error("Failed to create video segment")
+                    return {"status": "error", "message": "Failed to create video segment"}
+                
+                # Create a dict with filename and status (for API response)
+                result = {
+                    "filename": video_info["mov_filename"],
+                    "status": "recorded",
+                    "duration": video_info.get("duration", duration_seconds),
+                    "frame_count": video_info.get("frame_count", 0),
+                    "path": video_info.get("path", "")
+                }
+                
+                logger.info(f"Recording completed: {result}")
+                return result
+                
+            except Exception as e:
+                logger.error(f"Recording error: {e}")
+                self._recording_active = False
+                return {"status": "error", "message": str(e)}
 
     def stop_recording(self):
         """Stop current recording"""
@@ -218,10 +223,12 @@ class CameraService:
             raise RuntimeError("Insufficient system resources for picture capture")
 
         try:
+            # Just get a frame from the buffer without resetting anything
             jpeg_data = self.buffer_service.get_jpeg_frame()
             if jpeg_data:
                 return jpeg_data
-            raise RuntimeError("Failed to capture photo")
+            else:
+                raise RuntimeError("Failed to capture photo - no frame available in buffer")
         except Exception as e:
             logger.error(f"Photo capture error: {e}")
             raise

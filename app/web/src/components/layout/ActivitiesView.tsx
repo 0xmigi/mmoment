@@ -1,6 +1,7 @@
 import { Timeline } from '../Timeline';
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
+import { useParams } from 'react-router-dom';
 
 type FilterType = 'all' | 'camera' | 'my';
 
@@ -8,6 +9,19 @@ export function ActivitiesView() {
     const timelineRef = useRef<any>(null);
     const { primaryWallet } = useDynamicContext();
     const [activeFilter, setActiveFilter] = useState<FilterType>('all');
+    const { cameraId } = useParams<{ cameraId?: string }>();
+    
+    useEffect(() => {
+        console.log('ActivitiesView with cameraId:', cameraId);
+        // Store cameraId in localStorage for persistence if available
+        if (cameraId) {
+            localStorage.setItem('directCameraId', cameraId);
+            // Set filter to 'camera' when a specific camera is selected
+            if (activeFilter !== 'camera') {
+                setActiveFilter('camera');
+            }
+        }
+    }, [cameraId, activeFilter]);
 
     const filters: Array<{ id: FilterType; label: string }> = [
         { id: 'all', label: 'All' },
@@ -45,6 +59,7 @@ export function ActivitiesView() {
                                 filter={activeFilter}
                                 userAddress={primaryWallet?.address}
                                 variant="full"
+                                cameraId={cameraId}
                             />
                         </div>
                     </div>

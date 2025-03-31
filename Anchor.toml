@@ -4,15 +4,22 @@
 seeds = true
 skip-lint = false
 
+[programs.localnet]
+my_solana_project = "7BYuxsNyaxxsxwzcRzFd6UJGnUctN6V1vDQxjGPaK2L4"
+camera_activation = "77HrUp2XLQGe4tN6pMmHxLLkZnERhVgjJBRxujaVBF2"
+
 [programs.devnet]
-my_solana_project = "5HFxUPQ7aZPZF8UqRSSHsoamq3X4VU1K9euMXuuGcUfj"
+my_solana_project = "7BYuxsNyaxxsxwzcRzFd6UJGnUctN6V1vDQxjGPaK2L4"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Devnet"
+cluster = "devnet"
 wallet = "/Users/azuolascompy/.config/solana/id.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
+[test]
+startup_wait = 10000

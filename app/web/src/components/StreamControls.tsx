@@ -13,7 +13,7 @@ export const StreamControls = ({ onStreamToggle }: StreamControlsProps) => {
     const [isStreaming, setIsStreaming] = useState(false);
     const [isLoading] = useState(false);
     const { isInitialized, loading: initLoading } = useCamera();
-    useDynamicContext();
+    const { primaryWallet } = useDynamicContext();
 
     useEffect(() => {
         const unsubscribe = cameraStatus.subscribe(({ isStreaming: streaming }) => {
@@ -25,10 +25,18 @@ export const StreamControls = ({ onStreamToggle }: StreamControlsProps) => {
         };
     }, []);
 
+    // Handle the button click directly
+    const handleStreamClick = () => {
+        console.log("STREAM BUTTON CLICKED IN COMPONENT - direct handler");
+        if (onStreamToggle) {
+            onStreamToggle();
+        }
+    };
+
     return (
         <div className="group h-1/2 relative">
             <button
-                onClick={onStreamToggle}
+                onClick={handleStreamClick}
                 disabled={isLoading || initLoading || !isInitialized}
                 className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-black transition-colors rounded-xl"
                 aria-label={isStreaming ? "Stop Stream" : "Start Stream"}

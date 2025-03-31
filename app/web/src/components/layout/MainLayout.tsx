@@ -1,8 +1,8 @@
 import { HeadlessAuthButton } from '../headless/auth/HeadlessAuthButton';
 import { useIsLoggedIn } from '@dynamic-labs/sdk-react-core';
 import { Menu, X } from 'lucide-react';
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import Logo from '../Logo';
 
 interface MainLayoutProps {
@@ -15,6 +15,38 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
   const [isOpen, setIsOpen] = useState(false);
   const isLoggedIn = useIsLoggedIn();
   const navigate = useNavigate();
+  const { cameraId } = useParams<{ cameraId?: string }>();
+  const location = useLocation();
+  
+  // Debug logging for navigation
+  useEffect(() => {
+    const pathMatch = location.pathname.match(/\/app\/(camera|gallery|activities)\/([^\/]+)/);
+    const localStorageCameraId = localStorage.getItem('directCameraId');
+    
+    console.log('Navigation Debug:', {
+      currentPath: location.pathname,
+      activeTab,
+      cameraIdFromParams: cameraId,
+      cameraIdFromPath: pathMatch ? pathMatch[2] : null,
+      cameraIdFromLocalStorage: localStorageCameraId
+    });
+  }, [location.pathname, activeTab, cameraId]);
+  
+  // Handle tab navigation with camera ID
+  const handleTabChange = (tab: 'camera' | 'gallery' | 'activities' | 'account') => {
+    onTabChange(tab);
+    
+    // Extract camera ID from current path if available
+    const matchPath = location.pathname.match(/\/app\/(camera|gallery|activities)\/([^\/]+)/);
+    const currentCameraId = cameraId || (matchPath ? matchPath[2] : localStorage.getItem('directCameraId'));
+    
+    if (currentCameraId) {
+      console.log(`Navigating to ${tab} with camera ID: ${currentCameraId}`);
+      navigate(`/app/${tab}/${currentCameraId}`);
+    } else {
+      navigate('/app');
+    }
+  };
 
   return (
     <div className="flex flex-col h-screen bg-white">
@@ -36,7 +68,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
               <div className="hidden sm:flex items-center space-x-1">
                 <button
                   type='button'
-                  onClick={() => onTabChange('camera')}
+                  onClick={() => handleTabChange('camera')}
                   className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'camera'
                     ? 'bg-white text-stone-800'
                     : 'bg-white text-stone-400 hover:text-stone-800'
@@ -46,7 +78,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                 </button>
                 <button
                   type='button'
-                  onClick={() => onTabChange('gallery')}
+                  onClick={() => handleTabChange('gallery')}
                   className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'gallery'
                     ? 'bg-white text-stone-800'
                     : 'bg-white text-stone-400 hover:text-stone-800'
@@ -56,13 +88,20 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                 </button>
                 <button
                   type='button'
-                  onClick={() => onTabChange('activities')}
+                  onClick={() => handleTabChange('activities')}
                   className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'activities'
                     ? 'bg-white text-stone-800'
                     : 'bg-white text-stone-400 hover:text-stone-800'
                     }`}
                 >
                   Activities
+                </button>
+                <button
+                  type='button'
+                  onClick={() => navigate('/soldevnetdebug')}
+                  className="px-4 py-2 rounded-lg flex items-center gap-2 bg-white text-stone-400 hover:text-stone-800"
+                >
+                  DevNet Debug
                 </button>
               </div>
             )}
@@ -128,7 +167,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                 <button
                   type='button'
                   onClick={() => {
-                    onTabChange('camera');
+                    handleTabChange('camera');
                     setIsOpen(false);
                   }}
                   className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${activeTab === 'camera'
@@ -142,7 +181,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                 <button
                   type='button'
                   onClick={() => {
-                    onTabChange('gallery');
+                    handleTabChange('gallery');
                     setIsOpen(false);
                   }}
                   className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${activeTab === 'gallery'
@@ -156,7 +195,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                 <button
                   type='button'
                   onClick={() => {
-                    onTabChange('activities');
+                    handleTabChange('activities');
                     setIsOpen(false);
                   }}
                   className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${activeTab === 'activities'
@@ -176,6 +215,17 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                   className="w-full text-left px-4 py-3 rounded-lg transition-colors text-gray-600 hover:bg-gray-50"
                 >
                   Settings
+                </button>
+
+                <button
+                  type='button'
+                  onClick={() => {
+                    navigate('/soldevnetdebug');
+                    setIsOpen(false);
+                  }}
+                  className="w-full text-left px-4 py-3 rounded-lg transition-colors text-gray-600 hover:bg-gray-50"
+                >
+                  DevNet Debug
                 </button>
 
                 {/* Divider */}

@@ -29,6 +29,8 @@ export interface IPFSMedia {
   backupUrls: string[];
   provider: string;
   transactionId?: string;
+  cameraId?: string;
+  directUrl?: string;
 }
 
 export class IPFSService {
@@ -43,7 +45,12 @@ export class IPFSService {
     this.backupProvider = provider;
   }
 
-  async uploadFile(blob: Blob, walletAddress: string, type: 'image' | 'video'): Promise<IPFSMedia[]> {
+  async uploadFile(
+    blob: Blob, 
+    walletAddress: string, 
+    type: 'image' | 'video', 
+    options?: { directUrl?: string }
+  ): Promise<IPFSMedia[]> {
     if (!this.primaryProvider) {
       throw new Error('No primary provider configured');
     }
@@ -53,15 +60,26 @@ export class IPFSService {
       const url = await this.primaryProvider.uploadFile(blob, walletAddress, type);
       const ipfsHash = url.split('/').pop()!;
       
+      // Get backup URLs
+      const backupUrls = this.getBackupUrls(ipfsHash);
+      
+      // Add direct URL as the first backup URL if provided (useful for videos)
+      if (options?.directUrl && type === 'video') {
+        if (!backupUrls.includes(options.directUrl)) {
+          backupUrls.unshift(options.directUrl);
+        }
+      }
+      
       return [{
         id: ipfsHash,
         url,
         type,
-        mimeType: type === 'video' ? 'video/mp4' : 'image/jpeg',
+        mimeType: type === 'video' ? 'video/quicktime' : 'image/jpeg',
         walletAddress,
         timestamp: new Date().toISOString(),
-        backupUrls: this.getBackupUrls(ipfsHash),
-        provider: this.primaryProvider.name
+        backupUrls,
+        provider: this.primaryProvider.name,
+        directUrl: options?.directUrl
       }];
     } catch (error) {
       console.error(`Failed to upload to primary provider:`, error);
@@ -72,15 +90,26 @@ export class IPFSService {
           const url = await this.backupProvider.uploadFile(blob, walletAddress, type);
           const ipfsHash = url.split('/').pop()!;
           
+          // Get backup URLs
+          const backupUrls = this.getBackupUrls(ipfsHash);
+          
+          // Add direct URL as the first backup URL if provided (useful for videos)
+          if (options?.directUrl && type === 'video') {
+            if (!backupUrls.includes(options.directUrl)) {
+              backupUrls.unshift(options.directUrl);
+            }
+          }
+          
           return [{
             id: ipfsHash,
             url,
             type,
-            mimeType: type === 'video' ? 'video/mp4' : 'image/jpeg',
+            mimeType: type === 'video' ? 'video/quicktime' : 'image/jpeg',
             walletAddress,
             timestamp: new Date().toISOString(),
-            backupUrls: this.getBackupUrls(ipfsHash),
-            provider: this.backupProvider.name
+            backupUrls,
+            provider: this.backupProvider.name,
+            directUrl: options?.directUrl
           }];
         } catch (backupError) {
           console.error(`Failed to upload to backup provider:`, backupError);

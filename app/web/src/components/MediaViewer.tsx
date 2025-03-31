@@ -2,6 +2,7 @@ import { Dialog } from '@headlessui/react';
 import { X, ArrowUpRight } from 'lucide-react';
 import { IPFSMedia } from '../services/ipfs-service';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
+import { useState } from 'react';
 
 // Copy the necessary types
 type TimelineEventType =
@@ -26,6 +27,7 @@ interface TimelineEvent {
   timestamp: number;
   transactionId?: string;
   mediaUrl?: string;
+  cameraId?: string;
 }
 
 interface MediaViewerProps {
@@ -37,10 +39,23 @@ interface MediaViewerProps {
 
 export default function MediaViewer({ isOpen, onClose, media, event }: MediaViewerProps) {
   const { user } = useDynamicContext();
-  console.log('MediaViewer received media:', media);
-  console.log('Transaction ID in MediaViewer:', media?.transactionId);
+  const [currentVideoUrl, setCurrentVideoUrl] = useState('');
+  const [videoErrorCount, setVideoErrorCount] = useState(0);
 
   if (!media) return null;
+
+  // Add debugging for video media
+  if (media.type === 'video' && !currentVideoUrl) {
+    console.log('Video details:', {
+      url: media.url,
+      mimeType: media.mimeType,
+      backupUrls: media.backupUrls,
+      directUrl: media.directUrl
+    });
+    
+    // Initialize with the best URL
+    setCurrentVideoUrl(media.directUrl || media.url);
+  }
 
   // Get Farcaster identity from user's verified credentials
   const farcasterCred = user?.verifiedCredentials?.find(cred => 
@@ -87,11 +102,36 @@ export default function MediaViewer({ isOpen, onClose, media, event }: MediaView
             <div className="w-full">
               {media.type === 'video' ? (
                 <video
-                  src={media.url}
+                  src={currentVideoUrl || media.url}
                   className="w-full max-h-[60vh] object-contain"
                   controls
                   autoPlay
                   playsInline
+                  onError={(e) => {
+                    const video = e.currentTarget;
+                    console.error(`Video error loading ${video.src} (attempt ${videoErrorCount + 1})`);
+                    
+                    // Try to find the next URL to try
+                    const allUrls = [
+                      media.directUrl, 
+                      ...media.backupUrls, 
+                      media.url
+                    ].filter(Boolean) as string[];
+                    
+                    // Find the current URL's index
+                    const currentIndex = allUrls.indexOf(currentVideoUrl || media.url);
+                    const nextIndex = (currentIndex + 1) % allUrls.length;
+                    
+                    // Try the next URL if we haven't cycled through all options yet
+                    if (nextIndex !== currentIndex && videoErrorCount < allUrls.length) {
+                      const nextUrl = allUrls[nextIndex];
+                      console.log(`Trying alternative URL (${videoErrorCount + 1}/${allUrls.length}): ${nextUrl}`);
+                      setCurrentVideoUrl(nextUrl);
+                      setVideoErrorCount(prev => prev + 1);
+                    } else {
+                      console.error("All video URLs failed to load");
+                    }
+                  }}
                 />
               ) : (
                 <img
@@ -129,39 +169,45 @@ export default function MediaViewer({ isOpen, onClose, media, event }: MediaView
               <div>
                 <div className="text-[13px] font-medium text-gray-900">Action</div>
                 <div className="mt-1 bg-gray-50 px-3 py-2 rounded-lg">
-                  <div className="text-sm text-gray-600">Photo Captured</div>
+                  <div className="text-sm text-gray-600">
+                    {event?.type === 'video_recorded' ? 'Video Recorded' : 
+                     event?.type === 'photo_captured' ? 'Photo Captured' : 
+                     event?.type === 'stream_started' ? 'Stream Started' : 
+                     event?.type === 'stream_ended' ? 'Stream Ended' : 'Photo Captured'}
+                  </div>
                   <div className="text-xs text-gray-500 mt-0.5">
                     {new Date(media.timestamp).toLocaleString()}
                   </div>
-                </div>
-              </div>
-
-              {/* Transaction */}
-              <div>
-                <div className="text-[13px] font-medium text-gray-900">Transaction</div>
-                <div className="mt-1 bg-gray-50 px-3 py-2 rounded-lg flex items-center justify-between">
-                  {transactionId ? (
-                    <>
-                      <span className="text-xs font-mono text-gray-600 truncate max-w-[180px]">
-                        {`${transactionId.slice(0, 8)}...${transactionId.slice(-8)}`}
+                  {(event?.cameraId || media.cameraId) && (
+                    <div className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                      <span>Camera: </span>
+                      <span className="font-mono">
+                        {`${(event?.cameraId || media.cameraId || '').slice(0, 4)}...${(event?.cameraId || media.cameraId || '').slice(-4)}`}
                       </span>
-                      <a
-                        href={`https://solscan.io/tx/${transactionId}?cluster=devnet`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
-                      >
-                        View Tx <ArrowUpRight className="w-3 h-3" />
-                      </a>
-                    </>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <div className="animate-pulse w-2 h-2 bg-blue-400 rounded-full"></div>
-                      <span className="text-xs text-gray-500">Processing transaction...</span>
                     </div>
                   )}
                 </div>
               </div>
+
+              {/* Transaction */}
+              {transactionId && (
+                <div>
+                  <div className="text-[13px] font-medium text-gray-900">Transaction</div>
+                  <div className="mt-1 bg-gray-50 px-3 py-2 rounded-lg flex items-center justify-between">
+                    <span className="text-xs font-mono text-gray-600 truncate max-w-[180px]">
+                      {`${transactionId.slice(0, 8)}...${transactionId.slice(-8)}`}
+                    </span>
+                    <a
+                      href={`https://solscan.io/tx/${transactionId}?cluster=devnet`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
+                    >
+                      View Tx <ArrowUpRight className="w-3 h-3" />
+                    </a>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </Dialog.Panel>

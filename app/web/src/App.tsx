@@ -8,6 +8,10 @@ import {
   studioProvider,
 } from "@livepeer/react";
 import { CameraProvider } from './components/CameraProvider';
+import { NotificationProvider } from './components/NotificationProvider';
+import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
+import { PublicKey, clusterApiUrl } from '@solana/web3.js';
+import { CONFIG } from './config';
 
 function App() {
   // Create Livepeer client with studio provider
@@ -17,26 +21,35 @@ function App() {
     }),
   });
 
+  // Set up Solana connection
+  const endpoint = CONFIG.rpcEndpoint;
+
   return (
-    <LivepeerConfig client={livepeerClient}>
-      <DynamicContextProvider
-        settings={{
-          environmentId: "93e6248c-4446-4f78-837d-fedf6391d174",
-          walletConnectors: [SolanaWalletConnectors],
-          // Show both Phantom wallet and social logins
-          walletsFilter: (wallets: WalletOption[]) => {
-            const phantomWallet = wallets.find(w => w.name.toLowerCase() === 'phantom');
-            return phantomWallet ? [phantomWallet] : [];
-          }
-        }}
-      >
-        <CameraProvider>
-          <BrowserRouter>
-            <MainContent />
-          </BrowserRouter>
-        </CameraProvider>
-      </DynamicContextProvider>
-    </LivepeerConfig>
+    <ConnectionProvider endpoint={endpoint}>
+      <WalletProvider wallets={[]} autoConnect={true}>
+        <LivepeerConfig client={livepeerClient}>
+          <DynamicContextProvider
+            settings={{
+              environmentId: "93e6248c-4446-4f78-837d-fedf6391d174",
+              walletConnectors: [SolanaWalletConnectors],
+              // Show both Phantom wallet and social logins
+              walletsFilter: (wallets: WalletOption[]) => {
+                const phantomWallet = wallets.find(w => w.name.toLowerCase() === 'phantom');
+                return phantomWallet ? [phantomWallet] : [];
+              }
+            }}
+          >
+            <NotificationProvider>
+              <CameraProvider>
+                <BrowserRouter>
+                  <MainContent />
+                </BrowserRouter>
+              </CameraProvider>
+            </NotificationProvider>
+          </DynamicContextProvider>
+        </LivepeerConfig>
+      </WalletProvider>
+    </ConnectionProvider>
   );
 }
 export default App;

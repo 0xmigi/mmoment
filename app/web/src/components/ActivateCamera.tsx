@@ -7,6 +7,7 @@ import { BN } from '@coral-xyz/anchor';
 import { Camera, Loader } from 'lucide-react';
 import { CONFIG } from '../config';
 import { unifiedIpfsService } from '../services/unified-ipfs-service';
+import { useCamera } from './CameraProvider';
 
 interface ActivateCameraProps {
   onCameraUpdate?: (params: { address: string; isLive: boolean }) => void;
@@ -19,7 +20,7 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
   ({ onCameraUpdate, onInitialize, onPhotoCapture, onStatusUpdate }, ref) => {
     const { primaryWallet } = useDynamicContext();
     useConnection();
-    const program = useProgram();
+    const { program } = useProgram();
     const [loading, setLoading] = useState(false);
     const [, setShowTooltip] = useState(false);
     const buttonRef = useRef<HTMLButtonElement>(null);
@@ -35,57 +36,13 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
       localStorage.setItem('cameraKeypair', JSON.stringify(Array.from(newKeypair.secretKey)));
       return newKeypair;
     });
-    
-    const [isInitialized, setIsInitialized] = useState(false);
-
-    // Check initialization when wallet connects
-    useEffect(() => {
-      const checkInitialization = async () => {
-        if (!primaryWallet?.address || !program) return;
-
-        try {
-          const account = await program.account.cameraAccount.fetch(cameraKeypair.publicKey);
-          setIsInitialized(!!account);
-          if (account) {
-            onCameraUpdate?.({
-              address: cameraKeypair.publicKey.toString(),
-              isLive: true
-            });
-          }
-        } catch {
-          // Account doesn't exist, need to initialize
-          try {
-            onStatusUpdate?.({ type: 'info', message: 'Initializing camera...' });
-            await program.methods.initialize()
-              .accounts({
-                cameraAccount: cameraKeypair.publicKey,
-                user: new PublicKey(primaryWallet.address),
-                systemProgram: SystemProgram.programId,
-              })
-              .signers([cameraKeypair])
-              .rpc();
-
-            setIsInitialized(true);
-            onCameraUpdate?.({
-              address: cameraKeypair.publicKey.toString(),
-              isLive: true
-            });
-            onInitialize?.();
-          } catch (error) {
-            onStatusUpdate?.({ type: 'error', message: `Failed to initialize: ${error}` });
-          }
-        }
-      };
-
-      checkInitialization();
-    }, [primaryWallet?.address, program]);
 
     useImperativeHandle(ref, () => ({
       handleTakePicture
     }));
 
     const handleTakePicture = async () => {
-      if (!primaryWallet?.address || !program || !isInitialized) return;
+      if (!primaryWallet?.address || !program) return;
       setLoading(true);
 
       try {
@@ -143,13 +100,23 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
       }
     };
 
+    const handlePhotoClick = () => {
+      console.log("PHOTO BUTTON CLICKED IN COMPONENT - direct handler");
+      if (onPhotoCapture) {
+        onPhotoCapture();
+      } else {
+        console.error("No photo capture callback provided");
+        onStatusUpdate?.({ type: 'error', message: 'Photo capture callback not configured' });
+      }
+    };
+
     return (
       <button
         ref={buttonRef}
-        onClick={() => onPhotoCapture?.()}
+        onClick={handlePhotoClick}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
-        disabled={loading || !primaryWallet?.address || !isInitialized}
+        disabled={loading || !primaryWallet?.address}
         className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-gray-800 transition-colors rounded-xl"
       >
         {loading ? (

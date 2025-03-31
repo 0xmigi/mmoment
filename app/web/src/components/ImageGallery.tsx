@@ -8,9 +8,10 @@ import { IPFSMedia } from '../services/ipfs-service';
 interface MediaGalleryProps {
   mode?: 'recent' | 'archive';
   maxRecentItems?: number;
+  cameraId?: string;
 }
 
-export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: MediaGalleryProps) {
+export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, cameraId }: MediaGalleryProps) {
   const { primaryWallet } = useDynamicContext();
   const [media, setMedia] = useState<IPFSMedia[]>([]);
   const [loading, setLoading] = useState(true);
@@ -21,6 +22,48 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
 
   // Add click handler for media items
   const handleMediaClick = (media: IPFSMedia) => {
+    // Debug logging for transaction IDs
+    console.log("Viewing media with transaction ID:", media.transactionId || "none");
+    
+    // Access recent timeline events to find matching transaction ID if not in media
+    if (!media.transactionId) {
+      try {
+        // First check our transaction storage
+        const mediaTransactionsKey = `mediaTransactions_${media.walletAddress}`;
+        const storedTransactions = localStorage.getItem(mediaTransactionsKey);
+        
+        if (storedTransactions) {
+          const transactions = JSON.parse(storedTransactions);
+          if (transactions[media.id]) {
+            console.log("Found transaction ID in storage:", transactions[media.id].transactionId);
+            media.transactionId = transactions[media.id].transactionId;
+            media.cameraId = transactions[media.id].cameraId;
+          }
+        }
+        
+        // If still no transaction, check timeline events
+        if (!media.transactionId) {
+          const storedEvents = localStorage.getItem('timelineEvents');
+          if (storedEvents) {
+            const events = JSON.parse(storedEvents);
+            // Try to find a matching event by looking at the media URL or ID
+            const matchingEvent = events.find((event: any) => 
+              (event.mediaUrl && event.mediaUrl.includes(media.id)) ||
+              (media.url && event.mediaUrl && media.url.includes(event.mediaUrl))
+            );
+            
+            if (matchingEvent && matchingEvent.transactionId) {
+              console.log("Found matching transaction ID from timeline:", matchingEvent.transactionId);
+              media.transactionId = matchingEvent.transactionId;
+              media.cameraId = matchingEvent.cameraId;
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Error looking up transaction ID:", e);
+      }
+    }
+    
     setSelectedMedia(media);
     setIsViewerOpen(true);
   };
@@ -55,12 +98,28 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
           new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
         );
 
+        // Filter by cameraId if provided
+        let cameraFilteredMedia = sortedMedia;
+        if (cameraId) {
+          // The IPFSMedia object doesn't have a cameraId property directly
+          // As a temporary solution, check if the cameraId is in the URL or ID
+          cameraFilteredMedia = sortedMedia.filter(item => {
+            // Very simple check - if cameraId is in the URL or ID
+            const isRelatedToCamera = 
+              (item.url && item.url.includes(cameraId)) || 
+              (item.id && item.id.includes(cameraId));
+            
+            // If camera selected, include all media as fallback for now
+            return cameraId ? true : isRelatedToCamera;
+          });
+        }
+
         // Filter based on mode
         let filteredMedia;
         if (mode === 'recent') {
-          filteredMedia = sortedMedia.slice(0, maxRecentItems);
+          filteredMedia = cameraFilteredMedia.slice(0, maxRecentItems);
         } else {
-          filteredMedia = sortedMedia.slice(maxRecentItems);
+          filteredMedia = cameraFilteredMedia.slice(maxRecentItems);
         }
 
         setMedia(filteredMedia);
@@ -93,7 +152,7 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5 }: Me
       isSubscribed = false;
       clearInterval(interval);
     };
-  }, [primaryWallet?.address, mode, maxRecentItems]);
+  }, [primaryWallet?.address, mode, maxRecentItems, cameraId]);
 
   const handleDelete = async (mediaId: string) => {
     if (!primaryWallet?.address) return;

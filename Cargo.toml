@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "programs/my_solana_project",
+    "programs/camera-activation",
 ]
 resolver = "2"
 

@@ -2,12 +2,18 @@ import { useDynamicContext, useEmbeddedWallet } from '@dynamic-labs/sdk-react-co
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { User, Copy, Check } from 'lucide-react';
+import { CameraRegistry } from '../CameraRegistry';
 
 interface FarcasterCredential {
   oauthProvider: string;
   oauthUsername: string;
   oauthDisplayName: string;
   oauthAccountPhotos: string[];
+}
+
+interface StatusMessage {
+  type: 'success' | 'error' | 'info';
+  message: string;
 }
 
 export function AccountPage() {
@@ -18,6 +24,7 @@ export function AccountPage() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [showBackupOptions, setShowBackupOptions] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null);
 
   const handleSignOut = async () => {
     try {
@@ -56,6 +63,12 @@ export function AccountPage() {
     }
   };
 
+  const handleStatusUpdate = (status: StatusMessage) => {
+    setStatusMessage(status);
+    // Auto-clear status messages after 5 seconds
+    setTimeout(() => setStatusMessage(null), 5000);
+  };
+
   if (!primaryWallet?.address) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -79,6 +92,17 @@ export function AccountPage() {
         <div className="bg-white rounded-lg mb-6">
           <h1 className="text-xl font-semibold">Account</h1>
         </div>
+
+        {/* Status Message */}
+        {statusMessage && (
+          <div className={`mb-4 p-3 rounded-lg ${
+            statusMessage.type === 'success' ? 'bg-green-50 text-green-700' : 
+            statusMessage.type === 'error' ? 'bg-red-50 text-red-700' : 
+            'bg-blue-50 text-blue-700'
+          }`}>
+            <p>{statusMessage.message}</p>
+          </div>
+        )}
 
         {/* Account Details */}
         <div className="space-y-3">
@@ -112,6 +136,9 @@ export function AccountPage() {
               </div>
             </div>
           </div>
+
+          {/* Camera Registry Section */}
+          <CameraRegistry />
 
           {/* Linked Identities Section */}
           <div className="bg-gray-50 rounded-xl px-4 py-4">
