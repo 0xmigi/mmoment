@@ -13,7 +13,7 @@ export const StreamControls = ({ onStreamToggle }: StreamControlsProps) => {
     const [isStreaming, setIsStreaming] = useState(false);
     const [isLoading] = useState(false);
     const { isInitialized, loading: initLoading } = useCamera();
-    const { primaryWallet } = useDynamicContext();
+    useDynamicContext();
 
     useEffect(() => {
         const unsubscribe = cameraStatus.subscribe(({ isStreaming: streaming }) => {

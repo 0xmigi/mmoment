@@ -4,11 +4,11 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { motion } from 'framer-motion';
-import { useCamera, CameraData } from './CameraProvider';
+import { useCamera, CameraData, fetchCameraByPublicKey } from './CameraProvider';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { DynamicWidget } from '@dynamic-labs/sdk-react-core';
-import { PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
-import { Program, AnchorProvider, BN } from '@coral-xyz/anchor';
+import { PublicKey, Transaction } from '@solana/web3.js';
+import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import { CAMERA_ACTIVATION_PROGRAM_ID } from '../anchor/setup';
 import { IDL, MySolanaProject } from '../anchor/idl';
 import { isSolanaWallet } from '@dynamic-labs/solana';
@@ -19,9 +19,10 @@ interface CameraState {
   recentActivity: number;
 }
 
+
 export default function QuickStartView() {
-  const { cameraId, sessionId, timestamp } = useParams<{ cameraId: string; sessionId: string; timestamp: string }>();
-  const { connected } = useWallet();
+  const { cameraId, timestamp } = useParams<{ cameraId: string; sessionId: string; timestamp: string }>();
+  useWallet();
   const { connection } = useConnection();
   const { primaryWallet } = useDynamicContext();
   const { setSelectedCamera } = useCamera();
@@ -90,100 +91,6 @@ export default function QuickStartView() {
     return sessionAge < 300000;
   };
   
-  // Fetch camera by public key directly using the program
-  const fetchCameraByPublicKey = async (publicKeyStr: string): Promise<CameraData | null> => {
-    if (!program) {
-      console.error('Program not available');
-      return null;
-    }
-
-    try {
-      console.log(`Fetching camera with public key: "${publicKeyStr}"`);
-      
-      // Validate the public key format
-      let publicKey;
-      try {
-        publicKey = new PublicKey(publicKeyStr);
-        console.log('Valid public key format:', publicKey.toString());
-      } catch (err) {
-        console.error('Invalid public key format:', err);
-        return null;
-      }
-      
-      // Get all camera accounts to help with debugging
-      const allCameraAccounts = await program.account.cameraAccount.all();
-      console.log(`Found ${allCameraAccounts.length} total camera accounts`);
-      console.log('Available camera public keys:');
-      allCameraAccounts.forEach(account => {
-        console.log(`- ${account.publicKey.toString()}`);
-      });
-      
-      // Fetch the specific account
-      try {
-        console.log(`Attempting to fetch account data for: ${publicKey.toString()}`);
-        const cameraAccount = await program.account.cameraAccount.fetch(publicKey);
-        console.log('Found camera account:', cameraAccount);
-        
-        // Format the camera data
-        const formattedCamera = {
-          publicKey: publicKeyStr,
-          owner: cameraAccount.owner.toString(),
-          cameraId: cameraAccount.cameraId,
-          isActive: cameraAccount.isActive,
-          metadata: {
-            name: cameraAccount.metadata.name,
-            model: cameraAccount.metadata.model,
-            registrationDate: cameraAccount.metadata.registrationDate.toNumber(),
-            lastActivity: cameraAccount.metadata.lastActivity.toNumber(),
-            location: cameraAccount.metadata.location ? 
-              [cameraAccount.metadata.location[0].toNumber(), cameraAccount.metadata.location[1].toNumber()] as [number, number] : 
-              null
-          }
-        };
-        
-        console.log('Formatted camera data:', formattedCamera);
-        return formattedCamera;
-      } catch (err) {
-        console.error('Error fetching camera account:', err);
-        
-        // Check if any of the camera accounts have a matching cameraId field
-        console.log('Checking if any camera has a matching cameraId field...');
-        const matchingCamera = allCameraAccounts.find(account => 
-          account.account.cameraId === publicKeyStr
-        );
-        
-        if (matchingCamera) {
-          console.log(`Found camera with cameraId matching the provided public key: ${matchingCamera.publicKey.toString()}`);
-          // Format the camera data
-          const data = matchingCamera.account;
-          const formattedCamera = {
-            publicKey: matchingCamera.publicKey.toString(),
-            owner: data.owner.toString(),
-            cameraId: data.cameraId,
-            isActive: data.isActive,
-            metadata: {
-              name: data.metadata.name,
-              model: data.metadata.model,
-              registrationDate: data.metadata.registrationDate.toNumber(),
-              lastActivity: data.metadata.lastActivity.toNumber(),
-              location: data.metadata.location ? 
-                [data.metadata.location[0].toNumber(), data.metadata.location[1].toNumber()] as [number, number] : 
-                null
-            }
-          };
-          
-          console.log('Formatted camera data:', formattedCamera);
-          return formattedCamera;
-        }
-        
-        return null;
-      }
-    } catch (err) {
-      console.error('Error with public key format:', err);
-      return null;
-    }
-  };
-  
   // Fetch camera state
   useEffect(() => {
     const fetchCameraState = async () => {
@@ -221,7 +128,7 @@ export default function QuickStartView() {
           
           // Try to fetch the camera using its public key
           try {
-            const cameraData = await fetchCameraByPublicKey(decodedPublicKey);
+            const cameraData = await fetchCameraByPublicKey(decodedPublicKey, connection);
             if (cameraData) {
               console.log(`Successfully loaded camera: ${cameraData.metadata.name} (${cameraData.publicKey})`);
               // Store the camera in the provider for later use
@@ -265,7 +172,7 @@ export default function QuickStartView() {
     };
     
     fetchCameraState();
-  }, [cameraId, program, programLoading, programError, timestamp, setSelectedCamera]);
+  }, [cameraId, program, programLoading, programError, timestamp, setSelectedCamera, connection]);
 
   const handleQuickStart = async () => {
     if (!primaryWallet) {

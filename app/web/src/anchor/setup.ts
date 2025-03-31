@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { AnchorProvider, Program, Idl } from '@coral-xyz/anchor';
-import { PublicKey, Connection, Transaction } from '@solana/web3.js';
+import { AnchorProvider, Program } from '@coral-xyz/anchor';
+import { PublicKey, Transaction } from '@solana/web3.js';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { isSolanaWallet } from '@dynamic-labs/solana';
 import { IDL, MySolanaProject } from './idl';
-import { CONFIG } from '../config';
 
 // Program ID on devnet
 export const CAMERA_ACTIVATION_PROGRAM_ID = new PublicKey('7BYuxsNyaxxsxwzcRzFd6UJGnUctN6V1vDQxjGPaK2L4');

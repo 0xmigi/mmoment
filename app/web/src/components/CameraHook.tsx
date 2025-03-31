@@ -5,7 +5,7 @@ import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 
 export function useCameraInit() {
   const { primaryWallet } = useDynamicContext();
-  const program = useProgram();
+  const { program } = useProgram();
   const [isInitialized, setIsInitialized] = useState(false);
   const [cameraAccount] = useState(() => {
     // Store keypair in localStorage to persist across refreshes
@@ -35,10 +35,17 @@ export function useCameraInit() {
       } catch {
         // Account doesn't exist, need to initialize
         try {
-          await program.methods.initialize()
+          // Use recordActivity instead of initialize since initialize is not in the IDL
+          await program.methods.recordActivity({
+            activityType: { photoCapture: {} },
+            metadata: JSON.stringify({
+              timestamp: new Date().toISOString(),
+              action: 'initialization'
+            })
+          })
             .accounts({
-              cameraAccount: cameraAccount.publicKey,
-              user: new PublicKey(primaryWallet.address),
+              owner: new PublicKey(primaryWallet.address),
+              camera: cameraAccount.publicKey,
               systemProgram: SystemProgram.programId,
             })
             .signers([cameraAccount])
@@ -52,7 +59,7 @@ export function useCameraInit() {
     };
 
     checkInitialization();
-  }, [primaryWallet?.address, program]);
+  }, [primaryWallet?.address, program, cameraAccount]);
 
   return {
     isInitialized,

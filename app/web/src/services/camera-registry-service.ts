@@ -1,7 +1,6 @@
-import { AnchorProvider, BN, Program, Idl } from '@coral-xyz/anchor';
+import { BN, Program, Idl } from '@coral-xyz/anchor';
 import { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
 import { CONFIG } from '../config';
-import { IDL } from '../anchor/idl';
 
 // Simple request management
 const THROTTLE_MS = 1000; // Reduced from 5000ms to 1000ms
@@ -274,17 +273,17 @@ export class CameraRegistryService {
           if (!account) return null;
 
           return {
-            owner: account.owner || owner,
-            cameraId: account.cameraId || cameraId,
+            owner: account.owner as PublicKey,
+            cameraId: account.cameraId as string || cameraId,
             isActive: !!account.isActive,
             metadata: {
-              name: account.metadata?.name || '',
-              model: account.metadata?.model || '',
-              registrationDate: account.metadata?.registrationDate?.toNumber() || 0,
-              lastActivity: account.metadata?.lastActivity?.toNumber() || 0,
-              location: account.metadata?.location || undefined
+              name: (account.metadata as any)?.name || '',
+              model: (account.metadata as any)?.model || '',
+              registrationDate: (account.metadata as any)?.registrationDate?.toNumber() || 0,
+              lastActivity: (account.metadata as any)?.lastActivity?.toNumber() || 0,
+              location: (account.metadata as any)?.location || undefined
             },
-            bump: account.bump || 0
+            bump: account.bump as number || 0
           };
         } catch (e) {
           return null;
@@ -420,17 +419,14 @@ export class CameraRegistryService {
     cameraId: string,
     name: string,
     model: string,
-    location?: [number, number],
-    connection?: Connection
-  ): Promise<string | null> {
+    location?: [number, number]  ): Promise<string | null> {
     try {
       console.log('Direct register camera:', { owner: owner.toString(), cameraId, name, model });
       
       // Use provided connection or create a new one
-      const conn = connection || new Connection('https://api.devnet.solana.com', 'confirmed');
       
       // Find the camera PDA
-      const [cameraAddress, cameraBump] = await this.findCameraAddress(cameraId, owner);
+      const [cameraAddress] = await this.findCameraAddress(cameraId, owner);
       console.log('Camera address:', cameraAddress.toString());
       
       // Find the registry PDA
@@ -500,14 +496,11 @@ export class CameraRegistryService {
   public async directSetCameraActive(
     owner: PublicKey,
     cameraId: string,
-    isActive: boolean,
-    connection?: Connection
-  ): Promise<string | null> {
+    isActive: boolean  ): Promise<string | null> {
     try {
       console.log('Direct set camera active:', { owner: owner.toString(), cameraId, isActive });
       
       // Use provided connection or create a new one
-      const conn = connection || new Connection('https://api.devnet.solana.com', 'confirmed');
       
       // Find the camera PDA
       const [cameraAddress] = await this.findCameraAddress(cameraId, owner);
@@ -550,14 +543,11 @@ export class CameraRegistryService {
     owner: PublicKey,
     cameraId: string,
     activityType: ActivityType,
-    metadata: string,
-    connection?: Connection
-  ): Promise<string | null> {
+    metadata: string  ): Promise<string | null> {
     try {
       console.log('Direct record activity:', { owner: owner.toString(), cameraId, activityType, metadata });
       
       // Use provided connection or create a new one
-      const conn = connection || new Connection('https://api.devnet.solana.com', 'confirmed');
       
       // Find the camera PDA
       const [cameraAddress] = await this.findCameraAddress(cameraId, owner);
@@ -567,7 +557,7 @@ export class CameraRegistryService {
       const activityId = `activity_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
       
       // Find the activity PDA
-      const [activityAddress, activityBump] = await PublicKey.findProgramAddress(
+      const [activityAddress] = await PublicKey.findProgramAddress(
         [
           Buffer.from('activity'),
           Buffer.from(activityId),
@@ -625,6 +615,46 @@ export class CameraRegistryService {
     } catch (error) {
       console.error('Error in directRecordActivity:', error);
       return null;
+    }
+  }
+
+  // Add the getCamerasByOwner method to the CameraRegistryService class
+  public async getCamerasByOwner(owner: PublicKey): Promise<CameraAccount[]> {
+    if (!this.ensureInitialized()) {
+      return [];
+    }
+
+    try {
+      return await withRetry(async () => {
+        // @ts-ignore
+        const accounts = await this.program?.account.cameraAccount.all([
+          {
+            memcmp: {
+              offset: 8, // After discriminator
+              bytes: owner.toBase58()
+            }
+          }
+        ]);
+
+        if (!accounts) return [];
+
+        return accounts.map(a => ({
+          owner: a.account.owner as PublicKey,
+          cameraId: a.account.cameraId as string || '',
+          isActive: !!a.account.isActive,
+          metadata: {
+            name: (a.account.metadata as any)?.name || '',
+            model: (a.account.metadata as any)?.model || '',
+            registrationDate: (a.account.metadata as any)?.registrationDate?.toNumber() || 0,
+            lastActivity: (a.account.metadata as any)?.lastActivity?.toNumber() || 0,
+            location: (a.account.metadata as any)?.location || undefined
+          },
+          bump: a.account.bump as number || 0
+        }));
+      }) || [];
+    } catch (error) {
+      console.error('Error fetching cameras by owner:', error);
+      return [];
     }
   }
 }

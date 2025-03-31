@@ -24,7 +24,7 @@ export function AccountPage() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [showBackupOptions, setShowBackupOptions] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null);
+  const [statusMessage] = useState<StatusMessage | null>(null);
 
   const handleSignOut = async () => {
     try {
@@ -61,12 +61,6 @@ export function AccountPage() {
     } catch (err) {
       console.error('Failed to copy address:', err);
     }
-  };
-
-  const handleStatusUpdate = (status: StatusMessage) => {
-    setStatusMessage(status);
-    // Auto-clear status messages after 5 seconds
-    setTimeout(() => setStatusMessage(null), 5000);
   };
 
   if (!primaryWallet?.address) {

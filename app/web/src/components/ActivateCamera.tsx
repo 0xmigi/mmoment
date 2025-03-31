@@ -1,13 +1,11 @@
-import { useState, forwardRef, useImperativeHandle, useRef, useEffect } from 'react';
+import { useState, forwardRef, useImperativeHandle, useRef } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { useProgram } from '../anchor/setup';
 import { SystemProgram, Keypair, PublicKey } from '@solana/web3.js';
-import { BN } from '@coral-xyz/anchor';
 import { Camera, Loader } from 'lucide-react';
 import { CONFIG } from '../config';
 import { unifiedIpfsService } from '../services/unified-ipfs-service';
-import { useCamera } from './CameraProvider';
 
 interface ActivateCameraProps {
   onCameraUpdate?: (params: { address: string; isLive: boolean }) => void;
@@ -17,7 +15,7 @@ interface ActivateCameraProps {
 }
 
 export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void> }, ActivateCameraProps>(
-  ({ onCameraUpdate, onInitialize, onPhotoCapture, onStatusUpdate }, ref) => {
+  ({ onPhotoCapture, onStatusUpdate }, ref) => {
     const { primaryWallet } = useDynamicContext();
     useConnection();
     const { program } = useProgram();
@@ -46,14 +44,23 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
       setLoading(true);
 
       try {
-        onStatusUpdate?.({ type: 'info', message: 'Activating camera...' });
-        await program.methods.activateCamera(new BN(100))
-          .accounts({
-            cameraAccount: cameraKeypair.publicKey,
-            user: new PublicKey(primaryWallet.address),
-            systemProgram: SystemProgram.programId,
+        onStatusUpdate?.({ type: 'info', message: 'Recording camera activity...' });
+        
+        // Use recordActivity instead of activateCamera
+        await program.methods.recordActivity({
+          activityType: { photoCapture: {} },
+          metadata: JSON.stringify({
+            timestamp: new Date().toISOString(),
+            action: 'photo',
+            device: 'web'
           })
-          .rpc();
+        })
+        .accounts({
+          owner: new PublicKey(primaryWallet.address),
+          camera: cameraKeypair.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
 
         onStatusUpdate?.({ type: 'info', message: 'Taking picture...' });
         const apiUrl = `${CONFIG.CAMERA_API_URL}/api/capture`;

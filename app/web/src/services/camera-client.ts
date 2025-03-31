@@ -3,11 +3,10 @@ import { Program } from '@coral-xyz/anchor';
 import { 
   PublicKey, 
   Connection, 
-  Keypair, 
-  SystemProgram,
-  Transaction
+  SystemProgram
 } from '@solana/web3.js';
-import { CameraActivation } from '../target/types/camera_activation';
+// Define type instead of importing
+type CameraActivation = any;
 import { BN } from 'bn.js';
 
 export class CameraClient {

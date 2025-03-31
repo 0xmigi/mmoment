@@ -39,23 +39,6 @@ const getNextEndpoint = () => {
 const rpcEndpoint = cluster === 'localnet' ? 'http://localhost:8899' : devnetEndpoints[0];
 
 // Get the appropriate API URL based on environment
-const getApiUrl = async (): Promise<string> => {
-  if (isProduction) {
-    return "https://middleware.mmoment.xyz";
-  }
-  // In development, check if we're running the middleware locally
-  const localApi = "http://localhost:5002"; // Using middleware port (5002)
-  try {
-    await fetch(`${localApi}/api/health`, { 
-      method: 'HEAD',
-      headers: { 'Cache-Control': 'no-cache' }
-    });
-    return localApi;
-  } catch {
-    // If not running locally, use the middleware domain
-    return "https://middleware.mmoment.xyz";
-  }
-};
 
 // Get WebSocket URL based on environment and protocol
 const getWebSocketUrl = () => {

@@ -10,7 +10,6 @@ import {
 import { CameraProvider } from './components/CameraProvider';
 import { NotificationProvider } from './components/NotificationProvider';
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
-import { PublicKey, clusterApiUrl } from '@solana/web3.js';
 import { CONFIG } from './config';
 
 function App() {

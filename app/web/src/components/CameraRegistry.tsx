@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNotifications } from './NotificationProvider';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useCamera } from '../components/CameraProvider';
@@ -13,7 +13,7 @@ interface CameraRegistryProps {
 export function CameraRegistry({ onStatusUpdate }: CameraRegistryProps) {
   const { primaryWallet } = useDynamicContext();
   const { cameraKeypair } = useCamera();
-  const { program } = useProgram();
+  useProgram();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cameraData, setCameraData] = useState<CameraAccount | null>(null);

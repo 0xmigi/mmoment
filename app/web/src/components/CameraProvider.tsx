@@ -1,9 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { useConnection } from '@solana/wallet-adapter-react';
-import { Keypair, PublicKey, SystemProgram, Connection } from '@solana/web3.js';
+import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 import { Program, AnchorProvider } from '@coral-xyz/anchor';
-import { MySolanaProject, IDL } from '../anchor/idl';
+import { IDL } from '../anchor/idl';
 import { isSolanaWallet } from '@dynamic-labs/solana';
 import { CAMERA_ACTIVATION_PROGRAM_ID, useProgram } from '../anchor/setup';
 
@@ -12,26 +11,6 @@ const accountInfoCache = new Map<string, { data: any, timestamp: number }>();
 const CACHE_TTL = 30000; // 30 seconds
 
 // Helper to get account info with caching
-async function getCachedAccountInfo(connection: Connection, pubkey: PublicKey) {
-  const key = pubkey.toString();
-  const now = Date.now();
-  const cached = accountInfoCache.get(key);
-  
-  if (cached && now - cached.timestamp < CACHE_TTL) {
-    console.log(`[CameraProvider] Using cached account info for ${key}`);
-    return cached.data;
-  }
-  
-  try {
-    console.log(`[CameraProvider] Fetching fresh account info for ${key}`);
-    const info = await connection.getAccountInfo(pubkey);
-    accountInfoCache.set(key, { data: info, timestamp: now });
-    return info;
-  } catch (error) {
-    console.error('[CameraProvider] Error fetching account info:', error);
-    throw error;
-  }
-}
 
 // Export fetchCameraByPublicKey so it can be imported directly
 export const fetchCameraByPublicKey = async (publicKey: string, connection: any) => {
@@ -151,7 +130,7 @@ const SELECTED_CAMERA_STORAGE_KEY = 'selected_camera';
 
 export function CameraProvider({ children }: { children: React.ReactNode }) {
   const { primaryWallet } = useDynamicContext();
-  const { program, loading: programLoading, error: programError } = useProgram();
+  const { program, loading: programLoading } = useProgram();
   const [isInitialized, setIsInitialized] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -310,10 +289,8 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
       } catch (err) {
         console.log('Registry not initialized, initializing...');
         
-        // Get the signer
-        const signer = await primaryWallet.getSigner();
-        
-        // Initialize the registry
+        // Initialize the registry directly without explicitly using the signer
+        // as the signer will be provided by the AnchorProvider
         const tx = await program.methods.initialize()
           .accounts({
             authority: new PublicKey(primaryWallet.address),
