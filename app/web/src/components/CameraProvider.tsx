@@ -324,6 +324,19 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
     checkInitialization();
   }, [primaryWallet?.address, program, programLoading]);
 
+  // Add effect to clear camera when on default route
+  useEffect(() => {
+    // Check if we're on default route
+    const isDefaultRoute = window.location.pathname === '/app' || window.location.pathname === '/app/';
+    
+    if (isDefaultRoute && selectedCamera) {
+      console.log('[CameraProvider] On default route - clearing selected camera');
+      setSelectedCamera(null);
+      localStorage.removeItem('directCameraId');
+      localStorage.removeItem(SELECTED_CAMERA_STORAGE_KEY);
+    }
+  }, [window.location.pathname, selectedCamera]);
+
   return (
     <CameraContext.Provider 
       value={{

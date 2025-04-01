@@ -16,6 +16,8 @@ import { Transaction } from '@solana/web3.js';
 import { TransactionModal } from '../headless/auth/TransactionModal';
 import { StopCircle, Play, Camera, Video, Loader } from 'lucide-react';
 import { cameraActionService } from '../../services/camera-action-service.js';
+import { useCameraStatus } from '../../hooks/useCameraStatus';
+import { CameraModal } from '../CameraModal';
 
 type TimelineEventType =
   | 'photo_captured'
@@ -43,12 +45,15 @@ interface TransactionResult {
   signature: string;
 }
 
-// Add a wrapper component for the Camera ID display
+// Update the CameraIdDisplay component to show "No camera connected" in red and make it clickable
 const CameraIdDisplay = ({ cameraId, selectedCamera, cameraAccount }: { 
   cameraId: string | undefined; 
   selectedCamera: CameraData | null;
   cameraAccount: string | null;
 }) => {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const cameraStatus = useCameraStatus(selectedCamera?.publicKey || cameraAccount || cameraId || '');
+  
   // Get the direct ID from localStorage if available (most reliable source)
   const directId = localStorage.getItem('directCameraId');
   
@@ -61,22 +66,52 @@ const CameraIdDisplay = ({ cameraId, selectedCamera, cameraAccount }: {
     try {
       return `${id.slice(0, 6)}...${id.slice(-6)}`;
     } catch (e) {
-      return id; // Return full id if we can't slice it
+      return id;
     }
   };
+  
+  // The default camera PDA for development
+  const defaultDevCameraPda = '5onKAv5c6VdBZ8a7D11XqF79Hdzuv3tnysjv4B2pQWZ2';
   
   return (
     <div>
       <h2 className="text-xl font-semibold">Camera</h2>
-      <span className="text-sm text-gray-600">
-        {displayId 
-          ? `id: ${formatId(displayId)}`
-          : 'No Camera Connected'
-        }
-      </span>
+      {!displayId || displayId === 'None' ? (
+        <div 
+          onClick={() => setIsModalOpen(true)}
+          className="text-sm text-red-500 font-medium hover:text-red-600 cursor-pointer"
+        >
+          No camera connected
+        </div>
+      ) : (
+        <div 
+          onClick={() => setIsModalOpen(true)}
+          className="text-sm text-gray-600 hover:text-blue-600 transition-colors cursor-pointer"
+        >
+          id: {formatId(displayId)}
+        </div>
+      )}
+      
+      <CameraModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        camera={{
+          id: displayId && displayId !== 'None' ? displayId : '',
+          owner: selectedCamera?.owner || cameraStatus.owner || '',
+          ownerDisplayName: selectedCamera?.metadata?.name || "newProgramCamera",
+          model: selectedCamera?.metadata?.model || "pi5",
+          isLive: cameraStatus.isLive || false,
+          isStreaming: cameraStatus.isStreaming || false,
+          status: 'ok',
+          activityCounter: selectedCamera?.activityCounter || 226,
+          // Add development info when no camera is connected
+          showDevInfo: !displayId || displayId === 'None',
+          defaultDevCamera: defaultDevCameraPda
+        }}
+      />
     </div>
   );
-}
+};
 
 export function CameraView() {
   const { primaryWallet, user } = useDynamicContext();
@@ -265,11 +300,56 @@ export function CameraView() {
   // Check localStorage for direct camera ID (set by MainContent)
   useEffect(() => {
     const directCameraId = localStorage.getItem('directCameraId');
-    if (directCameraId && !cameraAccount) {
+    const isDefaultRoute = window.location.pathname === '/app' || window.location.pathname === '/app/';
+    
+    // Only load the camera ID from localStorage if explicitly on a camera route
+    // or if we're already connected (cameraAccount exists)
+    if (directCameraId && !cameraAccount && window.location.pathname.includes('/camera/')) {
       console.log(`[CameraView] Found direct camera ID in localStorage: ${directCameraId}`);
       setCameraAccount(directCameraId);
+    } else if (isDefaultRoute) {
+      // If we're on the default /app route with no specific camera, always ensure storage is cleared
+      console.log('[CameraView] On default route - clearing any stored camera ID');
+      localStorage.removeItem('directCameraId');
+      
+      // Force reset of camera state variables
+      if (cameraAccount) setCameraAccount(null);
+      if (selectedCamera) setSelectedCamera(null);
     }
-  }, [cameraAccount]);
+  }, [cameraAccount, selectedCamera, setSelectedCamera]);
+
+  // Debug logging for camera route with fix for paths
+  useEffect(() => {
+    const isDefaultRoute = window.location.pathname === '/app' || window.location.pathname === '/app/';
+    
+    console.log('CameraView Debug:', {
+      cameraIdParam: cameraId,
+      cameraAccount: cameraAccount,
+      selectedCamera: selectedCamera?.publicKey || null,
+      localStorageCamera: localStorage.getItem('directCameraId'),
+      route: window.location.pathname,
+      isDefaultRoute
+    });
+    
+    // Only update localStorage if we have a valid camera ID and are on a camera route
+    if (cameraId) {
+      localStorage.setItem('directCameraId', cameraId);
+    } else if (selectedCamera?.publicKey && window.location.pathname.includes('/camera/')) {
+      localStorage.setItem('directCameraId', selectedCamera.publicKey);
+    } else if (cameraAccount && window.location.pathname.includes('/camera/')) {
+      localStorage.setItem('directCameraId', cameraAccount);
+    } else if (isDefaultRoute) {
+      // Always clear on the default route
+      localStorage.removeItem('directCameraId');
+      
+      // Force reset of all camera state if we're still seeing a camera connection
+      if (cameraAccount || selectedCamera) {
+        console.log('[CameraView] Forcing disconnect on default route');
+        setCameraAccount(null);
+        if (setSelectedCamera) setSelectedCamera(null);
+      }
+    }
+  }, [cameraId, cameraAccount, selectedCamera, setSelectedCamera]);
 
   // Debug logging
   useEffect(() => {
@@ -573,26 +653,6 @@ export function CameraView() {
     }
   };
 
-  // Debug logging for camera route
-  useEffect(() => {
-    console.log('CameraView Debug:', {
-      cameraIdParam: cameraId,
-      cameraAccount: cameraAccount,
-      selectedCamera: selectedCamera?.publicKey || null,
-      localStorageCamera: localStorage.getItem('directCameraId'),
-      route: window.location.pathname
-    });
-    
-    // Ensure localStorage is consistent with current camera ID
-    if (cameraId) {
-      localStorage.setItem('directCameraId', cameraId);
-    } else if (selectedCamera?.publicKey) {
-      localStorage.setItem('directCameraId', selectedCamera.publicKey);
-    } else if (cameraAccount) {
-      localStorage.setItem('directCameraId', cameraAccount);
-    }
-  }, [cameraId, cameraAccount, selectedCamera]);
-
   return (
     <>
       <div className="h-full overflow-y-auto pb-40">
@@ -708,7 +768,19 @@ export function CameraView() {
           <div className="max-w-3xl mt-6 mx-auto flex flex-col justify-top relative">
             <div className="relative mb-40">
               <div className="flex pl-6 items-center gap-2">
-                {!isLive ? (
+                {!cameraId && !cameraAccount && !selectedCamera ? (
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-3 w-3 -ml-1">
+                      {/* Proper prohibited symbol (🚫) */}
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-white border border-gray-400"></span>
+                      <span className="absolute inset-0 flex items-center justify-center">
+                        <span className="h-[1.5px] w-2 bg-gray-500 rotate-45 absolute"></span>
+                        <span className="h-[1.5px] w-2 bg-gray-500 -rotate-45 absolute"></span>
+                      </span>
+                    </span>
+                    <span className="text-gray-500 font-medium">Disconnected</span>
+                  </div>
+                ) : !isLive ? (
                   <div className="flex items-center gap-2">
                     <span className="relative flex h-3 w-3 -ml-1">
                       <span className="relative inline-flex rounded-full h-3 w-3 bg-gray-400"></span>

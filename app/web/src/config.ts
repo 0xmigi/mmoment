@@ -39,23 +39,33 @@ const getNextEndpoint = () => {
 const rpcEndpoint = cluster === 'localnet' ? 'http://localhost:8899' : devnetEndpoints[0];
 
 // Get the appropriate API URL based on environment
+const getCameraApiUrl = () => {
+  // Always try Cloudflare tunnel first unless explicitly in local development
+  if (isProduction || isCloudflareProxy() || window.location.protocol === 'https:') {
+    return "https://middleware.mmoment.xyz";
+  }
+
+  // Only use localhost if we're explicitly in local development
+  // and have confirmed we need local access (e.g., debugging the Pi directly)
+  const forceLocal = import.meta.env.VITE_FORCE_LOCAL === 'true';
+  if (forceLocal) {
+    console.log('Using local camera API (forced by VITE_FORCE_LOCAL)');
+    return "http://localhost:5002";
+  }
+
+  // Default to Cloudflare tunnel
+  return "https://middleware.mmoment.xyz";
+};
 
 // Get WebSocket URL based on environment and protocol
 const getWebSocketUrl = () => {
+  // For production, use Railway URL
   if (isProduction) {
-    // Always use WSS in production with the camera domain
-    return "wss://camera.mmoment.xyz";
+    return forceHttps("wss://mmoment-production.up.railway.app");
   }
 
   // For local development
-  const localUrl = "ws://localhost:5001"; // Direct to camera API for websockets
-  
-  // If we're accessing the dev environment through HTTPS, use WSS
-  if (window.location.protocol === 'https:') {
-    return "wss://camera.mmoment.xyz";
-  }
-  
-  return localUrl;
+  return "ws://localhost:3001";
 };
 
 // Export configuration
@@ -64,9 +74,7 @@ export const CONFIG = {
   rpcEndpoint,
   devnetEndpoints,
   getNextEndpoint,
-  CAMERA_API_URL: isProduction 
-    ? "https://middleware.mmoment.xyz"  // Always use the middleware URL in production
-    : "http://localhost:5002",
+  CAMERA_API_URL: getCameraApiUrl(),
   BACKEND_URL: isProduction 
     ? forceHttps("https://mmoment-production.up.railway.app")
     : "http://localhost:3001",
@@ -82,17 +90,17 @@ export const timelineConfig = {
   wsOptions: {
     reconnectionDelay: 1000,
     reconnection: true,
-    secure: isProduction || window.location.protocol === 'https:',
+    secure: false, // Disable secure for local testing
     path: '/socket.io/',
-    rejectUnauthorized: !import.meta.env.DEV,
-    transports: ['websocket'],
-    upgrade: false,
-    timeout: 5000,
+    rejectUnauthorized: false,
+    transports: ['websocket', 'polling'],
+    upgrade: true,
+    timeout: 20000,
     pingTimeout: 90000,
     pingInterval: 25000,
-    reconnectionAttempts: 3,
+    reconnectionAttempts: 5,
     reconnectionDelayMax: 5000,
-    autoConnect: false,
+    autoConnect: true,
     forceNew: true
   }
 };

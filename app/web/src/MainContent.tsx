@@ -81,10 +81,14 @@ function MainContent() {
         } catch (error) {
           console.error('[MainContent] Error loading camera from URL:', error);
         }
-      } else if (location.pathname === '/app') {
-        // If we're on the default /app route, clear the selected camera
+      } else if (location.pathname === '/app' || location.pathname === '/app/') {
+        // If we're on the default /app route (with or without trailing slash), clear the selected camera and localStorage data
         setSelectedCamera(null);
         localStorage.removeItem('directCameraId');
+        
+        // Make sure we're also clearing any camera account references in CameraView
+        // This ensures a complete disconnect when going to the default route
+        console.log('[MainContent] On default route - ensuring all camera references are cleared');
       }
     };
 
