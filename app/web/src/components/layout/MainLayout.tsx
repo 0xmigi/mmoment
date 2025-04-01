@@ -96,13 +96,13 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                 >
                   Activities
                 </button>
-                <button
+                {/* <button
                   type='button'
                   onClick={() => navigate('/soldevnetdebug')}
                   className="px-4 py-2 rounded-lg flex items-center gap-2 bg-white text-stone-400 hover:text-stone-800"
                 >
                   DevNet Debug
-                </button>
+                </button> */}
               </div>
             )}
           </div>
@@ -206,7 +206,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                   Activities
                 </button>
 
-                <button
+                {/* <button
                   type='button'
                   onClick={() => {
                     navigate('/settings');
@@ -226,7 +226,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                   className="w-full text-left px-4 py-3 rounded-lg transition-colors text-gray-600 hover:bg-gray-50"
                 >
                   DevNet Debug
-                </button>
+                </button> */}
 
                 {/* Divider */}
                 <div className="my-4 border-t border-gray-200" />
