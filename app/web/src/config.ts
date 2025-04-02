@@ -90,9 +90,10 @@ export const timelineConfig = {
   wsOptions: {
     reconnectionDelay: 1000,
     reconnection: true,
-    secure: false, // Disable secure for local testing
+    // Use secure connection based on protocol
+    secure: isProduction || window.location.protocol === 'https:',
     path: '/socket.io/',
-    rejectUnauthorized: false,
+    rejectUnauthorized: isProduction ? true : false,
     transports: ['websocket', 'polling'],
     upgrade: true,
     timeout: 20000,
@@ -101,6 +102,10 @@ export const timelineConfig = {
     reconnectionAttempts: 5,
     reconnectionDelayMax: 5000,
     autoConnect: true,
-    forceNew: true
+    forceNew: true,
+    // Add extra options for secure connections
+    extraHeaders: isProduction ? {
+      "Access-Control-Allow-Origin": "*"
+    } : undefined
   }
 };
