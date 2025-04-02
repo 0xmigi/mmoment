@@ -10,14 +10,16 @@ const isMobileBrowser = () => {
 };
 
 const forceHttps = (url: string) => {
-  // Always use HTTPS for production and non-localhost URLs
-  if (isProduction || !url.includes('localhost')) {
+  // Always use HTTPS except for localhost
+  if (!url.includes('localhost')) {
     // Handle websocket URLs
     if (url.startsWith('ws://')) {
       return url.replace('ws://', 'wss://');
     }
     // Handle HTTP URLs
-    return url.replace('http://', 'https://');
+    if (url.startsWith('http://')) {
+      return url.replace('http://', 'https://');
+    }
   }
   return url;
 };
@@ -55,18 +57,12 @@ const rpcEndpoint = cluster === 'localnet' ? 'http://localhost:8899' : devnetEnd
 
 // Get the appropriate API URL based on environment with fallbacks
 const getCameraApiUrl = () => {
-  // Primary and fallback URLs
+  // Primary URL should always be HTTPS
   const primaryUrl = "https://middleware.mmoment.xyz";
   
-  // Always use HTTPS for production and Cloudflare
-  if (isProduction || isCloudflareProxy()) {
-    // Try the primary URL first
-    return primaryUrl;
-  }
-
   // Only use localhost if we're explicitly in local development
   const forceLocal = import.meta.env.VITE_FORCE_LOCAL === 'true';
-  if (forceLocal) {
+  if (forceLocal && window.location.hostname === 'localhost') {
     console.log('Using local camera API (forced by VITE_FORCE_LOCAL)');
     return "http://localhost:5002";
   }
@@ -77,12 +73,9 @@ const getCameraApiUrl = () => {
 
 // Get WebSocket URL based on environment and protocol with fallback
 const getWebSocketUrl = () => {
-  // For production, use Railway URL with WSS
-  if (isProduction || isCloudflareProxy()) {
-    const primaryWsUrl = "wss://middleware.mmoment.xyz";
-    
-    // Return the primary URL (the fallback will be handled by the socket.io client)
-    return forceHttps(primaryWsUrl);
+  // For production or non-localhost, always use WSS
+  if (!window.location.hostname.includes('localhost')) {
+    return "wss://middleware.mmoment.xyz";
   }
 
   // For local development
@@ -97,7 +90,7 @@ export const CONFIG = {
   getNextEndpoint,
   CAMERA_API_URL: getCameraApiUrl(),
   BACKEND_URL: isProduction 
-    ? forceHttps("https://mmoment-production.up.railway.app")
+    ? "https://mmoment-production.up.railway.app"
     : "http://localhost:3001",
   isProduction,
   isCloudflareProxy: isCloudflareProxy(),
@@ -115,7 +108,7 @@ export const timelineConfig = {
     reconnection: true,
     secure: true,
     path: '/socket.io/',
-    rejectUnauthorized: true,
+    rejectUnauthorized: false, // Allow self-signed certs
     transports: ['websocket', 'polling'],
     upgrade: true,
     timeout: 20000,
@@ -125,7 +118,6 @@ export const timelineConfig = {
     reconnectionDelayMax: 5000,
     autoConnect: true,
     forceNew: true,
-    // Add better headers for mobile support
     extraHeaders: {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET,HEAD,PUT,PATCH,POST,DELETE",

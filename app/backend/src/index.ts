@@ -19,9 +19,29 @@ httpServer.headersTimeout = 66000; // Slightly higher than keepAliveTimeout
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// More permissive CORS configuration for debugging
+// Strict CORS configuration
+const allowedOrigins = [
+  'https://mmoment.xyz',
+  'https://www.mmoment.xyz',
+  'https://camera.mmoment.xyz',
+  'http://localhost:5173',
+  'http://localhost:3000'
+];
+
 const corsOptions = {
-  origin: '*', // Temporarily allow all origins for debugging
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    
+    if (allowedOrigins.some(allowed => origin.startsWith(allowed))) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS not allowed'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
   credentials: true,
@@ -30,9 +50,14 @@ const corsOptions = {
 
 // Add CORS headers middleware
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE');
-  res.setHeader('Access-Control-Allow-Headers', 'Origin,X-Requested-With,Content-Type,Accept,Authorization');
+  const origin = req.headers.origin;
+  
+  if (origin && allowedOrigins.some(allowed => origin.startsWith(allowed))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin,X-Requested-With,Content-Type,Accept,Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
   
   // Handle preflight
   if (req.method === 'OPTIONS') {
@@ -43,11 +68,12 @@ app.use((req, res, next) => {
 
 app.use(cors(corsOptions));
 
-// Configure Socket.IO
+// Configure Socket.IO with strict CORS
 const io = new Server(httpServer, {
   cors: {
-    origin: '*', // Temporarily allow all origins
-    methods: ['GET', 'POST']
+    origin: allowedOrigins,
+    methods: ['GET', 'POST'],
+    credentials: true
   },
   path: '/socket.io/',
   transports: ['websocket', 'polling'],
@@ -92,7 +118,9 @@ app.get('/', (req, res) => {
     status: 'healthy',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV,
-    headers: req.headers
+    headers: req.headers,
+    secure: req.secure,
+    protocol: req.protocol
   });
 });
 
