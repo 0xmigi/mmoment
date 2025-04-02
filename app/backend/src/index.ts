@@ -9,117 +9,91 @@ import { config } from 'dotenv';
 config();
 
 const app = express();
+
+// Create HTTP server with timeout settings
 const httpServer = createServer(app);
+httpServer.keepAliveTimeout = 65000; // Slightly higher than Cloudflare's 60-second timeout
+httpServer.headersTimeout = 66000; // Slightly higher than keepAliveTimeout
+
+// Basic middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // More permissive CORS configuration for debugging
 const corsOptions = {
-  origin: function(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    const allowedOrigins = [
-      'https://mmoment.xyz',
-      'https://www.mmoment.xyz',
-      'https://camera.mmoment.xyz',
-      'http://localhost:5173',
-      'http://localhost:3000'
-    ];
-    
-    // Check if the origin is allowed
-    if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('mmoment.xyz')) {
-      callback(null, true);
-    } else {
-      console.warn(`Blocked request from origin: ${origin}`);
-      callback(null, false);
-    }
-  },
+  origin: '*', // Temporarily allow all origins for debugging
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
   credentials: true,
-  maxAge: 86400 // Cache preflight requests for 24 hours
+  maxAge: 86400
 };
 
-// Add explicit CORS headers middleware
+// Add CORS headers middleware
 app.use((req, res, next) => {
-  // Get the origin from the request
-  const origin = req.get('origin');
-  
-  // If it's an allowed origin, set the specific origin
-  if (origin && (corsOptions.origin as Function)(origin, (err: Error | null, allowed?: boolean) => {})) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  } else {
-    // Otherwise, use * as fallback
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
-  
-  // Set other CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE');
   res.setHeader('Access-Control-Allow-Headers', 'Origin,X-Requested-With,Content-Type,Accept,Authorization');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Max-Age', '86400');
   
-  // Handle preflight requests
+  // Handle preflight
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
-  
   next();
-});
-
-// Add error handling middleware
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Error:', err);
-  res.status(500).json({ error: 'Internal server error', details: process.env.NODE_ENV === 'development' ? err.message : undefined });
 });
 
 app.use(cors(corsOptions));
 
-// Configure Socket.IO with CORS and better error handling
+// Configure Socket.IO
 const io = new Server(httpServer, {
   cors: {
-    ...corsOptions,
+    origin: '*', // Temporarily allow all origins
     methods: ['GET', 'POST']
   },
   path: '/socket.io/',
   transports: ['websocket', 'polling'],
-  pingTimeout: 90000,
-  pingInterval: 25000,
-  connectTimeout: 45000,
-  // Add Socket.IO specific options
-  allowEIO3: true, // Enable Engine.IO v3 transport
-  upgradeTimeout: 30000,
+  pingTimeout: 30000,
+  pingInterval: 10000,
+  connectTimeout: 30000,
+  upgradeTimeout: 20000,
+  maxHttpBufferSize: 1e8,
   allowUpgrades: true,
-  perMessageDeflate: {
-    threshold: 2048 // Only compress data above this size
-  }
+  perMessageDeflate: false, // Disable compression for debugging
+  destroyUpgrade: false // Don't destroy upgraded connections
 });
 
-// Trust proxy for secure cookies and proper IP detection behind Cloudflare
-app.set('trust proxy', true);
-
-// Force HTTPS in production with better error handling
+// Trust proxy and handle HTTPS
+app.enable('trust proxy');
 app.use((req, res, next) => {
-  if (process.env.NODE_ENV === 'production' && 
-      !req.secure && 
-      req.headers['x-forwarded-proto'] !== 'https' &&
-      req.hostname !== 'localhost') {
-    const secureUrl = `https://${req.headers.host}${req.url}`;
-    console.log(`Redirecting to secure URL: ${secureUrl}`);
-    return res.redirect(301, secureUrl);
+  // Add response timeout
+  res.setTimeout(30000, () => {
+    res.status(504).json({ error: 'Server timeout' });
+  });
+
+  // Force HTTPS in production
+  if (process.env.NODE_ENV === 'production' && !req.secure) {
+    return res.redirect(301, `https://${req.headers.host}${req.url}`);
   }
   next();
 });
 
-// Add detailed logging middleware
+// Add request logging
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
-  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.url} - ${res.statusCode} - ${duration}ms`);
+  });
   next();
 });
 
-// Health check endpoint
+// Health check endpoint with detailed status
 app.get('/', (req, res) => {
-  res.json({ status: 'healthy' });
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV,
+    headers: req.headers
+  });
 });
 
 // Timeline events storage (in-memory)
@@ -227,22 +201,18 @@ io.on('connection', (socket) => {
   });
 });
 
-// Add error event handlers
-io.on('connect_error', (err) => {
+// Error handling for Socket.IO
+io.engine.on('connection_error', (err) => {
   console.error('Socket.IO connection error:', err);
 });
 
-httpServer.on('error', (err) => {
-  console.error('HTTP server error:', err);
-});
-
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Promise Rejection:', err);
-});
-
+// Start server with error handling
 const port = process.env.PORT || 3001;
 httpServer.listen(port, () => {
   console.log(`Server running on port ${port}`);
   console.log(`Environment: ${process.env.NODE_ENV}`);
-  console.log(`CORS configuration:`, JSON.stringify(corsOptions, null, 2));
+  console.log(`Server timeout settings:`, {
+    keepAliveTimeout: httpServer.keepAliveTimeout,
+    headersTimeout: httpServer.headersTimeout
+  });
 });
