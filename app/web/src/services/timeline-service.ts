@@ -15,11 +15,6 @@ class TimelineService {
   private currentCameraId: string | null = null;
   private reconnectAttempts: number = 0;
   private readonly MAX_RECONNECT_ATTEMPTS = 5;
-  private useFallbackHttp: boolean = false;
-  private isMobile: boolean = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  private lastHttpFetchTime: number = 0;
-  private httpFetchInProgress: boolean = false;
-  private readonly HTTP_FETCH_INTERVAL = 5000; // 5 seconds
 
   constructor() {
     // Try to restore events from local storage
@@ -27,12 +22,6 @@ class TimelineService {
 
     // Initialize socket with the timeline WebSocket URL
     this.initializeSocket();
-
-    // Check if we should use HTTP fallback immediately (for mobile)
-    if (this.isMobile) {
-      this.useFallbackHttp = true;
-      console.log('[Timeline] Mobile device detected, enabling HTTP fallback');
-    }
   }
 
   private initializeSocket() {
@@ -60,9 +49,6 @@ class TimelineService {
       console.error('[Timeline] Connection error:', error);
       this.isConnected = false;
       this.reconnectAttempts++;
-      
-      // Enable HTTP fallback on connection errors
-      this.useFallbackHttp = true;
       
       if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
         console.error('[Timeline] Max reconnection attempts reached');
@@ -112,67 +98,11 @@ class TimelineService {
     this.socket.on('disconnect', () => {
       this.isConnected = false;
       console.log('Disconnected from timeline service');
-      
-      // Enable HTTP fallback when disconnected
-      this.useFallbackHttp = true;
     });
 
     // Attempt initial connection
     if (!this.socket.connected) {
       this.socket.connect();
-    }
-  }
-
-  // HTTP fallback method to fetch events
-  private async fetchEventsByHttp(): Promise<void> {
-    if (this.httpFetchInProgress) return;
-    
-    const now = Date.now();
-    if (now - this.lastHttpFetchTime < this.HTTP_FETCH_INTERVAL) return;
-    
-    this.lastHttpFetchTime = now;
-    this.httpFetchInProgress = true;
-    
-    try {
-      console.log('[Timeline] Using HTTP fallback to fetch events');
-      
-      // Get events for a specific camera
-      let endpoint = `${CONFIG.BACKEND_URL}/api/timeline/events`;
-      
-      // Add camera filter if we have a camera ID
-      if (this.currentCameraId) {
-        endpoint += `?cameraId=${this.currentCameraId}`;
-      }
-
-      const response = await fetch(endpoint, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        }
-      });
-
-      if (response.ok) {
-        const events = await response.json() as TimelineEvent[];
-        console.log(`[Timeline] HTTP fallback received ${events.length} events`);
-        
-        // Merge with existing events
-        const mergedEvents = this.mergeEvents(this.events, events);
-        this.events = mergedEvents.sort((a, b) => b.timestamp - a.timestamp);
-        
-        // Save to localStorage
-        this.saveToLocalStorage();
-        
-        // Notify listeners of all events
-        events.forEach(event => this.notifyListeners(event));
-      } else {
-        console.error('[Timeline] HTTP fallback failed:', response.status);
-      }
-    } catch (error) {
-      console.error('[Timeline] HTTP fallback error:', error);
-    } finally {
-      this.httpFetchInProgress = false;
     }
   }
 
@@ -231,13 +161,7 @@ class TimelineService {
   }
 
   joinCamera(cameraId: string) {
-    if (this.currentCameraId === cameraId) {
-      // Even if it's the same camera, attempt HTTP fetch on mobile
-      if (this.isMobile && this.useFallbackHttp) {
-        this.fetchEventsByHttp();
-      }
-      return;
-    }
+    if (this.currentCameraId === cameraId) return;
 
     console.log('Joining camera room:', cameraId);
     
@@ -273,16 +197,10 @@ class TimelineService {
       this.events = [];
     }
     
-    // Attempt to use both WebSocket and HTTP methods for mobile
     this.socket.emit('joinCamera', cameraId);
+
+    // Request recent events for this camera
     this.requestRecentEvents();
-    
-    // Use HTTP fallback immediately on mobile
-    if (this.isMobile) {
-      setTimeout(() => {
-        this.fetchEventsByHttp();
-      }, 500);
-    }
   }
 
   private requestRecentEvents() {
@@ -324,13 +242,6 @@ class TimelineService {
       }, 0);
     }
     
-    // If on mobile, immediately try HTTP fallback
-    if (this.isMobile && this.currentCameraId) {
-      setTimeout(() => {
-        this.fetchEventsByHttp();
-      }, 300);
-    }
-    
     // Return unsubscribe function
     return () => {
       this.listeners.delete(callback);
@@ -354,42 +265,6 @@ class TimelineService {
     
     // Emit the event
     this.socket.emit('newTimelineEvent', eventWithCamera);
-    
-    // For mobile, also send via HTTP if WebSocket is not working
-    if (this.isMobile && this.useFallbackHttp) {
-      this.emitEventByHttp(eventWithCamera);
-    }
-  }
-
-  // HTTP fallback method to emit events
-  private async emitEventByHttp(event: Omit<TimelineEvent, 'id'>) {
-    try {
-      console.log('[Timeline] Using HTTP fallback to emit event');
-      
-      const response = await fetch(`${CONFIG.BACKEND_URL}/api/timeline/events`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(event)
-      });
-
-      if (response.ok) {
-        console.log('[Timeline] HTTP event emit successful');
-      } else {
-        console.error('[Timeline] HTTP event emit failed:', response.status);
-      }
-    } catch (error) {
-      console.error('[Timeline] HTTP event emit error:', error);
-    }
-  }
-
-  // Method to force refresh events via HTTP
-  public forceRefresh() {
-    console.log('[Timeline] Force refreshing events');
-    if (this.currentCameraId) {
-      this.fetchEventsByHttp();
-    }
   }
 
   disconnect() {
