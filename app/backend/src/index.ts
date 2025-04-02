@@ -39,6 +39,33 @@ const corsOptions = {
   maxAge: 86400 // Cache preflight requests for 24 hours
 };
 
+// Add explicit CORS headers middleware
+app.use((req, res, next) => {
+  // Get the origin from the request
+  const origin = req.get('origin');
+  
+  // If it's an allowed origin, set the specific origin
+  if (origin && (corsOptions.origin as Function)(origin, (err: Error | null, allowed?: boolean) => {})) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    // Otherwise, use * as fallback
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  
+  // Set other CORS headers
+  res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE');
+  res.setHeader('Access-Control-Allow-Headers', 'Origin,X-Requested-With,Content-Type,Accept,Authorization');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  
+  next();
+});
+
 // Add error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('Error:', err);
