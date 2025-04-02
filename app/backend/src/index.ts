@@ -11,38 +11,82 @@ config();
 const app = express();
 const httpServer = createServer(app);
 
-// Configure CORS for both Express and Socket.IO
+// More permissive CORS configuration for debugging
 const corsOptions = {
-  origin: [
-    'https://mmoment.xyz',
-    'https://camera.mmoment.xyz',
-    'http://localhost:5173',
-    'http://localhost:3000'
-  ],
+  origin: function(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      'https://mmoment.xyz',
+      'https://www.mmoment.xyz',
+      'https://camera.mmoment.xyz',
+      'http://localhost:5173',
+      'http://localhost:3000'
+    ];
+    
+    // Check if the origin is allowed
+    if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('mmoment.xyz')) {
+      callback(null, true);
+    } else {
+      console.warn(`Blocked request from origin: ${origin}`);
+      callback(null, false);
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
-  credentials: true
+  credentials: true,
+  maxAge: 86400 // Cache preflight requests for 24 hours
 };
+
+// Add error handling middleware
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('Error:', err);
+  res.status(500).json({ error: 'Internal server error', details: process.env.NODE_ENV === 'development' ? err.message : undefined });
+});
 
 app.use(cors(corsOptions));
 
-// Configure Socket.IO with CORS
+// Configure Socket.IO with CORS and better error handling
 const io = new Server(httpServer, {
-  cors: corsOptions,
+  cors: {
+    ...corsOptions,
+    methods: ['GET', 'POST']
+  },
   path: '/socket.io/',
   transports: ['websocket', 'polling'],
   pingTimeout: 90000,
-  pingInterval: 25000
+  pingInterval: 25000,
+  connectTimeout: 45000,
+  // Add Socket.IO specific options
+  allowEIO3: true, // Enable Engine.IO v3 transport
+  upgradeTimeout: 30000,
+  allowUpgrades: true,
+  perMessageDeflate: {
+    threshold: 2048 // Only compress data above this size
+  }
 });
 
 // Trust proxy for secure cookies and proper IP detection behind Cloudflare
-app.set('trust proxy', 1);
+app.set('trust proxy', true);
 
-// Force HTTPS in production
+// Force HTTPS in production with better error handling
 app.use((req, res, next) => {
-  if (process.env.NODE_ENV === 'production' && !req.secure && req.headers['x-forwarded-proto'] !== 'https') {
-    return res.redirect('https://' + req.headers.host + req.url);
+  if (process.env.NODE_ENV === 'production' && 
+      !req.secure && 
+      req.headers['x-forwarded-proto'] !== 'https' &&
+      req.hostname !== 'localhost') {
+    const secureUrl = `https://${req.headers.host}${req.url}`;
+    console.log(`Redirecting to secure URL: ${secureUrl}`);
+    return res.redirect(301, secureUrl);
   }
+  next();
+});
+
+// Add detailed logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
   next();
 });
 
@@ -156,9 +200,22 @@ io.on('connection', (socket) => {
   });
 });
 
+// Add error event handlers
+io.on('connect_error', (err) => {
+  console.error('Socket.IO connection error:', err);
+});
+
+httpServer.on('error', (err) => {
+  console.error('HTTP server error:', err);
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled Promise Rejection:', err);
+});
+
 const port = process.env.PORT || 3001;
 httpServer.listen(port, () => {
   console.log(`Server running on port ${port}`);
   console.log(`Environment: ${process.env.NODE_ENV}`);
-  console.log(`CORS origins: ${corsOptions.origin.join(', ')}`);
+  console.log(`CORS configuration:`, JSON.stringify(corsOptions, null, 2));
 });

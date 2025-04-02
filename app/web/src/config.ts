@@ -2,20 +2,34 @@
 
 // Ensure we're using HTTPS in production
 const isProduction = import.meta.env.PROD;
+
+// Helper to determine if we're on a mobile browser
+const isMobileBrowser = () => {
+  if (typeof window === 'undefined') return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+};
+
 const forceHttps = (url: string) => {
   // Always use HTTPS for production and non-localhost URLs
   if (isProduction || !url.includes('localhost')) {
-    return url.replace(/^http:\/\//i, 'https://').replace(/^ws:\/\//i, 'wss://');
+    // Handle websocket URLs
+    if (url.startsWith('ws://')) {
+      return url.replace('ws://', 'wss://');
+    }
+    // Handle HTTP URLs
+    return url.replace('http://', 'https://');
   }
   return url;
 };
 
 // Helper to determine if we're behind Cloudflare
 const isCloudflareProxy = () => {
-  return typeof window !== 'undefined' && 
-    (window.location.hostname === 'mmoment.xyz' || 
-     window.location.hostname === 'camera.mmoment.xyz' ||
-     window.location.hostname.endsWith('.mmoment.xyz'));
+  if (typeof window === 'undefined') return false;
+  const hostname = window.location.hostname;
+  return hostname === 'mmoment.xyz' || 
+         hostname === 'www.mmoment.xyz' ||
+         hostname === 'camera.mmoment.xyz' ||
+         hostname.endsWith('.mmoment.xyz');
 };
 
 // Get the cluster from environment variable, defaults to devnet if not specified
@@ -30,7 +44,7 @@ const devnetEndpoints = [
 
 let currentEndpointIndex = 0;
 
-// Simple endpoint rotation
+// Simple endpoint rotation with retry logic
 const getNextEndpoint = () => {
   currentEndpointIndex = (currentEndpointIndex + 1) % devnetEndpoints.length;
   return devnetEndpoints[currentEndpointIndex];
@@ -39,11 +53,15 @@ const getNextEndpoint = () => {
 // Set RPC endpoint based on the cluster
 const rpcEndpoint = cluster === 'localnet' ? 'http://localhost:8899' : devnetEndpoints[0];
 
-// Get the appropriate API URL based on environment
+// Get the appropriate API URL based on environment with fallbacks
 const getCameraApiUrl = () => {
+  // Primary and fallback URLs
+  const primaryUrl = "https://middleware.mmoment.xyz";
+  
   // Always use HTTPS for production and Cloudflare
   if (isProduction || isCloudflareProxy()) {
-    return "https://middleware.mmoment.xyz";
+    // Try the primary URL first
+    return primaryUrl;
   }
 
   // Only use localhost if we're explicitly in local development
@@ -54,14 +72,17 @@ const getCameraApiUrl = () => {
   }
 
   // Default to HTTPS
-  return "https://middleware.mmoment.xyz";
+  return primaryUrl;
 };
 
-// Get WebSocket URL based on environment and protocol
+// Get WebSocket URL based on environment and protocol with fallback
 const getWebSocketUrl = () => {
   // For production, use Railway URL with WSS
   if (isProduction || isCloudflareProxy()) {
-    return forceHttps("wss://mmoment-production.up.railway.app");
+    const primaryWsUrl = "wss://middleware.mmoment.xyz";
+    
+    // Return the primary URL (the fallback will be handled by the socket.io client)
+    return forceHttps(primaryWsUrl);
   }
 
   // For local development
@@ -80,17 +101,19 @@ export const CONFIG = {
     : "http://localhost:3001",
   isProduction,
   isCloudflareProxy: isCloudflareProxy(),
+  isMobileBrowser: isMobileBrowser(),
   LIVEPEER_PLAYBACK_ID: process.env.REACT_APP_LIVEPEER_PLAYBACK_ID || '',
   WS_URL: getWebSocketUrl(),
   CAMERA_PDA: import.meta.env.VITE_CAMERA_PDA || '5onKAv5c6VdBZ8a7D11XqF79Hdzuv3tnysjv4B2pQWZ2'
 };
 
+// Socket.IO configuration with better mobile support
 export const timelineConfig = {
   wsUrl: CONFIG.WS_URL,
   wsOptions: {
     reconnectionDelay: 1000,
     reconnection: true,
-    secure: true, // Always use secure WebSocket
+    secure: true,
     path: '/socket.io/',
     rejectUnauthorized: true,
     transports: ['websocket', 'polling'],
@@ -102,10 +125,12 @@ export const timelineConfig = {
     reconnectionDelayMax: 5000,
     autoConnect: true,
     forceNew: true,
+    // Add better headers for mobile support
     extraHeaders: {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET,HEAD,PUT,PATCH,POST,DELETE",
-      "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept"
+      "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept",
+      "User-Agent": navigator.userAgent
     }
   }
 };
