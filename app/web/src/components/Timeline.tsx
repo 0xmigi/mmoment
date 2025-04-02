@@ -156,6 +156,26 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     };
   }, [cameraId, enrichEventWithUserInfo]);
 
+  // Add polling mechanism for mobile browsers
+  useEffect(() => {
+    // Check if this is a mobile browser
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    if (!isMobile) return;
+
+    // Add polling for mobile browsers to refresh timeline events
+    const pollInterval = setInterval(() => {
+      if (cameraId) {
+        console.log('Mobile polling: Refreshing timeline events for camera', cameraId);
+        // Re-join the camera to refresh events (this will fetch recent events)
+        timelineService.joinCamera(cameraId);
+      }
+    }, 10000); // Poll every 10 seconds
+
+    return () => {
+      clearInterval(pollInterval);
+    };
+  }, [cameraId]);
+
   // Filter events based on selected filter
   const filteredEvents = useMemo(() => {
     // Sort events by timestamp (newest first) before filtering
@@ -164,9 +184,13 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       if (filter === 'my' && userAddress) {
         return event.user.address === userAddress;
       }
+      // Add camera filter - this makes mobile browsers properly filter events
+      if (filter === 'camera' && cameraId && event.cameraId) {
+        return event.cameraId === cameraId;
+      }
       return true;
     });
-  }, [events, filter, userAddress]);
+  }, [events, filter, userAddress, cameraId]);
 
   // Get display events based on variant and display count
   const displayEvents = useMemo(() => {

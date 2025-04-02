@@ -2,7 +2,6 @@ import { useDynamicContext, useEmbeddedWallet } from '@dynamic-labs/sdk-react-co
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { User, Copy, Check } from 'lucide-react';
-import { CameraRegistry } from '../CameraRegistry';
 
 interface FarcasterCredential {
   oauthProvider: string;
@@ -130,9 +129,6 @@ export function AccountPage() {
               </div>
             </div>
           </div>
-
-          {/* Camera Registry Section */}
-          <CameraRegistry />
 
           {/* Linked Identities Section */}
           <div className="bg-gray-50 rounded-xl px-4 py-4">
