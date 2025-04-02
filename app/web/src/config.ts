@@ -100,29 +100,31 @@ export const CONFIG = {
   CAMERA_PDA: import.meta.env.VITE_CAMERA_PDA || '5onKAv5c6VdBZ8a7D11XqF79Hdzuv3tnysjv4B2pQWZ2'
 };
 
-// Socket.IO configuration with better mobile support
+// Socket.IO configuration with better mobile support and longer timeouts
 export const timelineConfig = {
   wsUrl: CONFIG.WS_URL,
   wsOptions: {
-    reconnectionDelay: 1000,
+    reconnectionDelay: 10000,
     reconnection: true,
+    reconnectionAttempts: 10,
     secure: true,
     path: '/socket.io/',
     rejectUnauthorized: false, // Allow self-signed certs
-    transports: ['websocket', 'polling'],
+    transports: ['polling', 'websocket'], // Try polling first
     upgrade: true,
-    timeout: 20000,
-    pingTimeout: 90000,
+    timeout: 60000,
+    pingTimeout: 300000, // 5 minutes
     pingInterval: 25000,
-    reconnectionAttempts: 5,
-    reconnectionDelayMax: 5000,
+    reconnectionDelayMax: 60000,
     autoConnect: true,
     forceNew: true,
     extraHeaders: {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET,HEAD,PUT,PATCH,POST,DELETE",
       "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept",
-      "User-Agent": navigator.userAgent
+      "User-Agent": navigator.userAgent,
+      "Cache-Control": "no-cache",
+      "Pragma": "no-cache"
     }
   }
 };
