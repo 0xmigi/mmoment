@@ -57,23 +57,13 @@ const rpcEndpoint = cluster === 'localnet' ? 'http://localhost:8899' : devnetEnd
 
 // Get the appropriate API URL based on environment with fallbacks
 const getCameraApiUrl = () => {
-  // Primary URL should always be HTTPS
-  const primaryUrl = "https://middleware.mmoment.xyz";
-  
-  // Only use localhost if we're explicitly in local development
-  const forceLocal = import.meta.env.VITE_FORCE_LOCAL === 'true';
-  if (forceLocal && window.location.hostname === 'localhost') {
-    console.log('Using local camera API (forced by VITE_FORCE_LOCAL)');
-    return "http://localhost:5002";
-  }
-
-  // Default to HTTPS
-  return primaryUrl;
+  // ALWAYS use the middleware URL, never localhost
+  return "https://middleware.mmoment.xyz";
 };
 
 // Get WebSocket URL for timeline updates from Railway backend
 const getTimelineWebSocketUrl = () => {
-  if (window.location.hostname.includes('localhost')) {
+  if (window.location.hostname === 'localhost') {
     return "ws://localhost:3001";
   }
   return "wss://mmoment-production.up.railway.app";
