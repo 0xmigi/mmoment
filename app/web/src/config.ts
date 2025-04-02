@@ -3,9 +3,9 @@
 // Ensure we're using HTTPS in production
 const isProduction = import.meta.env.PROD;
 const forceHttps = (url: string) => {
-  if (isProduction) {
-    // Always use HTTPS in production, regardless of input
-    return url.replace(/^http:\/\//i, 'https://');
+  // Always use HTTPS for production and non-localhost URLs
+  if (isProduction || !url.includes('localhost')) {
+    return url.replace(/^http:\/\//i, 'https://').replace(/^ws:\/\//i, 'wss://');
   }
   return url;
 };
@@ -14,7 +14,8 @@ const forceHttps = (url: string) => {
 const isCloudflareProxy = () => {
   return typeof window !== 'undefined' && 
     (window.location.hostname === 'mmoment.xyz' || 
-     window.location.hostname === 'camera.mmoment.xyz');
+     window.location.hostname === 'camera.mmoment.xyz' ||
+     window.location.hostname.endsWith('.mmoment.xyz'));
 };
 
 // Get the cluster from environment variable, defaults to devnet if not specified
@@ -40,27 +41,26 @@ const rpcEndpoint = cluster === 'localnet' ? 'http://localhost:8899' : devnetEnd
 
 // Get the appropriate API URL based on environment
 const getCameraApiUrl = () => {
-  // Always try Cloudflare tunnel first unless explicitly in local development
-  if (isProduction || isCloudflareProxy() || window.location.protocol === 'https:') {
+  // Always use HTTPS for production and Cloudflare
+  if (isProduction || isCloudflareProxy()) {
     return "https://middleware.mmoment.xyz";
   }
 
   // Only use localhost if we're explicitly in local development
-  // and have confirmed we need local access (e.g., debugging the Pi directly)
   const forceLocal = import.meta.env.VITE_FORCE_LOCAL === 'true';
   if (forceLocal) {
     console.log('Using local camera API (forced by VITE_FORCE_LOCAL)');
     return "http://localhost:5002";
   }
 
-  // Default to Cloudflare tunnel
+  // Default to HTTPS
   return "https://middleware.mmoment.xyz";
 };
 
 // Get WebSocket URL based on environment and protocol
 const getWebSocketUrl = () => {
-  // For production, use Railway URL
-  if (isProduction) {
+  // For production, use Railway URL with WSS
+  if (isProduction || isCloudflareProxy()) {
     return forceHttps("wss://mmoment-production.up.railway.app");
   }
 
@@ -90,10 +90,9 @@ export const timelineConfig = {
   wsOptions: {
     reconnectionDelay: 1000,
     reconnection: true,
-    // Use secure connection based on protocol
-    secure: isProduction || window.location.protocol === 'https:',
+    secure: true, // Always use secure WebSocket
     path: '/socket.io/',
-    rejectUnauthorized: isProduction ? true : false,
+    rejectUnauthorized: true,
     transports: ['websocket', 'polling'],
     upgrade: true,
     timeout: 20000,
@@ -103,9 +102,10 @@ export const timelineConfig = {
     reconnectionDelayMax: 5000,
     autoConnect: true,
     forceNew: true,
-    // Add extra options for secure connections
-    extraHeaders: isProduction ? {
-      "Access-Control-Allow-Origin": "*"
-    } : undefined
+    extraHeaders: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,HEAD,PUT,PATCH,POST,DELETE",
+      "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept"
+    }
   }
 };

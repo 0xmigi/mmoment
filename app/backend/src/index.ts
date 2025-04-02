@@ -11,29 +11,44 @@ config();
 const app = express();
 const httpServer = createServer(app);
 
-// Add middleware
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
+// Configure CORS for both Express and Socket.IO
+const corsOptions = {
+  origin: [
+    'https://mmoment.xyz',
+    'https://camera.mmoment.xyz',
+    'http://localhost:5173',
+    'http://localhost:3000'
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
   credentials: true
-}));
+};
 
-// Health check endpoint
-app.get('/', (req, res) => {
-  res.json({ status: 'healthy' });
-});
+app.use(cors(corsOptions));
 
-// Initialize Socket.IO
+// Configure Socket.IO with CORS
 const io = new Server(httpServer, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST", "OPTIONS"],
-    credentials: true
-  },
+  cors: corsOptions,
   path: '/socket.io/',
   transports: ['websocket', 'polling'],
   pingTimeout: 90000,
   pingInterval: 25000
+});
+
+// Trust proxy for secure cookies and proper IP detection behind Cloudflare
+app.set('trust proxy', 1);
+
+// Force HTTPS in production
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'production' && !req.secure && req.headers['x-forwarded-proto'] !== 'https') {
+    return res.redirect('https://' + req.headers.host + req.url);
+  }
+  next();
+});
+
+// Health check endpoint
+app.get('/', (req, res) => {
+  res.json({ status: 'healthy' });
 });
 
 // Timeline events storage (in-memory)
@@ -141,8 +156,9 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3001;
-
-httpServer.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+const port = process.env.PORT || 3001;
+httpServer.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+  console.log(`Environment: ${process.env.NODE_ENV}`);
+  console.log(`CORS origins: ${corsOptions.origin.join(', ')}`);
 });
