@@ -43,7 +43,7 @@ function App() {
               <CameraProvider>
                 <BrowserRouter>
                   <Routes>
-                    <Route path="/" element={<MainContent />} />
+                    <Route path="/*" element={<MainContent />} />
                     <Route path="/debug" element={<DebugPage />} />
                   </Routes>
                 </BrowserRouter>
