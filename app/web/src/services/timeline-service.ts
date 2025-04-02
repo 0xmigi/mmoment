@@ -175,7 +175,7 @@ class TimelineService {
         // Insert the event in chronological order (newest first)
         const index = this.events.findIndex(e => e.timestamp < event.timestamp);
         if (index === -1) {
-          this.events.push(event);
+      this.events.push(event);
         } else {
           this.events.splice(index, 0, event);
         }
@@ -185,7 +185,7 @@ class TimelineService {
         // Save to localStorage
         this.saveToLocalStorage();
         
-        this.notifyListeners(event);
+      this.notifyListeners(event);
       }
     });
 
@@ -302,21 +302,6 @@ class TimelineService {
     }
   }
 
-  // Create a mock event for testing
-  private createMockEvent(type: string): TimelineEvent {
-    const now = Date.now();
-    return {
-      id: `mock-${now}-${Math.random().toString(36).substring(2, 9)}`,
-      type: type as any,
-      user: {
-        address: "0x123MockUser456",
-        username: "mock_user",
-      },
-      timestamp: now,
-      cameraId: this.currentCameraId || undefined,
-    };
-  }
-
   joinCamera(cameraId: string) {
     if (this.currentCameraId === cameraId) return;
 
@@ -362,32 +347,7 @@ class TimelineService {
     } else if (this.usingMockData && window.location.hostname === 'localhost') {
       // For local dev without backend, create mock data
       console.log('[Timeline] Using mock data for camera:', cameraId);
-      
-      // Generate a few mock events
-      const mockEvents = [
-        this.createMockEvent('initialization'),
-        this.createMockEvent('user_connected'),
-        this.createMockEvent('photo_captured')
-      ];
-      
-      // Add to events and notify listeners
-      this.events = mockEvents;
-      this.saveToLocalStorage();
-      
-      // Notify after a short delay to simulate network
-      setTimeout(() => {
-        mockEvents.forEach(event => this.notifyListeners(event));
-      }, 500);
-    }
     
-    // For Chrome mobile, set up a one-time delayed fetch to ensure we get the latest events
-    if (this.isChromeOnMobile && this.isConnected) {
-      setTimeout(() => {
-        if (this.currentCameraId === cameraId) {
-          console.log('[Timeline] Chrome mobile: delayed fetch of recent events');
-          this.requestRecentEvents();
-        }
-      }, 2000);
     }
   }
 
@@ -500,7 +460,7 @@ class TimelineService {
     this.events = [];
     this.listeners.clear();
     if (this.socket) {
-      this.socket.disconnect();
+    this.socket.disconnect();
     }
   }
   
@@ -510,10 +470,6 @@ class TimelineService {
       this.requestRecentEvents();
     } else if (this.usingMockData && this.currentCameraId) {
       // For mock data, create a new "refresh" event
-      const refreshEvent = this.createMockEvent('user_connected');
-      this.events.unshift(refreshEvent);
-      this.saveToLocalStorage();
-      this.notifyListeners(refreshEvent);
     }
   }
 }

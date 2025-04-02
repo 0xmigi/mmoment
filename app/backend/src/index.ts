@@ -199,6 +199,7 @@ io.on('connection', (socket) => {
 
   // Handle new timeline events
   socket.on('newTimelineEvent', (event: Omit<TimelineEvent, 'id'>) => {
+    // Generate unique ID based on timestamp and random string
     const newEvent = {
       ...event,
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
