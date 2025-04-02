@@ -9,14 +9,7 @@ const streamInfoCache = {
   data: null as any, 
   timestamp: 0 
 };
-
-// Longer cache for mobile to reduce API calls
 const STREAM_CACHE_TTL = 10000; // 10 seconds
-const MOBILE_CACHE_TTL = 30000; // 30 seconds for mobile
-
-// Fetch timeout to avoid hanging
-const FETCH_TIMEOUT = 8000; // 8 seconds
-const MOBILE_FETCH_TIMEOUT = 10000; // 10 seconds for mobile
 
 interface StreamInfo {
   playbackId: string;
@@ -28,55 +21,22 @@ const StreamPlayer = memo(() => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isMobile] = useState(() => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
-  const [loadingRetry, setLoadingRetry] = useState(0);
   const pollInterval = useRef<NodeJS.Timeout>();
   const lastFetchTime = useRef(0);
   const isCameraOperation = useRef(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
   const { program } = useProgram();
   const { selectedCamera } = useCamera();
 
-  // Helper function for fetch with timeout
-  const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout: number) => {
-    // Cancel any ongoing fetch
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-    const { signal } = controller;
-    
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-    }, timeout);
-    
-    try {
-      const response = await fetch(url, { ...options, signal });
-      clearTimeout(timeoutId);
-      return response;
-    } catch (error) {
-      clearTimeout(timeoutId);
-      throw error;
-    } finally {
-      if (abortControllerRef.current === controller) {
-        abortControllerRef.current = null;
-      }
-    }
-  };
-
-  const fetchStreamInfo = useCallback(async (forceRefresh = false) => {
+  const fetchStreamInfo = useCallback(async () => {
     // Skip fetching during camera operations
     if (isCameraOperation.current) return;
 
     // Prevent multiple rapid fetches
     const now = Date.now();
-    const minTimeBetweenFetches = isMobile ? 5000 : 3000;
-    if (!forceRefresh && now - lastFetchTime.current < minTimeBetweenFetches) return;
+    if (now - lastFetchTime.current < 3000) return; // Increased minimum time between fetches
     
-    // Check cache first if not forced refresh
-    const cacheTTL = isMobile ? MOBILE_CACHE_TTL : STREAM_CACHE_TTL;
-    if (!forceRefresh && streamInfoCache.data && now - streamInfoCache.timestamp < cacheTTL) {
+    // Check cache first
+    if (streamInfoCache.data && now - streamInfoCache.timestamp < STREAM_CACHE_TTL) {
       console.log('[StreamPlayer] Using cached stream info');
       setStreamInfo(streamInfoCache.data);
       setError(null);
@@ -88,21 +48,15 @@ const StreamPlayer = memo(() => {
 
     try {
       console.log('[StreamPlayer] Fetching fresh stream info');
-      const timeout = isMobile ? MOBILE_FETCH_TIMEOUT : FETCH_TIMEOUT;
-      
-      const response = await fetchWithTimeout(
-        `${CONFIG.CAMERA_API_URL}/api/stream/info`, 
-        {
-          headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-          }
-        },
-        timeout
-      );
+      const response = await fetch(`${CONFIG.CAMERA_API_URL}/api/stream/info`, {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
       
       if (!response.ok) {
-        throw new Error(`Failed to fetch stream info (${response.status})`);
+        throw new Error('Failed to fetch stream info');
       }
       
       const data = await response.json();
@@ -123,29 +77,17 @@ const StreamPlayer = memo(() => {
         return newStreamInfo;
       });
       setError(null);
-      setLoadingRetry(0); // Reset retry counter on success
     } catch (err) {
       console.error('Failed to get stream info:', err);
       if (!isCameraOperation.current) {
-        setError(`Failed to get stream info: ${err instanceof Error ? err.message : 'Network error'}`);
-        
-        // For mobile, retry a few times
-        if (isMobile && loadingRetry < 3) {
-          console.log(`[StreamPlayer] Retrying fetch (${loadingRetry + 1}/3)`);
-          setLoadingRetry(prev => prev + 1);
-          
-          // Schedule retry after a delay
-          setTimeout(() => {
-            fetchStreamInfo(true);
-          }, 5000);
-        }
+        setError('Failed to get stream info');
       }
     } finally {
       if (!isCameraOperation.current) {
         setIsLoading(false);
       }
     }
-  }, [isMobile, loadingRetry]);
+  }, []);
 
   // Listen for camera operations
   useEffect(() => {
@@ -161,44 +103,31 @@ const StreamPlayer = memo(() => {
 
   useEffect(() => {
     fetchStreamInfo();
-    // Use different polling intervals for mobile vs desktop
-    const pollingInterval = isMobile ? 30000 : 15000;
-    pollInterval.current = setInterval(() => fetchStreamInfo(), pollingInterval);
+    pollInterval.current = setInterval(fetchStreamInfo, 15000); // Increased polling interval to 15 seconds
     
     return () => {
       if (pollInterval.current) {
         clearInterval(pollInterval.current);
       }
-      // Cleanup any ongoing fetch
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
     };
-  }, [fetchStreamInfo, isMobile]);
+  }, [fetchStreamInfo]);
 
   // Add debug logging for program and camera availability
   useEffect(() => {
     console.log(`[StreamPlayer] Program ID: ${CAMERA_ACTIVATION_PROGRAM_ID.toString()}`);
     console.log(`[StreamPlayer] Program available: ${!!program}`);
-    console.log(`[StreamPlayer] Mobile browser: ${isMobile}`);
     
     if (selectedCamera) {
       console.log(`[StreamPlayer] Camera loaded: ${selectedCamera.publicKey}`);
     } else {
       console.log(`[StreamPlayer] No camera loaded`);
     }
-  }, [program, selectedCamera, isMobile]);
+  }, [program, selectedCamera]);
 
   if (isLoading) {
     return (
       <div className="aspect-video bg-gray-900 rounded-lg flex items-center justify-center">
-        <p className="text-gray-400">
-          Loading stream...
-          {isMobile && loadingRetry > 0 && (
-            <span className="block text-xs mt-1">Attempt {loadingRetry}/3</span>
-          )}
-        </p>
+        <p className="text-gray-400">Loading stream...</p>
       </div>
     );
   }
@@ -206,21 +135,7 @@ const StreamPlayer = memo(() => {
   if (error || !streamInfo?.playbackId || !streamInfo.isActive) {
     return (
       <div className="aspect-video w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-gray-400">Stream is offline</p>
-          {isMobile && error && (
-            <button 
-              className="mt-2 px-3 py-1 text-xs bg-blue-500 text-white rounded"
-              onClick={() => {
-                setIsLoading(true);
-                setError(null);
-                fetchStreamInfo(true);
-              }}
-            >
-              Retry
-            </button>
-          )}
-        </div>
+        <p className="text-center text-gray-400">Stream is offline</p>
       </div>
     );
   }
