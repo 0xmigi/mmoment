@@ -10,117 +10,103 @@ config();
 
 const app = express();
 
-// Create HTTP server with timeout settings
+// Create HTTP server with more lenient timeout settings
 const httpServer = createServer(app);
-httpServer.keepAliveTimeout = 65000; // Slightly higher than Cloudflare's 60-second timeout
-httpServer.headersTimeout = 66000; // Slightly higher than keepAliveTimeout
+httpServer.keepAliveTimeout = 120000; // 2 minutes
+httpServer.headersTimeout = 121000; // Slightly higher than keepAliveTimeout
 
 // Basic middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Strict CORS configuration
-const allowedOrigins = [
-  'https://mmoment.xyz',
-  'https://www.mmoment.xyz',
-  'https://camera.mmoment.xyz',
-  'http://localhost:5173',
-  'http://localhost:3000'
-];
-
+// More permissive CORS configuration for debugging
 const corsOptions = {
-  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) {
-      callback(null, true);
-      return;
-    }
-    
-    if (allowedOrigins.some(allowed => origin.startsWith(allowed))) {
-      callback(null, true);
-    } else {
-      callback(new Error('CORS not allowed'));
-    }
-  },
+  origin: true, // Allow all origins temporarily
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
+  allowedHeaders: ['*'], // Allow all headers
   credentials: true,
-  maxAge: 86400
+  maxAge: 86400,
+  preflightContinue: true
 };
 
 // Add CORS headers middleware
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  
-  if (origin && allowedOrigins.some(allowed => origin.startsWith(allowed))) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE');
-    res.setHeader('Access-Control-Allow-Headers', 'Origin,X-Requested-With,Content-Type,Accept,Authorization');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
   
   // Handle preflight
   if (req.method === 'OPTIONS') {
-    return res.status(204).end();
+    res.status(200).end();
+    return;
   }
   next();
 });
 
 app.use(cors(corsOptions));
 
-// Configure Socket.IO with strict CORS
+// Configure Socket.IO with permissive settings
 const io = new Server(httpServer, {
   cors: {
-    origin: allowedOrigins,
+    origin: '*',
     methods: ['GET', 'POST'],
-    credentials: true
+    credentials: true,
+    allowedHeaders: ['*']
   },
   path: '/socket.io/',
   transports: ['websocket', 'polling'],
-  pingTimeout: 30000,
-  pingInterval: 10000,
-  connectTimeout: 30000,
-  upgradeTimeout: 20000,
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  connectTimeout: 60000,
+  upgradeTimeout: 30000,
   maxHttpBufferSize: 1e8,
   allowUpgrades: true,
-  perMessageDeflate: false, // Disable compression for debugging
-  destroyUpgrade: false // Don't destroy upgraded connections
+  perMessageDeflate: false,
+  destroyUpgrade: false
 });
 
 // Trust proxy and handle HTTPS
 app.enable('trust proxy');
 app.use((req, res, next) => {
-  // Add response timeout
-  res.setTimeout(30000, () => {
+  // Increase response timeout
+  res.setTimeout(60000, () => {
     res.status(504).json({ error: 'Server timeout' });
   });
 
-  // Force HTTPS in production
-  if (process.env.NODE_ENV === 'production' && !req.secure) {
+  // Only force HTTPS in production and not for health checks
+  if (process.env.NODE_ENV === 'production' && !req.secure && !req.path.includes('/health')) {
     return res.redirect(301, `https://${req.headers.host}${req.url}`);
   }
   next();
 });
 
-// Add request logging
+// Add detailed request logging
 app.use((req, res, next) => {
   const start = Date.now();
+  console.log(`[${new Date().toISOString()}] Incoming ${req.method} ${req.url}`);
+  console.log('Headers:', req.headers);
+  
   res.on('finish', () => {
     const duration = Date.now() - start;
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.url} - ${res.statusCode} - ${duration}ms`);
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} - ${res.statusCode} - ${duration}ms`);
   });
   next();
 });
 
 // Health check endpoint with detailed status
-app.get('/', (req, res) => {
+app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV,
     headers: req.headers,
     secure: req.secure,
-    protocol: req.protocol
+    protocol: req.protocol,
+    host: req.headers.host,
+    origin: req.headers.origin,
+    userAgent: req.headers['user-agent']
   });
 });
 
