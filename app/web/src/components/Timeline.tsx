@@ -156,25 +156,50 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     };
   }, [cameraId, enrichEventWithUserInfo]);
 
-  // Add polling mechanism for mobile browsers
+  // Mobile auto-refresh for timeline updates
   useEffect(() => {
-    // Check if this is a mobile browser
+    // Only run on mobile browsers
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    if (!isMobile) return;
+    if (!isMobile || !cameraId) return;
 
-    // Add polling for mobile browsers to refresh timeline events
-    const pollInterval = setInterval(() => {
-      if (cameraId) {
-        console.log('Mobile polling: Refreshing timeline events for camera', cameraId);
-        // Re-join the camera to refresh events (this will fetch recent events)
-        timelineService.joinCamera(cameraId);
-      }
-    }, 10000); // Poll every 10 seconds
-
+    console.log('[Mobile Timeline] Setting up auto-refresh');
+    
+    // Force reload events on initial load
+    setTimeout(() => {
+      console.log('[Mobile Timeline] Initial refresh');
+      timelineService.joinCamera(cameraId);
+    }, 1000);
+    
+    // Set up regular polling for mobile browsers
+    const refreshInterval = setInterval(() => {
+      console.log('[Mobile Timeline] Auto-refreshing timeline');
+      timelineService.joinCamera(cameraId);
+    }, 8000); // Refresh every 8 seconds
+    
     return () => {
-      clearInterval(pollInterval);
+      clearInterval(refreshInterval);
     };
   }, [cameraId]);
+
+  // Add a refresh function to force timeline updates on mobile
+  const refreshTimeline = useCallback(() => {
+    if (cameraId) {
+      console.log('Manually refreshing timeline for camera', cameraId);
+      // Use the forceRefresh method if available
+      if (typeof timelineService.forceRefresh === 'function') {
+        timelineService.forceRefresh();
+      } else {
+        // Fallback to re-joining the camera
+        timelineService.joinCamera(cameraId);
+      }
+    }
+  }, [cameraId]);
+
+  // Add this after the existing useEffect for mobile polling
+  // Force refresh button click handler
+  const handleRefreshClick = () => {
+    refreshTimeline();
+  };
 
   // Filter events based on selected filter
   const filteredEvents = useMemo(() => {
@@ -251,6 +276,21 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
             : 'auto'
         }}
       >
+        {/* Mobile Refresh Button - only visible on mobile devices */}
+        {/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) && (
+          <button 
+            onClick={handleRefreshClick}
+            className="absolute right-2 top-2 z-10 p-1 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200"
+            title="Refresh timeline"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12a9 9 0 0 1-9 9c-4.97 0-9-4.03-9-9s4.03-9 9-9h3" />
+              <path d="M21 3v6h-6" />
+              <path d="M16 8l5-5" />
+            </svg>
+          </button>
+        )}
+        
         {/* Vertical timeline line */}
         <div className="absolute left-[4px] sm:left-[6px] top-0 h-full w-px bg-gray-200" />
         

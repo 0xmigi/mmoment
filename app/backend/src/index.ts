@@ -4,6 +4,8 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { config } from 'dotenv';
+import { randomUUID } from 'crypto';
+import { TimelineEvent } from './types';
 
 // Load environment variables
 config();
@@ -146,18 +148,7 @@ app.get('/health', async (req, res) => {
 });
 
 // Timeline events storage (in-memory)
-interface TimelineEvent {
-  id: string;
-  type: string;
-  user: {
-    address: string;
-    username?: string;
-  };
-  timestamp: number;
-  cameraId?: string;
-}
-
-const timelineEvents: TimelineEvent[] = [];
+let timelineEvents: TimelineEvent[] = [];
 const cameraRooms = new Map<string, Set<string>>();
 
 // Socket connection handling
@@ -253,6 +244,71 @@ io.on('connection', (socket) => {
 // Error handling for Socket.IO
 io.engine.on('connection_error', (err) => {
   console.error('Socket.IO connection error:', err);
+});
+
+// HTTP endpoints for timeline events (mobile fallback)
+app.get('/api/timeline/events', (req, res) => {
+  try {
+    // Extract camera ID from query params if available
+    const cameraId = req.query.cameraId as string | undefined;
+    
+    // Get events from the timeline service
+    const allEvents = [...timelineEvents];
+    
+    // Filter by camera ID if provided
+    const filteredEvents = cameraId 
+      ? allEvents.filter(event => event.cameraId === cameraId)
+      : allEvents;
+    
+    // Sort by timestamp (newest first)
+    const sortedEvents = filteredEvents.sort((a, b) => b.timestamp - a.timestamp);
+    
+    // Limit to most recent 50 events
+    const recentEvents = sortedEvents.slice(0, 50);
+    
+    console.log(`[HTTP Timeline] Returning ${recentEvents.length} events${cameraId ? ` for camera ${cameraId}` : ''}`);
+    
+    return res.status(200).json(recentEvents);
+  } catch (error) {
+    console.error('[HTTP Timeline] Error fetching events:', error);
+    return res.status(500).json({ error: 'Failed to fetch timeline events' });
+  }
+});
+
+app.post('/api/timeline/events', (req, res) => {
+  try {
+    const eventData = req.body as Omit<TimelineEvent, 'id'>;
+    
+    if (!eventData || !eventData.type || !eventData.user || !eventData.timestamp) {
+      return res.status(400).json({ error: 'Invalid event data' });
+    }
+    
+    // Create a new event with an ID
+    const newEvent: TimelineEvent = {
+      ...eventData,
+      id: randomUUID()
+    };
+    
+    // Add to timeline events
+    timelineEvents.push(newEvent);
+    
+    // Trim the events array if it gets too large
+    if (timelineEvents.length > 500) {
+      timelineEvents = timelineEvents.slice(-500);
+    }
+    
+    // Emit to all connected clients in the camera room
+    if (newEvent.cameraId) {
+      io.to(newEvent.cameraId).emit('timelineEvent', newEvent);
+    }
+    
+    console.log(`[HTTP Timeline] Added new event of type ${newEvent.type}`);
+    
+    return res.status(201).json({ success: true, eventId: newEvent.id });
+  } catch (error) {
+    console.error('[HTTP Timeline] Error adding event:', error);
+    return res.status(500).json({ error: 'Failed to add timeline event' });
+  }
 });
 
 // Start server with error handling
