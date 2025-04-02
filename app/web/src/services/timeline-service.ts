@@ -8,7 +8,7 @@ const TIMELINE_EVENTS_STORAGE_KEY = 'timeline_events';
 const TIMELINE_CAMERA_ID_KEY = 'timeline_camera_id';
 
 class TimelineService {
-  private socket: Socket;
+  private socket!: Socket;  // Use definite assignment assertion
   private listeners: Set<(event: TimelineEvent) => void> = new Set();
   private events: TimelineEvent[] = [];
   private isConnected: boolean = false;
@@ -17,11 +17,20 @@ class TimelineService {
   private readonly MAX_RECONNECT_ATTEMPTS = 5;
 
   constructor() {
-    // Try to restore events and camera ID from local storage
+    // Try to restore events from local storage
     this.restoreFromLocalStorage();
 
-    // Use the config WS_URL for WebSocket connection
-    this.socket = io(CONFIG.WS_URL, {
+    // Initialize socket with the timeline WebSocket URL
+    this.initializeSocket();
+  }
+
+  private initializeSocket() {
+    // Always use the timeline WebSocket URL (Railway)
+    const timelineWsUrl = CONFIG.TIMELINE_WS_URL;
+    
+    console.log(`[Timeline] Connecting to timeline service at: ${timelineWsUrl}`);
+    
+    this.socket = io(timelineWsUrl, {
       ...timelineConfig.wsOptions,
       autoConnect: true
     });
@@ -29,21 +38,20 @@ class TimelineService {
     this.socket.on('connect', () => {
       this.isConnected = true;
       this.reconnectAttempts = 0;
-      console.log('Connected to timeline service');
+      console.log('[Timeline] Connected to timeline service');
       
-      // If we have a camera ID, join its room immediately after connection
       if (this.currentCameraId) {
         this.joinCamera(this.currentCameraId);
       }
     });
 
     this.socket.on('connect_error', (error) => {
-      console.error('Timeline connection error:', error);
+      console.error('[Timeline] Connection error:', error);
       this.isConnected = false;
       this.reconnectAttempts++;
       
       if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
-        console.error('Timeline service max reconnection attempts reached');
+        console.error('[Timeline] Max reconnection attempts reached');
         this.socket.disconnect();
       }
     });

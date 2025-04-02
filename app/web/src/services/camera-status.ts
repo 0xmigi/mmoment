@@ -9,7 +9,9 @@ class CameraStatusService {
   private retryCount = 0;
   private currentStatus = { isLive: false, isStreaming: false };
   private lastCheckTime = 0;
-  private readonly MIN_CHECK_INTERVAL = 2000;
+  private readonly MIN_CHECK_INTERVAL = 3000; // Increased to reduce load
+  private readonly MOBILE_CHECK_INTERVAL = 10000; // Longer interval for mobile
+  private readonly FETCH_TIMEOUT = 8000; // 8 second timeout for fetch operations
   private debugMode = true; // Enable debug logs
 
   private constructor() {
@@ -30,18 +32,53 @@ class CameraStatusService {
     }
   }
 
+  // Helper function to safely fetch with timeout
+  private async fetchWithTimeout(url: string, options: RequestInit = {}, timeout = this.FETCH_TIMEOUT): Promise<Response> {
+    const controller = new AbortController();
+    const { signal } = controller;
+    
+    // Create timeout that aborts the fetch
+    const timeoutId = setTimeout(() => {
+      this.logDebug(`Fetch timeout reached for ${url}`);
+      controller.abort();
+    }, timeout);
+    
+    try {
+      const response = await fetch(url, { ...options, signal });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      throw error;
+    }
+  }
+
   private async checkStatus(force = false): Promise<void> {
     const now = Date.now();
-    if (!force && now - this.lastCheckTime < this.MIN_CHECK_INTERVAL) {
+    const isMobile = CONFIG.isMobileBrowser;
+    const minInterval = isMobile ? this.MOBILE_CHECK_INTERVAL : this.MIN_CHECK_INTERVAL;
+    
+    if (!force && now - this.lastCheckTime < minInterval) {
       return;
     }
     this.lastCheckTime = now;
 
-    this.logDebug(`Checking camera status using API URL: ${CONFIG.CAMERA_API_URL}`);
+    this.logDebug(`Checking camera status using API URL: ${CONFIG.CAMERA_API_URL}, mobile: ${isMobile}`);
 
     try {
-      // Create a simple fetch without cache-control headers which might cause CORS issues
-      const healthResponse = await fetch(`${CONFIG.CAMERA_API_URL}/api/health`);
+      // Try a simple health check first
+      const healthResponse = await this.fetchWithTimeout(
+        `${CONFIG.CAMERA_API_URL}/api/health`,
+        {
+          // Add cache-busting for mobile
+          headers: isMobile ? {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+          } : undefined
+        },
+        isMobile ? this.FETCH_TIMEOUT * 1.5 : this.FETCH_TIMEOUT // Longer timeout for mobile
+      );
+      
       this.logDebug('Health response status:', healthResponse.status);
 
       if (!healthResponse.ok) {
@@ -56,11 +93,21 @@ class CameraStatusService {
         this.logDebug('Failed to parse health response as JSON:', e);
       }
 
-      // Try to fetch stream info - if it fails, we'll still consider the camera live
-      // but not streaming
+      // Try to fetch stream info with a shorter timeout
       let isStreaming = false;
       try {
-        const streamResponse = await fetch(`${CONFIG.CAMERA_API_URL}/api/stream/info`);
+        const streamResponse = await this.fetchWithTimeout(
+          `${CONFIG.CAMERA_API_URL}/api/stream/info`,
+          {
+            // Add cache-busting for mobile
+            headers: isMobile ? {
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache'
+            } : undefined
+          },
+          isMobile ? 5000 : 3000 // Shorter timeout for stream info
+        );
+        
         this.logDebug('Stream info response status:', streamResponse.status);
 
         if (streamResponse.ok) {
@@ -92,10 +139,13 @@ class CameraStatusService {
     } catch (error) {
       this.logDebug('Status check failed:', error);
       
-      if (this.retryCount < 3) {
+      // Mobile gets more retries with longer delays
+      const maxRetries = CONFIG.isMobileBrowser ? 5 : 3;
+      
+      if (this.retryCount < maxRetries) {
         this.retryCount++;
-        const retryDelay = Math.min(1000 * Math.pow(2, this.retryCount), 10000);
-        this.logDebug(`Retrying in ${retryDelay}ms (attempt ${this.retryCount})`);
+        const retryDelay = Math.min(1000 * Math.pow(2, this.retryCount), 20000);
+        this.logDebug(`Retrying in ${retryDelay}ms (attempt ${this.retryCount}/${maxRetries})`);
         await new Promise(resolve => setTimeout(resolve, retryDelay));
         return this.checkStatus(true);
       } else {
@@ -117,7 +167,12 @@ class CameraStatusService {
   private startPolling() {
     this.logDebug('Starting status polling');
     this.checkStatus(true);
-    this.pollInterval = setInterval(() => this.checkStatus(), 5000);
+    
+    // Use different polling intervals for mobile vs desktop
+    const pollInterval = CONFIG.isMobileBrowser ? 15000 : 5000;
+    this.logDebug(`Setting poll interval to ${pollInterval}ms (mobile: ${CONFIG.isMobileBrowser})`);
+    
+    this.pollInterval = setInterval(() => this.checkStatus(), pollInterval);
   }
 
   subscribe(callback: StatusCallback): () => void {

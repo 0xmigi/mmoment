@@ -71,15 +71,12 @@ const getCameraApiUrl = () => {
   return primaryUrl;
 };
 
-// Get WebSocket URL based on environment and protocol with fallback
-const getWebSocketUrl = () => {
-  // For production or non-localhost, always use WSS
-  if (!window.location.hostname.includes('localhost')) {
-    return "wss://middleware.mmoment.xyz";
+// Get WebSocket URL for timeline updates from Railway backend
+const getTimelineWebSocketUrl = () => {
+  if (window.location.hostname.includes('localhost')) {
+    return "ws://localhost:3001";
   }
-
-  // For local development
-  return "ws://localhost:3001";
+  return "wss://mmoment-production.up.railway.app";
 };
 
 // Export configuration
@@ -88,7 +85,9 @@ export const CONFIG = {
   rpcEndpoint,
   devnetEndpoints,
   getNextEndpoint,
+  // Camera API is your Pi5 device with the Python/Flask server
   CAMERA_API_URL: getCameraApiUrl(),
+  // Timeline backend is your Railway service
   BACKEND_URL: isProduction 
     ? "https://mmoment-production.up.railway.app"
     : "http://localhost:3001",
@@ -96,35 +95,20 @@ export const CONFIG = {
   isCloudflareProxy: isCloudflareProxy(),
   isMobileBrowser: isMobileBrowser(),
   LIVEPEER_PLAYBACK_ID: process.env.REACT_APP_LIVEPEER_PLAYBACK_ID || '',
-  WS_URL: getWebSocketUrl(),
+  TIMELINE_WS_URL: getTimelineWebSocketUrl(),
   CAMERA_PDA: import.meta.env.VITE_CAMERA_PDA || '5onKAv5c6VdBZ8a7D11XqF79Hdzuv3tnysjv4B2pQWZ2'
 };
 
-// Socket.IO configuration with better mobile support and longer timeouts
+// Socket.IO configuration for timeline (Railway backend)
 export const timelineConfig = {
-  wsUrl: CONFIG.WS_URL,
+  wsUrl: CONFIG.TIMELINE_WS_URL,
   wsOptions: {
-    reconnectionDelay: 10000,
+    reconnectionDelay: 1000,
     reconnection: true,
-    reconnectionAttempts: 10,
-    secure: true,
-    path: '/socket.io/',
-    rejectUnauthorized: false, // Allow self-signed certs
-    transports: ['polling', 'websocket'], // Try polling first
-    upgrade: true,
-    timeout: 60000,
-    pingTimeout: 300000, // 5 minutes
-    pingInterval: 25000,
-    reconnectionDelayMax: 60000,
+    reconnectionAttempts: 5,
+    timeout: 10000, 
     autoConnect: true,
     forceNew: true,
-    extraHeaders: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET,HEAD,PUT,PATCH,POST,DELETE",
-      "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept",
-      "User-Agent": navigator.userAgent,
-      "Cache-Control": "no-cache",
-      "Pragma": "no-cache"
-    }
+    transports: ['polling', 'websocket'] // Try polling first on mobile
   }
 };
