@@ -9,31 +9,140 @@ import { config } from 'dotenv';
 config();
 
 const app = express();
+
+// Create HTTP server with extremely lenient timeout settings
 const httpServer = createServer(app);
+httpServer.keepAliveTimeout = 300000; // 5 minutes
+httpServer.headersTimeout = 301000; // Slightly higher than keepAliveTimeout
 
-// Add middleware
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  credentials: true
-}));
+// Basic middleware with increased limits
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Health check endpoint
-app.get('/', (req, res) => {
-  res.json({ status: 'healthy' });
+// Super permissive CORS configuration
+app.use((req, res, next) => {
+  // Allow any origin
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  
+  // Allow all methods and headers
+  res.setHeader('Access-Control-Allow-Methods', '*');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  
+  // Add cache control headers
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  
+  // Handle preflight
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  next();
 });
 
-// Initialize Socket.IO
+// Use cors middleware with permissive settings
+app.use(cors({
+  origin: true,
+  methods: '*',
+  allowedHeaders: '*',
+  credentials: true,
+  maxAge: 86400,
+  preflightContinue: true
+}));
+
+// Configure Socket.IO with extremely permissive settings
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST", "OPTIONS"],
-    credentials: true
+    origin: '*',
+    methods: ['GET', 'POST'],
+    credentials: true,
+    allowedHeaders: '*'
   },
   path: '/socket.io/',
-  transports: ['websocket', 'polling'],
-  pingTimeout: 90000,
-  pingInterval: 25000
+  transports: ['polling', 'websocket'], // Try polling first
+  pingTimeout: 300000, // 5 minutes
+  pingInterval: 25000,
+  connectTimeout: 300000, // 5 minutes
+  upgradeTimeout: 300000, // 5 minutes
+  maxHttpBufferSize: 1e8,
+  allowUpgrades: true,
+  perMessageDeflate: false,
+  destroyUpgrade: false
+});
+
+// Trust proxy and handle HTTPS
+app.enable('trust proxy');
+
+// Add response timeout middleware
+app.use((req, res, next) => {
+  res.setTimeout(300000, () => { // 5 minutes
+    res.status(504).json({ error: 'Server timeout' });
+  });
+  next();
+});
+
+// Debug logging middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  const requestId = Math.random().toString(36).substring(7);
+  
+  console.log(`[${requestId}] ${new Date().toISOString()} - Incoming ${req.method} ${req.url}`);
+  console.log(`[${requestId}] Headers:`, req.headers);
+  
+  // Log response
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(`[${requestId}] ${new Date().toISOString()} - ${req.method} ${req.url} - ${res.statusCode} - ${duration}ms`);
+  });
+  
+  next();
+});
+
+// Add debug endpoints
+app.get('/debug/headers', (req, res) => {
+  res.json({
+    headers: req.headers,
+    ip: req.ip,
+    ips: req.ips,
+    secure: req.secure,
+    protocol: req.protocol
+  });
+});
+
+app.get('/debug/ping', (req, res) => {
+  res.json({ pong: Date.now() });
+});
+
+// Health check endpoint with connection test
+app.get('/health', async (req, res) => {
+  try {
+    const status = {
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV,
+      headers: req.headers,
+      secure: req.secure,
+      protocol: req.protocol,
+      host: req.headers.host,
+      origin: req.headers.origin,
+      userAgent: req.headers['user-agent'],
+      socketConnections: io.engine.clientsCount,
+      memoryUsage: process.memoryUsage(),
+      uptime: process.uptime()
+    };
+
+    res.json(status);
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Timeline events storage (in-memory)
@@ -141,8 +250,21 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3001;
+// Error handling for Socket.IO
+io.engine.on('connection_error', (err) => {
+  console.error('Socket.IO connection error:', err);
+});
 
-httpServer.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+// Start server with error handling
+const port = process.env.PORT || 3001;
+httpServer.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+  console.log(`Environment: ${process.env.NODE_ENV}`);
+  console.log('Server configuration:', {
+    keepAliveTimeout: httpServer.keepAliveTimeout,
+    headersTimeout: httpServer.headersTimeout,
+    socketTransports: io.engine.opts.transports,
+    socketPingTimeout: io.engine.opts.pingTimeout,
+    socketPingInterval: io.engine.opts.pingInterval
+  });
 });

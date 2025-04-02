@@ -2,19 +2,36 @@
 
 // Ensure we're using HTTPS in production
 const isProduction = import.meta.env.PROD;
+
+// Helper to determine if we're on a mobile browser
+const isMobileBrowser = () => {
+  if (typeof window === 'undefined') return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+};
+
 const forceHttps = (url: string) => {
-  if (isProduction) {
-    // Always use HTTPS in production, regardless of input
-    return url.replace(/^http:\/\//i, 'https://');
+  // Always use HTTPS except for localhost
+  if (!url.includes('localhost')) {
+    // Handle websocket URLs
+    if (url.startsWith('ws://')) {
+      return url.replace('ws://', 'wss://');
+    }
+    // Handle HTTP URLs
+    if (url.startsWith('http://')) {
+      return url.replace('http://', 'https://');
+    }
   }
   return url;
 };
 
 // Helper to determine if we're behind Cloudflare
 const isCloudflareProxy = () => {
-  return typeof window !== 'undefined' && 
-    (window.location.hostname === 'mmoment.xyz' || 
-     window.location.hostname === 'camera.mmoment.xyz');
+  if (typeof window === 'undefined') return false;
+  const hostname = window.location.hostname;
+  return hostname === 'mmoment.xyz' || 
+         hostname === 'www.mmoment.xyz' ||
+         hostname === 'camera.mmoment.xyz' ||
+         hostname.endsWith('.mmoment.xyz');
 };
 
 // Get the cluster from environment variable, defaults to devnet if not specified
@@ -29,7 +46,7 @@ const devnetEndpoints = [
 
 let currentEndpointIndex = 0;
 
-// Simple endpoint rotation
+// Simple endpoint rotation with retry logic
 const getNextEndpoint = () => {
   currentEndpointIndex = (currentEndpointIndex + 1) % devnetEndpoints.length;
   return devnetEndpoints[currentEndpointIndex];
@@ -38,34 +55,39 @@ const getNextEndpoint = () => {
 // Set RPC endpoint based on the cluster
 const rpcEndpoint = cluster === 'localnet' ? 'http://localhost:8899' : devnetEndpoints[0];
 
-// Get the appropriate API URL based on environment
+// Get the appropriate API URL based on environment with fallbacks
 const getCameraApiUrl = () => {
-  // Always try Cloudflare tunnel first unless explicitly in local development
-  if (isProduction || isCloudflareProxy() || window.location.protocol === 'https:') {
-    return "https://middleware.mmoment.xyz";
-  }
-
+  // Primary URL should always be HTTPS
+  const primaryUrl = "https://middleware.mmoment.xyz";
+  
   // Only use localhost if we're explicitly in local development
-  // and have confirmed we need local access (e.g., debugging the Pi directly)
   const forceLocal = import.meta.env.VITE_FORCE_LOCAL === 'true';
-  if (forceLocal) {
+  if (forceLocal && window.location.hostname === 'localhost') {
     console.log('Using local camera API (forced by VITE_FORCE_LOCAL)');
     return "http://localhost:5002";
   }
 
-  // Default to Cloudflare tunnel
-  return "https://middleware.mmoment.xyz";
+  // Default to HTTPS
+  return primaryUrl;
 };
 
-// Get WebSocket URL based on environment and protocol
-const getWebSocketUrl = () => {
-  // For production, use Railway URL
-  if (isProduction) {
-    return forceHttps("wss://mmoment-production.up.railway.app");
+// Get WebSocket URL for timeline updates from Railway backend
+const getTimelineWebSocketUrl = () => {
+  // In development, try to connect to the local server first
+  if (window.location.hostname.includes('localhost')) {
+    // Use HTTP for health check and WS for socket connection
+    return "ws://localhost:3001";
   }
+  return "wss://mmoment-production.up.railway.app";
+};
 
-  // For local development
-  return "ws://localhost:3001";
+// For local development: check if we're trying to connect to localhost 
+// but with a different port than what's running vite
+const isUsingDifferentLocalPorts = () => {
+  if (!window.location.hostname.includes('localhost')) return false;
+  const vitePort = window.location.port; // e.g., 5173
+  const backendPort = '3001';
+  return vitePort !== backendPort;
 };
 
 // Export configuration
@@ -74,38 +96,36 @@ export const CONFIG = {
   rpcEndpoint,
   devnetEndpoints,
   getNextEndpoint,
+  // Camera API is your Pi5 device with the Python/Flask server
   CAMERA_API_URL: getCameraApiUrl(),
+  // Timeline backend is your Railway service
   BACKEND_URL: isProduction 
-    ? forceHttps("https://mmoment-production.up.railway.app")
+    ? "https://mmoment-production.up.railway.app"
     : "http://localhost:3001",
   isProduction,
   isCloudflareProxy: isCloudflareProxy(),
+  isMobileBrowser: isMobileBrowser(),
   LIVEPEER_PLAYBACK_ID: process.env.REACT_APP_LIVEPEER_PLAYBACK_ID || '',
-  WS_URL: getWebSocketUrl(),
-  CAMERA_PDA: import.meta.env.VITE_CAMERA_PDA || '5onKAv5c6VdBZ8a7D11XqF79Hdzuv3tnysjv4B2pQWZ2'
+  TIMELINE_WS_URL: getTimelineWebSocketUrl(),
+  CAMERA_PDA: import.meta.env.VITE_CAMERA_PDA || '5onKAv5c6VdBZ8a7D11XqF79Hdzuv3tnysjv4B2pQWZ2',
+  isUsingDifferentLocalPorts: isUsingDifferentLocalPorts()
 };
 
+// Socket.IO configuration for timeline (Railway backend)
 export const timelineConfig = {
-  wsUrl: CONFIG.WS_URL,
+  wsUrl: CONFIG.TIMELINE_WS_URL,
   wsOptions: {
     reconnectionDelay: 1000,
     reconnection: true,
-    // Use secure connection based on protocol
-    secure: isProduction || window.location.protocol === 'https:',
-    path: '/socket.io/',
-    rejectUnauthorized: isProduction ? true : false,
-    transports: ['websocket', 'polling'],
-    upgrade: true,
-    timeout: 20000,
-    pingTimeout: 90000,
-    pingInterval: 25000,
     reconnectionAttempts: 5,
-    reconnectionDelayMax: 5000,
+    timeout: 15000, 
     autoConnect: true,
     forceNew: true,
-    // Add extra options for secure connections
-    extraHeaders: isProduction ? {
-      "Access-Control-Allow-Origin": "*"
-    } : undefined
+    // For local development, don't use credentials to avoid CORS issues
+    withCredentials: !CONFIG.isUsingDifferentLocalPorts,
+    // Use appropriate transports based on device
+    transports: CONFIG.isMobileBrowser 
+      ? ['polling', 'websocket'] // Try polling first on mobile
+      : ['websocket', 'polling']  // Try websocket first on desktop
   }
 };
