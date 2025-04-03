@@ -33,10 +33,11 @@ class BufferService:
             return
 
         self._initialized = True
-        self.frame_rate = 10  # Reduced from 20 to 10 fps
-        self.buffer_size = 100  # Reduced from 200 to 100 frames (10 seconds at 10fps)
-        self.width = 960  # Reduced from 1280 to 960
-        self.height = 540  # Reduced from 720 to 540
+        # STRIPPED DOWN: Minimal framerate and resolution
+        self.frame_rate = 15  # Increased framerate for better streaming quality
+        self.buffer_size = 100  # Small buffer size
+        self.width = 640  # Lower resolution
+        self.height = 360  # Lower resolution
         
         # Core buffer components
         self.frame_buffer = deque(maxlen=self.buffer_size)
@@ -52,15 +53,15 @@ class BufferService:
         self.last_frame_time = 0
         self.health_lock = Lock()
         self.last_temp_check = 0
-        self.temp_check_interval = 1  # Check temp every second
+        self.temp_check_interval = 2  # Check less frequently
         
         # Cleanup settings
-        self.max_video_age_days = 1  # Delete videos older than 1 day
-        self.max_videos_to_keep = 50  # Keep at most 50 videos
-        self.cleanup_interval = 3600  # Run cleanup every hour
+        self.max_video_age_days = 1
+        self.max_videos_to_keep = 10  # Keep fewer videos
+        self.cleanup_interval = 3600
         self.last_cleanup_time = 0
         
-        logger.info("Buffer Service initialized with lower resolution and frame rate")
+        logger.info("Buffer Service initialized with minimal settings")
         
         # Start buffering automatically
         self.start_buffering()
@@ -96,41 +97,39 @@ class BufferService:
                 time.sleep(1.0)
 
                 self.picam2 = Picamera2()
+                # Add back autofocus settings but remove the vflip/hflip transform
                 config = self.picam2.create_video_configuration(
                     main={"size": (self.width, self.height), "format": "RGB888"},
                     controls={
                         "FrameRate": self.frame_rate,
+                        # Add back auto-focus controls
                         "AfMode": 2,                  # Continuous auto focus (2 is better than 1)
                         "AfMetering": 0,              # Auto focus metering mode
                         "AfRange": 0,                 # Normal range
                         "AfSpeed": 1,                 # Normal AF speed
-                        "Sharpness": 1.5,             # Normal sharpness
-                        "NoiseReductionMode": 1,
-                    },
-                    transform=libcamera.Transform(vflip=True, hflip=True),
-                    buffer_count=4
+                        "AfTrigger": 0                # Trigger autofocus now
+                    }
+                    # Remove transform to avoid double-flip with get_latest_frame
                 )
                 
                 self.picam2.configure(config)
                 
-                # Try to apply controls after configuration as well
+                # Try to apply controls after configuration as well to ensure focus works
                 try:
-                    logger.info("Setting camera controls after configuration")
+                    logger.info("Setting autofocus controls after configuration")
                     self.picam2.set_controls({
                         "AfMode": 2,                # Continuous autofocus mode
                         "AfTrigger": 0              # Trigger autofocus now
                     })
-                    logger.info("Successfully set controls after configuration")
+                    logger.info("Successfully set autofocus controls")
                 except Exception as e:
-                    logger.warning(f"Could not set controls after configuration: {e}")
+                    logger.warning(f"Could not set autofocus controls: {e}")
                 
                 # Start the camera and wait for it to initialize
                 self.picam2.start()
-                time.sleep(1.0)  # Give it more time to initialize
+                time.sleep(2.0)  # Give it more time to initialize
                 
-                # Log the actual camera configuration
-                logger.info(f"Camera started with configuration: {self.picam2.camera_configuration()}")
-                logger.info(f"Camera controls: {self.picam2.camera_controls}")
+                logger.info(f"Camera started with autofocus settings and no transform")
 
                 self.is_running = True
                 self.shutdown_event.clear()
@@ -227,14 +226,17 @@ class BufferService:
             mov_path = os.path.join(Settings.VIDEOS_DIR, mov_filename)
             logger.info(f"Will save video to: {mov_path}")
 
-            # Create a temporary file for frames
+            # Create a temporary file for frames - manually rotate each frame before writing
             temp_path = f"/tmp/frames_{timestamp}.raw"
             logger.info(f"Writing frames to temporary file: {temp_path}")
             with open(temp_path, "wb") as temp_file:
                 for frame, _ in frames:
+                    # Try a different method to correct orientation
+                    # Rotate each frame 180 degrees (flip horizontally and vertically)
+                    frame = cv2.flip(frame, -1)  # -1 means flip both horizontally and vertically
                     temp_file.write(frame.tobytes())
 
-            # Use the temporary file as input with web-optimized settings
+            # Use a direct approach for ffmpeg without additional transformations
             ffmpeg_cmd = [
                 "ffmpeg", "-y",
                 "-f", "rawvideo",
@@ -245,15 +247,10 @@ class BufferService:
                 "-i", temp_path,
                 "-c:v", "libx264",
                 "-preset", "veryfast",
-                "-tune", "zerolatency",
-                "-profile:v", "main",
-                "-level", "4.0",
                 "-pix_fmt", "yuv420p",
-                "-b:v", "2M",
-                "-bufsize", "4M",
-                "-maxrate", "2.5M",
+                "-b:v", "1M",  # Low bitrate
+                # Don't use any additional transformations since we've already rotated the frames
                 "-movflags", "+faststart",
-                "-brand", "mp42",
                 mov_path
             ]
 
@@ -285,7 +282,7 @@ class BufferService:
             if file_size == 0:
                 raise RuntimeError("Video file is empty")
                 
-            logger.info(f"Successfully created video: {mov_filename} (size: {file_size} bytes)")
+            logger.info(f"Successfully created video with frame-by-frame rotation: {mov_filename} (size: {file_size} bytes)")
             return {
                 "mov_filename": mov_filename,
                 "frame_count": num_frames,
@@ -307,20 +304,21 @@ class BufferService:
             try:
                 current_time = time.time()
                 
-                # Temperature check every second
+                # Temperature check less frequently
                 if current_time - last_temp_check >= self.temp_check_interval:
                     temp = self._check_temperature()
-                    if temp > 70:  # Reduced from 75
+                    if temp > 80:
                         logger.error(f"Critical temperature: {temp}°C")
                         self.cleanup()
                         break
                     last_temp_check = current_time
 
+                # Basic frame capture
                 frame = self.picam2.capture_array()
                 frames_processed += 1
                 
-                # Log performance metrics every 100 frames
-                if frames_processed % 100 == 0:
+                # Log less frequently
+                if frames_processed % 200 == 0:
                     logger.debug(f"Processed {frames_processed} frames, Buffer size: {len(self.frame_buffer)}")
                 
                 with self.buffer_lock:
@@ -328,32 +326,36 @@ class BufferService:
                     self.latest_frame = frame
                     self.last_frame_time = current_time
 
-                # Maintain frame rate with better timing
-                elapsed = time.time() - current_time
-                sleep_time = frame_interval - elapsed
+                # Basic timing
+                sleep_time = frame_interval - (time.time() - current_time)
                 if sleep_time > 0:
                     time.sleep(sleep_time)
-                elif elapsed > frame_interval * 1.5:
-                    logger.warning(f"Frame processing taking too long: {elapsed:.3f}s")
 
             except Exception as e:
                 logger.error(f"Error buffering frame: {e}")
                 time.sleep(0.1)
 
     def get_latest_frame(self):
-        """Thread-safe access to the latest frame"""
+        """Thread-safe access to the latest frame with orientation correction"""
         with self.buffer_lock:
-            return self.latest_frame.copy() if self.latest_frame is not None else None
+            if self.latest_frame is not None:
+                frame = self.latest_frame.copy()
+                # Apply orientation correction
+                frame = cv2.flip(frame, -1)  # -1 means flip both horizontally and vertically
+                return frame
+            return None
 
     def get_jpeg_frame(self):
-        """Get latest frame as JPEG with optimized settings"""
-        frame = self.get_latest_frame()
+        """Get latest frame as JPEG with manual rotation for consistent orientation"""
+        frame = self.get_latest_frame()  # Already includes orientation correction
         if frame is not None:
             try:
+                # Basic JPEG encoding (frame is already rotated in get_latest_frame)
                 _, jpeg_data = cv2.imencode('.jpg', frame, [
-                    cv2.IMWRITE_JPEG_QUALITY, 85,  # Reduced quality
+                    cv2.IMWRITE_JPEG_QUALITY, 80,  # Lower quality
                     cv2.IMWRITE_JPEG_OPTIMIZE, 1
                 ])
+                logger.debug("Created JPEG with orientation correction")
                 return jpeg_data.tobytes()
             except Exception as e:
                 logger.error(f"Error encoding JPEG: {e}")

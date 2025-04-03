@@ -97,7 +97,7 @@ def verify_transaction(tx_signature: str) -> bool:
                 logger.info(f"Transaction not found, retrying in {wait_time:.1f}s...")
                 time.sleep(wait_time)
                 continue
-                
+            
             # Accept both confirmed and finalized status
             status = resp.value[0].confirmation_status
             logger.info(f"Transaction status: {status}")

@@ -76,17 +76,17 @@ def require_auth(f):
 @api.after_request
 def after_request(response):
     """Add CORS headers to every response"""
-    logger.debug(f"Request headers: {dict(request.headers)}")
-    logger.debug(f"Response headers: {dict(response.headers)}")
-    
     # Add CORS headers to every response
-    origin = request.headers.get('Origin')
-    if origin:
-        response.headers.add('Access-Control-Allow-Origin', origin)
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,Accept,Origin,Cache-Control,Pragma,Cf-Connecting-Ip,Cf-Ipcountry,Cf-Ray,Cf-Visitor')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
-    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,Accept,Origin,Cache-Control,Pragma,Range')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Expose-Headers', 'Content-Type,Authorization,Content-Length,Accept-Ranges,Content-Range')
+    response.headers.add('Access-Control-Max-Age', '86400')
     
+    # Ensure no caching for dynamic content
+    response.headers.add('Cache-Control', 'no-cache, no-store, must-revalidate')
+    response.headers.add('Pragma', 'no-cache')
+    response.headers.add('Expires', '0')
     return response
 
 @api.route("/api/system/status", methods=["GET", "OPTIONS"])
@@ -367,10 +367,10 @@ def record_video():
     try:
         # Get duration from request or use default
         data = request.get_json(silent=True) or {}
-        duration = data.get("duration", 5)
+        duration = data.get("duration", 5)  # Default to 5 seconds
         
-        # Ensure duration is within safe limits
-        duration = min(max(1, duration), 10)
+        # Ensure duration is within strict limits
+        duration = min(max(1, duration), 10)  # Cap at 10 seconds maximum
         
         # Initialize camera service
         camera_service = CameraService()
@@ -468,11 +468,16 @@ def create_app():
     CORS(app, resources={
         r"/*": {
             "origins": "*",
-            "methods": ["GET", "POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin", "Cache-Control", "Pragma", "Cf-Connecting-Ip", "Cf-Ipcountry", "Cf-Ray", "Cf-Visitor"],
-            "expose_headers": ["Content-Type", "Authorization"],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin", 
+                             "Cache-Control", "Pragma", "Range", "Access-Control-Allow-Origin", 
+                             "Access-Control-Allow-Headers", "Access-Control-Allow-Methods",
+                             "Cf-Connecting-Ip", "Cf-Ipcountry", "Cf-Ray", "Cf-Visitor"],
+            "expose_headers": ["Content-Type", "Authorization", "Content-Length", "Accept-Ranges", 
+                              "Content-Range", "Access-Control-Allow-Origin"],
             "supports_credentials": False,
-            "send_wildcard": True
+            "send_wildcard": True,
+            "max_age": 86400
         }
     })
     

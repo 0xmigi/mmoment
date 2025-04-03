@@ -1,15 +1,18 @@
 [Unit]
 Description=Camera Service
-After=network.target cloudflared.service
+After=network.target
 
 [Service]
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/learning/boulderframe/my_solana_project/app/raspberry_pi/new-camera-service
-Environment="PATH=/home/pi/.local/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=/home/pi/.local/bin/gunicorn --worker-class eventlet --workers 1 --bind 127.0.0.1:8000 wsgi:app --log-level debug
+User=azuolas
+Group=azuolas
+WorkingDirectory=/home/azuolas/new-camera-service
+Environment="PATH=/home/azuolas/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/usr/bin/python3 -m camera_service.main
 Restart=always
-RestartSec=10
+Environment=PYTHONPATH=/home/azuolas/new-camera-service
+Environment=LIVEPEER_API_KEY=7019f80b-f416-45d4-9b90-1ea130039e97
+Environment=LIVEPEER_STREAM_KEY=a183-5r72-7vui-u9vy
+Environment=LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
 
 [Install]
 WantedBy=multi-user.target 

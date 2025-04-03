@@ -32,12 +32,13 @@ class LivepeerStreamService:
             self.api_key = os.getenv("LIVEPEER_API_KEY")
             self.stream_key = os.getenv("LIVEPEER_STREAM_KEY")
             self.ingest_url = os.getenv("LIVEPEER_INGEST_URL")
-            self.width = 960
-            self.height = 540
-            self.frame_rate = 30
+            # STRIPPED DOWN: Use minimal resolution and framerate
+            self.width = 640  # Match buffer service
+            self.height = 360  # Match buffer service
+            self.frame_rate = 15  # Match buffer service frame rate
             self.stop_streaming_event = threading.Event()
             self.ffmpeg_process = None
-            logger.debug("LivepeerStreamService initialized")
+            logger.debug("LivepeerStreamService initialized with minimal settings")
 
     @property
     def is_streaming(self):
@@ -65,28 +66,26 @@ class LivepeerStreamService:
                 ingest_url = f"{self.ingest_url}/{self.stream_key}"
                 logger.info(f"Using Livepeer ingest URL: {ingest_url}")
                 
-                # Initialize FFmpeg command with improved settings
+                # STRIPPED DOWN: Basic FFmpeg command with minimal settings
                 ffmpeg_cmd = [
                     "ffmpeg",
                     "-f", "rawvideo",
                     "-vcodec", "rawvideo",
                     "-s", f"{self.width}x{self.height}",
-                    "-pix_fmt", "rgb24",
+                    "-pix_fmt", "rgb24",  # Basic format
                     "-r", str(self.frame_rate),
                     "-i", "-",  # Read from stdin
                     "-c:v", "libx264",
-                    "-preset", "veryfast",
-                    "-tune", "zerolatency",
-                    "-profile:v", "main",
-                    "-level", "4.0",
-                    "-pix_fmt", "yuv420p",
-                    "-b:v", "2500k",
-                    "-maxrate", "2500k",
-                    "-bufsize", "5000k",
-                    "-g", "30",            # Keyframe interval
-                    "-keyint_min", "30",   # Minimum keyframe interval
-                    "-sc_threshold", "0",  # Disable scene change detection
-                    "-f", "flv",
+                    "-preset", "veryfast",  # Faster encoding, less CPU
+                    "-tune", "zerolatency",  # Optimize for streaming
+                    "-pix_fmt", "yuv420p",  # Required for compatibility
+                    "-b:v", "1M",  # Lower bitrate
+                    "-maxrate", "1M",  # Lower max bitrate
+                    "-bufsize", "2M",  # Smaller buffer
+                    "-g", str(self.frame_rate * 2),  # Set keyframe interval to 2 seconds
+                    "-force_key_frames", f"expr:gte(t,n_forced*{2})",  # Force keyframe every 2 seconds
+                    "-x264opts", "no-scenecut",  # Disable scene detection to maintain keyframe interval
+                    "-f", "flv",  # Output format
                     ingest_url
                 ]
 
@@ -98,7 +97,7 @@ class LivepeerStreamService:
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    bufsize=0  # Unbuffered
+                    bufsize=0  # No buffering for less memory usage
                 )
 
                 # Start the streaming thread
@@ -134,9 +133,10 @@ class LivepeerStreamService:
                     logger.error("Buffer service not running")
                     break
 
+                # Get frame from buffer service - it's already rotated by get_latest_frame
                 frame = self.buffer_service.get_latest_frame()
                 if frame is None:
-                    time.sleep(0.01)  # Short sleep to prevent CPU spin
+                    time.sleep(0.01)  # Sleep if no frame
                     continue
 
                 try:
@@ -145,9 +145,9 @@ class LivepeerStreamService:
                     self.ffmpeg_process.stdin.flush()
                     frames_sent += 1
 
-                    # Log streaming stats every 5 seconds
+                    # Log streaming stats every 10 seconds (less frequently)
                     current_time = time.time()
-                    if current_time - last_log >= 5:
+                    if current_time - last_log >= 10:
                         elapsed = current_time - start_time
                         fps = frames_sent / elapsed
                         logger.debug(f"Streaming stats - Frames sent: {frames_sent}, FPS: {fps:.1f}")
@@ -159,6 +159,9 @@ class LivepeerStreamService:
                 except Exception as e:
                     logger.error(f"Error writing frame to FFmpeg: {e}")
                     break
+
+                # Simple rate control
+                time.sleep(1.0 / self.frame_rate)
 
         except Exception as e:
             logger.error(f"Streaming thread error: {e}")
