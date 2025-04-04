@@ -264,6 +264,32 @@ io.on('connection', (socket) => {
       .filter(event => event.cameraId === cameraId)
       .sort((a, b) => b.timestamp - a.timestamp);
     socket.emit('recentEvents', cameraEvents);
+    
+    // Send all known social profiles to this client
+    const uniqueAddresses = new Set<string>();
+    
+    // First collect all addresses from events in this camera
+    cameraEvents.forEach(event => {
+      uniqueAddresses.add(event.user.address.toLowerCase());
+    });
+    
+    // Then send profiles for all those addresses
+    uniqueAddresses.forEach(address => {
+      const profile = socialProfiles.get(address);
+      if (profile) {
+        console.log(`[PROFILE] Sending profile for ${address} to new client`);
+        socket.emit('userProfileUpdate', {
+          address,
+          profile: {
+            address: profile.address,
+            username: profile.username,
+            displayName: profile.displayName,
+            pfpUrl: profile.pfpUrl,
+            provider: profile.provider
+          }
+        });
+      }
+    });
   });
 
   // Handle user profile updates

@@ -119,6 +119,9 @@ class TimelineService {
             // We'll just request recent events which should include server-generated IDs
             this.requestRecentEvents();
           }
+          
+          // Sync all cached social profiles with the server
+          this.syncCachedProfiles();
         }
       });
 
@@ -557,6 +560,33 @@ class TimelineService {
   // New helper method to check connection status
   isSocketConnected(): boolean {
     return this.isConnected && this.socket && this.socket.connected;
+  }
+
+  // Sync cached social profiles with the server on connection
+  private syncCachedProfiles() {
+    if (!this.isConnected || !this.socket || !this.currentCameraId) return;
+    
+    console.log(`[Timeline] Syncing cached social profiles`);
+    
+    // Scan localStorage for profile caches
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('profileCache_')) {
+        try {
+          const address = key.replace('profileCache_', '');
+          const data = JSON.parse(localStorage.getItem(key) || '{}');
+          
+          if (data.profile) {
+            console.log(`[Timeline] Broadcasting cached profile for ${address}`);
+            this.updateUserProfile({
+              address,
+              profile: data.profile
+            });
+          }
+        } catch (err) {
+          console.error('Error parsing cached profile:', err);
+        }
+      }
+    });
   }
 }
 

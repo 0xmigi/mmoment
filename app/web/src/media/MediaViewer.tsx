@@ -2,8 +2,9 @@ import { Dialog } from '@headlessui/react';
 import { X, ArrowUpRight, Download, Trash2 } from 'lucide-react';
 import { IPFSMedia } from '../storage/ipfs/ipfs-service';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { unifiedIpfsService } from '../storage/ipfs/unified-ipfs-service';
+import { socialService } from '../auth/social/social-service';
 
 // Copy the necessary types
 type TimelineEventType =
@@ -44,8 +45,46 @@ export default function MediaViewer({ isOpen, onClose, media, event, onDelete }:
   const [currentVideoUrl, setCurrentVideoUrl] = useState('');
   const [videoErrorCount, setVideoErrorCount] = useState(0);
   const [deleting, setDeleting] = useState(false);
+  const [socialProfiles, setSocialProfiles] = useState<any[]>([]);
+  const [, setLoading] = useState(false);
 
   if (!media) return null;
+
+  // Actively fetch profiles when the viewer opens
+  useEffect(() => {
+    if (!isOpen || (!event?.user.address && !media.walletAddress)) return;
+    
+    const address = event?.user.address || media.walletAddress;
+    const fetchProfiles = async () => {
+      setLoading(true);
+      try {
+        console.log(`[MediaViewer] Fetching profiles for ${address}`);
+        const profiles = await socialService.getProfilesByAddress(address);
+        if (profiles.length > 0) {
+          console.log(`[MediaViewer] Found ${profiles.length} profiles:`, profiles);
+          setSocialProfiles(profiles);
+        } else if (user?.verifiedCredentials?.length && 
+                  user.verifiedCredentials.some(cred => cred.address === address)) {
+          // If no profiles from API but user has matching verified credentials
+          const matchingCreds = user.verifiedCredentials.filter(
+            cred => cred.address === address
+          );
+          const credsProfiles = socialService.getProfileFromVerifiedCredentials(matchingCreds);
+          console.log(`[MediaViewer] Using verified credentials:`, credsProfiles);
+          setSocialProfiles(credsProfiles);
+        } else {
+          console.log(`[MediaViewer] No profiles found for ${address}`);
+          setSocialProfiles([]);
+        }
+      } catch (error) {
+        console.error(`[MediaViewer] Error fetching profiles:`, error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchProfiles();
+  }, [isOpen, event?.user.address, media.walletAddress, user?.verifiedCredentials]);
 
   // Add debugging for video media
   if (media.type === 'video' && !currentVideoUrl) {
@@ -60,33 +99,40 @@ export default function MediaViewer({ isOpen, onClose, media, event, onDelete }:
     setCurrentVideoUrl(media.directUrl || media.url);
   }
 
-  // Get social identity from user's verified credentials
-  const farcasterCred = user?.verifiedCredentials?.find(cred => 
-    cred.oauthProvider === 'farcaster'
-  );
-  
-  const twitterCred = user?.verifiedCredentials?.find(cred => 
-    cred.oauthProvider === 'twitter'
-  );
+  // Get social profiles data - direct, reliable approach
+  const farcasterProfile = socialProfiles.find(profile => profile.provider === 'farcaster');
+  const twitterProfile = socialProfiles.find(profile => profile.provider === 'twitter');
   
   // Prioritize Farcaster over Twitter
-  const primarySocialCred = farcasterCred || twitterCred;
+  const primarySocialProfile = farcasterProfile || twitterProfile;
   
-  // Get social identity from event first, user's verified credentials as fallback
-  // This lets us display profile info correctly for other users
-  const displayName = event?.user.displayName || primarySocialCred?.oauthDisplayName;
-  const username = event?.user.username || primarySocialCred?.oauthUsername;
-  const profileImage = event?.user.pfpUrl || primarySocialCred?.oauthAccountPhotos?.[0];
+  // Get social identity from event first, profiles second, user's credentials as last resort
+  const displayName = event?.user.displayName || 
+                     primarySocialProfile?.displayName;
+                     
+  const username = event?.user.username || 
+                   primarySocialProfile?.username;
+                   
+  const profileImage = event?.user.pfpUrl || 
+                       primarySocialProfile?.pfpUrl;
   
-  // Determine social provider from event data or current user credentials
+  // Determine social provider from profiles first, then fall back to credentials
   const socialProvider = (() => {
-    // If we have a username that includes farcaster.xyz, it's Farcaster
-    if (username?.includes('farcaster.xyz')) return 'Farcaster';
-    // If username has a Twitter domain
-    if (username?.includes('twitter.com')) return 'X / Twitter';
-    // Use the provider from credentials as a fallback
+    if (farcasterProfile) return 'Farcaster';
+    if (twitterProfile) return 'X / Twitter';
+    
+    // If nothing in profiles, use OAuth provider info from user credentials
+    const farcasterCred = user?.verifiedCredentials?.find(cred => 
+      cred.oauthProvider === 'farcaster'
+    );
+    
+    const twitterCred = user?.verifiedCredentials?.find(cred => 
+      cred.oauthProvider === 'twitter'
+    );
+    
     if (farcasterCred) return 'Farcaster';
     if (twitterCred) return 'X / Twitter';
+    
     return null;
   })();
   

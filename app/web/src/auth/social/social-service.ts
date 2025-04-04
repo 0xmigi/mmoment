@@ -76,26 +76,60 @@ export class SocialService {
   // Get social profiles for any wallet address
   async getProfilesByAddress(address: string): Promise<SocialProfile[]> {
     try {
-      console.log(`[SocialService] Fetching profiles for address ${address} from ${this.API_BASE}/api/profiles/${address}`);
+      console.log(`[SocialService] Fetching profiles for address ${address}`);
       
-      // Try to fetch from our API endpoint
-      const response = await axios.get(`${this.API_BASE}/api/profiles/${address}`);
+      // First check localStorage for a cached profile
+      const profileCacheKey = `profileCache_${address.toLowerCase()}`;
+      const cachedData = localStorage.getItem(profileCacheKey);
       
-      if (response.data && Array.isArray(response.data.profiles)) {
-        console.log(`[SocialService] Found ${response.data.profiles.length} profiles for ${address}:`, response.data.profiles);
-        return response.data.profiles;
+      if (cachedData) {
+        try {
+          const data = JSON.parse(cachedData);
+          if (data.profile) {
+            console.log(`[SocialService] Found cached profile for ${address} in localStorage:`, data.profile);
+            return [{
+              id: address,
+              username: data.profile.username,
+              displayName: data.profile.displayName,
+              pfpUrl: data.profile.pfpUrl,
+              provider: data.profile.provider,
+              isVerified: true
+            }];
+          }
+        } catch (err) {
+          console.error('[SocialService] Error parsing cached profile:', err);
+        }
       }
       
-      // If API endpoint doesn't exist yet or returns no profiles, try Farcaster directly
+      // If not in localStorage, try to fetch from our API endpoint
       try {
-        console.log(`[SocialService] No profiles found in API, trying Farcaster lookup for ${address}`);
+        console.log(`[SocialService] Trying API: ${this.API_BASE}/api/profiles/${address}`);
+        const response = await axios.get(`${this.API_BASE}/api/profiles/${address}`);
+        
+        if (response.data && Array.isArray(response.data.profiles) && response.data.profiles.length > 0) {
+          console.log(`[SocialService] Found ${response.data.profiles.length} profiles from API:`, response.data.profiles);
+          
+          // Cache this result for future use
+          localStorage.setItem(profileCacheKey, JSON.stringify({
+            profile: response.data.profiles[0],
+            timestamp: Date.now()
+          }));
+          
+          return response.data.profiles;
+        }
+      } catch (apiErr) {
+        console.log(`[SocialService] API request failed:`, apiErr);
+      }
+      
+      // If API endpoint failed, try Farcaster directly
+      try {
+        console.log(`[SocialService] Trying direct Farcaster lookup for ${address}`);
         const fid = await this.getFarcasterFidByAddress(address);
         if (fid) {
           console.log(`[SocialService] Found FID ${fid} for address ${address}, fetching profile`);
           const profile = await this.getFarcasterProfileByFid(parseInt(fid));
           if (profile.displayName || profile.username) {
-            console.log(`[SocialService] Found Farcaster profile for ${address}:`, profile);
-            return [{
+            const result = {
               id: fid,
               username: profile.username,
               displayName: profile.displayName,
@@ -103,7 +137,16 @@ export class SocialService {
               bio: profile.bio,
               provider: 'farcaster',
               isVerified: true
-            }];
+            };
+            
+            // Cache this result
+            localStorage.setItem(profileCacheKey, JSON.stringify({
+              profile: result,
+              timestamp: Date.now()
+            }));
+            
+            console.log(`[SocialService] Found Farcaster profile for ${address}:`, result);
+            return [result];
           }
         }
       } catch (err) {
