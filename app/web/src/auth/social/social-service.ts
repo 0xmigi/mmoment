@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { SocialProfile } from './useSocialProfile';
+import { CONFIG } from '../../core/config';
 
 interface FarcasterProfileResponse {
   messages: Array<{
@@ -13,7 +14,11 @@ interface FarcasterProfileResponse {
 }
 
 export class SocialService {
-  private readonly FARCASTER_API_BASE = 'http://localhost:2281/v1'; // Update with your actual API endpoint
+  // Use dynamic base URL that works in both dev and production
+  private readonly FARCASTER_API_BASE = `${window.location.protocol}//${window.location.hostname}:2281/v1`;
+  
+  // For accessing our backend API
+  private readonly API_BASE = CONFIG.BACKEND_URL;
 
   // Farcaster Methods
   async getFarcasterProfileByFid(fid: number): Promise<Partial<SocialProfile>> {
@@ -65,6 +70,51 @@ export class SocialService {
     } catch (error) {
       console.error('Failed to fetch FID for address:', error);
       return null;
+    }
+  }
+
+  // Get social profiles for any wallet address
+  async getProfilesByAddress(address: string): Promise<SocialProfile[]> {
+    try {
+      console.log(`[SocialService] Fetching profiles for address ${address} from ${this.API_BASE}/api/profiles/${address}`);
+      
+      // Try to fetch from our API endpoint
+      const response = await axios.get(`${this.API_BASE}/api/profiles/${address}`);
+      
+      if (response.data && Array.isArray(response.data.profiles)) {
+        console.log(`[SocialService] Found ${response.data.profiles.length} profiles for ${address}:`, response.data.profiles);
+        return response.data.profiles;
+      }
+      
+      // If API endpoint doesn't exist yet or returns no profiles, try Farcaster directly
+      try {
+        console.log(`[SocialService] No profiles found in API, trying Farcaster lookup for ${address}`);
+        const fid = await this.getFarcasterFidByAddress(address);
+        if (fid) {
+          console.log(`[SocialService] Found FID ${fid} for address ${address}, fetching profile`);
+          const profile = await this.getFarcasterProfileByFid(parseInt(fid));
+          if (profile.displayName || profile.username) {
+            console.log(`[SocialService] Found Farcaster profile for ${address}:`, profile);
+            return [{
+              id: fid,
+              username: profile.username,
+              displayName: profile.displayName,
+              pfpUrl: profile.pfpUrl,
+              bio: profile.bio,
+              provider: 'farcaster',
+              isVerified: true
+            }];
+          }
+        }
+      } catch (err) {
+        console.error('[SocialService] Failed to get Farcaster profile directly:', err);
+      }
+      
+      console.log(`[SocialService] No profiles found for ${address}`);
+      return [];
+    } catch (error) {
+      console.error('[SocialService] Failed to fetch profiles for address:', error);
+      return [];
     }
   }
 

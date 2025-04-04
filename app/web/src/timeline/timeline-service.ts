@@ -38,6 +38,9 @@ class TimelineService {
     // Initialize the socket connection
     this.initializeSocket();
     
+    // Setup profile updates listener
+    this.setupProfileUpdates();
+    
     // Setup heartbeat for Chrome mobile
     if (this.isChromeOnMobile) {
       this.setupHeartbeat();
@@ -231,6 +234,23 @@ class TimelineService {
           this.forceFallback = true;
         }
       });
+
+      this.socket.on('userProfileUpdate', (data: { address: string, profile: any }) => {
+        console.log('[Timeline] Received profile update:', data);
+        
+        // Dispatch a custom event that the Timeline component can listen for
+        const event = new CustomEvent('timeline:profileUpdate', { 
+          detail: data 
+        });
+        window.dispatchEvent(event);
+        
+        // Also store in localStorage as backup
+        const profileCacheKey = `profileCache_${data.address}`;
+        localStorage.setItem(profileCacheKey, JSON.stringify({
+          profile: data.profile,
+          timestamp: Date.now()
+        }));
+      });
     } catch (error) {
       console.error('[Timeline] Error initializing socket:', error);
       this.forceFallback = true;
@@ -389,6 +409,7 @@ class TimelineService {
     };
   }
 
+  // Method to emit an event to the timeline
   emitEvent(event: Omit<TimelineEvent, 'id'>) {
     if (!this.currentCameraId) {
       console.error('Cannot emit event: no camera selected');
@@ -399,11 +420,11 @@ class TimelineService {
     const eventWithCamera = {
       ...event,
       cameraId: this.currentCameraId,
-      timestamp: Date.now()
+      timestamp: event.timestamp || Date.now()
     };
 
     // If connected, emit to server
-    if (this.isSocketConnected()) {
+    if (this.isConnected && this.socket) {
       console.log('Emitting timeline event:', eventWithCamera);
       this.socket.emit('newTimelineEvent', eventWithCamera);
       
@@ -427,6 +448,48 @@ class TimelineService {
       // Notify listeners about the local event
       this.notifyListeners(tempEvent);
     }
+  }
+
+  // Method to update and share a user profile with other clients
+  updateUserProfile(data: { address: string, profile: any }) {
+    if (!this.socket || !this.isConnected || !this.currentCameraId) {
+      console.log('[Timeline] Caching profile update for later sync:', data.address);
+      // Store in localStorage for future sync
+      const profileCacheKey = `profileCache_${data.address}`;
+      localStorage.setItem(profileCacheKey, JSON.stringify({
+        profile: data.profile,
+        timestamp: Date.now()
+      }));
+      return;
+    }
+
+    console.log('[Timeline] Sharing profile update:', data.address);
+    this.socket.emit('userProfileUpdate', {
+      ...data,
+      cameraId: this.currentCameraId
+    });
+  }
+
+  // Method to handle profile updates from other clients
+  private setupProfileUpdates() {
+    if (!this.socket) return;
+
+    this.socket.on('userProfileUpdate', (data: { address: string, profile: any }) => {
+      console.log('[Timeline] Received profile update:', data);
+      
+      // Dispatch a custom event that the Timeline component can listen for
+      const event = new CustomEvent('timeline:profileUpdate', { 
+        detail: data 
+      });
+      window.dispatchEvent(event);
+      
+      // Also store in localStorage as backup
+      const profileCacheKey = `profileCache_${data.address}`;
+      localStorage.setItem(profileCacheKey, JSON.stringify({
+        profile: data.profile,
+        timestamp: Date.now()
+      }));
+    });
   }
 
   disconnect() {

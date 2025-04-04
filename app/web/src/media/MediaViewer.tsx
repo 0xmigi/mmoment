@@ -71,12 +71,24 @@ export default function MediaViewer({ isOpen, onClose, media, event, onDelete }:
   
   // Prioritize Farcaster over Twitter
   const primarySocialCred = farcasterCred || twitterCred;
-  const socialProvider = farcasterCred ? 'Farcaster' : twitterCred ? 'X / Twitter' : null;
   
-  // Get display information
-  const displayName = primarySocialCred?.oauthDisplayName || event?.user.displayName;
-  const username = primarySocialCred?.oauthUsername || event?.user.username;
-  const profileImage = primarySocialCred?.oauthAccountPhotos?.[0] || event?.user.pfpUrl;
+  // Get social identity from event first, user's verified credentials as fallback
+  // This lets us display profile info correctly for other users
+  const displayName = event?.user.displayName || primarySocialCred?.oauthDisplayName;
+  const username = event?.user.username || primarySocialCred?.oauthUsername;
+  const profileImage = event?.user.pfpUrl || primarySocialCred?.oauthAccountPhotos?.[0];
+  
+  // Determine social provider from event data or current user credentials
+  const socialProvider = (() => {
+    // If we have a username that includes farcaster.xyz, it's Farcaster
+    if (username?.includes('farcaster.xyz')) return 'Farcaster';
+    // If username has a Twitter domain
+    if (username?.includes('twitter.com')) return 'X / Twitter';
+    // Use the provider from credentials as a fallback
+    if (farcasterCred) return 'Farcaster';
+    if (twitterCred) return 'X / Twitter';
+    return null;
+  })();
   
   // Only use wallet address as fallback if no social identity
   const displayIdentity = displayName || `${media.walletAddress.slice(0, 4)}...${media.walletAddress.slice(-4)}`;
