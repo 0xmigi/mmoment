@@ -30,10 +30,16 @@ interface ProfileModalProps {
 export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProps) {
   if (!isOpen) return null;
 
-  // Get Farcaster identity
+  // Get social identity credentials
   const farcasterCred = user?.verifiedCredentials?.find(cred => cred.oauthProvider === 'farcaster');
-  const displayName = user.displayName || farcasterCred?.oauthDisplayName || farcasterCred?.oauthUsername;
-  const profileImage = user.pfpUrl || farcasterCred?.oauthAccountPhotos?.[0];
+  const twitterCred = user?.verifiedCredentials?.find(cred => cred.oauthProvider === 'twitter');
+  
+  // Prioritize Farcaster, then Twitter
+  const primarySocialCred = farcasterCred || twitterCred;
+  
+  // Get display information
+  const displayName = user.displayName || primarySocialCred?.oauthDisplayName || primarySocialCred?.oauthUsername;
+  const profileImage = user.pfpUrl || primarySocialCred?.oauthAccountPhotos?.[0];
   
   // Only use wallet as fallback
   const displayIdentity = displayName || `${user.address.slice(0, 4)}...${user.address.slice(-4)}`;
@@ -41,6 +47,12 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
   const handleWarpcastClick = () => {
     if (farcasterCred?.oauthUsername) {
       window.open(`https://warpcast.com/${farcasterCred.oauthUsername.replace('@', '')}`, '_blank');
+    }
+  };
+  
+  const handleTwitterClick = () => {
+    if (twitterCred?.oauthUsername) {
+      window.open(`https://twitter.com/${twitterCred.oauthUsername.replace('@', '')}`, '_blank');
     }
   };
 
@@ -116,35 +128,56 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
                 <div className="text-sm font-medium">
                   {displayIdentity}
                 </div>
-                {farcasterCred && (
-                  <div className="text-xs text-gray-500">
-                    Farcaster
-                  </div>
-                )}
               </div>
             </div>
 
-            {/* Connected Account */}
+            {/* Connected Accounts */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-gray-700">Farcaster</span>
-                    <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">source</span>
+              {/* Farcaster Account */}
+              {farcasterCred && (
+                <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-gray-700">Farcaster</span>
+                      {farcasterCred === primarySocialCred && (
+                        <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">source</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      @{farcasterCred.oauthUsername?.replace('@', '')}
+                    </div>
                   </div>
-                  <div className="text-xs text-gray-500">
-                    {farcasterCred?.oauthUsername ? farcasterCred.oauthUsername : 'Not connected'}
-                  </div>
-                </div>
-                {farcasterCred?.oauthUsername && (
                   <button 
                     onClick={handleWarpcastClick}
                     className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
                   >
                     View <ExternalLink className="w-3 h-3" />
                   </button>
-                )}
-              </div>
+                </div>
+              )}
+              
+              {/* Twitter Account */}
+              {twitterCred && (
+                <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-gray-700">X / Twitter</span>
+                      {primarySocialCred === twitterCred && (
+                        <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">source</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      @{twitterCred.oauthUsername?.replace('@', '')}
+                    </div>
+                  </div>
+                  <button 
+                    onClick={handleTwitterClick}
+                    className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
+                  >
+                    View <ExternalLink className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Action Details */}

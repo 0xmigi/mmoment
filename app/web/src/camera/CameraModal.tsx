@@ -117,7 +117,7 @@ export function CameraModal({ isOpen, onClose, camera }: CameraModalProps) {
                     <Camera className="w-5 h-5 text-blue-500" />
                   </div>
                   <div className="ml-3 flex-1">
-                    <div className="text-sm text-gray-700">Camera PDA</div>
+                    <div className="text-sm text-gray-700">Camera</div>
                     <div className="text-sm font-medium">{formatAddress(camera.id)}</div>
                   </div>
                   <button

@@ -875,7 +875,7 @@ export function CameraView() {
                   />
                 </div>
           <div className="max-w-3xl mt-6 mx-auto flex flex-col justify-top relative">
-            <div className="relative mb-40">
+            <div className="relative mb-36">
               <div className="flex pl-6 items-center gap-2">
                 {!cameraId && !cameraAccount && !selectedCamera ? (
                   <div className="flex items-center gap-2">
@@ -915,7 +915,7 @@ export function CameraView() {
               </div>
             </div>
 
-            <div className="absolute mt-12 pb-20 pl-6 left-0 w-full">
+            <div className="absolute mt-12 pb-20 pl-5 left-0 w-full">
               <Timeline ref={timelineRef} variant="camera" cameraId={cameraAccount || undefined} />
               <div
                 className="top-0 left-0 right-0 pointer-events-none"

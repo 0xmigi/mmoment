@@ -1,8 +1,9 @@
 import { Dialog } from '@headlessui/react';
-import { X, ArrowUpRight } from 'lucide-react';
+import { X, ArrowUpRight, Download, Trash2 } from 'lucide-react';
 import { IPFSMedia } from '../storage/ipfs/ipfs-service';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useState } from 'react';
+import { unifiedIpfsService } from '../storage/ipfs/unified-ipfs-service';
 
 // Copy the necessary types
 type TimelineEventType =
@@ -35,12 +36,14 @@ interface MediaViewerProps {
   onClose: () => void;
   media: IPFSMedia | null;
   event?: TimelineEvent;
+  onDelete?: (mediaId: string) => void;
 }
 
-export default function MediaViewer({ isOpen, onClose, media, event }: MediaViewerProps) {
-  const { user } = useDynamicContext();
+export default function MediaViewer({ isOpen, onClose, media, event, onDelete }: MediaViewerProps) {
+  const { user, primaryWallet } = useDynamicContext();
   const [currentVideoUrl, setCurrentVideoUrl] = useState('');
   const [videoErrorCount, setVideoErrorCount] = useState(0);
+  const [deleting, setDeleting] = useState(false);
 
   if (!media) return null;
 
@@ -57,19 +60,61 @@ export default function MediaViewer({ isOpen, onClose, media, event }: MediaView
     setCurrentVideoUrl(media.directUrl || media.url);
   }
 
-  // Get Farcaster identity from user's verified credentials
+  // Get social identity from user's verified credentials
   const farcasterCred = user?.verifiedCredentials?.find(cred => 
     cred.oauthProvider === 'farcaster'
   );
   
-  const displayName = farcasterCred?.oauthDisplayName || farcasterCred?.oauthUsername;
-  const profileImage = farcasterCred?.oauthAccountPhotos?.[0];
+  const twitterCred = user?.verifiedCredentials?.find(cred => 
+    cred.oauthProvider === 'twitter'
+  );
   
-  // Only use wallet address as fallback if no Farcaster identity
+  // Prioritize Farcaster over Twitter
+  const primarySocialCred = farcasterCred || twitterCred;
+  const socialProvider = farcasterCred ? 'Farcaster' : twitterCred ? 'X / Twitter' : null;
+  
+  // Get display information
+  const displayName = primarySocialCred?.oauthDisplayName || event?.user.displayName;
+  const username = primarySocialCred?.oauthUsername || event?.user.username;
+  const profileImage = primarySocialCred?.oauthAccountPhotos?.[0] || event?.user.pfpUrl;
+  
+  // Only use wallet address as fallback if no social identity
   const displayIdentity = displayName || `${media.walletAddress.slice(0, 4)}...${media.walletAddress.slice(-4)}`;
 
   // Use event's transaction ID if available, fallback to media's transaction ID
   const transactionId = event?.transactionId || media.transactionId;
+
+  // Function to handle media download
+  const handleDownload = (url: string, filename: string) => {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  // Function to handle media deletion
+  const handleDelete = async (mediaId: string) => {
+    if (!primaryWallet?.address) return;
+    
+    try {
+      setDeleting(true);
+      
+      const success = await unifiedIpfsService.deleteMedia(mediaId, primaryWallet.address);
+      
+      if (success) {
+        if (onDelete) {
+          onDelete(mediaId);
+        }
+        onClose();
+      }
+    } catch (err) {
+      console.error('Delete error:', err);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <Dialog
@@ -83,17 +128,35 @@ export default function MediaViewer({ isOpen, onClose, media, event }: MediaView
       {/* Full-screen container */}
       <div className="fixed inset-0 flex items-end sm:items-center justify-center p-2 sm:p-0">
         <Dialog.Panel className="mx-auto w-full sm:w-[480px] md:w-[640px] rounded-xl bg-white shadow-xl">
-          {/* Header with close button */}
+          {/* Header with buttons */}
           <div className="flex items-center justify-between p-3 border-b border-gray-100">
             <Dialog.Title className="text-base font-medium">
               Media
             </Dialog.Title>
-            <button
-              onClick={onClose}
-              className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
-            >
-              <X className="w-4 h-4 text-gray-500" />
-            </button>
+            <div className="flex items-center space-x-1">
+              <button
+                onClick={() => handleDownload(media.url, `${media.id}.${media.type === 'video' ? 'mp4' : 'jpg'}`)}
+                className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
+                title="Download"
+              >
+                <Download className="w-4 h-4 text-blue-500" />
+              </button>
+              <button
+                onClick={() => handleDelete(media.id)}
+                disabled={deleting}
+                className="p-1 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
+                title="Delete"
+              >
+                <Trash2 className={`w-4 h-4 text-red-500 ${deleting ? 'animate-spin' : ''}`} />
+              </button>
+              <button
+                onClick={onClose}
+                className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
+                title="Close"
+              >
+                <X className="w-4 h-4 text-gray-500" />
+              </button>
+            </div>
           </div>
 
           {/* Media Content */}
@@ -159,9 +222,15 @@ export default function MediaViewer({ isOpen, onClose, media, event }: MediaView
                   <div className="text-sm font-medium">
                     {displayIdentity}
                   </div>
-                  <div className="text-xs text-gray-500">
-                    Farcaster {farcasterCred && <span className="text-blue-500">source</span>}
-                  </div>
+                  {socialProvider && (
+                    <div className="text-xs text-gray-500">
+                      {username && `@${username.replace('@', '')}`}
+                      {' '}
+                      <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded ml-1">
+                        {socialProvider}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 

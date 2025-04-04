@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { User } from 'lucide-react';
 import { AuthModal } from './AuthModal';
 
-interface FarcasterCredential {
+interface SocialCredential {
   oauthProvider: string;
   oauthUsername: string;
   oauthDisplayName: string;
@@ -35,25 +35,34 @@ export function HeadlessAuthButton() {
 
   // Find Farcaster credentials if they exist
   const farcasterCred = user?.verifiedCredentials?.find(
-    (cred: any): cred is FarcasterCredential => 
+    (cred: any): cred is SocialCredential => 
       cred?.oauthProvider?.toLowerCase() === 'farcaster'
   );
 
-  // If user is connected with Farcaster, show their profile
-  if (farcasterCred) {
+  // Find Twitter credentials if they exist
+  const twitterCred = user?.verifiedCredentials?.find(
+    (cred: any): cred is SocialCredential => 
+      cred?.oauthProvider?.toLowerCase() === 'twitter'
+  );
+
+  // Prioritize Farcaster, but fall back to Twitter if available
+  const socialCred = farcasterCred || twitterCred;
+
+  // If user is connected with a social account, show their profile
+  if (socialCred) {
     return (
       <button
         onClick={() => navigate('/account')}
         className="px-4 py-2 bg-gray-100 text-black rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
       >
-        {farcasterCred.oauthAccountPhotos?.[0] && (
+        {socialCred.oauthAccountPhotos?.[0] && (
           <img
-            src={farcasterCred.oauthAccountPhotos[0]}
+            src={socialCred.oauthAccountPhotos[0]}
             alt="Profile"
             className="w-6 h-6 rounded-full"
           />
         )}
-        <span className="font-medium">{farcasterCred.oauthDisplayName}</span>
+        <span className="font-medium">{socialCred.oauthDisplayName}</span>
       </button>
     );
   }

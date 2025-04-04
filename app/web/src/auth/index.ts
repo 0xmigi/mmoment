@@ -16,3 +16,6 @@ export { HeadlessAuthButton } from './components/HeadlessAuthButton';
 export * from './components/EmailSignup';
 export * from './components/HeadlessSocialLogin';
 export * from './components/TransactionModal';
+
+// Social profile components and hooks
+export * from './social';

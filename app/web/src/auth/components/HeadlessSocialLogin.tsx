@@ -1,6 +1,6 @@
 import { useSocialAccounts } from '@dynamic-labs/sdk-react-core';
 import { ProviderEnum } from '@dynamic-labs/types';
-import { FarcasterIcon } from '@dynamic-labs/iconic';
+import { FarcasterIcon, TwitterIcon } from '@dynamic-labs/iconic';
 
 interface HeadlessSocialLoginProps {
   onSuccess?: () => void;
@@ -18,6 +18,15 @@ export function HeadlessSocialLogin({ onSuccess }: HeadlessSocialLoginProps) {
     }
   };
 
+  const handleTwitterLogin = async () => {
+    try {
+      await signInWithSocialAccount(ProviderEnum.Twitter);
+      onSuccess?.();
+    } catch (err) {
+      console.error('Failed to sign in with Twitter:', err);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <button
@@ -29,6 +38,17 @@ export function HeadlessSocialLogin({ onSuccess }: HeadlessSocialLoginProps) {
           <FarcasterIcon className="w-full h-full" />
         </div>
         <span className="flex-1 text-left text-sm font-medium">Farcaster</span>
+      </button>
+
+      <button
+        onClick={handleTwitterLogin}
+        disabled={isProcessing}
+        className="w-full flex items-center p-3 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <div className="w-6 h-6 mr-3">
+          <TwitterIcon className="w-full h-full" />
+        </div>
+        <span className="flex-1 text-left text-sm font-medium">X / Twitter</span>
       </button>
       
       {error && (

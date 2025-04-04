@@ -73,25 +73,36 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   const [selectedMedia, setSelectedMedia] = useState<IPFSMedia | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
 
-  // Enrich event with Farcaster info if available
+  // Enrich event with social info if available
   const enrichEventWithUserInfo = useCallback((event: TimelineEvent): TimelineEvent => {
     if (!user?.verifiedCredentials) return event;
     
-    // Find matching Farcaster credential
+    // Try to determine if this is the current user's event
+    const isCurrentUser = user.verifiedCredentials.some(cred => cred.address === event.user.address);
+    
+    // Find matching social credentials - prioritize Farcaster over Twitter
     const farcasterCred = user.verifiedCredentials.find(
-      cred => cred.oauthProvider === 'farcaster' && 
-              cred.address === event.user.address
+      cred => cred.oauthProvider === 'farcaster' &&
+              (cred.address === event.user.address || isCurrentUser)
+    );
+
+    const twitterCred = user.verifiedCredentials.find(
+      cred => cred.oauthProvider === 'twitter' &&
+              (cred.address === event.user.address || isCurrentUser)
     );
     
-    if (!farcasterCred) return event;
+    // Prioritize Farcaster over Twitter
+    const socialCred = farcasterCred || twitterCred;
+    
+    if (!socialCred) return event;
     
     return {
       ...event,
       user: {
         ...event.user,
-        displayName: farcasterCred.oauthDisplayName || event.user.displayName,
-        username: farcasterCred.oauthUsername || event.user.username,
-        pfpUrl: farcasterCred.oauthAccountPhotos?.[0] || event.user.pfpUrl
+        displayName: socialCred.oauthDisplayName || event.user.displayName,
+        username: socialCred.oauthUsername || event.user.username,
+        pfpUrl: socialCred.oauthAccountPhotos?.[0] || event.user.pfpUrl
       }
     };
   }, [user?.verifiedCredentials]);
@@ -170,10 +181,13 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
 
   // Get display events based on variant and display count
   const displayEvents = useMemo(() => {
+    // Apply enrichEventWithUserInfo to all events
+    const enrichedEvents = filteredEvents.map(event => enrichEventWithUserInfo(event));
+    
     return variant === 'camera' 
-      ? filteredEvents.slice(0, displayCount)
-      : filteredEvents;
-  }, [filteredEvents, variant, displayCount]);
+      ? enrichedEvents.slice(0, displayCount)
+      : enrichedEvents;
+  }, [filteredEvents, variant, displayCount, enrichEventWithUserInfo]);
 
   const getEventIcon = (type: TimelineEventType) => {
     switch (type) {
@@ -193,9 +207,11 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   };
 
   const handleProfileClick = (event: TimelineEvent) => {
-    setSelectedUser(event.user);
+    // Apply social profile enrichment
+    const enrichedEvent = enrichEventWithUserInfo(event);
+    setSelectedUser(enrichedEvent.user);
     setIsProfileModalOpen(true);
-    setSelectedEvent(event);
+    setSelectedEvent(enrichedEvent);
   };
 
   const handleMediaClick = (event: TimelineEvent) => {
@@ -362,17 +378,28 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
             username: selectedUser.username,
             displayName: selectedUser.displayName,
             pfpUrl: selectedUser.pfpUrl,
-            verifiedCredentials: user?.verifiedCredentials
-              ?.filter(cred => 
-                cred.oauthProvider === 'farcaster' && 
-                selectedUser.address === cred.address
-              )
-              ?.map(cred => ({
-                oauthProvider: 'farcaster',
-                oauthDisplayName: cred.oauthDisplayName || undefined,
-                oauthUsername: cred.oauthUsername,
-                oauthAccountPhotos: cred.oauthAccountPhotos
-              }))
+            verifiedCredentials: 
+              user?.verifiedCredentials?.some(cred => 
+                cred.address === selectedUser.address)
+                ? user?.verifiedCredentials?.filter(cred => 
+                    cred.oauthProvider === 'farcaster' || cred.oauthProvider === 'twitter'
+                  )?.map(cred => ({
+                    oauthProvider: cred.oauthProvider as string,
+                    oauthDisplayName: cred.oauthDisplayName || undefined,
+                    oauthUsername: cred.oauthUsername,
+                    oauthAccountPhotos: cred.oauthAccountPhotos
+                  }))
+                : user?.verifiedCredentials
+                  ?.filter(cred => 
+                    (cred.oauthProvider === 'farcaster' || cred.oauthProvider === 'twitter') && 
+                    cred.address === selectedUser.address
+                  )
+                  ?.map(cred => ({
+                    oauthProvider: cred.oauthProvider as string,
+                    oauthDisplayName: cred.oauthDisplayName || undefined,
+                    oauthUsername: cred.oauthUsername,
+                    oauthAccountPhotos: cred.oauthAccountPhotos
+                  }))
           }}
           action={{
             type: selectedEvent.type,

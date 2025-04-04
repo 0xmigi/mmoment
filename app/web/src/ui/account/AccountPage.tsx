@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { User, Copy, Check } from 'lucide-react';
 
-interface FarcasterCredential {
+interface SocialCredential {
   oauthProvider: string;
   oauthUsername: string;
   oauthDisplayName: string;
@@ -74,10 +74,21 @@ export function AccountPage() {
   }
 
   const isEmbeddedWallet = primaryWallet.connector?.name.toLowerCase() !== 'phantom';
+  
+  // Find social credentials
   const farcasterCred = user?.verifiedCredentials?.find(
-    (cred: any): cred is FarcasterCredential => 
+    (cred: any): cred is SocialCredential => 
       cred?.oauthProvider?.toLowerCase() === 'farcaster'
   );
+  
+  const twitterCred = user?.verifiedCredentials?.find(
+    (cred: any): cred is SocialCredential => 
+      cred?.oauthProvider?.toLowerCase() === 'twitter'
+  );
+  
+  // Prioritize Farcaster over Twitter
+  const primarySocialCred = farcasterCred || twitterCred;
+  const primarySocialProvider = farcasterCred ? 'Farcaster' : twitterCred ? 'X / Twitter' : null;
 
   return (
     <div className="min-h-screen bg-white">
@@ -106,12 +117,12 @@ export function AccountPage() {
                 <div>
                   <div className="font-medium mb-1">Primary Identity</div>
                   <div className="text-gray-500 text-xs mb-3">
-                    {farcasterCred ? 'pulled from Farcaster' : 'pulled from Wallet (default)'}
+                    {primarySocialProvider ? `pulled from ${primarySocialProvider}` : 'pulled from Wallet (default)'}
                   </div>
                 </div>
-                {farcasterCred?.oauthAccountPhotos?.[0] ? (
+                {primarySocialCred?.oauthAccountPhotos?.[0] ? (
                   <img
-                    src={farcasterCred.oauthAccountPhotos[0]}
+                    src={primarySocialCred.oauthAccountPhotos[0]}
                     alt="Profile"
                     className="w-12 h-12 rounded-full"
                   />
@@ -124,7 +135,7 @@ export function AccountPage() {
               <div className="mt-3">
                 <div className="font-medium">Display Name</div>
                 <div className="text-gray-500">
-                  {farcasterCred?.oauthDisplayName || `${primaryWallet.address.slice(0, 6)}...${primaryWallet.address.slice(-4)}`}
+                  {primarySocialCred?.oauthDisplayName || `${primaryWallet.address.slice(0, 6)}...${primaryWallet.address.slice(-4)}`}
                 </div>
               </div>
             </div>
@@ -144,6 +155,21 @@ export function AccountPage() {
                   </div>
                 </div>
                 {!farcasterCred && (
+                  <button className="text-blue-600 text-sm hover:text-blue-700 transition-colors">
+                    Connect
+                  </button>
+                )}
+              </div>
+              
+              {/* Twitter Identity */}
+              <div className="flex items-center justify-between py-2 border-t border-gray-100">
+                <div>
+                  <div className="font-medium text-gray-700">X / Twitter</div>
+                  <div className="text-gray-500">
+                    {twitterCred?.oauthUsername ? twitterCred.oauthUsername : 'Not connected'}
+                  </div>
+                </div>
+                {!twitterCred && (
                   <button className="text-blue-600 text-sm hover:text-blue-700 transition-colors">
                     Connect
                   </button>

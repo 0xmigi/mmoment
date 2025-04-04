@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { Trash2, Download, Image, Video } from 'lucide-react';
+import { Image, Video } from 'lucide-react';
 import MediaViewer from './MediaViewer';
 import { unifiedIpfsService } from '../storage/ipfs/unified-ipfs-service';
 import { IPFSMedia } from '../storage/ipfs/ipfs-service';
@@ -16,9 +16,10 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
   const [media, setMedia] = useState<IPFSMedia[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const [, setDeleting] = useState<string | null>(null);
   const [selectedMedia, setSelectedMedia] = useState<IPFSMedia | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'mine' | 'shared'>('mine');
 
   // Add click handler for media items
   const handleMediaClick = (media: IPFSMedia) => {
@@ -176,14 +177,6 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
     }
   };
 
-  const handleDownload = (url: string, filename: string) => {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
 
   if (!primaryWallet?.address) {
     return (
@@ -194,12 +187,38 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
   }
 
   const title = mode === 'recent'
-    ? `Recent (${media.length})`
+    ? ``
     : `Gallery (${media.length})`;
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h2 className="text-xl text-left font-bold text-gray-800 mb-6">{title}</h2>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-xl text-left font-bold text-gray-800">{title}</h2>
+        
+        {/* Mine/Shared Toggle */}
+        <div className="bg-gray-100 rounded-lg p-0.5 flex text-sm">
+          <button
+            className={`px-3 py-1 rounded-md transition-colors ${
+              viewMode === 'mine' 
+                ? 'bg-white text-gray-800 shadow-sm' 
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+            onClick={() => setViewMode('mine')}
+          >
+            Mine
+          </button>
+          <button
+            className={`px-3 py-1 rounded-md transition-colors ${
+              viewMode === 'shared' 
+                ? 'bg-white text-gray-800 shadow-sm' 
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+            onClick={() => setViewMode('shared')}
+          >
+            Shared
+          </button>
+        </div>
+      </div>
 
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
@@ -207,7 +226,11 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
         </div>
       )}
 
-      {loading ? (
+      {viewMode === 'shared' ? (
+        <div className="text-center py-12 text-gray-500">
+          Shared media feature coming soon
+        </div>
+      ) : loading ? (
         <div className="text-left py-4">Loading your media...</div>
       ) : media.length === 0 ? (
         <div className="text-left py-4 text-gray-500">
@@ -250,29 +273,6 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
                   />
                 )}
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
-                <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDownload(item.url, `${item.id}.${item.type === 'video' ? 'mp4' : 'jpg'}`);
-                    }}
-                    className="p-1.5 rounded-full bg-white/80 hover:bg-white transition-colors"
-                  >
-                    <Download className="w-4 h-4 text-blue-500" />
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(item.id);
-                    }}
-                    disabled={deleting === item.id}
-                    className="p-1.5 rounded-full bg-white/80 hover:bg-white transition-colors disabled:opacity-50"
-                  >
-                    <Trash2
-                      className={`w-4 h-4 text-red-500 ${deleting === item.id ? 'animate-spin' : ''}`}
-                    />
-                  </button>
-                </div>
                 <div className="absolute top-2 left-2">
                   {item.type === 'video' ? (
                     <Video className="w-4 h-4 text-white drop-shadow" />
@@ -292,6 +292,7 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
           setSelectedMedia(null);
         }}
         media={selectedMedia}
+        onDelete={(mediaId) => handleDelete(mediaId)}
       />
     </div>
   );
