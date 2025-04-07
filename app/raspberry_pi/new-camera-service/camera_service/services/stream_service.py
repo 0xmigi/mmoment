@@ -5,8 +5,10 @@ import threading
 from threading import Lock
 import time
 import os
+import io
 from ..config.settings import Settings
 import cv2
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +40,7 @@ class LivepeerStreamService:
             self.frame_rate = 15  # Match buffer service frame rate
             self.stop_streaming_event = threading.Event()
             self.ffmpeg_process = None
-            logger.debug("LivepeerStreamService initialized with minimal settings")
+            logger.debug("LivepeerStreamService initialized for MJPEG buffer")
 
     @property
     def is_streaming(self):
@@ -66,14 +68,10 @@ class LivepeerStreamService:
                 ingest_url = f"{self.ingest_url}/{self.stream_key}"
                 logger.info(f"Using Livepeer ingest URL: {ingest_url}")
                 
-                # STRIPPED DOWN: Basic FFmpeg command with minimal settings
+                # Modify FFmpeg command to accept MJPEG input
                 ffmpeg_cmd = [
                     "ffmpeg",
-                    "-f", "rawvideo",
-                    "-vcodec", "rawvideo",
-                    "-s", f"{self.width}x{self.height}",
-                    "-pix_fmt", "rgb24",  # Basic format
-                    "-r", str(self.frame_rate),
+                    "-f", "mjpeg",  # Input format is MJPEG
                     "-i", "-",  # Read from stdin
                     "-c:v", "libx264",
                     "-preset", "veryfast",  # Faster encoding, less CPU
@@ -122,7 +120,7 @@ class LivepeerStreamService:
                 raise RuntimeError(f"Failed to start stream: {e}")
 
     def _stream_frames(self):
-        """Stream frames to FFmpeg process"""
+        """Stream MJPEG frames to FFmpeg process"""
         frames_sent = 0
         start_time = time.time()
         last_log = start_time
@@ -133,15 +131,15 @@ class LivepeerStreamService:
                     logger.error("Buffer service not running")
                     break
 
-                # Get frame from buffer service - it's already rotated by get_latest_frame
-                frame = self.buffer_service.get_latest_frame()
-                if frame is None:
+                # Get JPEG frame directly from buffer
+                jpeg_data = self.buffer_service.get_jpeg_frame()
+                if jpeg_data is None:
                     time.sleep(0.01)  # Sleep if no frame
                     continue
 
                 try:
-                    # Write frame to FFmpeg's stdin
-                    self.ffmpeg_process.stdin.write(frame.tobytes())
+                    # Write JPEG frame to FFmpeg's stdin
+                    self.ffmpeg_process.stdin.write(jpeg_data)
                     self.ffmpeg_process.stdin.flush()
                     frames_sent += 1
 

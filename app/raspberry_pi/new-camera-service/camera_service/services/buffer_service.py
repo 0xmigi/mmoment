@@ -35,9 +35,10 @@ class BufferService:
         self._initialized = True
         # STRIPPED DOWN: Minimal framerate and resolution
         self.frame_rate = 15  # Increased framerate for better streaming quality
-        self.buffer_size = 100  # Small buffer size
+        self.buffer_size = 450  # Increased buffer size for 30 second recordings
         self.width = 640  # Lower resolution
         self.height = 360  # Lower resolution
+        self.jpeg_quality = 90  # Quality setting for JPEG compression
         
         # Core buffer components
         self.frame_buffer = deque(maxlen=self.buffer_size)
@@ -48,6 +49,7 @@ class BufferService:
         # Camera components
         self.picam2 = None
         self.latest_frame = None
+        self.latest_jpeg = None  # Store the latest frame as JPEG
         
         # Health monitoring
         self.last_frame_time = 0
@@ -61,7 +63,7 @@ class BufferService:
         self.cleanup_interval = 3600
         self.last_cleanup_time = 0
         
-        logger.info("Buffer Service initialized with minimal settings")
+        logger.info("Buffer Service initialized with MJPEG settings")
         
         # Start buffering automatically
         self.start_buffering()
@@ -97,19 +99,19 @@ class BufferService:
                 time.sleep(1.0)
 
                 self.picam2 = Picamera2()
-                # Add back autofocus settings but remove the vflip/hflip transform
+                # Configure for JPEG encoding directly
                 config = self.picam2.create_video_configuration(
                     main={"size": (self.width, self.height), "format": "RGB888"},
                     controls={
                         "FrameRate": self.frame_rate,
-                        # Add back auto-focus controls
-                        "AfMode": 2,                  # Continuous auto focus (2 is better than 1)
+                        # Auto-focus controls
+                        "AfMode": 2,                  # Continuous auto focus
                         "AfMetering": 0,              # Auto focus metering mode
                         "AfRange": 0,                 # Normal range
                         "AfSpeed": 1,                 # Normal AF speed
                         "AfTrigger": 0                # Trigger autofocus now
-                    }
-                    # Remove transform to avoid double-flip with get_latest_frame
+                    },
+                    transform=libcamera.Transform(hflip=1, vflip=1)  # Hardware flip for correct orientation
                 )
                 
                 self.picam2.configure(config)
@@ -129,7 +131,7 @@ class BufferService:
                 self.picam2.start()
                 time.sleep(2.0)  # Give it more time to initialize
                 
-                logger.info(f"Camera started with autofocus settings and no transform")
+                logger.info(f"Camera started with MJPEG buffer and hardware orientation correction")
 
                 self.is_running = True
                 self.shutdown_event.clear()
@@ -204,8 +206,8 @@ class BufferService:
             logger.error(f"Error during video cleanup: {e}")
 
     def get_video_segment(self, duration_seconds: int = 5) -> Optional[dict]:
-        """Extract video segment directly to MOV format"""
-        logger.info("Starting video extraction")
+        """Extract video segment directly from MJPEG frames"""
+        logger.info("Starting video extraction from MJPEG buffer")
         
         try:
             # Run cleanup to ensure we have disk space
@@ -216,43 +218,80 @@ class BufferService:
                 raise RuntimeError("Insufficient frames in buffer")
 
             with self.buffer_lock:
+                # Get the jpeg frames with timestamps
                 frames = list(self.frame_buffer)[-num_frames:]
             
             timestamp = int(time.time())
             mov_filename = f"video_{timestamp}.mov"
+            
+            # Get start and end timestamps for audio sync
+            start_time = frames[0][1]  # First frame timestamp
+            end_time = frames[-1][1]   # Last frame timestamp
             
             # Ensure videos directory exists
             os.makedirs(Settings.VIDEOS_DIR, exist_ok=True)
             mov_path = os.path.join(Settings.VIDEOS_DIR, mov_filename)
             logger.info(f"Will save video to: {mov_path}")
 
-            # Create a temporary file for frames - manually rotate each frame before writing
-            temp_path = f"/tmp/frames_{timestamp}.raw"
-            logger.info(f"Writing frames to temporary file: {temp_path}")
+            # Create a temporary file for MJPEG frames
+            temp_path = f"/tmp/frames_{timestamp}.mjpeg"
+            logger.info(f"Writing MJPEG frames to: {temp_path}")
+            
             with open(temp_path, "wb") as temp_file:
-                for frame, _ in frames:
-                    # Try a different method to correct orientation
-                    # Rotate each frame 180 degrees (flip horizontally and vertically)
-                    frame = cv2.flip(frame, -1)  # -1 means flip both horizontally and vertically
-                    temp_file.write(frame.tobytes())
-
-            # Use a direct approach for ffmpeg without additional transformations
-            ffmpeg_cmd = [
-                "ffmpeg", "-y",
-                "-f", "rawvideo",
-                "-vcodec", "rawvideo",
-                "-s", f"{self.width}x{self.height}",
-                "-pix_fmt", "rgb24",
-                "-r", str(self.frame_rate),
-                "-i", temp_path,
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-pix_fmt", "yuv420p",
-                "-b:v", "1M",  # Low bitrate
-                # Don't use any additional transformations since we've already rotated the frames
-                "-movflags", "+faststart",
-                mov_path
-            ]
+                for jpeg_data, _ in frames:
+                    temp_file.write(jpeg_data)
+            
+            # Try to get audio from AudioBufferService if available
+            has_audio = False
+            audio_temp = f"/tmp/audio_{timestamp}.wav"
+            
+            try:
+                from .audio_buffer_service import AudioBufferService
+                audio_buffer = AudioBufferService()
+                
+                # Only try to use audio if the service is running
+                if audio_buffer.is_running:
+                    # Save audio segment to temp file
+                    if audio_buffer.save_audio_segment(start_time, end_time, audio_temp):
+                        has_audio = True
+                        logger.info(f"Audio segment saved to {audio_temp}")
+                    else:
+                        logger.warning("No audio data available for the time range")
+                else:
+                    logger.info("Audio buffer service not running, creating video without audio")
+            except Exception as e:
+                logger.warning(f"Could not get audio segment: {e}")
+            
+            # Prepare FFmpeg command based on whether we have audio
+            if has_audio:
+                # Use ffmpeg to convert MJPEG and WAV to MP4/MOV
+                ffmpeg_cmd = [
+                    "ffmpeg", "-y",
+                    "-f", "mjpeg",
+                    "-i", temp_path,
+                    "-i", audio_temp,  # Add audio input
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-pix_fmt", "yuv420p",
+                    "-b:v", "1M",
+                    "-c:a", "aac",     # Audio codec
+                    "-b:a", "128k",    # Audio bitrate
+                    "-movflags", "+faststart",
+                    mov_path
+                ]
+            else:
+                # Video only
+                ffmpeg_cmd = [
+                    "ffmpeg", "-y",
+                    "-f", "mjpeg",
+                    "-i", temp_path,
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-pix_fmt", "yuv420p",
+                    "-b:v", "1M",
+                    "-movflags", "+faststart",
+                    mov_path
+                ]
 
             logger.info(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
             process = subprocess.Popen(
@@ -267,12 +306,14 @@ class BufferService:
                 logger.error(f"FFmpeg error: {stderr.decode()}")
                 raise RuntimeError(f"FFmpeg error: {stderr.decode()}")
 
-            # Clean up temp file
+            # Clean up temp files
             try:
                 os.remove(temp_path)
-                logger.info("Cleaned up temporary file")
+                if has_audio and os.path.exists(audio_temp):
+                    os.remove(audio_temp)
+                logger.info("Cleaned up temporary files")
             except Exception as e:
-                logger.warning(f"Failed to clean up temp file: {e}")
+                logger.warning(f"Failed to clean up temp files: {e}")
 
             # Verify the file exists and has content
             if not os.path.exists(mov_path):
@@ -282,12 +323,13 @@ class BufferService:
             if file_size == 0:
                 raise RuntimeError("Video file is empty")
                 
-            logger.info(f"Successfully created video with frame-by-frame rotation: {mov_filename} (size: {file_size} bytes)")
+            logger.info(f"Successfully created {'audio+video' if has_audio else 'video-only'} from MJPEG frames: {mov_filename} (size: {file_size} bytes)")
             return {
                 "mov_filename": mov_filename,
                 "frame_count": num_frames,
                 "duration": duration_seconds,
-                "path": mov_path
+                "path": mov_path,
+                "has_audio": has_audio
             }
 
         except Exception as e:
@@ -295,7 +337,7 @@ class BufferService:
             raise
 
     def _buffer_frames(self):
-        """Continuously buffer frames from the camera"""
+        """Continuously buffer frames from the camera as JPEG"""
         frame_interval = 1.0 / self.frame_rate
         last_temp_check = time.time()
         frames_processed = 0
@@ -313,19 +355,27 @@ class BufferService:
                         break
                     last_temp_check = current_time
 
-                # Basic frame capture
+                # Capture frame
                 frame = self.picam2.capture_array()
                 frames_processed += 1
+                
+                # Convert to JPEG immediately to preserve color accuracy
+                _, jpeg_data = cv2.imencode('.jpg', frame, [
+                    cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality,
+                    cv2.IMWRITE_JPEG_OPTIMIZE, 1
+                ])
+                
+                # Store JPEG data in buffer
+                with self.buffer_lock:
+                    self.frame_buffer.append((jpeg_data.tobytes(), current_time))
+                    self.latest_frame = frame
+                    self.latest_jpeg = jpeg_data.tobytes()
+                    self.last_frame_time = current_time
                 
                 # Log less frequently
                 if frames_processed % 200 == 0:
                     logger.debug(f"Processed {frames_processed} frames, Buffer size: {len(self.frame_buffer)}")
                 
-                with self.buffer_lock:
-                    self.frame_buffer.append((frame, current_time))
-                    self.latest_frame = frame
-                    self.last_frame_time = current_time
-
                 # Basic timing
                 sleep_time = frame_interval - (time.time() - current_time)
                 if sleep_time > 0:
@@ -336,29 +386,28 @@ class BufferService:
                 time.sleep(0.1)
 
     def get_latest_frame(self):
-        """Thread-safe access to the latest frame with orientation correction"""
+        """Thread-safe access to the latest frame"""
         with self.buffer_lock:
             if self.latest_frame is not None:
-                frame = self.latest_frame.copy()
-                # Apply orientation correction
-                frame = cv2.flip(frame, -1)  # -1 means flip both horizontally and vertically
-                return frame
+                return self.latest_frame.copy()
             return None
 
     def get_jpeg_frame(self):
-        """Get latest frame as JPEG with manual rotation for consistent orientation"""
-        frame = self.get_latest_frame()  # Already includes orientation correction
-        if frame is not None:
-            try:
-                # Basic JPEG encoding (frame is already rotated in get_latest_frame)
-                _, jpeg_data = cv2.imencode('.jpg', frame, [
-                    cv2.IMWRITE_JPEG_QUALITY, 80,  # Lower quality
-                    cv2.IMWRITE_JPEG_OPTIMIZE, 1
-                ])
-                logger.debug("Created JPEG with orientation correction")
-                return jpeg_data.tobytes()
-            except Exception as e:
-                logger.error(f"Error encoding JPEG: {e}")
+        """Get latest frame as JPEG directly from buffer"""
+        with self.buffer_lock:
+            if self.latest_jpeg is not None:
+                return self.latest_jpeg
+            
+            # Fallback if latest_jpeg not available
+            if self.latest_frame is not None:
+                try:
+                    _, jpeg_data = cv2.imencode('.jpg', self.latest_frame, [
+                        cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality,
+                        cv2.IMWRITE_JPEG_OPTIMIZE, 1
+                    ])
+                    return jpeg_data.tobytes()
+                except Exception as e:
+                    logger.error(f"Error encoding JPEG: {e}")
         return None
 
     def cleanup(self):
@@ -378,5 +427,6 @@ class BufferService:
         with self.buffer_lock:
             self.frame_buffer.clear()
             self.latest_frame = None
+            self.latest_jpeg = None
 
         logger.info("Buffer service cleanup complete")

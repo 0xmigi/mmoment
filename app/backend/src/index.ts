@@ -152,89 +152,13 @@ interface TimelineEvent {
   user: {
     address: string;
     username?: string;
-    displayName?: string;
-    pfpUrl?: string;
   };
   timestamp: number;
   cameraId?: string;
 }
 
-// Social profiles storage (in-memory)
-interface SocialProfile {
-  address: string;
-  username?: string;
-  displayName?: string;
-  pfpUrl?: string;
-  provider?: string;
-  lastUpdated: number;
-}
-
 const timelineEvents: TimelineEvent[] = [];
 const cameraRooms = new Map<string, Set<string>>();
-const socialProfiles = new Map<string, SocialProfile>();
-
-// API endpoint to get social profiles
-app.get('/api/profiles/:address', (req, res) => {
-  const { address } = req.params;
-  
-  if (!address) {
-    return res.status(400).json({ error: 'Address is required' });
-  }
-  
-  const profile = socialProfiles.get(address.toLowerCase());
-  
-  if (!profile) {
-    return res.status(404).json({ 
-      message: 'Profile not found',
-      profiles: [] 
-    });
-  }
-  
-  // Return all profiles in an array for consistency
-  res.json({ 
-    profiles: [{ 
-      id: profile.address,
-      username: profile.username,
-      displayName: profile.displayName,
-      pfpUrl: profile.pfpUrl,
-      provider: profile.provider,
-      isVerified: true
-    }]
-  });
-});
-
-// API endpoint to update social profiles
-app.post('/api/profiles/:address', (req, res) => {
-  const { address } = req.params;
-  const profileData = req.body;
-  
-  if (!address || !profileData) {
-    return res.status(400).json({ error: 'Address and profile data are required' });
-  }
-  
-  const normalizedAddress = address.toLowerCase();
-  
-  // Create or update the profile
-  socialProfiles.set(normalizedAddress, {
-    address: normalizedAddress,
-    username: profileData.username,
-    displayName: profileData.displayName,
-    pfpUrl: profileData.pfpUrl,
-    provider: profileData.provider,
-    lastUpdated: Date.now()
-  });
-  
-  // Update any associated timeline events with the new profile info
-  timelineEvents.forEach(event => {
-    if (event.user.address.toLowerCase() === normalizedAddress) {
-      event.user.username = profileData.username || event.user.username;
-      event.user.displayName = profileData.displayName || event.user.displayName;
-      event.user.pfpUrl = profileData.pfpUrl || event.user.pfpUrl;
-    }
-  });
-  
-  res.json({ success: true, profile: socialProfiles.get(normalizedAddress) });
-});
 
 // Socket connection handling
 io.on('connection', (socket) => {
@@ -264,74 +188,6 @@ io.on('connection', (socket) => {
       .filter(event => event.cameraId === cameraId)
       .sort((a, b) => b.timestamp - a.timestamp);
     socket.emit('recentEvents', cameraEvents);
-    
-    // Send all known social profiles to this client
-    const uniqueAddresses = new Set<string>();
-    
-    // First collect all addresses from events in this camera
-    cameraEvents.forEach(event => {
-      uniqueAddresses.add(event.user.address.toLowerCase());
-    });
-    
-    // Then send profiles for all those addresses
-    uniqueAddresses.forEach(address => {
-      const profile = socialProfiles.get(address);
-      if (profile) {
-        console.log(`[PROFILE] Sending profile for ${address} to new client`);
-        socket.emit('userProfileUpdate', {
-          address,
-          profile: {
-            address: profile.address,
-            username: profile.username,
-            displayName: profile.displayName,
-            pfpUrl: profile.pfpUrl,
-            provider: profile.provider
-          }
-        });
-      }
-    });
-  });
-
-  // Handle user profile updates
-  socket.on('userProfileUpdate', (data: { address: string, profile: any, cameraId?: string }) => {
-    const { address, profile, cameraId } = data;
-    
-    if (!address || !profile) {
-      console.warn('Invalid profile update data:', data);
-      return;
-    }
-    
-    console.log(`[PROFILE] Received profile update for ${address}:`, profile);
-    
-    const normalizedAddress = address.toLowerCase();
-    
-    // Store profile
-    socialProfiles.set(normalizedAddress, {
-      address: normalizedAddress,
-      username: profile.username,
-      displayName: profile.displayName,
-      pfpUrl: profile.pfpUrl,
-      provider: profile.provider,
-      lastUpdated: Date.now()
-    });
-    
-    // Update any associated timeline events
-    const updatedEvents = [];
-    timelineEvents.forEach(event => {
-      if (event.user.address.toLowerCase() === normalizedAddress) {
-        event.user.username = profile.username || event.user.username;
-        event.user.displayName = profile.displayName || event.user.displayName;
-        event.user.pfpUrl = profile.pfpUrl || event.user.pfpUrl;
-        updatedEvents.push(event.id);
-      }
-    });
-    
-    console.log(`[PROFILE] Updated ${updatedEvents.length} timeline events for ${address}`);
-    console.log(`[PROFILE] Profile updated for ${address} by ${socket.id}, broadcasting to all clients`);
-    
-    // IMPORTANT: Broadcast to ALL clients, not just those in a specific camera room
-    // This ensures all connected clients have the latest profile data
-    io.emit('userProfileUpdate', { address, profile });
   });
 
   // Handle leaving a camera room

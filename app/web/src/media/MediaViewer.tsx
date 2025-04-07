@@ -2,9 +2,8 @@ import { Dialog } from '@headlessui/react';
 import { X, ArrowUpRight, Download, Trash2 } from 'lucide-react';
 import { IPFSMedia } from '../storage/ipfs/ipfs-service';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { unifiedIpfsService } from '../storage/ipfs/unified-ipfs-service';
-import { socialService } from '../auth/social/social-service';
 
 // Copy the necessary types
 type TimelineEventType =
@@ -42,97 +41,37 @@ interface MediaViewerProps {
 
 export default function MediaViewer({ isOpen, onClose, media, event, onDelete }: MediaViewerProps) {
   const { user, primaryWallet } = useDynamicContext();
-  const [currentVideoUrl, setCurrentVideoUrl] = useState('');
-  const [videoErrorCount, setVideoErrorCount] = useState(0);
   const [deleting, setDeleting] = useState(false);
-  const [socialProfiles, setSocialProfiles] = useState<any[]>([]);
-  const [, setLoading] = useState(false);
 
   if (!media) return null;
 
-  // Actively fetch profiles when the viewer opens
-  useEffect(() => {
-    if (!isOpen || (!event?.user.address && !media.walletAddress)) return;
-    
-    const address = event?.user.address || media.walletAddress;
-    const fetchProfiles = async () => {
-      setLoading(true);
-      try {
-        console.log(`[MediaViewer] Fetching profiles for ${address}`);
-        const profiles = await socialService.getProfilesByAddress(address);
-        if (profiles.length > 0) {
-          console.log(`[MediaViewer] Found ${profiles.length} profiles:`, profiles);
-          setSocialProfiles(profiles);
-        } else if (user?.verifiedCredentials?.length && 
-                  user.verifiedCredentials.some(cred => cred.address === address)) {
-          // If no profiles from API but user has matching verified credentials
-          const matchingCreds = user.verifiedCredentials.filter(
-            cred => cred.address === address
-          );
-          const credsProfiles = socialService.getProfileFromVerifiedCredentials(matchingCreds);
-          console.log(`[MediaViewer] Using verified credentials:`, credsProfiles);
-          setSocialProfiles(credsProfiles);
-        } else {
-          console.log(`[MediaViewer] No profiles found for ${address}`);
-          setSocialProfiles([]);
-        }
-      } catch (error) {
-        console.error(`[MediaViewer] Error fetching profiles:`, error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    fetchProfiles();
-  }, [isOpen, event?.user.address, media.walletAddress, user?.verifiedCredentials]);
-
-  // Add debugging for video media
-  if (media.type === 'video' && !currentVideoUrl) {
-    console.log('Video details:', {
-      url: media.url,
-      mimeType: media.mimeType,
-      backupUrls: media.backupUrls,
-      directUrl: media.directUrl
-    });
-    
-    // Initialize with the best URL
-    setCurrentVideoUrl(media.directUrl || media.url);
-  }
-
-  // Get social profiles data - direct, reliable approach
-  const farcasterProfile = socialProfiles.find(profile => profile.provider === 'farcaster');
-  const twitterProfile = socialProfiles.find(profile => profile.provider === 'twitter');
+  // Get social identity from user's verified credentials
+  const farcasterCred = user?.verifiedCredentials?.find(cred => 
+    cred.oauthProvider === 'farcaster'
+  );
+  
+  const twitterCred = user?.verifiedCredentials?.find(cred => 
+    cred.oauthProvider === 'twitter'
+  );
   
   // Prioritize Farcaster over Twitter
-  const primarySocialProfile = farcasterProfile || twitterProfile;
+  const primarySocialCred = farcasterCred || twitterCred;
   
-  // Get social identity from event first, profiles second, user's credentials as last resort
-  const displayName = event?.user.displayName || 
-                     primarySocialProfile?.displayName;
-                     
-  const username = event?.user.username || 
-                   primarySocialProfile?.username;
-                   
-  const profileImage = event?.user.pfpUrl || 
-                       primarySocialProfile?.pfpUrl;
+  // Get social identity from event first, user's verified credentials as fallback
+  // This lets us display profile info correctly for other users
+  const displayName = event?.user.displayName || primarySocialCred?.oauthDisplayName;
+  const username = event?.user.username || primarySocialCred?.oauthUsername;
+  const profileImage = event?.user.pfpUrl || primarySocialCred?.oauthAccountPhotos?.[0];
   
-  // Determine social provider from profiles first, then fall back to credentials
+  // Determine social provider from event data or current user credentials
   const socialProvider = (() => {
-    if (farcasterProfile) return 'Farcaster';
-    if (twitterProfile) return 'X / Twitter';
-    
-    // If nothing in profiles, use OAuth provider info from user credentials
-    const farcasterCred = user?.verifiedCredentials?.find(cred => 
-      cred.oauthProvider === 'farcaster'
-    );
-    
-    const twitterCred = user?.verifiedCredentials?.find(cred => 
-      cred.oauthProvider === 'twitter'
-    );
-    
+    // If we have a username that includes farcaster.xyz, it's Farcaster
+    if (username?.includes('farcaster.xyz')) return 'Farcaster';
+    // If username has a Twitter domain
+    if (username?.includes('twitter.com')) return 'X / Twitter';
+    // Use the provider from credentials as a fallback
     if (farcasterCred) return 'Farcaster';
     if (twitterCred) return 'X / Twitter';
-    
     return null;
   })();
   
@@ -223,36 +162,12 @@ export default function MediaViewer({ isOpen, onClose, media, event, onDelete }:
             <div className="w-full">
               {media.type === 'video' ? (
                 <video
-                  src={currentVideoUrl || media.url}
+                  key={media.id}
+                  src={media.url}
                   className="w-full max-h-[60vh] object-contain"
                   controls
                   autoPlay
                   playsInline
-                  onError={(e) => {
-                    const video = e.currentTarget;
-                    console.error(`Video error loading ${video.src} (attempt ${videoErrorCount + 1})`);
-                    
-                    // Try to find the next URL to try
-                    const allUrls = [
-                      media.directUrl, 
-                      ...media.backupUrls, 
-                      media.url
-                    ].filter(Boolean) as string[];
-                    
-                    // Find the current URL's index
-                    const currentIndex = allUrls.indexOf(currentVideoUrl || media.url);
-                    const nextIndex = (currentIndex + 1) % allUrls.length;
-                    
-                    // Try the next URL if we haven't cycled through all options yet
-                    if (nextIndex !== currentIndex && videoErrorCount < allUrls.length) {
-                      const nextUrl = allUrls[nextIndex];
-                      console.log(`Trying alternative URL (${videoErrorCount + 1}/${allUrls.length}): ${nextUrl}`);
-                      setCurrentVideoUrl(nextUrl);
-                      setVideoErrorCount(prev => prev + 1);
-                    } else {
-                      console.error("All video URLs failed to load");
-                    }
-                  }}
                 />
               ) : (
                 <img

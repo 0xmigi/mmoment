@@ -593,21 +593,21 @@ export function CameraView() {
     }
     
     setLoading(true);
-    updateToast('info', 'Processing video transaction...');
+    updateToast('info', 'Recording 30-second video...');
     
     // Add a small delay for visual feedback
     setTimeout(() => {
       sendSimpleTransaction('video')
         .then(async (signature: string | undefined) => {
           if (signature && primaryWallet?.address) {
-            updateToast('info', 'Recording video...');
+            updateToast('info', 'Recording 30-second video...');
             
             // Set camera status to online immediately for better UX
             cameraStatus.setOnline(false);
             
             const response = await cameraActionService.recordVideo(signature, primaryWallet.address);
             if (response.success) {
-              updateToast('success', 'Video recorded and uploaded to IPFS');
+              updateToast('success', '30-second video recorded and uploaded to IPFS');
               // Ensure camera shows as online
               cameraStatus.setOnline(false);
             } else {

@@ -6,6 +6,7 @@ import threading
 from threading import Lock
 import time
 from .buffer_service import BufferService
+from .audio_buffer_service import AudioBufferService
 from .stream_service import LivepeerStreamService
 from ..config.settings import Settings
 
@@ -27,11 +28,42 @@ class CameraService:
             return
             
         self._initialized = True
+        
+        # Initialize buffer services
+        logger.info("Initializing buffer services")
+        
+        # Video buffer must be initialized first
         self.buffer_service = BufferService()
-        self.stream_service = LivepeerStreamService()
         
         # Start buffer immediately - it's our highest priority
-        self.buffer_service.start_buffering()
+        logger.info("Starting video buffer service")
+        if not self.buffer_service.start_buffering():
+            logger.error("Failed to start video buffer service")
+        else:
+            logger.info("Video buffer service started successfully")
+            
+        # Delay a moment before starting audio
+        time.sleep(2)
+        
+        # Initialize audio buffer after video is running
+        self.audio_buffer_service = AudioBufferService()
+        
+        # Only try to start audio if video buffer is running
+        if self.buffer_service.is_running:
+            # Try to start audio buffer
+            logger.info("Starting audio buffer service")
+            try:
+                if self.audio_buffer_service.start_buffering():
+                    logger.info("Audio buffer started successfully")
+                else:
+                    logger.error("Failed to start audio buffer service")
+            except Exception as e:
+                logger.error(f"Could not start audio buffer: {e}")
+        else:
+            logger.warning("Not starting audio buffer because video buffer is not running")
+            
+        # Initialize stream service
+        self.stream_service = LivepeerStreamService()
         
         # Resource monitoring (minimal)
         self._resource_check_interval = 10  # Check less frequently
@@ -39,6 +71,10 @@ class CameraService:
         self._system_healthy = True
         self._recording_active = False
         self._recording_start_time = None
+        
+        logger.info("Camera service initialization complete. Status: " + 
+                   f"Video buffer: {self.buffer_service.is_running}, " +
+                   f"Audio buffer: {self.audio_buffer_service.is_running}")
 
     def _check_system_resources(self, streaming_active=False) -> bool:
         """Check if system has enough resources to perform operations"""
@@ -76,11 +112,11 @@ class CameraService:
         """Determine safe recording duration based on system conditions"""
         # Simple fixed durations
         if self.stream_service.is_streaming:
-            return 5  # Short recording while streaming
+            return 20  # Longer recording while streaming
         else:
-            return 10  # Longer when not streaming
+            return 30  # Longer default duration when not streaming
                 
-    def start_recording(self, duration_seconds=5) -> dict:
+    def start_recording(self, duration_seconds=30) -> dict:
         """
         Start video recording. 
         If recording is already active, returns its info.
@@ -97,6 +133,11 @@ class CameraService:
             if not self._check_system_resources():
                 logger.error("Insufficient system resources for recording")
                 return {"status": "error", "message": "Insufficient resources for recording"}
+            
+            # Check if buffer is running
+            if not self.buffer_service.is_running:
+                logger.error("Video buffer is not running, cannot record")
+                return {"status": "error", "message": "Video buffer is not running"}
             
             # Simple duration limitation
             safe_duration = self._get_safe_recording_duration()
@@ -125,7 +166,8 @@ class CameraService:
                     "status": "recorded",
                     "duration": video_info.get("duration", duration_seconds),
                     "frame_count": video_info.get("frame_count", 0),
-                    "path": video_info.get("path", "")
+                    "path": video_info.get("path", ""),
+                    "has_audio": video_info.get("has_audio", False)
                 }
                 
                 logger.info(f"Recording completed: {result}")
@@ -162,3 +204,11 @@ class CameraService:
         except Exception as e:
             logger.error(f"Photo capture error: {e}")
             raise
+
+    def get_audio_status(self):
+        """Get audio buffer status"""
+        try:
+            return self.audio_buffer_service.get_buffer_status()
+        except Exception as e:
+            logger.error(f"Failed to get audio status: {e}")
+            return {"running": False, "error": str(e)}

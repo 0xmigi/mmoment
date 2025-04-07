@@ -16,7 +16,7 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
     useConnection();
     const program = useProgram();
     const [loading, setLoading] = useState(false);
-    const [, setShowTooltip] = useState(false);
+    const [showTooltip, setShowTooltip] = useState(false);
     const buttonRef = useRef<HTMLButtonElement>(null);
     
     // Use the shared camera context
@@ -64,20 +64,29 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
 
     return (
       <>
-        <button
-          ref={buttonRef}
-          onClick={handleButtonClick}
-          onMouseEnter={() => setShowTooltip(true)}
-          onMouseLeave={() => setShowTooltip(false)}
-          disabled={loading || initLoading || !isInitialized}
-          className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-gray-800 transition-colors rounded-xl"
-        >
-          {loading || initLoading ? (
-            <Loader className="w-5 h-5 animate-spin" />
-          ) : (
-            <Video className="w-5 h-5" />
+        <div className="relative">
+          <button
+            ref={buttonRef}
+            onClick={handleButtonClick}
+            onMouseEnter={() => setShowTooltip(true)}
+            onMouseLeave={() => setShowTooltip(false)}
+            disabled={loading || initLoading || !isInitialized}
+            className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-gray-800 transition-colors rounded-xl"
+            aria-label="Record 30-second video"
+          >
+            {loading || initLoading ? (
+              <Loader className="w-5 h-5 animate-spin" />
+            ) : (
+              <Video className="w-5 h-5" />
+            )}
+          </button>
+          
+          {showTooltip && (
+            <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs rounded py-1 px-2 whitespace-nowrap">
+              Record 30s Video
+            </div>
           )}
-        </button>
+        </div>
       </>
     );
   }

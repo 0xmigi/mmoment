@@ -343,6 +343,9 @@ def get_camera_status():
             "frame_count": buffer_service.get_frame_count() if buffer_service.is_running else 0
         }
         
+        # Get audio status
+        audio_status = camera_service.get_audio_status() if hasattr(camera_service, 'get_audio_status') else {"running": False}
+        
         # Get camera ID
         camera_id = solana_auth.get_camera_public_key()
         
@@ -350,10 +353,25 @@ def get_camera_status():
             "online": buffer_service.is_running,
             "camera_id": camera_id,
             "stream": stream_info,
-            "buffer": buffer_status
+            "buffer": buffer_status,
+            "audio": audio_status
         })
     except Exception as e:
         logger.error(f"Error getting camera status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@api.route("/api/audio/status", methods=["GET", "OPTIONS"])
+@require_auth
+def get_audio_status():
+    """Get audio buffer status"""
+    if request.method == "OPTIONS":
+        return "", 204
+        
+    try:
+        audio_status = camera_service.get_audio_status()
+        return jsonify(audio_status)
+    except Exception as e:
+        logger.error(f"Error getting audio status: {e}")
         return jsonify({"error": str(e)}), 500
 
 @api.route("/api/record", methods=["POST", "OPTIONS"])
@@ -367,10 +385,10 @@ def record_video():
     try:
         # Get duration from request or use default
         data = request.get_json(silent=True) or {}
-        duration = data.get("duration", 5)  # Default to 5 seconds
+        duration = data.get("duration", 30)  # Default to 30 seconds
         
         # Ensure duration is within strict limits
-        duration = min(max(1, duration), 10)  # Cap at 10 seconds maximum
+        duration = min(max(1, duration), 30)  # Cap at 30 seconds maximum
         
         # Initialize camera service
         camera_service = CameraService()

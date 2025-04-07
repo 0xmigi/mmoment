@@ -1,7 +1,5 @@
 import { Dialog } from '@headlessui/react';
 import { X, ExternalLink, Download } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { socialService } from '../auth/social/social-service';
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -30,66 +28,31 @@ interface ProfileModalProps {
 }
 
 export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProps) {
-  const [, setLoading] = useState(false);
-  const [socialProfiles, setSocialProfiles] = useState<any[]>([]);
-  
-  // Actively fetch profiles when the modal opens
-  useEffect(() => {
-    if (!isOpen || !user.address) return;
-    
-    const fetchProfiles = async () => {
-      setLoading(true);
-      try {
-        console.log(`[ProfileModal] Fetching profiles for ${user.address}`);
-        const profiles = await socialService.getProfilesByAddress(user.address);
-        if (profiles.length > 0) {
-          console.log(`[ProfileModal] Found ${profiles.length} profiles:`, profiles);
-          setSocialProfiles(profiles);
-        } else if (user.verifiedCredentials?.length) {
-          // If no profiles from API but user has verified credentials
-          const credsProfiles = socialService.getProfileFromVerifiedCredentials(user.verifiedCredentials);
-          console.log(`[ProfileModal] Using verified credentials:`, credsProfiles);
-          setSocialProfiles(credsProfiles);
-        } else {
-          console.log(`[ProfileModal] No profiles found for ${user.address}`);
-          setSocialProfiles([]);
-        }
-      } catch (error) {
-        console.error(`[ProfileModal] Error fetching profiles:`, error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    fetchProfiles();
-  }, [isOpen, user.address, user.verifiedCredentials]);
-
   if (!isOpen) return null;
 
-  // Get social identity credentials - prioritize our fetched profiles first, 
-  // then fall back to what was passed in props
-  const farcasterProfile = socialProfiles.find(profile => profile.provider === 'farcaster');
-  const twitterProfile = socialProfiles.find(profile => profile.provider === 'twitter');
+  // Get social identity credentials
+  const farcasterCred = user?.verifiedCredentials?.find(cred => cred.oauthProvider === 'farcaster');
+  const twitterCred = user?.verifiedCredentials?.find(cred => cred.oauthProvider === 'twitter');
   
   // Prioritize Farcaster, then Twitter
-  const primarySocialProfile = farcasterProfile || twitterProfile;
+  const primarySocialCred = farcasterCred || twitterCred;
   
   // Get display information
-  const displayName = primarySocialProfile?.displayName || user.displayName;
-  const profileImage = primarySocialProfile?.pfpUrl || user.pfpUrl;
+  const displayName = user.displayName || primarySocialCred?.oauthDisplayName || primarySocialCred?.oauthUsername;
+  const profileImage = user.pfpUrl || primarySocialCred?.oauthAccountPhotos?.[0];
   
   // Only use wallet as fallback
   const displayIdentity = displayName || `${user.address.slice(0, 4)}...${user.address.slice(-4)}`;
 
   const handleWarpcastClick = () => {
-    if (farcasterProfile?.username) {
-      window.open(`https://warpcast.com/${farcasterProfile.username.replace('@', '')}`, '_blank');
+    if (farcasterCred?.oauthUsername) {
+      window.open(`https://warpcast.com/${farcasterCred.oauthUsername.replace('@', '')}`, '_blank');
     }
   };
   
   const handleTwitterClick = () => {
-    if (twitterProfile?.username) {
-      window.open(`https://twitter.com/${twitterProfile.username.replace('@', '')}`, '_blank');
+    if (twitterCred?.oauthUsername) {
+      window.open(`https://twitter.com/${twitterCred.oauthUsername.replace('@', '')}`, '_blank');
     }
   };
 
@@ -169,55 +132,53 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
             </div>
 
             {/* Connected Accounts */}
-            {(farcasterProfile || twitterProfile) && (
-              <div className="space-y-2">
-                {/* Farcaster Account */}
-                {farcasterProfile && (
-                  <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-gray-700">Farcaster</span>
-                        {primarySocialProfile === farcasterProfile && (
-                          <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">source</span>
-                        )}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        @{farcasterProfile.username?.replace('@', '')}
-                      </div>
+            <div className="space-y-2">
+              {/* Farcaster Account */}
+              {farcasterCred && (
+                <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-gray-700">Farcaster</span>
+                      {farcasterCred === primarySocialCred && (
+                        <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">source</span>
+                      )}
                     </div>
-                    <button 
-                      onClick={handleWarpcastClick}
-                      className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
-                    >
-                      View <ExternalLink className="w-3 h-3" />
-                    </button>
-                  </div>
-                )}
-                
-                {/* Twitter Account */}
-                {twitterProfile && (
-                  <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-gray-700">X / Twitter</span>
-                        {primarySocialProfile === twitterProfile && (
-                          <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">source</span>
-                        )}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        @{twitterProfile.username?.replace('@', '')}
-                      </div>
+                    <div className="text-xs text-gray-500">
+                      @{farcasterCred.oauthUsername?.replace('@', '')}
                     </div>
-                    <button 
-                      onClick={handleTwitterClick}
-                      className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
-                    >
-                      View <ExternalLink className="w-3 h-3" />
-                    </button>
                   </div>
-                )}
-              </div>
-            )}
+                  <button 
+                    onClick={handleWarpcastClick}
+                    className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
+                  >
+                    View <ExternalLink className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+              
+              {/* Twitter Account */}
+              {twitterCred && (
+                <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-gray-700">X / Twitter</span>
+                      {primarySocialCred === twitterCred && (
+                        <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">source</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      @{twitterCred.oauthUsername?.replace('@', '')}
+                    </div>
+                  </div>
+                  <button 
+                    onClick={handleTwitterClick}
+                    className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
+                  >
+                    View <ExternalLink className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Action Details */}
             {action && (

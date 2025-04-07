@@ -19,7 +19,6 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
   const [, setDeleting] = useState<string | null>(null);
   const [selectedMedia, setSelectedMedia] = useState<IPFSMedia | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<'mine' | 'shared'>('mine');
 
   // Add click handler for media items
   const handleMediaClick = (media: IPFSMedia) => {
@@ -187,38 +186,12 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
   }
 
   const title = mode === 'recent'
-    ? ``
+    ? `Recent (${media.length})`
     : `Gallery (${media.length})`;
 
   return (
     <div className="max-w-3xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl text-left font-bold text-gray-800">{title}</h2>
-        
-        {/* Mine/Shared Toggle */}
-        <div className="bg-gray-100 rounded-lg p-0.5 flex text-sm">
-          <button
-            className={`px-3 py-1 rounded-md transition-colors ${
-              viewMode === 'mine' 
-                ? 'bg-white text-gray-800 shadow-sm' 
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-            onClick={() => setViewMode('mine')}
-          >
-            Mine
-          </button>
-          <button
-            className={`px-3 py-1 rounded-md transition-colors ${
-              viewMode === 'shared' 
-                ? 'bg-white text-gray-800 shadow-sm' 
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-            onClick={() => setViewMode('shared')}
-          >
-            Shared
-          </button>
-        </div>
-      </div>
+      <h2 className="text-xl text-left font-bold text-gray-800 mb-6">{title}</h2>
 
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
@@ -226,11 +199,7 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
         </div>
       )}
 
-      {viewMode === 'shared' ? (
-        <div className="text-center py-12 text-gray-500">
-          Shared media feature coming soon
-        </div>
-      ) : loading ? (
+      {loading ? (
         <div className="text-left py-4">Loading your media...</div>
       ) : media.length === 0 ? (
         <div className="text-left py-4 text-gray-500">

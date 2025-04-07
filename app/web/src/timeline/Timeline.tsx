@@ -144,8 +144,6 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   // Fetch user profiles for all addresses in the events
   useEffect(() => {
     const fetchUserProfiles = async () => {
-      console.log("[Timeline] Fetching profiles for events", events.length);
-      
       // Get unique addresses that we don't already have profiles for
       const addresses = events
         .map(event => event.user.address)
@@ -154,8 +152,6 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
         );
       
       if (addresses.length === 0) return;
-      
-      console.log("[Timeline] Need to fetch profiles for addresses:", addresses);
       
       // Create a temporary object to store new profiles
       const newProfiles: Record<string, any> = {};
@@ -175,7 +171,6 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
             if (matchingCreds.length > 0) {
               const profiles = socialService.getProfileFromVerifiedCredentials(matchingCreds);
               if (profiles.length > 0) {
-                console.log(`[Timeline] Found profile for ${address} in verified credentials:`, profiles[0]);
                 newProfiles[address] = {
                   ...profiles[0],
                   address
@@ -192,13 +187,10 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
             const farcasterProfile = profiles.find(p => p.provider === 'farcaster');
             const profile = farcasterProfile || profiles[0];
             
-            console.log(`[Timeline] Found profile for ${address} from API:`, profile);
             newProfiles[address] = {
               ...profile,
               address
             };
-          } else {
-            console.log(`[Timeline] No profile found for ${address}`);
           }
           
         } catch (error) {
@@ -208,29 +200,15 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       
       // Update our profiles state if we found any new ones
       if (Object.keys(newProfiles).length > 0) {
-        console.log(`[Timeline] Adding ${Object.keys(newProfiles).length} new profiles to state`);
         setUserProfiles(prev => ({
           ...prev,
           ...newProfiles
         }));
-        
-        // Share the newly discovered profiles with other clients through timeline service
-        // This ensures all connected clients have the latest social info
-        for (const address of Object.keys(newProfiles)) {
-          try {
-            timelineService.updateUserProfile({
-              address,
-              profile: newProfiles[address]
-            });
-          } catch (error) {
-            console.error(`Failed to share profile for ${address}:`, error);
-          }
-        }
       }
     };
     
     fetchUserProfiles();
-  }, [events, user?.verifiedCredentials]);
+  }, [events, user?.verifiedCredentials, userProfiles]);
 
   // Update display count on window resize
   useEffect(() => {
@@ -356,77 +334,6 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       setIsViewerOpen(true);
     }
   };
-
-  // Listen for profile updates from other clients
-  useEffect(() => {
-    const handleProfileUpdate = (e: any) => {
-      const { address, profile } = e.detail;
-      
-      if (address && profile) {
-        console.log(`[Timeline] Received profile update from event for ${address}:`, profile);
-        
-        setUserProfiles(prev => {
-          // Only update if we don't already have this profile or if it has new info
-          const existingProfile = prev[address];
-          if (!existingProfile || 
-              !existingProfile.displayName || 
-              !existingProfile.username ||
-              !existingProfile.pfpUrl) {
-            return {
-              ...prev,
-              [address]: profile
-            };
-          }
-          return prev;
-        });
-      }
-    };
-    
-    // Add the event listener for profile updates
-    window.addEventListener('timeline:profileUpdate', handleProfileUpdate);
-    
-    // Also check for any cached profiles in localStorage
-    const loadCachedProfiles = () => {
-      console.log('[Timeline] Checking for cached profiles in localStorage');
-      const newProfiles: Record<string, any> = {};
-      let updatedProfiles = false;
-      
-      // Scan localStorage for profile caches
-      Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('profileCache_')) {
-          try {
-            const address = key.replace('profileCache_', '');
-            const data = JSON.parse(localStorage.getItem(key) || '{}');
-            
-            if (data.profile && !userProfiles[address]) {
-              console.log(`[Timeline] Found cached profile for ${address}:`, data.profile);
-              newProfiles[address] = data.profile;
-              updatedProfiles = true;
-            }
-          } catch (err) {
-            console.error('Error parsing cached profile:', err);
-          }
-        }
-      });
-      
-      if (updatedProfiles) {
-        console.log(`[Timeline] Adding ${Object.keys(newProfiles).length} cached profiles to state`);
-        setUserProfiles(prev => ({
-          ...prev,
-          ...newProfiles
-        }));
-      } else {
-        console.log('[Timeline] No cached profiles found or already loaded');
-      }
-    };
-    
-    // Load any cached profiles immediately
-    loadCachedProfiles();
-    
-    return () => {
-      window.removeEventListener('timeline:profileUpdate', handleProfileUpdate);
-    };
-  }, []);
 
   return (
     <div className="w-full relative" ref={timelineRef}>

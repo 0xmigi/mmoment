@@ -381,7 +381,7 @@ export class CameraActionService {
         body: JSON.stringify({
           tx_signature: txSignature,
           wallet_address: walletAddress,
-          duration: 5 // Fixed 5-second duration
+          duration: 30 // 30-second duration
         }),
         mode: 'cors',
         credentials: 'omit'
