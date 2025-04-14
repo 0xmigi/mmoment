@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { CONFIG } from '../../core/config';
+import { Link } from 'react-router-dom';
 
 export function DebugPage() {
   const [info] = useState({
@@ -134,6 +135,19 @@ export function DebugPage() {
         >
           Retry
         </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
+        <div className="p-4 border rounded-lg shadow">
+          <h3 className="text-lg font-semibold mb-2">Walrus Storage</h3>
+          <p className="mb-4">Test the Walrus decentralized storage integration</p>
+          <Link 
+            to="/debug/walrus" 
+            className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700"
+          >
+            Test Walrus Storage
+          </Link>
+        </div>
       </div>
     </div>
   );

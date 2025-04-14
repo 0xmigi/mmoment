@@ -186,7 +186,7 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
   }
 
   const title = mode === 'recent'
-    ? `Recent (${media.length})`
+    ? `Your recents`
     : `Gallery (${media.length})`;
 
   return (

@@ -1,6 +1,7 @@
 import { useSocialAccounts } from '@dynamic-labs/sdk-react-core';
 import { ProviderEnum } from '@dynamic-labs/types';
 import { FarcasterIcon, TwitterIcon } from '@dynamic-labs/iconic';
+import { useNavigate } from 'react-router-dom';
 
 interface HeadlessSocialLoginProps {
   onSuccess?: () => void;
@@ -8,11 +9,13 @@ interface HeadlessSocialLoginProps {
 
 export function HeadlessSocialLogin({ onSuccess }: HeadlessSocialLoginProps) {
   const { error, isProcessing, signInWithSocialAccount } = useSocialAccounts();
+  const navigate = useNavigate();
 
   const handleFarcasterLogin = async () => {
     try {
       await signInWithSocialAccount(ProviderEnum.Farcaster);
       onSuccess?.();
+      navigate('/app');
     } catch (err) {
       console.error('Failed to sign in with Farcaster:', err);
     }
@@ -22,6 +25,7 @@ export function HeadlessSocialLogin({ onSuccess }: HeadlessSocialLoginProps) {
     try {
       await signInWithSocialAccount(ProviderEnum.Twitter);
       onSuccess?.();
+      navigate('/app');
     } catch (err) {
       console.error('Failed to sign in with Twitter:', err);
     }

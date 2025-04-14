@@ -1,9 +1,11 @@
 import { useDynamicContext, useEmbeddedWallet } from '@dynamic-labs/sdk-react-core';
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
-import { User, Copy, Check } from 'lucide-react';
+import { Copy, User, LogOut, KeyRound, Check, Globe, Lock } from 'lucide-react';
 
+// Define interfaces
 interface SocialCredential {
+  format: string;
   oauthProvider: string;
   oauthUsername: string;
   oauthDisplayName: string;
@@ -11,26 +13,42 @@ interface SocialCredential {
 }
 
 interface StatusMessage {
-  type: 'success' | 'error' | 'info';
   message: string;
+  type: 'success' | 'error' | 'info';
 }
 
 export function AccountPage() {
   const { primaryWallet, handleLogOut, user } = useDynamicContext();
   const { revealWalletKey } = useEmbeddedWallet();
   const navigate = useNavigate();
+  const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [showBackupOptions, setShowBackupOptions] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [showBackupOptions, setShowBackupOptions] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [statusMessage] = useState<StatusMessage | null>(null);
 
   const handleSignOut = async () => {
     try {
       await handleLogOut();
-      navigate('/app');
+      navigate('/');
     } catch (err) {
       console.error('Failed to sign out:', err);
+    }
+  };
+
+  const handleCopyAddress = async () => {
+    if (!primaryWallet?.address) return;
+    
+    try {
+      await navigator.clipboard.writeText(primaryWallet.address);
+      setCopied(true);
+      setStatusMessage({ type: 'info', message: 'Wallet address copied!' });
+      setTimeout(() => {
+        setCopied(false);
+        setStatusMessage(null);
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy address:', err);
     }
   };
 
@@ -42,58 +60,89 @@ export function AccountPage() {
         htmlContainerId: 'wallet-export-container',
         type,
       });
+      setStatusMessage({ 
+        type: 'success', 
+        message: `${type === 'privateKey' ? 'Private key' : 'Recovery phrase'} displayed.` 
+      });
     } catch (error) {
       console.error('Failed to export wallet:', error);
       setExportError('Failed to export wallet. Please try again.');
+      setStatusMessage({ type: 'error', message: 'Failed to export wallet.' });
     } finally {
       setIsExporting(false);
     }
   };
 
-  const handleCopyAddress = async () => {
-    if (!primaryWallet?.address) return;
-    
-    try {
-      await navigator.clipboard.writeText(primaryWallet.address);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy address:', err);
-    }
-  };
-
   if (!primaryWallet?.address) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4" />
-          <p className="text-gray-600">Loading account...</p>
-        </div>
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-gray-600">Loading...</div>
       </div>
     );
   }
 
-  const isEmbeddedWallet = primaryWallet.connector?.name.toLowerCase() !== 'phantom';
+  // Get social credentials
+  const socialCreds = user?.verifiedCredentials?.filter(
+    (cred: any): cred is SocialCredential => cred.format === 'oauth'
+  ) || [];
   
-  // Find social credentials
-  const farcasterCred = user?.verifiedCredentials?.find(
-    (cred: any): cred is SocialCredential => 
-      cred?.oauthProvider?.toLowerCase() === 'farcaster'
-  );
+  // Find specific social providers
+  const twitterCred = socialCreds.find(cred => cred.oauthProvider === 'twitter');
+  const farcasterCred = socialCreds.find(cred => cred.oauthProvider === 'farcaster');
   
-  const twitterCred = user?.verifiedCredentials?.find(
-    (cred: any): cred is SocialCredential => 
-      cred?.oauthProvider?.toLowerCase() === 'twitter'
-  );
-  
-  // Prioritize Farcaster over Twitter
+  // Prioritize credentials (Farcaster > Twitter > none)
   const primarySocialCred = farcasterCred || twitterCred;
   const primarySocialProvider = farcasterCred ? 'Farcaster' : twitterCred ? 'X / Twitter' : null;
+  
+  // Prepare the profile image and display name
+  const profileImageUrl = primarySocialCred?.oauthAccountPhotos?.[0];
+  const displayName = primarySocialCred?.oauthDisplayName || primaryWallet.address.slice(0, 6) + '...' + primaryWallet.address.slice(-4);
+  
+  // Check if the wallet is an embedded wallet (not Phantom)
+  const isEmbeddedWallet = primaryWallet.connector?.name.toLowerCase() !== 'phantom';
+
+  // Define identity items for the branching display
+  const identities = [
+    {
+      id: 'twitter',
+      label: 'X / Twitter',
+      value: twitterCred?.oauthUsername,
+      connected: !!twitterCred,
+      isPublic: true,
+      icon: <Globe className="w-3 h-3 mr-1" />
+    },
+    {
+      id: 'farcaster',
+      label: 'Farcaster',
+      value: farcasterCred?.oauthUsername,
+      connected: !!farcasterCred,
+      isPublic: true,
+      icon: <Globe className="w-3 h-3 mr-1" />
+    },
+    {
+      id: 'email',
+      label: 'Email',
+      value: user?.email,
+      connected: !!user?.email,
+      isPublic: false,
+      icon: <Lock className="w-3 h-3 mr-1" />
+    },
+    {
+      id: 'wallet',
+      label: 'Solana Wallet',
+      value: primaryWallet.address,
+      shortValue: `${primaryWallet.address.slice(0, 6)}...${primaryWallet.address.slice(-4)}`,
+      connected: true,
+      isPublic: true,
+      isWallet: true,
+      icon: <Globe className="w-3 h-3 mr-1" />
+    }
+  ].filter(item => item.connected || ['farcaster', 'email', 'twitter'].includes(item.id));
 
   return (
     <div className="min-h-screen bg-white">
-      <div className="max-w-3xl mx-auto pt-8 px-4">
-        <div className="bg-white rounded-lg mb-6">
+      <div className="max-w-2xl mx-auto pt-8 px-4">
+        <div className="bg-white mb-6">
           <h1 className="text-xl font-semibold">Account</h1>
         </div>
 
@@ -108,170 +157,146 @@ export function AccountPage() {
           </div>
         )}
 
-        {/* Account Details */}
-        <div className="space-y-3">
-          {/* Core Identity Section */}
-          <div className="bg-gray-50 rounded-xl px-4 py-4">
-            <div className="text-sm">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="font-medium mb-1">Primary Identity</div>
-                  <div className="text-gray-500 text-xs mb-3">
-                    {primarySocialProvider ? `pulled from ${primarySocialProvider}` : 'pulled from Wallet (default)'}
-                  </div>
-                </div>
-                {primarySocialCred?.oauthAccountPhotos?.[0] ? (
-                  <img
-                    src={primarySocialCred.oauthAccountPhotos[0]}
-                    alt="Profile"
-                    className="w-12 h-12 rounded-full"
+        {/* Digital Identity Section */}
+        <div className="bg-gray-50 rounded-xl p-4 sm:p-6 mb-6">
+          <h2 className="text-lg font-medium mb-6 sm:mb-8">Digital Identity</h2>
+          
+          {/* Profile Picture & Identity Tree - RIGHT ALIGNED, mobile responsive */}
+          <div className="relative mb-10">
+            {/* Profile Container - right-aligned on ALL screen sizes */}
+            <div className="flex justify-end mb-8">
+              <div className="relative">
+                {/* Profile Avatar */}
+                {profileImageUrl ? (
+                  <img 
+                    src={profileImageUrl} 
+                    alt={displayName} 
+                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-gray-200"
                   />
                 ) : (
-                  <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
-                    <User className="w-6 h-6 text-gray-400" />
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gray-200 flex items-center justify-center">
+                    <User className="w-8 h-8 sm:w-10 sm:h-10 text-gray-400" />
                   </div>
                 )}
+                
+                {/* Vertical line coming down from profile - centered and extended */}
+                <div className="absolute left-1/2 top-full w-0.5 h-[350px] bg-gray-300 transform -translate-x-1/2"></div>
               </div>
-              <div className="mt-3">
-                <div className="font-medium">Display Name</div>
-                <div className="text-gray-500">
-                  {primarySocialCred?.oauthDisplayName || `${primaryWallet.address.slice(0, 6)}...${primaryWallet.address.slice(-4)}`}
-                </div>
+            </div>
+            
+            {/* Profile name - now left-aligned like other identity items */}
+            <div className="mb-6 mr-[100px] sm:mr-[135px]">
+              <div className="font-medium text-gray-800">{displayName}</div>
+              <div className="text-sm text-gray-600">
+                {primarySocialProvider || 'Wallet Address'}
+              </div>
+            </div>
+            
+            {/* Identity Tree Structure - styled to match the profile popup */}
+            <div className="flex flex-col relative">
+              {/* Identity Items - adjusted for mobile while maintaining alignment */}
+              <div className="space-y-6 sm:space-y-7">
+                {identities.map((identity, idx) => (
+                  <div key={idx} className="relative mr-[100px] sm:mr-[135px]">
+                    {/* Horizontal connector to main stem */}
+                    <div className="absolute right-[-40px] sm:right-[-68px] top-[12px] w-[40px] sm:w-[68px] h-0.5 bg-gray-300"></div>
+                    
+                    {/* Identity Content - matching popup style */}
+                    <div className="flex justify-between items-start pr-3 sm:pr-8">
+                      {/* Identity Info - LEFT ALIGNED - matching popup style */}
+                      <div className="pl-0">
+                        <div className="font-medium text-gray-800">{identity.label}</div>
+                        {identity.connected ? (
+                          identity.isWallet ? (
+                            <div className="text-sm text-gray-600 font-mono">{identity.shortValue}</div>
+                          ) : (
+                            <>
+                              <div className="text-sm text-gray-600">
+                                {identity.id === 'twitter' && '@'}{identity.value}
+                              </div>
+                              <div className="text-xs text-gray-400 mt-1">
+                                {identity.isPublic ? 'Public' : 'Private'}
+                              </div>
+                            </>
+                          )
+                        ) : (
+                          <div className="text-sm text-gray-500">Not connected</div>
+                        )}
+                      </div>
+                      
+                      {/* Action Button - RIGHT ALIGNED - Removed Connect buttons, kept only Copy for wallet */}
+                      <div className="ml-auto">
+                        {identity.connected && identity.isWallet && (
+                          <button
+                            onClick={handleCopyAddress}
+                            className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+                            title="Copy address"
+                          >
+                            {copied ? 
+                              <Check className="w-4 h-4 sm:w-5 sm:h-5 text-green-500" /> : 
+                              <Copy className="w-4 h-4 sm:w-5 sm:h-5" />
+                            }
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Linked Identities Section */}
-          <div className="bg-gray-50 rounded-xl px-4 py-4">
+        {/* Wallet Backup Section - responsive padding */}
+        {isEmbeddedWallet && (
+          <div className="bg-gray-50 rounded-xl px-4 py-4 mb-4">
             <div className="text-sm">
-              <div className="font-medium mb-3">Linked Identities</div>
-              
-              {/* Farcaster Identity */}
-              <div className="flex items-center justify-between py-2">
-                <div>
-                  <div className="font-medium text-gray-700">Farcaster</div>
-                  <div className="text-gray-500">
-                    {farcasterCred?.oauthUsername ? farcasterCred.oauthUsername : 'Not connected'}
-                  </div>
-                </div>
-                {!farcasterCred && (
-                  <button className="text-blue-600 text-sm hover:text-blue-700 transition-colors">
-                    Connect
-                  </button>
-                )}
-              </div>
-              
-              {/* Twitter Identity */}
-              <div className="flex items-center justify-between py-2 border-t border-gray-100">
-                <div>
-                  <div className="font-medium text-gray-700">X / Twitter</div>
-                  <div className="text-gray-500">
-                    {twitterCred?.oauthUsername ? twitterCred.oauthUsername : 'Not connected'}
-                  </div>
-                </div>
-                {!twitterCred && (
-                  <button className="text-blue-600 text-sm hover:text-blue-700 transition-colors">
-                    Connect
-                  </button>
-                )}
-              </div>
-
-              {/* Email Identity */}
-              <div className="flex items-center justify-between py-2 border-t border-gray-100">
-                <div>
-                  <div className="font-medium text-gray-700">Email</div>
-                  <div className="text-gray-500">
-                    {user?.email || 'Not connected'}
-                  </div>
-                </div>
-                {!user?.email && (
-                  <button className="text-blue-600 text-sm hover:text-blue-700 transition-colors">
-                    Connect
-                  </button>
-                )}
-              </div>
-
-              {/* Wallet Identity */}
-              <div className="flex items-center justify-between py-2 border-t border-gray-100">
-                <div className="w-full">
-                  <div className="flex items-center justify-between mb-0.5">
-                    <div className="font-medium text-gray-700">Solana Wallet</div>
-                    <button
-                      onClick={handleCopyAddress}
-                      className="p-1 hover:bg-gray-200 rounded-md transition-colors"
-                      title="Copy address"
-                    >
-                      {copied ? (
-                        <Check className="w-3 h-3 text-green-600" />
-                      ) : (
-                        <Copy className="w-3 h-3 text-gray-400" />
-                      )}
-                    </button>
-                  </div>
-                  <div className="text-gray-500 font-mono text-xs">
-                    {primaryWallet.address}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Wallet Backup Section */}
-          {isEmbeddedWallet && (
-            <div className="bg-gray-50 rounded-xl px-4 py-4">
-              <div className="text-sm">
-                <div className="font-medium mb-2">Wallet Backup</div>
-                {!showBackupOptions ? (
+              <div className="font-medium mb-3">Wallet Backup</div>
+              <button
+                onClick={() => setShowBackupOptions(!showBackupOptions)}
+                className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+              >
+                <KeyRound className="w-4 h-4" />
+                Back up Wallet
+              </button>
+              {showBackupOptions && (
+                <div className="mt-4 space-y-2">
                   <button
-                    onClick={() => setShowBackupOptions(true)}
-                    className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                    onClick={() => handleExportWallet('recoveryPhrase')}
+                    disabled={isExporting}
+                    className="w-full px-3 sm:px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
                   >
-                    Back up Wallet
+                    Show Recovery Phrase
                   </button>
-                ) : (
-                  <div className="space-y-2">
-                    <button
-                      onClick={() => handleExportWallet('privateKey')}
-                      disabled={isExporting}
-                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isExporting ? 'Exporting...' : 'Export Private Key'}
-                    </button>
-                    <button
-                      onClick={() => handleExportWallet('recoveryPhrase')}
-                      disabled={isExporting}
-                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isExporting ? 'Exporting...' : 'Export Recovery Phrase'}
-                    </button>
-                    <button
-                      onClick={() => setShowBackupOptions(false)}
-                      className="w-full px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                )}
-                {exportError && (
-                  <p className="text-sm text-red-600 mt-2">{exportError}</p>
-                )}
-                <div 
-                  id="wallet-export-container" 
-                  className="mt-2 p-4 bg-gray-100 rounded-lg font-mono text-xs break-all"
-                />
-              </div>
+                  <button
+                    onClick={() => handleExportWallet('privateKey')}
+                    disabled={isExporting}
+                    className="w-full px-3 sm:px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  >
+                    Show Private Key
+                  </button>
+                </div>
+              )}
+              {exportError && (
+                <p className="text-sm text-red-600 mt-2">{exportError}</p>
+              )}
+              <div 
+                id="wallet-export-container" 
+                className="mt-2 p-3 sm:p-4 bg-gray-100 rounded-lg font-mono text-xs break-all"
+              />
             </div>
-          )}
-
-          {/* Sign Out Button */}
-          <div className="bg-gray-50 rounded-xl px-4 py-4">
-            <button
-              onClick={handleSignOut}
-              className="w-full px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
-            >
-              Sign Out
-            </button>
           </div>
+        )}
+
+        {/* Sign Out Button - responsive padding */}
+        <div className="bg-gray-50 rounded-xl px-4 py-4 mb-8">
+          <button
+            onClick={handleSignOut}
+            className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+            Sign Out
+          </button>
         </div>
       </div>
     </div>

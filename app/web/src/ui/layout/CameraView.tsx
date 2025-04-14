@@ -8,16 +8,17 @@ import { ToastMessage } from '../../core/types/toast';
 import { ToastContainer } from '../feedback/ToastContainer';
 import { StreamPlayer } from '../../media/StreamPlayer';
 import { useCamera, CameraData, fetchCameraByPublicKey } from '../../camera/CameraProvider';
-import { PublicKey, SystemProgram } from '@solana/web3.js';
+import { PublicKey, SystemProgram, Connection } from '@solana/web3.js';
 import { useProgram } from '../../anchor/setup';
 import { cameraActionService } from '../../camera/camera-service';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { Transaction } from '@solana/web3.js';
 import { TransactionModal } from '../../auth/components/TransactionModal';
-import { StopCircle, Play, Camera, Video, Loader } from 'lucide-react';
+import { StopCircle, Play, Camera, Video, Loader, Link2 } from 'lucide-react';
 import { useCameraStatus } from '../../camera/useCameraStatus';
 import { CameraModal } from '../../camera/CameraModal';
 import { cameraStatus } from '../../camera/camera-status';
+import { CONFIG } from '../../core/config';
 
 type TimelineEventType =
   | 'photo_captured'
@@ -86,9 +87,10 @@ const CameraIdDisplay = ({ cameraId, selectedCamera, cameraAccount }: {
       ) : (
         <div 
           onClick={() => setIsModalOpen(true)}
-          className="text-sm text-gray-600 hover:text-blue-600 transition-colors cursor-pointer"
+          className="text-sm text-gray-600 hover:text-blue-600 transition-colors cursor-pointer flex items-center"
         >
-          id: {formatId(displayId)}
+          <span>id: {formatId(displayId)}</span>
+          <Link2 className="w-3.5 h-3.5 ml-1.5 text-green-500" />
         </div>
       )}
       
@@ -385,7 +387,7 @@ export function CameraView() {
           if (camera) {
             console.log(`[CameraView] Successfully loaded camera data directly:`, camera);
             setSelectedCamera(camera);
-            updateToast('success', `Connected to camera: ${camera.metadata.name || 'Unnamed'}`);
+            // No need for connection notification - the UI already shows connection status via the ID and link icon
             return;
           } else {
             console.log(`[CameraView] Failed to load camera data directly`);
@@ -398,7 +400,7 @@ export function CameraView() {
           if (camera) {
             console.log(`[CameraView] Successfully loaded camera with provider:`, camera);
             setSelectedCamera(camera);
-            updateToast('success', `Connected to camera: ${camera.metadata.name || 'Unnamed'}`);
+            // Don't show a second success notification to avoid duplicates
           } else {
             console.log(`[CameraView] Camera could not be loaded with provider, showing ID only`);
           }
@@ -441,104 +443,161 @@ export function CameraView() {
   // Update the Simple direct transaction function to return the signature
   const sendSimpleTransaction = async (actionType: string): Promise<string | undefined> => {
     console.log("DIRECT TRANSACTION FUNCTION - Type:", actionType);
-    try {
-      // Check for wallet, program, and connection
-      if (!primaryWallet || !program || !connection) {
-        console.error("Missing required components for transaction");
-        const missing = [];
-        if (!primaryWallet) missing.push("wallet");
-        if (!program) missing.push("program");
-        if (!connection) missing.push("connection");
-        updateToast('error', `Cannot send transaction: missing ${missing.join(", ")}`);
-        return undefined;
-      }
-      
-      // Get camera ID
-      const cameraId = cameraAccount || localStorage.getItem('directCameraId');
-      if (!cameraId) {
-        console.error("No camera ID found");
-        updateToast('error', 'No camera ID found');
-        return undefined;
-      }
-      
-      // Create transaction
-      const tx = new Transaction();
-      
-      // Get activity type based on action
-      let activityTypeObj;
-      switch(actionType) {
-        case 'photo': 
-          activityTypeObj = { photoCapture: {} };
-          break;
-        case 'video':
-          activityTypeObj = { videoRecord: {} };
-          break;
-        case 'stream':
-          activityTypeObj = { liveStream: {} };
-          break;
-        default:
-          activityTypeObj = { photoCapture: {} };
-      }
-      
-      // Create metadata
-      const metadata = JSON.stringify({
-        timestamp: new Date().toISOString(),
-        action: actionType,
-        cameraId
-      });
-      
-      // Log program and methods
-      console.log("Program exists:", !!program);
-      console.log("Program methods:", Object.keys(program.methods));
-      
+    let retryCount = 0;
+    const MAX_RETRIES = 3;
+    let currentConnection = connection;
+
+    while (retryCount < MAX_RETRIES) {
       try {
-        // Create transaction instruction
-        console.log("Creating instruction with activityType:", activityTypeObj);
-        const ix = await program.methods
-          .recordActivity({
-            activityType: activityTypeObj,
-            metadata
-          })
-          .accounts({
-            camera: new PublicKey(cameraId),
-            owner: new PublicKey(primaryWallet.address),
-            systemProgram: SystemProgram.programId,
-          })
-          .instruction();
+        // Check for wallet, program, and connection
+        if (!primaryWallet || !program || !currentConnection) {
+          console.error("Missing required components for transaction");
+          const missing = [];
+          if (!primaryWallet) missing.push("wallet");
+          if (!program) missing.push("program");
+          if (!currentConnection) missing.push("connection");
+          updateToast('error', `Cannot send transaction: missing ${missing.join(", ")}`);
+          return undefined;
+        }
         
-        // Add instruction to transaction
-        tx.add(ix);
+        // Get camera ID
+        const cameraId = cameraAccount || localStorage.getItem('directCameraId');
+        if (!cameraId) {
+          console.error("No camera ID found");
+          updateToast('error', 'No camera ID found');
+          return undefined;
+        }
         
-        // Set recent blockhash and fee payer
-        const { blockhash } = await connection.getLatestBlockhash();
-        tx.recentBlockhash = blockhash;
-        tx.feePayer = new PublicKey(primaryWallet.address);
+        // Create transaction
+        const tx = new Transaction();
         
-        // Sign and send transaction
-        const signer = await (primaryWallet as any).getSigner();
-        const result = await signer.signAndSendTransaction(tx) as TransactionResult;
-        console.log("Transaction sent:", result.signature);
+        // Get activity type based on action
+        let activityTypeObj;
+        switch(actionType) {
+          case 'photo': 
+            activityTypeObj = { photoCapture: {} };
+            break;
+          case 'video':
+            activityTypeObj = { videoRecord: {} };
+            break;
+          case 'stream':
+            activityTypeObj = { liveStream: {} };
+            break;
+          default:
+            activityTypeObj = { photoCapture: {} };
+        }
         
-        // Show success toast
-        updateToast('success', `${actionType} transaction sent: ${result.signature.slice(0, 8)}...`);
+        // Create metadata
+        const metadata = JSON.stringify({
+          timestamp: new Date().toISOString(),
+          action: actionType,
+          cameraId
+        });
         
-        // Add event to timeline
-        addTimelineEvent(getEventType(actionType), result.signature);
-        
-        return result.signature;
-        
+        try {
+          // Create transaction instruction
+          console.log("Creating instruction with activityType:", activityTypeObj);
+          const ix = await program.methods
+            .recordActivity({
+              activityType: activityTypeObj,
+              metadata
+            })
+            .accounts({
+              camera: new PublicKey(cameraId),
+              owner: new PublicKey(primaryWallet.address),
+              systemProgram: SystemProgram.programId,
+            })
+            .instruction();
+          
+          // Add instruction to transaction
+          tx.add(ix);
+          
+          // Get recent blockhash with retry logic
+          let blockhash;
+          try {
+            const { blockhash: newBlockhash } = await currentConnection.getLatestBlockhash('finalized');
+            blockhash = newBlockhash;
+          } catch (bhError) {
+            console.error("Error getting blockhash:", bhError);
+            // Try the next RPC endpoint
+            const nextEndpoint = CONFIG.getNextEndpoint();
+            console.log(`Switching to RPC endpoint: ${nextEndpoint}`);
+            currentConnection = new Connection(nextEndpoint, 'confirmed');
+            throw new Error('Failed to get blockhash, retrying with new endpoint');
+          }
+          
+          tx.recentBlockhash = blockhash;
+          tx.feePayer = new PublicKey(primaryWallet.address);
+          
+          // Sign and send transaction with timeout
+          const signer = await (primaryWallet as any).getSigner();
+          const signPromise = signer.signAndSendTransaction(tx);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Transaction timeout')), 30000)
+          );
+          
+          const result = await Promise.race([signPromise, timeoutPromise]) as TransactionResult;
+          console.log("Transaction sent:", result.signature);
+          
+          // Confirm transaction
+          const confirmation = await currentConnection.confirmTransaction({
+            signature: result.signature,
+            blockhash,
+            lastValidBlockHeight: await currentConnection.getBlockHeight()
+          });
+          
+          if (confirmation.value.err) {
+            throw new Error(`Transaction failed: ${confirmation.value.err}`);
+          }
+          
+          // Show success toast
+          updateToast('success', `${actionType} transaction sent: ${result.signature.slice(0, 8)}...`);
+          
+          // Add event to timeline
+          addTimelineEvent(getEventType(actionType), result.signature);
+          
+          return result.signature;
+          
+        } catch (error) {
+          console.error("Error in transaction:", error);
+          logDetailedError(error, "Transaction error");
+          
+          // Check if it's a blockhash error
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          if (errorMessage.includes('Blockhash not found') || 
+              errorMessage.includes('block height exceeded') ||
+              errorMessage.includes('timeout')) {
+            retryCount++;
+            if (retryCount < MAX_RETRIES) {
+              console.log(`Retrying transaction (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+              // Switch to next RPC endpoint
+              const nextEndpoint = CONFIG.getNextEndpoint();
+              console.log(`Switching to RPC endpoint: ${nextEndpoint}`);
+              currentConnection = new Connection(nextEndpoint, 'confirmed');
+              continue;
+            }
+          }
+          
+          updateToast('error', `Transaction failed: ${errorMessage}`);
+          return undefined;
+        }
       } catch (error) {
-        console.error("Error creating or sending transaction:", error);
-        logDetailedError(error, "Simple transaction");
-        updateToast('error', `Transaction failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        console.error("Outer error in transaction:", error);
+        logDetailedError(error, "Outer transaction error");
+        
+        retryCount++;
+        if (retryCount < MAX_RETRIES) {
+          console.log(`Retrying entire transaction process (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+          continue;
+        }
+        
+        updateToast('error', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
         return undefined;
       }
-    } catch (error) {
-      console.error("Outer error in simple transaction:", error);
-      logDetailedError(error, "Simple transaction outer");
-      updateToast('error', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      return undefined;
     }
+    
+    updateToast('error', 'Transaction failed after maximum retries');
+    return undefined;
   };
 
   // Direct button handlers for testing

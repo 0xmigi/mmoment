@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useCallback } from 'react';
 import { unifiedIpfsService } from './ipfs/unified-ipfs-service';
 import { pinataService } from './ipfs/pinata-service';
 import { filebaseService } from './ipfs/filebase-service';
+import { walrusService } from './walrus';
+import { walrusSdkService } from './walrus/walrus-sdk-service';
 
 console.log('Storage provider initializing with IPFS services');
 
@@ -30,7 +32,10 @@ export interface StorageService {
 }
 
 // All available storage providers
-export type StorageProvider = 'ipfs' | 'pinata' | 'filebase' | 'walrus';
+export type StorageProvider = 'ipfs' | 'pinata' | 'filebase' | 'walrus' | 'walrus-sdk';
+
+// The types of storage providers we can use
+export type StorageProviderType = 'pinata' | 'filebase' | 'walrus' | 'walrus-sdk';
 
 // Storage context type
 interface StorageContextType {
@@ -180,39 +185,14 @@ function getStorageService(provider: StorageProvider): StorageService {
       } as StorageService;
     
     case 'walrus':
-      // This will be implemented in the future
-      return {
-        name: 'Walrus',
-        upload: async () => ({ id: 'not-implemented', url: '' }),
-        uploadBlob: async () => ({ id: 'not-implemented', url: '' }),
-        getUrl: () => '',
-        isAvailable: async () => false
-      } as StorageService;
+      return walrusService as StorageService;
+      
+    case 'walrus-sdk':
+      return walrusSdkService as StorageService;
     
     default:
-      // Default to IPFS
-      return {
-        name: 'IPFS',
-        upload: async (file, options) => {
-          const results = await unifiedIpfsService.uploadFile(
-            file, 
-            options?.metadata?.walletAddress || 'anonymous', 
-            'image'
-          );
-          return results[0] || { id: 'error', url: '' };
-        },
-        uploadBlob: async (blob, filename, options) => {
-          const results = await unifiedIpfsService.uploadFile(
-            blob, 
-            options?.metadata?.walletAddress || 'anonymous', 
-            filename.endsWith('.mp4') || filename.endsWith('.mov') ? 'video' : 'image',
-            options
-          );
-          return results[0] || { id: 'error', url: '' };
-        },
-        getUrl: (fileId) => `https://ipfs.io/ipfs/${fileId}`,
-        isAvailable: async () => true
-      } as StorageService;
+      // Default to Walrus SDK if available, otherwise Walrus
+      return (walrusSdkService || walrusService) as StorageService;
   }
 }
 

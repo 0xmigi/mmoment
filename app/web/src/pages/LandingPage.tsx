@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import Logo from '../ui/common/Logo';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AuthModal } from '../auth';
 
 function GetStartedButton() {
@@ -29,7 +29,9 @@ function GetStartedButton() {
                 isOpen={showAuthModal} 
                 onClose={() => {
                     setShowAuthModal(false);
-                    navigate('/app');
+                    if (primaryWallet?.address) {
+                        navigate('/app');
+                    }
                 }} 
             />
         </>
@@ -37,6 +39,14 @@ function GetStartedButton() {
 }
 
 export default function LandingPage() {
+    const { primaryWallet } = useDynamicContext();
+    const navigate = useNavigate();
+
+    useEffect(() => {
+        if (primaryWallet?.address) {
+            navigate('/app');
+        }
+    }, [primaryWallet, navigate]);
 
     return (
         <div className="bg-white min-h-screen overflow-auto">

@@ -7,7 +7,8 @@ import { AccountPage } from '../ui/account/AccountPage';
 import { SolDevNetDebug } from '../ui/debug/SolDevNetDebug';
 import { DebugPage } from '../ui/debug/DebugPage';
 import { useCamera, fetchCameraByPublicKey } from '../camera/CameraProvider';
-import { useConnection } from '@solana/wallet-adapter-react';
+import { useConnection, useWallet } from '@solana/wallet-adapter-react';
+import { WalrusExample } from '../ui/debug/WalrusExample';
 
 function Router() {
   const [activeTab, setActiveTab] = useState<'camera' | 'gallery' | 'activities' | 'account'>('camera');
@@ -15,6 +16,7 @@ function Router() {
   const location = useLocation();
   const navigate = useNavigate();
   const { connection } = useConnection();
+  const { publicKey } = useWallet();
 
   // Extract camera ID from URL if present
   useEffect(() => {
@@ -98,6 +100,13 @@ function Router() {
         <Route path="/settings" element={<Settings />} />
         <Route path="/soldevnetdebug" element={<SolDevNetDebug />} />
         <Route path="/debug" element={<DebugPage />} />
+        <Route path="/debug/solana" element={<SolDevNetDebug />} />
+        <Route 
+          path="/debug/walrus" 
+          element={
+            <WalrusExample walletAddress={publicKey?.toString() || 'anonymous'} />
+          } 
+        />
         <Route
           path="/account"
           element={

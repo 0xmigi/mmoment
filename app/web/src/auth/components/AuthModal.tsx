@@ -4,6 +4,7 @@ import { WalletIcon } from '@dynamic-labs/wallet-book';
 import { Dialog } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { HeadlessSocialLogin } from './HeadlessSocialLogin';
+import { useNavigate } from 'react-router-dom';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -14,6 +15,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
   const { walletOptions, selectWalletOption } = useWalletOptions();
   const { connectWithEmail, verifyOneTimePassword } = useConnectWithOtp();
   const { createEmbeddedWallet, userHasEmbeddedWallet } = useEmbeddedWallet();
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -22,12 +24,17 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
   if (!isOpen) return null;
 
+  const handleSuccessfulAuth = () => {
+    onClose();
+    navigate('/app');
+  };
+
   const handleWalletSelect = async (wallet: WalletOption) => {
     try {
       setIsLoading(true);
       setError('');
       await selectWalletOption(wallet.key);
-      onClose();
+      handleSuccessfulAuth();
     } catch (error) {
       console.error('Failed to connect wallet:', error);
       setError('Failed to connect wallet. Please try again.');
@@ -62,7 +69,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
         await createEmbeddedWallet();
       }
 
-      onClose();
+      handleSuccessfulAuth();
     } catch (error) {
       console.error('Failed to verify code:', error);
       setError('Invalid verification code. Please try again.');

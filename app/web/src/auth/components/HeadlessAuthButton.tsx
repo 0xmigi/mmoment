@@ -16,6 +16,15 @@ export function HeadlessAuthButton() {
   const navigate = useNavigate();
   const [showAuthModal, setShowAuthModal] = useState(false);
 
+  const handleAuthModalClose = () => {
+    setShowAuthModal(false);
+    // Only navigate if we're not already authenticated
+    // This prevents unnecessary navigation when canceling the modal
+    if (primaryWallet?.address) {
+      navigate('/app');
+    }
+  };
+
   if (!primaryWallet?.address) {
     return (
       <>
@@ -27,7 +36,7 @@ export function HeadlessAuthButton() {
         </button>
         <AuthModal 
           isOpen={showAuthModal} 
-          onClose={() => setShowAuthModal(false)} 
+          onClose={handleAuthModalClose} 
         />
       </>
     );
@@ -67,16 +76,14 @@ export function HeadlessAuthButton() {
     );
   }
 
-  // Fallback to showing wallet address
+  // Fallback for wallet-only users without social profiles
   return (
     <button
       onClick={() => navigate('/account')}
       className="px-4 py-2 bg-gray-100 text-black rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
     >
-      <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center">
-        <User className="w-4 h-4 text-gray-500" />
-      </div>
-      <span className="font-mono text-sm">{primaryWallet.address.slice(0, 3)}..{primaryWallet.address.slice(-3)}</span>
+      <User className="w-5 h-5" />
+      <span className="font-medium">Account</span>
     </button>
   );
 } 
