@@ -12,7 +12,9 @@ type TimelineEventType =
   | 'photo_captured'
   | 'video_recorded'
   | 'stream_started'
-  | 'stream_ended';
+  | 'stream_ended'
+  | 'check_in'
+  | 'check_out';
 
 interface TimelineUser {
   address: string;

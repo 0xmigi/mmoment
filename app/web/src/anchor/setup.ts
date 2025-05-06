@@ -1,13 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
-import { AnchorProvider, Program } from '@coral-xyz/anchor';
-import { PublicKey, Transaction } from '@solana/web3.js';
-import { useConnection } from '@solana/wallet-adapter-react';
+import { AnchorProvider, Program, Idl, setProvider } from '@coral-xyz/anchor';
+import { PublicKey, Transaction, Keypair } from '@solana/web3.js';
+import { useConnection, useAnchorWallet } from '@solana/wallet-adapter-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { isSolanaWallet } from '@dynamic-labs/solana';
 import { IDL, MySolanaProject } from './idl';
 
-// Program ID on devnet
-export const CAMERA_ACTIVATION_PROGRAM_ID = new PublicKey('7BYuxsNyaxxsxwzcRzFd6UJGnUctN6V1vDQxjGPaK2L4');
+// Updated program ID to match the one in lib.rs
+export const CAMERA_ACTIVATION_PROGRAM_ID = new PublicKey("Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S");
+
+// Camera Network Program ID (same as the activation program ID)
+export const CAMERA_NETWORK_PROGRAM_ID = new PublicKey("Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S");
 
 // Global cache to prevent multiple initializations
 let globalProgramInstance: Program<MySolanaProject> | null = null;
@@ -38,13 +41,6 @@ export function useCameraActivationProgram() {
 
   useEffect(() => {
     let mounted = true;
-    
-    // Log wallet connection status for debugging
-    // console.log('Wallet connection status:', {
-    //   dynamicWallet: !!primaryWallet?.address,
-    //   walletAddress,
-    //   isWalletConnected
-    // });
     
     const setupProgram = async () => {
       // Don't setup if already in progress or if we've recently attempted
@@ -83,47 +79,29 @@ export function useCameraActivationProgram() {
           throw new Error('This is not a Solana wallet');
         }
 
+        if (!connection) {
+          throw new Error('No connection available');
+        }
+
         console.log('Setting up program with wallet address:', walletAddress);
         console.log('Using program ID:', CAMERA_ACTIVATION_PROGRAM_ID.toString());
 
-        // Get the connection from the wallet
-        const walletConnection = await primaryWallet.getConnection();
-        console.log('Connection established to:', walletConnection.rpcEndpoint);
+        // Use a dummy wallet for Anchor that won't actually sign
+        // We'll handle signing separately in the application
+        const dummyWallet = {
+          publicKey: new PublicKey(primaryWallet.address),
+          signTransaction: async (tx: any) => tx,
+          signAllTransactions: async (txs: any) => txs,
+        } as any; // Type assertion to avoid TypeScript errors
 
-        // Get the signer
-        const signer = await primaryWallet.getSigner();
-        console.log('Signer obtained');
-
-        // Create provider with the wallet's connection and signer
+        // Create provider with the connection and wallet adapter
         const provider = new AnchorProvider(
-          walletConnection,
-          {
-            publicKey: new PublicKey(primaryWallet.address),
-            signTransaction: async (tx: Transaction) => {
-              try {
-                // Use the signer to sign the transaction
-                const signedTx = await signer.signTransaction(tx);
-                return signedTx;
-              } catch (err) {
-                console.error('Error signing transaction:', err);
-                throw err;
-              }
-            },
-            signAllTransactions: async (txs: Transaction[]) => {
-              try {
-                // Use the signer to sign all transactions
-                const signedTxs = await Promise.all(txs.map(tx => signer.signTransaction(tx)));
-                return signedTxs;
-              } catch (err) {
-                console.error('Error signing multiple transactions:', err);
-                throw err;
-              }
-            },
-          } as any,
+          connection, 
+          dummyWallet,
           { commitment: "confirmed" }
         );
 
-        console.log('Created AnchorProvider with connection:', walletConnection.rpcEndpoint);
+        console.log('Created AnchorProvider with connection:', connection.rpcEndpoint);
         
         // Create program instance
         const prog = new Program(
@@ -163,6 +141,183 @@ export function useCameraActivationProgram() {
 
   return { program, loading, error, isWalletConnected };
 }
+
+/**
+ * Custom hook for setting up the Camera Network Program with a connected wallet
+ */
+export const useCameraNetworkProgram = () => {
+  const { connection } = useConnection();
+  const wallet = useAnchorWallet();
+  
+  const [programId] = useState(CAMERA_NETWORK_PROGRAM_ID);
+  const [program, setProgram] = useState<Program<MySolanaProject> | null>(null);
+  const [registryAddress, setRegistryAddress] = useState<PublicKey | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    const setupProgram = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        if (!wallet) {
+          console.log("[useCameraNetworkProgram] No wallet connected");
+          setLoading(false);
+          return;
+        }
+
+        console.log("[useCameraNetworkProgram] Wallet connected:", wallet.publicKey.toString());
+
+        // Create provider
+        const provider = new AnchorProvider(
+          connection,
+          wallet,
+          AnchorProvider.defaultOptions()
+        );
+        setProvider(provider);
+
+        // Initialize program
+        const program = new Program(IDL as Idl, programId, provider) as unknown as Program<MySolanaProject>;
+        setProgram(program);
+        console.log("[useCameraNetworkProgram] Program initialized");
+
+        // Find PDA for the registry
+        const [registryPDA] = PublicKey.findProgramAddressSync(
+          [Buffer.from("camera-registry")],
+          programId
+        );
+        setRegistryAddress(registryPDA);
+        console.log("[useCameraNetworkProgram] Registry PDA:", registryPDA.toString());
+
+        setLoading(false);
+      } catch (error) {
+        console.error("[useCameraNetworkProgram] Error setting up program:", error);
+        setError(error as Error);
+        setLoading(false);
+      }
+    };
+
+    setupProgram();
+  }, [connection, wallet, programId]);
+
+  return {
+    program,
+    programId,
+    registryAddress,
+    loading,
+    error,
+    connected: !!wallet,
+    walletAddress: wallet?.publicKey || null,
+  };
+};
+
+/**
+ * Initializes a program without requiring a connected wallet adapter
+ * Use for read-only interactions or when manually signing transactions
+ */
+export const useCameraNetworkProgramWithoutWallet = (walletKeyPair?: Keypair) => {
+  const { connection } = useConnection();
+  const [program, setProgram] = useState<Program<MySolanaProject> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    const setupProgram = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Create an "empty" wallet adapter - will need manual transaction signing
+        const wallet = walletKeyPair
+          ? {
+              publicKey: walletKeyPair.publicKey,
+              signTransaction: async (tx: any) => {
+                tx.partialSign(walletKeyPair);
+                return tx;
+              },
+              signAllTransactions: async (txs: any[]) => {
+                return txs.map((tx) => {
+                  tx.partialSign(walletKeyPair);
+                  return tx;
+                });
+              },
+            }
+          : {
+              publicKey: PublicKey.default,
+              signTransaction: async () => {
+                throw new Error("Wallet not initialized");
+              },
+              signAllTransactions: async () => {
+                throw new Error("Wallet not initialized");
+              },
+            };
+
+        // Create provider
+        const provider = new AnchorProvider(
+          connection,
+          wallet as any,
+          AnchorProvider.defaultOptions()
+        );
+        setProvider(provider);
+
+        // Initialize program
+        const program = new Program(
+          IDL as Idl,
+          CAMERA_NETWORK_PROGRAM_ID,
+          provider
+        ) as unknown as Program<MySolanaProject>;
+        setProgram(program);
+
+        setLoading(false);
+      } catch (error) {
+        console.error("[useProgram] Setup error:", error);
+        setError(error as Error);
+        setLoading(false);
+      }
+    };
+
+    setupProgram();
+  }, [connection, walletKeyPair]);
+
+  return {
+    program,
+    loading,
+    error,
+    connected: !!walletKeyPair,
+    walletAddress: walletKeyPair?.publicKey || null,
+  };
+};
+
+/**
+ * Helper to find a camera account PDA
+ */
+export const findCameraPDA = (cameraName: string, owner: PublicKey) => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("camera"), owner.toBuffer(), Buffer.from(cameraName)],
+    CAMERA_NETWORK_PROGRAM_ID
+  );
+};
+
+/**
+ * Helper to find a user session PDA
+ */
+export const findSessionPDA = (user: PublicKey, camera: PublicKey) => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("session"), user.toBuffer(), camera.toBuffer()],
+    CAMERA_NETWORK_PROGRAM_ID
+  );
+};
+
+/**
+ * Helper to find a face data PDA
+ */
+export const findFaceDataPDA = (user: PublicKey) => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("face"), user.toBuffer()],
+    CAMERA_NETWORK_PROGRAM_ID
+  );
+};
 
 /**
  * Alias for useCameraActivationProgram for backward compatibility

@@ -25,3 +25,22 @@ yarn-error.log*
 .env
 .env.local
 app/web/src/assets/cyberchunk.png
+# Keypair files
+*.keypair.json
+/keys/**/*.json
+new_keypair.json
+
+# Build output
+/target/
+/dist/
+/node_modules/
+
+# Environment files
+.env
+.env.local
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo

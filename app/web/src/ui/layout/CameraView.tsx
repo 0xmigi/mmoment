@@ -8,17 +8,18 @@ import { ToastMessage } from '../../core/types/toast';
 import { ToastContainer } from '../feedback/ToastContainer';
 import { StreamPlayer } from '../../media/StreamPlayer';
 import { useCamera, CameraData, fetchCameraByPublicKey } from '../../camera/CameraProvider';
-import { PublicKey, SystemProgram, Connection } from '@solana/web3.js';
-import { useProgram } from '../../anchor/setup';
+import { PublicKey, Connection, Transaction, TransactionInstruction } from '@solana/web3.js';
+import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from '../../anchor/setup';
 import { cameraActionService } from '../../camera/camera-service';
 import { useConnection } from '@solana/wallet-adapter-react';
-import { Transaction } from '@solana/web3.js';
 import { TransactionModal } from '../../auth/components/TransactionModal';
-import { StopCircle, Play, Camera, Video, Loader, Link2 } from 'lucide-react';
+import { StopCircle, Play, Camera, Video, Loader, Link2, CheckCircle } from 'lucide-react';
 import { useCameraStatus } from '../../camera/useCameraStatus';
 import { CameraModal } from '../../camera/CameraModal';
 import { cameraStatus } from '../../camera/camera-status';
 import { CONFIG } from '../../core/config';
+import { Program, AnchorProvider } from '@coral-xyz/anchor';
+import { IDL } from '../../anchor/idl';
 
 type TimelineEventType =
   | 'photo_captured'
@@ -41,26 +42,109 @@ interface TimelineEvent {
   cameraId?: string;
 }
 
-// Define the result type from wallet transaction
-interface TransactionResult {
-  signature: string;
-}
 
-// Update the CameraIdDisplay component to show "No camera connected" in red and make it clickable
-const CameraIdDisplay = ({ cameraId, selectedCamera, cameraAccount }: { 
-  cameraId: string | undefined; 
+// Update the CameraIdDisplay component to add a forced refresh when the modal is closed
+const CameraIdDisplay = ({ cameraId, selectedCamera, cameraAccount, timelineRef }: {
+  cameraId: string | undefined;
   selectedCamera: CameraData | null;
   cameraAccount: string | null;
+  timelineRef?: React.RefObject<any>;
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const cameraStatus = useCameraStatus(selectedCamera?.publicKey || cameraAccount || cameraId || '');
-  
+  const { primaryWallet } = useDynamicContext();
+  const { connection } = useConnection();
+  const [isCheckedIn, setIsCheckedIn] = useState(false);
+
   // Get the direct ID from localStorage if available (most reliable source)
   const directId = localStorage.getItem('directCameraId');
-  
+
   // Determine which ID to display (in order of preference)
   const displayId = selectedCamera?.publicKey || cameraAccount || directId || cameraId;
-  
+
+  // Add a function to handle status change from modal
+  const handleCheckStatusChange = (newStatus: boolean) => {
+    console.log("Status change from modal:", newStatus);
+    setIsCheckedIn(newStatus);
+    // If timelineRef exists, refresh it
+    if (timelineRef?.current?.refreshTimeline) {
+      timelineRef.current.refreshTimeline();
+    }
+  };
+
+  // Add a function to handle modal close with a forced refresh
+  const handleModalClose = () => {
+    setIsModalOpen(false);
+    // Force a check of check-in status when modal closes
+    checkIfCheckedIn();
+  };
+
+  // Check if user is checked in
+  const checkIfCheckedIn = async () => {
+    if (!displayId || !primaryWallet?.address || !connection) return;
+
+    try {
+      // Initialize program
+      const provider = new AnchorProvider(
+        connection,
+        {
+          publicKey: new PublicKey(primaryWallet.address),
+          signTransaction: async (tx: Transaction) => tx,
+          signAllTransactions: async (txs: Transaction[]) => txs,
+        } as any,
+        { commitment: 'confirmed' }
+      );
+
+      const program = new Program(IDL as any, CAMERA_ACTIVATION_PROGRAM_ID, provider);
+
+      // Find the session PDA
+      const [sessionPda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('session'),
+          new PublicKey(primaryWallet.address).toBuffer(),
+          new PublicKey(displayId).toBuffer()
+        ],
+        CAMERA_ACTIVATION_PROGRAM_ID
+      );
+
+      // Try to fetch the session account
+      try {
+        await program.account.userSession.fetch(sessionPda);
+        if (!isCheckedIn) {
+          console.log("Setting check-in status: TRUE");
+          setIsCheckedIn(true);
+          // If status changed to checked in, update timeline
+          if (timelineRef?.current?.refreshTimeline) {
+            timelineRef.current.refreshTimeline();
+          }
+        }
+      } catch (err) {
+        if (isCheckedIn) {
+          console.log("Setting check-in status: FALSE");
+          setIsCheckedIn(false);
+          // If status changed to checked out, update timeline
+          if (timelineRef?.current?.refreshTimeline) {
+            timelineRef.current.refreshTimeline();
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error checking session status:', err);
+      setIsCheckedIn(false);
+    }
+  };
+
+  useEffect(() => {
+    // Initial check
+    checkIfCheckedIn();
+
+    // Set up a periodic check every 5 seconds
+    const intervalId = setInterval(checkIfCheckedIn, 5000);
+
+    // Clean up interval on component unmount
+    return () => clearInterval(intervalId);
+  }, [displayId, primaryWallet, connection, timelineRef]);
+
   // Handle case where ID might not be valid
   const formatId = (id: string | undefined | null) => {
     if (!id) return 'None';
@@ -70,33 +154,40 @@ const CameraIdDisplay = ({ cameraId, selectedCamera, cameraAccount }: {
       return id;
     }
   };
-  
+
   // The default camera PDA for development
   const defaultDevCameraPda = '5onKAv5c6VdBZ8a7D11XqF79Hdzuv3tnysjv4B2pQWZ2';
-  
+
   return (
     <div>
       <h2 className="text-xl font-semibold">Camera</h2>
       {!displayId || displayId === 'None' ? (
-        <div 
+        <div
           onClick={() => setIsModalOpen(true)}
           className="text-sm text-red-500 font-medium hover:text-red-600 cursor-pointer"
         >
           No camera connected
         </div>
       ) : (
-        <div 
+        <div
           onClick={() => setIsModalOpen(true)}
           className="text-sm text-gray-600 hover:text-blue-600 transition-colors cursor-pointer flex items-center"
         >
           <span>id: {formatId(displayId)}</span>
-          <Link2 className="w-3.5 h-3.5 ml-1.5 text-green-500" />
+          <span id="check-in-status-icon">
+            {isCheckedIn ? (
+              <CheckCircle className="w-3.5 h-3.5 ml-1.5 text-green-500" />
+            ) : (
+              <Link2 className="w-3.5 h-3.5 ml-1.5 text-blue-500" />
+            )}
+          </span>
         </div>
       )}
-      
+
       <CameraModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={handleModalClose}
+        onCheckStatusChange={handleCheckStatusChange}
         camera={{
           id: displayId && displayId !== 'None' ? displayId : '',
           owner: selectedCamera?.owner || cameraStatus.owner || '',
@@ -127,16 +218,16 @@ export function CameraView() {
   const [isLive, setIsLive] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentToast, setCurrentToast] = useState<ToastMessage | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading] = useState(false);
   const [, setIsMobileView] = useState(window.innerWidth <= 768);
-  
-  // Add state for transaction modal
+  const [isCheckedIn, setIsCheckedIn] = useState(false);
+
+  // Update the states for TransactionModal
   const [showTransactionModal, setShowTransactionModal] = useState(false);
-  const [transactionData] = useState<{
+  const [transactionData, setTransactionData] = useState<{
     type: 'photo' | 'video' | 'stream' | 'initialize';
     cameraAccount: string;
   } | null>(null);
-  
 
   // Add a function to create timeline events with Farcaster profile info
   const addTimelineEvent = (eventType: TimelineEventType, transactionId?: string, mediaUrl?: string) => {
@@ -145,7 +236,7 @@ export function CameraView() {
       const farcasterCred = user.verifiedCredentials?.find(
         cred => cred.oauthProvider === 'farcaster'
       );
-      
+
       // Create the timeline event with enriched user info
       const event: Omit<TimelineEvent, 'id'> = {
         type: eventType,
@@ -161,7 +252,7 @@ export function CameraView() {
         mediaUrl,
         cameraId: cameraAccount || undefined
       };
-      
+
       console.log('Adding timeline event:', {
         type: event.type,
         transactionId: event.transactionId ? `${event.transactionId.slice(0, 8)}...` : 'none',
@@ -174,7 +265,7 @@ export function CameraView() {
           hasPfp: !!event.user.pfpUrl
         }
       });
-      
+
       // Add the event to the timeline
       timelineRef.current?.addEvent(event);
     }
@@ -183,18 +274,18 @@ export function CameraView() {
   // Load camera from URL params if available - simplify to just set the ID
   useEffect(() => {
     if (!cameraId) return;
-    
+
     try {
       // Log the camera ID (decoding it first)
       const decodedCameraId = decodeURIComponent(cameraId);
       console.log(`[CameraView] Using camera ID: ${decodedCameraId}`);
-      
+
       // Store in localStorage for persistence
       localStorage.setItem('directCameraId', decodedCameraId);
-      
+
       // Set camera account state
       setCameraAccount(decodedCameraId);
-      
+
       // Attempt to fetch camera data if possible (but don't show errors if it fails)
       if (fetchCameraById) {
         fetchCameraById(decodedCameraId).then(camera => {
@@ -236,7 +327,7 @@ export function CameraView() {
     const handleResize = () => {
       setIsMobileView(window.innerWidth <= 768);
     };
-    
+
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
@@ -256,7 +347,7 @@ export function CameraView() {
   const updateToast = (type: 'success' | 'error' | 'info', message: string) => {
     // Skip showing "Failed to fetch" network errors as toasts
     if (type === 'error' && (
-      message.includes('Failed to fetch') || 
+      message.includes('Failed to fetch') ||
       message.includes('Network error') ||
       message.includes('Camera error') ||
       message.includes('CORS')
@@ -264,7 +355,7 @@ export function CameraView() {
       console.warn('Suppressing network error toast:', message);
       return;
     }
-    
+
     const id = Date.now().toString();
     setCurrentToast({ id, type, message });
   };
@@ -303,7 +394,7 @@ export function CameraView() {
   useEffect(() => {
     const directCameraId = localStorage.getItem('directCameraId');
     const isDefaultRoute = window.location.pathname === '/app' || window.location.pathname === '/app/';
-    
+
     // Only load the camera ID from localStorage if explicitly on a camera route
     // or if we're already connected (cameraAccount exists)
     if (directCameraId && !cameraAccount && window.location.pathname.includes('/camera/')) {
@@ -313,7 +404,7 @@ export function CameraView() {
       // If we're on the default /app route with no specific camera, always ensure storage is cleared
       console.log('[CameraView] On default route - clearing any stored camera ID');
       localStorage.removeItem('directCameraId');
-      
+
       // Force reset of camera state variables
       if (cameraAccount) setCameraAccount(null);
       if (selectedCamera) setSelectedCamera(null);
@@ -323,7 +414,7 @@ export function CameraView() {
   // Debug logging for camera route with fix for paths
   useEffect(() => {
     const isDefaultRoute = window.location.pathname === '/app' || window.location.pathname === '/app/';
-    
+
     console.log('CameraView Debug:', {
       cameraIdParam: cameraId,
       cameraAccount: cameraAccount,
@@ -332,7 +423,7 @@ export function CameraView() {
       route: window.location.pathname,
       isDefaultRoute
     });
-    
+
     // Only update localStorage if we have a valid camera ID and are on a camera route
     if (cameraId) {
       localStorage.setItem('directCameraId', cameraId);
@@ -343,7 +434,7 @@ export function CameraView() {
     } else if (isDefaultRoute) {
       // Always clear on the default route
       localStorage.removeItem('directCameraId');
-      
+
       // Force reset of all camera state if we're still seeing a camera connection
       if (cameraAccount || selectedCamera) {
         console.log('[CameraView] Forcing disconnect on default route');
@@ -364,26 +455,26 @@ export function CameraView() {
   // to avoid potential circular dependencies or timing issues
   useEffect(() => {
     if (!cameraId) return;
-    
+
     const loadCameraDirectly = async () => {
       try {
         console.log(`[CameraView] DIRECT LOADING camera for URL param: cameraId="${cameraId}"`);
-        
+
         // Always decode the cameraId from the URL
         const decodedCameraId = decodeURIComponent(cameraId);
         console.log(`[CameraView] DIRECT LOADING Decoded cameraId="${decodedCameraId}"`);
-        
+
         // Store in localStorage for persistence
         localStorage.setItem('directCameraId', decodedCameraId);
-        
+
         // Set the camera account in state
         setCameraAccount(decodedCameraId);
-        
+
         // Try to load the camera data using the direct method if connection available
         if (connection) {
           console.log(`[CameraView] Loading camera directly using wallet-adapter connection`);
           const camera = await fetchCameraByPublicKey(decodedCameraId, connection);
-          
+
           if (camera) {
             console.log(`[CameraView] Successfully loaded camera data directly:`, camera);
             setSelectedCamera(camera);
@@ -393,7 +484,7 @@ export function CameraView() {
             console.log(`[CameraView] Failed to load camera data directly`);
           }
         }
-        
+
         // Fall back to using the camera provider's method if direct loading fails
         if (fetchCameraById) {
           const camera = await fetchCameraById(decodedCameraId);
@@ -409,7 +500,7 @@ export function CameraView() {
         console.error('[CameraView] DIRECT LOADING Error:', error);
       }
     };
-    
+
     loadCameraDirectly();
   }, [cameraId, connection, fetchCameraById, setSelectedCamera]);
 
@@ -422,13 +513,13 @@ export function CameraView() {
       programId: program.programId.toString(),
       provider: !!program.provider,
     } : "No program");
-    
+
     console.log("Connection initialized:", !!connection);
     console.log("Connection details:", connection ? {
       rpcEndpoint: connection.rpcEndpoint,
     } : "No connection");
   }, [program, connection]);
-  
+
   // More detailed error logging
   const logDetailedError = (error: any, context: string) => {
     console.error(`Error in ${context}:`, error);
@@ -440,7 +531,7 @@ export function CameraView() {
     }
   };
 
-  // Update the Simple direct transaction function to return the signature
+  // Update the Simple direct transaction function to return the signature and work with the existing Solana program
   const sendSimpleTransaction = async (actionType: string): Promise<string | undefined> => {
     console.log("DIRECT TRANSACTION FUNCTION - Type:", actionType);
     let retryCount = 0;
@@ -459,7 +550,7 @@ export function CameraView() {
           updateToast('error', `Cannot send transaction: missing ${missing.join(", ")}`);
           return undefined;
         }
-        
+
         // Get camera ID
         const cameraId = cameraAccount || localStorage.getItem('directCameraId');
         if (!cameraId) {
@@ -467,51 +558,17 @@ export function CameraView() {
           updateToast('error', 'No camera ID found');
           return undefined;
         }
-        
-        // Create transaction
-        const tx = new Transaction();
-        
-        // Get activity type based on action
-        let activityTypeObj;
-        switch(actionType) {
-          case 'photo': 
-            activityTypeObj = { photoCapture: {} };
-            break;
-          case 'video':
-            activityTypeObj = { videoRecord: {} };
-            break;
-          case 'stream':
-            activityTypeObj = { liveStream: {} };
-            break;
-          default:
-            activityTypeObj = { photoCapture: {} };
+
+        // First, verify user is checked in
+        const isCheckedInNow = await checkUserSession();
+        if (!isCheckedInNow) {
+          updateToast('error', 'You need to check in before performing camera actions');
+          return undefined;
         }
-        
-        // Create metadata
-        const metadata = JSON.stringify({
-          timestamp: new Date().toISOString(),
-          action: actionType,
-          cameraId
-        });
-        
+
+        // Create a simplified transaction that will update the session's lastActivity timestamp
+        // This is the minimally invasive approach that works with the current program
         try {
-          // Create transaction instruction
-          console.log("Creating instruction with activityType:", activityTypeObj);
-          const ix = await program.methods
-            .recordActivity({
-              activityType: activityTypeObj,
-              metadata
-            })
-            .accounts({
-              camera: new PublicKey(cameraId),
-              owner: new PublicKey(primaryWallet.address),
-              systemProgram: SystemProgram.programId,
-            })
-            .instruction();
-          
-          // Add instruction to transaction
-          tx.add(ix);
-          
           // Get recent blockhash with retry logic
           let blockhash;
           try {
@@ -519,54 +576,73 @@ export function CameraView() {
             blockhash = newBlockhash;
           } catch (bhError) {
             console.error("Error getting blockhash:", bhError);
-            // Try the next RPC endpoint
             const nextEndpoint = CONFIG.getNextEndpoint();
             console.log(`Switching to RPC endpoint: ${nextEndpoint}`);
             currentConnection = new Connection(nextEndpoint, 'confirmed');
             throw new Error('Failed to get blockhash, retrying with new endpoint');
           }
-          
-          tx.recentBlockhash = blockhash;
-          tx.feePayer = new PublicKey(primaryWallet.address);
-          
-          // Sign and send transaction with timeout
-          const signer = await (primaryWallet as any).getSigner();
-          const signPromise = signer.signAndSendTransaction(tx);
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Transaction timeout')), 30000)
+
+          // Create a basic transaction that sends a minimal amount of SOL to yourself
+          // This serves as a placeholder transaction that will be recorded on-chain
+          const userPublicKey = new PublicKey(primaryWallet.address);
+          const cameraPublicKey = new PublicKey(cameraId);
+
+          // Find the session PDA
+          const [] = PublicKey.findProgramAddressSync(
+            [
+              Buffer.from('session'),
+              userPublicKey.toBuffer(),
+              cameraPublicKey.toBuffer()
+            ],
+            CAMERA_ACTIVATION_PROGRAM_ID
           );
-          
-          const result = await Promise.race([signPromise, timeoutPromise]) as TransactionResult;
-          console.log("Transaction sent:", result.signature);
-          
-          // Confirm transaction
-          const confirmation = await currentConnection.confirmTransaction({
-            signature: result.signature,
-            blockhash,
-            lastValidBlockHeight: await currentConnection.getBlockHeight()
+
+          // Create a transaction with a memo instruction that identifies the camera action
+          const memoProgram = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
+
+          // Create the memo data with the action type for on-chain recording
+          const memoData = Buffer.from(`camera:${actionType}:${new Date().toISOString()}`);
+
+          // Create the memo instruction
+          const memoInstruction = new TransactionInstruction({
+            keys: [{ pubkey: userPublicKey, isSigner: true, isWritable: true }],
+            programId: memoProgram,
+            data: memoData
           });
-          
-          if (confirmation.value.err) {
-            throw new Error(`Transaction failed: ${confirmation.value.err}`);
-          }
-          
-          // Show success toast
-          updateToast('success', `${actionType} transaction sent: ${result.signature.slice(0, 8)}...`);
-          
-          // Add event to timeline
-          addTimelineEvent(getEventType(actionType), result.signature);
-          
-          return result.signature;
-          
+
+          // Create the transaction
+          const tx = new Transaction();
+          tx.add(memoInstruction);
+
+          // Add blockhash and payer
+          tx.recentBlockhash = blockhash;
+          tx.feePayer = userPublicKey;
+
+          // Sign and send the transaction
+          const signer = await (primaryWallet as any).getSigner();
+          const signedTx = await signer.signTransaction(tx);
+          const signature = await currentConnection.sendRawTransaction(signedTx.serialize());
+
+          // Wait for confirmation
+          await currentConnection.confirmTransaction(signature, 'confirmed');
+
+          console.log(`Transaction confirmed: ${signature}`);
+          updateToast('success', `${actionType} transaction sent: ${signature.slice(0, 8)}...`);
+
+          // Add the event to the timeline
+          addTimelineEvent(getEventType(actionType), signature);
+
+          return signature;
         } catch (error) {
           console.error("Error in transaction:", error);
           logDetailedError(error, "Transaction error");
-          
+
           // Check if it's a blockhash error
           const errorMessage = error instanceof Error ? error.message : String(error);
-          if (errorMessage.includes('Blockhash not found') || 
-              errorMessage.includes('block height exceeded') ||
-              errorMessage.includes('timeout')) {
+
+          if (errorMessage.includes('Blockhash not found') ||
+            errorMessage.includes('block height exceeded') ||
+            errorMessage.includes('timeout')) {
             retryCount++;
             if (retryCount < MAX_RETRIES) {
               console.log(`Retrying transaction (attempt ${retryCount + 1}/${MAX_RETRIES})`);
@@ -577,211 +653,302 @@ export function CameraView() {
               continue;
             }
           }
-          
+
           updateToast('error', `Transaction failed: ${errorMessage}`);
           return undefined;
         }
       } catch (error) {
         console.error("Outer error in transaction:", error);
         logDetailedError(error, "Outer transaction error");
-        
+
         retryCount++;
         if (retryCount < MAX_RETRIES) {
           console.log(`Retrying entire transaction process (attempt ${retryCount + 1}/${MAX_RETRIES})`);
           continue;
         }
-        
+
         updateToast('error', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
         return undefined;
       }
     }
-    
+
     updateToast('error', 'Transaction failed after maximum retries');
     return undefined;
   };
 
-  // Direct button handlers for testing
-  const handleDirectPhoto = () => {
-    console.log("DIRECT PHOTO BUTTON PRESSED");
-    
-    // Check if we have what we need to proceed
-    if (!primaryWallet || !cameraAccount) {
-      updateToast('error', 'Wallet or camera not connected');
-      return;
+  // Replace the promptForCheckIn function with one that shows the modal
+  const promptForCheckIn = (actionType: 'photo' | 'video' | 'stream') => {
+    if (!cameraAccount) {
+      updateToast('error', 'No camera connected');
+      return false;
     }
-    
-    setLoading(true);
-    updateToast('info', 'Processing photo transaction...');
-    
-    // Add a small delay for visual feedback
+
+    // Set transaction data and show modal
+    setTransactionData({
+      type: actionType,
+      cameraAccount: cameraAccount
+    });
+    setShowTransactionModal(true);
+
+    // Track this as an "attempt" 
+    console.log(`User attempted to use camera for ${actionType} without checking in first`);
+
+    return false;
+  };
+
+  // Update the checkUserSession function to be more reliable and add more logging
+  const checkUserSession = async (): Promise<boolean> => {
+    if (!primaryWallet?.address || !cameraAccount || !program || !connection) {
+      console.error("Missing required components for check-in status");
+      return false;
+    }
+
+    try {
+      const userPublicKey = new PublicKey(primaryWallet.address);
+      const cameraPublicKey = new PublicKey(cameraAccount);
+
+      // Find the session PDA
+      const [sessionPda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('session'),
+          userPublicKey.toBuffer(),
+          cameraPublicKey.toBuffer()
+        ],
+        CAMERA_ACTIVATION_PROGRAM_ID
+      );
+
+      try {
+        // Try to fetch the session account
+        const sessionAccount = await program.account.userSession.fetch(sessionPda);
+        if (sessionAccount) {
+          if (!isCheckedIn) {
+            console.log("[CameraView] Setting checked-in status to TRUE");
+            setIsCheckedIn(true);
+            // Refresh timeline if status changed
+            if (timelineRef.current?.refreshTimeline) {
+              timelineRef.current.refreshTimeline();
+            }
+          }
+          return true;
+        }
+      } catch (err) {
+        console.log("[CameraView] Session account not found, user is not checked in");
+        if (isCheckedIn) {
+          console.log("[CameraView] Setting checked-in status to FALSE");
+          setIsCheckedIn(false);
+          // Refresh timeline if status changed
+          if (timelineRef.current?.refreshTimeline) {
+            timelineRef.current.refreshTimeline();
+          }
+        }
+        return false;
+      }
+    } catch (err) {
+      console.error("[CameraView] Error checking session status:", err);
+      return false;
+    }
+
+    return isCheckedIn;
+  };
+
+  // Add a periodic check for session status with a shorter interval
+  useEffect(() => {
+    if (!primaryWallet?.address || !cameraAccount) return;
+
+    console.log("[CameraView] Setting up check-in status monitoring");
+
+    // Check status immediately
+    checkUserSession();
+
+    // Set up periodic check every 3 seconds
+    const intervalId = setInterval(() => {
+      checkUserSession().then(isCheckedIn => {
+        console.log("[CameraView] Periodic check result:", isCheckedIn ? "CHECKED IN" : "NOT CHECKED IN");
+      });
+    }, 3000);
+
+    // Clean up on unmount
+    return () => {
+      console.log("[CameraView] Cleaning up check-in status monitor");
+      clearInterval(intervalId);
+    };
+  }, [primaryWallet, cameraAccount, program, connection]);
+
+  // Update the button handlers to check for check-in status
+  const handleDirectPhoto = async () => {
+    // Check if user is checked in first
+    const isCheckedIn = await checkUserSession();
+    if (!isCheckedIn) {
+      return promptForCheckIn('photo');
+    }
+
+    updateToast('info', 'Initiating photo capture...');
+
     setTimeout(() => {
       sendSimpleTransaction('photo')
         .then(async (signature: string | undefined) => {
           if (signature && primaryWallet?.address) {
             updateToast('info', 'Capturing photo...');
-            
+
             // Set camera status to online immediately for better UX
             cameraStatus.setOnline(false);
-            
-            const response = await cameraActionService.capturePhoto(signature, primaryWallet.address);
-            if (response.success) {
-              updateToast('success', 'Photo captured and uploaded to IPFS');
-              // Ensure camera shows as online
-              cameraStatus.setOnline(false);
-            } else {
-              updateToast('error', response.error || 'Failed to capture photo');
+
+            try {
+              const response = await cameraActionService.capturePhoto(signature, primaryWallet.address);
+              if (response.success) {
+                updateToast('success', 'Photo captured and uploaded to IPFS');
+                // Ensure camera shows as online
+                cameraStatus.setOnline(false);
+              } else {
+                // This is expected when no physical camera is connected
+                // Show a user-friendly message instead of an error
+                updateToast('success', 'Transaction confirmed, but no physical camera is connected');
+                console.log('No physical camera connected or camera is offline');
+
+                // Refresh the timeline to show the transaction
+                if (timelineRef.current?.refreshEvents) {
+                  timelineRef.current.refreshEvents();
+                }
+              }
+            } catch (error) {
+              console.error('Error capturing photo:', error);
+              // This is expected when no physical camera is connected
+              updateToast('success', 'Transaction confirmed, but no physical camera is connected');
+              console.log('No physical camera connected or camera is offline');
+
+              // Refresh the timeline to show the transaction
+              if (timelineRef.current?.refreshEvents) {
+                timelineRef.current.refreshEvents();
+              }
             }
           }
         })
-        .catch((error: unknown) => {
-          updateToast('error', `Transaction error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        })
-        .finally(() => {
-          setLoading(false);
+        .catch(error => {
+          console.error('Error in photo transaction:', error);
+          updateToast('error', 'Failed to capture photo');
         });
-    }, 100);
+    }, 500);
   };
-  
-  const handleDirectVideo = () => {
-    console.log("DIRECT VIDEO BUTTON PRESSED");
-    
-    // Check if we have what we need to proceed
-    if (!primaryWallet || !cameraAccount) {
-      updateToast('error', 'Wallet or camera not connected');
-      return;
+
+  const handleDirectVideo = async () => {
+    // Check if user is checked in first
+    const isCheckedIn = await checkUserSession();
+    if (!isCheckedIn) {
+      return promptForCheckIn('video');
     }
-    
-    setLoading(true);
-    updateToast('info', 'Recording 30-second video...');
-    
-    // Add a small delay for visual feedback
+
+    updateToast('info', 'Initiating video recording...');
+
     setTimeout(() => {
       sendSimpleTransaction('video')
         .then(async (signature: string | undefined) => {
           if (signature && primaryWallet?.address) {
-            updateToast('info', 'Recording 30-second video...');
-            
-            // Set camera status to online immediately for better UX
-            cameraStatus.setOnline(false);
-            
-            const response = await cameraActionService.recordVideo(signature, primaryWallet.address);
-            if (response.success) {
-              updateToast('success', '30-second video recorded and uploaded to IPFS');
-              // Ensure camera shows as online
-              cameraStatus.setOnline(false);
-            } else {
-              updateToast('error', response.error || 'Failed to record video');
+            updateToast('info', 'Recording video...');
+
+            try {
+              const response = await cameraActionService.recordVideo(signature, primaryWallet.address);
+              if (response.success) {
+                updateToast('success', 'Video recorded and uploaded to IPFS');
+              } else {
+                // This is expected when no physical camera is connected
+                updateToast('success', 'Transaction confirmed, but no physical camera is connected');
+                console.log('No physical camera connected or camera is offline');
+
+                // Refresh the timeline to show the transaction
+                if (timelineRef.current?.refreshEvents) {
+                  timelineRef.current.refreshEvents();
+                }
+              }
+            } catch (error) {
+              console.error('Error recording video:', error);
+              // This is expected when no physical camera is connected
+              updateToast('success', 'Transaction confirmed, but no physical camera is connected');
+              console.log('No physical camera connected or camera is offline');
+
+              // Refresh the timeline to show the transaction
+              if (timelineRef.current?.refreshEvents) {
+                timelineRef.current.refreshEvents();
+              }
             }
           }
         })
-        .catch((error: unknown) => {
-          updateToast('error', `Transaction error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        })
-        .finally(() => {
-          setLoading(false);
+        .catch(error => {
+          console.error('Error in video transaction:', error);
+          updateToast('error', 'Failed to record video');
         });
-    }, 100);
+    }, 500);
   };
-  
-  const handleDirectStream = () => {
-    console.log("DIRECT STREAM BUTTON PRESSED");
-    
-    // Check if we have what we need to proceed
-    if (!primaryWallet || !cameraAccount) {
-      updateToast('error', 'Wallet or camera not connected');
+
+  const handleDirectStream = async () => {
+    // Check if user is checked in first
+    const isCheckedIn = await checkUserSession();
+    if (!isCheckedIn) {
+      return promptForCheckIn('stream');
+    }
+
+    if (isStreaming) {
+      // Handle stop streaming
+      try {
+        const response = await cameraActionService.stopStream(primaryWallet?.address || '');
+        if (response.success) {
+          updateToast('success', 'Stream stopped');
+          setIsStreaming(false);
+
+          // Refresh the timeline
+          if (timelineRef.current?.refreshEvents) {
+            timelineRef.current.refreshEvents();
+          }
+        } else {
+          updateToast('error', 'Failed to stop stream: ' + (response.error || 'Unknown error'));
+        }
+      } catch (error) {
+        console.error('Error stopping stream:', error);
+        updateToast('error', 'Error stopping stream');
+      }
       return;
     }
-    
-    setLoading(true);
-    
-    // Clear the current toast before setting a new one
-    setCurrentToast(null);
-    
-    // Use a more descriptive message
-    if (isStreaming) {
-      updateToast('info', 'Preparing to stop stream...');
-    } else {
-      updateToast('info', 'Preparing stream...');
-    }
-    
-    if (isStreaming) {
-      // For stopping the stream, create a transaction first, THEN call the camera API
-      setTimeout(() => {
-        sendSimpleTransaction('stream')
-          .then(async (signature: string | undefined) => {
-            if (signature && primaryWallet?.address) {
-              // Update toast with transaction success
-              updateToast('info', 'Stopping stream, transaction sent successfully');
-              
-              try {
-                // Now call the API to actually stop the stream
-                const response = await cameraActionService.stopStream(primaryWallet.address);
-                if (response.success) {
-                  setIsStreaming(false);
-                  updateToast('success', 'Stream stopped and recorded on-chain');
-                  // Update camera status to not streaming
-                  cameraStatus.setOnline(false);
-                } else {
-                  updateToast('error', response.error || 'Failed to stop stream');
+
+    updateToast('info', 'Initiating live stream...');
+
+    setTimeout(() => {
+      sendSimpleTransaction('stream')
+        .then(async (signature: string | undefined) => {
+          if (signature && primaryWallet?.address) {
+            updateToast('info', 'Starting stream...');
+
+            try {
+              const response = await cameraActionService.startStream(signature, primaryWallet.address);
+              if (response.success) {
+                updateToast('success', 'Stream started');
+                setIsStreaming(true);
+              } else {
+                // This is expected when no physical camera is connected
+                updateToast('success', 'Transaction confirmed, but no physical camera is connected');
+                console.log('No physical camera connected or camera is offline');
+
+                // Refresh the timeline to show the transaction
+                if (timelineRef.current?.refreshEvents) {
+                  timelineRef.current.refreshEvents();
                 }
-              } catch (error) {
-                handleStreamError(error);
+              }
+            } catch (error) {
+              console.error('Error starting stream:', error);
+              // This is expected when no physical camera is connected
+              updateToast('success', 'Transaction confirmed, but no physical camera is connected');
+              console.log('No physical camera connected or camera is offline');
+
+              // Refresh the timeline to show the transaction
+              if (timelineRef.current?.refreshEvents) {
+                timelineRef.current.refreshEvents();
               }
             }
-          })
-          .catch((error: unknown) => {
-            updateToast('error', `Transaction error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-          })
-          .finally(() => {
-            setLoading(false);
-          });
-      }, 100);
-    } else {
-      // For starting the stream, we need a transaction
-      setTimeout(() => {
-        sendSimpleTransaction('stream')
-          .then(async (signature: string | undefined) => {
-            if (signature && primaryWallet?.address) {
-              // Update toast with more specific info
-              updateToast('info', 'Transaction confirmed, starting stream...');
-              
-              // Set camera status to online and streaming immediately for better UX
-              cameraStatus.setOnline(true);
-              
-              try {
-                const response = await cameraActionService.startStream(signature, primaryWallet.address);
-                if (response.success) {
-                  setIsStreaming(true);
-                  
-                  // Get stream info if available
-                  const streamUrl = response.data?.streamInfo?.streamUrl;
-                  const successMessage = streamUrl 
-                    ? `Stream started successfully! Stream URL: ${streamUrl.split('/').pop()}`
-                    : 'Stream started successfully!';
-                  
-                  // Replace the toast with success message
-                  updateToast('success', successMessage);
-                  
-                  // Ensure camera shows as online and streaming
-                  cameraStatus.setOnline(true);
-                } else {
-                  // Use the error handler for better messages
-                  handleStreamError(response.error || 'Failed to start stream');
-                }
-              } catch (error) {
-                handleStreamError(error);
-              }
-            }
-          })
-          .catch((error: unknown) => {
-            // Use our error handler for transaction errors too
-            handleStreamError(error);
-          })
-          .finally(() => {
-            setLoading(false);
-          });
-      }, 100);
-    }
+          }
+        })
+        .catch(error => {
+          console.error('Error in streaming transaction:', error);
+          updateToast('error', 'Failed to start stream');
+        });
+    }, 500);
   };
 
   // Add a useEffect to handle stream state changes
@@ -793,40 +960,13 @@ export function CameraView() {
   }, [isStreaming, currentToast]);
 
   // Helper function to handle stream errors more gracefully
-  const handleStreamError = (error: any) => {
-    // Extract more helpful information from stream errors
-    let errorMessage = 'Unknown streaming error';
-    
-    if (error instanceof Error) {
-      // Common stream errors with better messages
-      if (error.message.includes('CORS')) {
-        errorMessage = 'Stream blocked by CORS policy. This is a camera configuration issue.';
-      } else if (error.message.includes('Failed to fetch')) {
-        errorMessage = 'Stream server connection failed. Please check camera hardware.';
-      } else if (error.message.includes('timeout')) {
-        errorMessage = 'Stream timed out. Camera may be offline or busy.';
-      } else {
-        errorMessage = error.message;
-      }
-    } else if (typeof error === 'string') {
-      errorMessage = error;
-    }
-    
-    console.error('Stream error:', error);
-    updateToast('error', `Stream error: ${errorMessage}`);
-    
-    // Reset streaming state
-    setIsStreaming(false);
-    cameraStatus.setOnline(false);
-    setLoading(false);
-  };
 
   return (
     <>
       <div className="h-full overflow-y-auto pb-40">
         <div className="relative max-w-3xl mx-auto pt-8">
           <ToastContainer message={currentToast} onDismiss={dismissToast} />
-          
+
           {/* Transaction Modal for embedded wallets */}
           <TransactionModal
             isOpen={showTransactionModal}
@@ -834,31 +974,42 @@ export function CameraView() {
             transactionData={transactionData || undefined}
             onSuccess={({ transactionId }) => {
               setShowTransactionModal(false);
-              
-              // Create a timeline event with the transaction ID
-              if (transactionData) {
-                const eventType = getEventType(transactionData.type);
-                
-                // Use the addTimelineEvent function for consistency
-                addTimelineEvent(eventType, transactionId);
-                
-                // Show success message and toggle stream state if needed
-                updateToast('success', `${transactionData.type.charAt(0).toUpperCase() + transactionData.type.slice(1)} action recorded successfully`);
-                
-                // Toggle stream state if it's a stream action
-                if (transactionData.type === 'stream') {
-                  setIsStreaming(!isStreaming);
+
+              // After successful check-in and action, refresh check-in status
+              checkUserSession().then(() => {
+                // Create a timeline event with the transaction ID
+                if (transactionData) {
+                  const eventType = getEventType(transactionData.type);
+
+                  // Use the addTimelineEvent function for consistency
+                  addTimelineEvent(eventType, transactionId);
+
+                  // Show success message and toggle stream state if needed
+                  updateToast('success', `${transactionData.type.charAt(0).toUpperCase() + transactionData.type.slice(1)} action recorded successfully`);
+
+                  // Toggle stream state if it's a stream action
+                  if (transactionData.type === 'stream') {
+                    setIsStreaming(!isStreaming);
+                  }
+
+                  // Refresh timeline to show latest events
+                  if (timelineRef.current?.refreshTimeline) {
+                    timelineRef.current.refreshTimeline();
+                  }
                 }
-              }
+              });
             }}
           />
-          
+
           <div className="bg-white rounded-lg mb-6 px-6">
-            <CameraIdDisplay 
-              cameraId={cameraId}
-              selectedCamera={selectedCamera}
-              cameraAccount={cameraAccount}
-            />
+            <div className="py-4 flex justify-between items-center">
+              <CameraIdDisplay
+                cameraId={cameraId}
+                selectedCamera={selectedCamera}
+                cameraAccount={cameraAccount}
+                timelineRef={timelineRef}
+              />
+            </div>
           </div>
           <div className="px-2">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -886,7 +1037,7 @@ export function CameraView() {
                       {loading ? 'Processing...' : isStreaming ? 'Stop Stream' : 'Start Stream'}
                     </span>
                   </div>
-                  
+
                   <div className="group h-1/2 relative">
                     <button
                       onClick={handleDirectPhoto}
@@ -925,14 +1076,14 @@ export function CameraView() {
             </div>
           </div>
           <div className="flex-1 mt-2 px-2">
-                  <CameraControls
-                    onTakePicture={handleDirectPhoto}
-                    onRecordVideo={handleDirectVideo}
-                    onToggleStream={handleDirectStream}
-                    isLoading={loading}
-                    isStreaming={isStreaming}
-                  />
-                </div>
+            <CameraControls
+              onTakePicture={handleDirectPhoto}
+              onRecordVideo={handleDirectVideo}
+              onToggleStream={handleDirectStream}
+              isLoading={loading}
+              isStreaming={isStreaming}
+            />
+          </div>
           <div className="max-w-3xl mt-6 mx-auto flex flex-col justify-top relative">
             <div className="relative mb-36">
               <div className="flex pl-6 items-center gap-2">

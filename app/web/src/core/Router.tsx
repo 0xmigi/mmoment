@@ -150,7 +150,7 @@ function Router() {
           }
         />
         <Route
-          path="/quickstart/:cameraId/:sessionId/:timestamp"
+          path="/quickstart/:cameraId/:timestamp"
           element={<QuickStartView />}
         />
       </Routes>

@@ -1,11 +1,14 @@
 import { Dialog } from '@headlessui/react';
-import { X } from 'lucide-react';
+import { X, CheckCircle } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
-import { useProgram } from '../../anchor/setup';
+import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from '../../anchor/setup';
 import { SystemProgram, PublicKey, ComputeBudgetProgram, Transaction } from '@solana/web3.js';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { isSolanaWallet } from '@dynamic-labs/solana';
+import { Program, AnchorProvider } from '@coral-xyz/anchor';
+import { IDL } from '../../anchor/idl';
+import { timelineService } from '../../timeline/timeline-service';
 
 interface TransactionModalProps {
   isOpen: boolean;
@@ -24,12 +27,171 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   onSuccess
 }) => {
   const { primaryWallet } = useDynamicContext();
-  useConnection();
+  const { connection } = useConnection();
   const { program } = useProgram();
   const [status, setStatus] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fee] = useState<number>(100); // Default fee in lamports
+  const [isCheckedIn, setIsCheckedIn] = useState<boolean>(false);
+  const [isCheckingIn, setIsCheckingIn] = useState<boolean>(false);
+  const [checkInSuccess, setCheckInSuccess] = useState<boolean>(false);
+  
+  // Check if user is already checked in
+  useEffect(() => {
+    if (isOpen && transactionData?.cameraAccount && primaryWallet?.address && connection) {
+      checkSessionStatus();
+    }
+  }, [isOpen, transactionData, primaryWallet, connection]);
+  
+  // Function to check if user is already checked in
+  const checkSessionStatus = async () => {
+    if (!transactionData?.cameraAccount || !primaryWallet?.address || !connection) return;
+    
+    try {
+      // Initialize program
+      const provider = new AnchorProvider(
+        connection,
+        {
+          publicKey: new PublicKey(primaryWallet.address),
+          signTransaction: async (tx: Transaction) => tx,
+          signAllTransactions: async (txs: Transaction[]) => txs,
+        } as any,
+        { commitment: 'confirmed' }
+      );
+      
+      const program = new Program(IDL as any, CAMERA_ACTIVATION_PROGRAM_ID, provider);
+      
+      // Find the session PDA
+      const [sessionPda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('session'),
+          new PublicKey(primaryWallet.address).toBuffer(),
+          new PublicKey(transactionData.cameraAccount).toBuffer()
+        ],
+        CAMERA_ACTIVATION_PROGRAM_ID
+      );
+      
+      // Try to fetch the session account
+      try {
+        await program.account.userSession.fetch(sessionPda);
+        setIsCheckedIn(true);
+      } catch (err) {
+        setIsCheckedIn(false);
+      }
+    } catch (err) {
+      console.error('Error checking session status:', err);
+      setIsCheckedIn(false);
+    }
+  };
+  
+  // Function to handle check-in
+  const handleCheckIn = async () => {
+    if (!transactionData?.cameraAccount || !primaryWallet?.address || !connection) {
+      setError('Wallet not connected or missing data');
+      return;
+    }
+    
+    setIsCheckingIn(true);
+    setError(null);
+    
+    try {
+      // Initialize program
+      const provider = new AnchorProvider(
+        connection,
+        {
+          publicKey: new PublicKey(primaryWallet.address),
+          signTransaction: async (tx: Transaction) => tx,
+          signAllTransactions: async (txs: Transaction[]) => txs,
+        } as any,
+        { commitment: 'confirmed' }
+      );
+      
+      const program = new Program(IDL as any, CAMERA_ACTIVATION_PROGRAM_ID, provider);
+      const userPublicKey = new PublicKey(primaryWallet.address);
+      const cameraPublicKey = new PublicKey(transactionData.cameraAccount);
+      
+      // Find the session PDA
+      const [sessionPda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('session'),
+          userPublicKey.toBuffer(),
+          cameraPublicKey.toBuffer()
+        ],
+        CAMERA_ACTIVATION_PROGRAM_ID
+      );
+      
+      // Create check-in instruction (without face recognition for simplicity)
+      const ix = await program.methods
+        .checkIn(false) // No face recognition for simplicity in this flow
+        .accounts({
+          user: userPublicKey,
+          camera: cameraPublicKey,
+          session: sessionPda,
+          systemProgram: SystemProgram.programId
+        })
+        .instruction();
+      
+      // Create transaction
+      const tx = new Transaction().add(ix);
+      const { blockhash } = await connection.getLatestBlockhash();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = userPublicKey;
+      
+      // Use wallet to sign and send
+      if (!isSolanaWallet(primaryWallet)) {
+        throw new Error('Not a Solana wallet');
+      }
+      
+      const signer = await primaryWallet.getSigner();
+      const signedTx = await signer.signTransaction(tx);
+      const signature = await connection.sendRawTransaction(signedTx.serialize());
+      await connection.confirmTransaction(signature, 'confirmed');
+      
+      // Add to timeline
+      if (primaryWallet?.address) {
+        timelineService.emitEvent({
+          type: 'check_in',
+          user: {
+            address: primaryWallet.address
+          },
+          timestamp: Date.now(),
+          transactionId: signature,
+          cameraId: transactionData.cameraAccount
+        } as any);
+      }
+      
+      setIsCheckedIn(true);
+      setCheckInSuccess(true);
+      timelineService.refreshEvents();
+      
+    } catch (error) {
+      console.error('Check-in error:', error);
+      
+      if (error instanceof Error) {
+        let errorMsg = error.message;
+        
+        // Check for common error messages
+        if (errorMsg.includes('custom program error: 0x64')) {
+          errorMsg = 'Program error: The camera may not be configured correctly.';
+        } else if (errorMsg.includes('insufficient funds')) {
+          errorMsg = 'Insufficient SOL in your wallet. Please add more SOL and try again.';
+        } else if (errorMsg.includes('already in use')) {
+          errorMsg = 'You are already checked in to this camera.';
+          setIsCheckedIn(true);
+          return;
+        } else if (errorMsg.length > 150) {
+          errorMsg = 'An error occurred during check-in. Please check the console for details.';
+        }
+        
+        setError(errorMsg);
+      } else {
+        setError('Unknown error during check-in');
+      }
+    } finally {
+      setIsCheckingIn(false);
+    }
+  };
 
   const handleConfirmTransaction = async () => {
     if (!primaryWallet?.address || !program || !transactionData) {
@@ -153,9 +315,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           {/* Header with close button */}
           <div className="flex items-center justify-between p-3 border-b border-gray-100">
             <Dialog.Title className="text-base font-medium">
-              Confirm {transactionData?.type || ''} Action
+              {!isCheckedIn 
+                ? 'Check In Required' 
+                : `Confirm ${transactionData?.type || ''} Action`}
             </Dialog.Title>
-            {!loading && (
+            {!loading && !isCheckingIn && (
               <button
                 onClick={onClose}
                 className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
@@ -167,64 +331,124 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
           {/* Transaction Content */}
           <div className="p-3 space-y-4">
-            {/* Transaction Details */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
-                <div>
-                  <div className="text-xs font-medium text-gray-500">Action</div>
-                  <div className="text-sm text-gray-900">
-                    {formatActionType(transactionData?.type || '')}
+            {!isCheckedIn ? (
+              // Show check-in UI if not checked in
+              <>
+                <div className="bg-yellow-50 border border-yellow-100 rounded-lg p-3">
+                  <div className="flex items-start">
+                    <div className="flex-1">
+                      <p className="text-sm text-yellow-800 mb-1 font-medium">Camera Check-in Required</p>
+                      <p className="text-xs text-yellow-700">
+                        You need to check in to the camera before performing any actions. This allows the camera to identify you and associate your actions.
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-
-              <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
-                <div>
-                  <div className="text-xs font-medium text-gray-500">Network</div>
-                  <div className="text-sm text-gray-900">Solana Devnet</div>
+                
+                {checkInSuccess && (
+                  <div className="bg-green-50 text-green-700 px-3 py-2 rounded-lg text-sm flex items-center">
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Check-in successful! You can now proceed with your action.
+                  </div>
+                )}
+                
+                {error && (
+                  <div className="bg-red-50 text-red-700 px-2 py-1.5 rounded-lg text-xs">
+                    {error}
+                  </div>
+                )}
+                
+                <div className="flex gap-2 pt-2">
+                  {checkInSuccess ? (
+                    <button
+                      onClick={handleConfirmTransaction}
+                      disabled={loading}
+                      className="flex-1 bg-blue-600 text-white py-2 px-3 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                    >
+                      Continue with {formatActionType(transactionData?.type || '')}
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={handleCheckIn}
+                        disabled={isCheckingIn}
+                        className="flex-1 bg-blue-600 text-white py-2 px-3 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isCheckingIn ? 'Checking in...' : 'Check In'}
+                      </button>
+                      <button
+                        onClick={onClose}
+                        className="flex-1 bg-gray-100 text-gray-700 py-2 px-3 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  )}
                 </div>
-              </div>
+              </>
+            ) : (
+              // Show normal transaction UI if already checked in
+              <>
+                {/* Transaction Details */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
+                    <div>
+                      <div className="text-xs font-medium text-gray-500">Action</div>
+                      <div className="text-sm text-gray-900">
+                        {formatActionType(transactionData?.type || '')}
+                      </div>
+                    </div>
+                  </div>
 
-              <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
-                <div>
-                  <div className="text-xs font-medium text-gray-500">Fee</div>
-                  <div className="text-sm text-gray-900">{fee} lamports</div>
+                  <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
+                    <div>
+                      <div className="text-xs font-medium text-gray-500">Network</div>
+                      <div className="text-sm text-gray-900">Solana Devnet</div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
+                    <div>
+                      <div className="text-xs font-medium text-gray-500">Fee</div>
+                      <div className="text-sm text-gray-900">{fee} lamports</div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
 
-            {/* Status Messages */}
-            {status && (
-              <div className="bg-blue-50 text-blue-700 px-2 py-1.5 rounded-lg text-xs flex items-center">
-                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current mr-2" />
-                {status}
-              </div>
+                {/* Status Messages */}
+                {status && (
+                  <div className="bg-blue-50 text-blue-700 px-2 py-1.5 rounded-lg text-xs flex items-center">
+                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current mr-2" />
+                    {status}
+                  </div>
+                )}
+
+                {error && (
+                  <div className="bg-red-50 text-red-700 px-2 py-1.5 rounded-lg text-xs">
+                    {error}
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={handleConfirmTransaction}
+                    disabled={loading}
+                    className="flex-1 bg-blue-600 text-white py-2 px-3 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading ? 'Processing...' : 'Confirm'}
+                  </button>
+                  {!loading && (
+                    <button
+                      onClick={onClose}
+                      className="flex-1 bg-gray-100 text-gray-700 py-2 px-3 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </>
             )}
-
-            {error && (
-              <div className="bg-red-50 text-red-700 px-2 py-1.5 rounded-lg text-xs">
-                {error}
-              </div>
-            )}
-
-            {/* Action Buttons */}
-            <div className="flex gap-2 pt-2">
-              <button
-                onClick={handleConfirmTransaction}
-                disabled={loading}
-                className="flex-1 bg-blue-600 text-white py-2 px-3 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {loading ? 'Processing...' : 'Confirm'}
-              </button>
-              {!loading && (
-                <button
-                  onClick={onClose}
-                  className="flex-1 bg-gray-100 text-gray-700 py-2 px-3 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors"
-                >
-                  Cancel
-                </button>
-              )}
-            </div>
           </div>
         </Dialog.Panel>
       </div>

@@ -1,36 +1,12 @@
-import { useEffect, useState, forwardRef, useRef, useCallback, useMemo } from 'react';
-import { Camera, Video, Power, User, Radio, Signal } from 'lucide-react';
+import { useEffect, useState, forwardRef, useImperativeHandle, useRef, useCallback, useMemo } from 'react';
+import { Camera, Video, Power, User, Radio, Signal, Play, StopCircle, RefreshCw, Plug, Unplug, LogIn, LogOut } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { ProfileModal } from '../profile/ProfileModal';
-import { IPFSMedia } from '../storage/ipfs/ipfs-service';
 import MediaViewer from '../media/MediaViewer';
 import { timelineService } from './timeline-service';
 import { socialService } from '../auth/social/social-service';
-
-export type TimelineEventType =
-  | 'initialization'
-  | 'user_connected'
-  | 'photo_captured'
-  | 'video_recorded'
-  | 'stream_started'
-  | 'stream_ended';
-
-interface TimelineUser {
-  address: string;
-  username?: string;
-  displayName?: string;
-  pfpUrl?: string;
-}
-
-interface TimelineEvent {
-  id: string;
-  type: TimelineEventType;
-  user: TimelineUser;
-  timestamp: number;
-  transactionId?: string;
-  mediaUrl?: string;
-  cameraId?: string;
-}
+import { TimelineEvent, TimelineEventType, TimelineUser } from './timeline-types';
+import { IPFSMedia } from '../storage/ipfs/ipfs-service';
 
 interface TimelineProps {
   filter?: 'all' | 'camera' | 'my';
@@ -60,6 +36,10 @@ const getEventText = (type: TimelineEventType): string => {
       return 'started the stream';
     case 'stream_ended':
       return 'ended the stream';
+    case 'check_in':
+      return 'checked in to the camera';
+    case 'check_out':
+      return 'checked out from the camera';
   }
 };
 
@@ -261,6 +241,13 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       ref.current = {
         addEvent: (event: Omit<TimelineEvent, 'id'>) => {
           timelineService.emitEvent(event);
+        },
+        refreshTimeline: () => {
+          timelineService.refreshEvents();
+          // Also request from server if connected
+          if (cameraId) {
+            timelineService.joinCamera(cameraId);
+          }
         }
       };
     }
@@ -304,6 +291,10 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
         return <Radio className="w-4 h-4 text-red-500" />;
       case 'stream_ended':
         return <Signal className="w-4 h-4 text-gray-400" />;
+      case 'check_in':
+        return <User className="w-4 h-4 text-green-500" />;
+      case 'check_out':
+        return <User className="w-4 h-4 text-gray-400" />;
       default:
         return <User className="w-4 h-4" />;
     }

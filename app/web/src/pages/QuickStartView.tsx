@@ -2,16 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useWallet, useConnection } from '@solana/wallet-adapter-react';
+import { useConnection } from '@solana/wallet-adapter-react';
 import { motion } from 'framer-motion';
-import { useCamera, CameraData, fetchCameraByPublicKey } from '../camera/CameraProvider';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { DynamicWidget } from '@dynamic-labs/sdk-react-core';
 import { PublicKey, Transaction } from '@solana/web3.js';
 import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import { CAMERA_ACTIVATION_PROGRAM_ID } from '../anchor/setup';
-import { IDL, MySolanaProject } from '../anchor/idl';
+import { IDL } from '../anchor/idl';
 import { isSolanaWallet } from '@dynamic-labs/solana';
+import { useCamera, CameraData, fetchCameraByPublicKey } from '../camera/CameraProvider';
 
 interface CameraState {
   preview?: string;
@@ -19,10 +18,8 @@ interface CameraState {
   recentActivity: number;
 }
 
-
 export default function QuickStartView() {
-  const { cameraId, timestamp } = useParams<{ cameraId: string; sessionId: string; timestamp: string }>();
-  useWallet();
+  const { cameraId, timestamp } = useParams<{ cameraId: string; timestamp: string }>();
   const { connection } = useConnection();
   const { primaryWallet } = useDynamicContext();
   const { setSelectedCamera } = useCamera();
@@ -35,17 +32,13 @@ export default function QuickStartView() {
     activeUsers: 0,
     recentActivity: 0
   });
-  const [program, setProgram] = useState<Program<MySolanaProject> | null>(null);
-  const [programLoading, setProgramLoading] = useState(true);
-  const [programError, setProgramError] = useState<Error | null>(null);
+  const [, setProgram] = useState<Program<any> | null>(null);
   
   // Initialize program when wallet is connected
   useEffect(() => {
     if (!primaryWallet?.address || !connection) return;
 
     try {
-      setProgramLoading(true);
-      
       // Check if it's a Solana wallet
       if (!isSolanaWallet(primaryWallet)) {
         throw new Error('This is not a Solana wallet');
@@ -59,23 +52,31 @@ export default function QuickStartView() {
         connection,
         {
           publicKey: new PublicKey(primaryWallet.address),
-          // We don't need these methods as we'll use the wallet directly
-          signTransaction: async (tx: Transaction) => tx,
-          signAllTransactions: async (txs: Transaction[]) => txs,
+          signTransaction: async (tx: Transaction) => {
+            if (!isSolanaWallet(primaryWallet)) {
+              throw new Error('Not a Solana wallet');
+            }
+            const signer = await primaryWallet.getSigner();
+            return await signer.signTransaction(tx);
+          },
+          signAllTransactions: async (txs: Transaction[]) => {
+            if (!isSolanaWallet(primaryWallet)) {
+              throw new Error('Not a Solana wallet');
+            }
+            const signer = await primaryWallet.getSigner();
+            return await Promise.all(txs.map(tx => signer.signTransaction(tx)));
+          },
         } as any,
         { commitment: 'confirmed' }
       );
 
       // Create the program
-      const prog = new Program<MySolanaProject>(IDL as any, CAMERA_ACTIVATION_PROGRAM_ID, provider);
+      const prog = new Program(IDL as any, CAMERA_ACTIVATION_PROGRAM_ID, provider);
       setProgram(prog);
       console.log('Program initialized with ID:', prog.programId.toString());
-      setProgramError(null);
     } catch (err) {
       console.error('Failed to initialize program:', err);
-      setProgramError(err instanceof Error ? err : new Error(String(err)));
-    } finally {
-      setProgramLoading(false);
+      setError(`Program initialization error: ${err instanceof Error ? err.message : String(err)}`);
     }
   }, [primaryWallet?.address, connection]);
   
@@ -91,105 +92,92 @@ export default function QuickStartView() {
     return sessionAge < 300000;
   };
   
-  // Fetch camera state
+  // Fetch camera data
   useEffect(() => {
-    const fetchCameraState = async () => {
+    const fetchCameraData = async () => {
+      if (!cameraId) {
+        setError('No camera ID provided');
+        setLoading(false);
+        return;
+      }
+
       try {
-        // First check if the session is valid
-        if (!isValidSession()) {
+        // First check if the session is valid when there's a timestamp
+        if (timestamp && !isValidSession()) {
           setError('This session has expired. Please scan the NFC tag again.');
           setLoading(false);
           return;
         }
         
-        // Wait for program to be initialized
-        if (programLoading) {
-          console.log('Waiting for program to initialize...');
-          return;
-        }
+        // Decode the camera public key from the URL
+        const decodedPublicKey = decodeURIComponent(cameraId);
+        console.log(`Attempting to fetch camera with public key: "${decodedPublicKey}"`);
         
-        if (programError) {
-          setError(`Program initialization error: ${programError.message}`);
+        if (!connection) {
+          setError('Solana connection not available');
           setLoading(false);
           return;
         }
         
-        if (!program) {
-          setError('Program not available. Please connect your wallet.');
-          setLoading(false);
-          return;
-        }
-        
-        // Then fetch the camera data from the blockchain
-        if (cameraId) {
-          // Decode the camera public key from the URL
-          const decodedPublicKey = decodeURIComponent(cameraId);
-          console.log(`Attempting to fetch camera with public key: "${decodedPublicKey}"`);
-          
-          // Try to fetch the camera using its public key
-          try {
-            const cameraData = await fetchCameraByPublicKey(decodedPublicKey, connection);
-            if (cameraData) {
-              console.log(`Successfully loaded camera: ${cameraData.metadata.name} (${cameraData.publicKey})`);
-              // Store the camera in the provider for later use
-              setSelectedCamera(cameraData);
-              setCamera(cameraData);
-              
-              // Fetch additional camera state from API if needed
-              try {
-                const response = await fetch(`${window.location.origin}/api/camera/${cameraData.publicKey}/state`);
-                if (response.ok) {
-                  const data = await response.json();
-                  setCameraState(data);
-                }
-              } catch (apiError) {
-                console.log('API not available, using default camera state');
-                // Use default camera state if API is not available
-                setCameraState({
-                  preview: undefined,
-                  activeUsers: Math.floor(Math.random() * 5),
-                  recentActivity: Math.floor(Math.random() * 20)
-                });
-              }
-            } else {
-              console.error(`Camera with public key ${decodedPublicKey} not found`);
-              setError(`Camera with public key ${decodedPublicKey} not found. Please make sure the camera is registered.`);
-            }
-          } catch (fetchError) {
-            console.error('Error fetching camera:', fetchError);
-            setError(`Error fetching camera: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}`);
+        // Try to fetch the camera using its public key
+        try {
+          const cameraData = await fetchCameraByPublicKey(decodedPublicKey, connection);
+          if (cameraData) {
+            console.log(`Successfully loaded camera: ${cameraData.metadata.name} (${cameraData.publicKey})`);
+            // Store the camera in the provider for later use
+            setSelectedCamera(cameraData);
+            setCamera(cameraData);
+            
+            // Store camera ID in localStorage for persistence
+            localStorage.setItem('directCameraId', decodedPublicKey);
+            
+            // Simulate camera state with mock data
+            setCameraState({
+              preview: undefined,
+              activeUsers: Math.floor(Math.random() * 5),
+              recentActivity: Math.floor(Math.random() * 20)
+            });
+          } else {
+            console.log(`Camera with public key ${decodedPublicKey} not found, but we'll show the ID anyway`);
+            // Even if we can't fetch full camera data, still set the ID for navigation
+            localStorage.setItem('directCameraId', decodedPublicKey);
           }
-        } else {
-          setError('No camera ID provided');
+        } catch (fetchError) {
+          console.error('Error fetching camera:', fetchError);
+          setError(`Error fetching camera: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}`);
         }
         
         setLoading(false);
       } catch (err) {
-        console.error('Failed to fetch camera state:', err);
+        console.error('Failed to fetch camera data:', err);
         setError(`Failed to fetch camera information: ${err instanceof Error ? err.message : 'Unknown error'}`);
         setLoading(false);
       }
     };
     
-    fetchCameraState();
-  }, [cameraId, program, programLoading, programError, timestamp, setSelectedCamera, connection]);
+    fetchCameraData();
+  }, [cameraId, connection, timestamp, setSelectedCamera]);
 
-  const handleQuickStart = async () => {
+  const handleQuickStart = () => {
     if (!primaryWallet) {
       // User needs to authenticate first
       return;
     }
     
     // Navigate to the camera-specific view
-    if (cameraId && camera) {
-      navigate(`/app/camera/${camera.publicKey}`);
+    if (cameraId) {
+      const decodedCameraId = decodeURIComponent(cameraId);
+      navigate(`/app/camera/${decodedCameraId}`);
     }
   };
 
-  if (loading || programLoading) {
+  if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-black/80">
-        <div className="text-white">Loading camera state...</div>
+        <div className="text-white flex flex-col items-center">
+          <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-white mb-4"></div>
+          <div>Loading camera...</div>
+        </div>
       </div>
     );
   }
@@ -201,10 +189,10 @@ export default function QuickStartView() {
           <h2 className="text-xl font-bold text-red-600 mb-4">Error</h2>
           <p className="text-gray-700 mb-6">{error}</p>
           <button
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/app')}
             className="w-full bg-blue-600 text-white rounded-lg py-3 font-bold"
           >
-            Return to Home
+            Go to App
           </button>
         </div>
       </div>
@@ -220,14 +208,13 @@ export default function QuickStartView() {
       <div className="flex-1 p-4">
         <div className="max-w-lg mx-auto bg-white rounded-lg overflow-hidden">
           <div className="aspect-video bg-gray-900 relative">
-            {cameraState.preview && (
+            {cameraState.preview ? (
               <img 
                 src={cameraState.preview} 
                 alt="Camera Preview" 
                 className="absolute inset-0 w-full h-full object-cover"
               />
-            )}
-            {!cameraState.preview && (
+            ) : (
               <div className="absolute inset-0 flex items-center justify-center text-white">
                 Camera Preview Not Available
               </div>
@@ -236,7 +223,7 @@ export default function QuickStartView() {
           
           <div className="p-4">
             <h2 className="text-lg font-bold">Camera Ready</h2>
-            {camera && (
+            {camera ? (
               <>
                 <p className="text-sm text-gray-600 mb-2">
                   Name: {camera.metadata.name}
@@ -247,44 +234,42 @@ export default function QuickStartView() {
                 <p className="text-sm text-gray-600 mb-2">
                   ID: {camera.publicKey}
                 </p>
+                <p className="text-sm text-gray-600 mb-4">
+                  Active Users: {cameraState.activeUsers}
+                </p>
+              </>
+            ) : (
+              <>
                 <p className="text-sm text-gray-600 mb-2">
-                  Status: <span className={camera.isActive ? 'text-green-600' : 'text-red-600'}>
-                    {camera.isActive ? 'Active' : 'Inactive'}
-                  </span>
+                  ID: {cameraId ? decodeURIComponent(cameraId) : 'Unknown'}
+                </p>
+                <p className="text-sm text-gray-600 mb-4">
+                  No additional camera information available
                 </p>
               </>
             )}
-            {cameraState.activeUsers > 0 && (
-              <p className="text-sm text-gray-600">
-                {cameraState.activeUsers} people recording now
-              </p>
-            )}
-            {cameraState.recentActivity > 0 && (
-              <p className="text-sm text-gray-600">
-                {cameraState.recentActivity} recordings today
-              </p>
-            )}
+            
+            <p className="text-sm font-medium mb-6">
+              This camera is ready to use. Click below to access the camera.
+            </p>
+            
+            <button
+              onClick={handleQuickStart}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium transition-colors"
+            >
+              Access Camera
+            </button>
           </div>
         </div>
       </div>
       
-      <div className="p-4">
-        {!primaryWallet ? (
-          <div className="mb-4">
-            <p className="text-white text-center mb-4">Please connect your wallet to continue</p>
-            <div className="flex justify-center">
-              <DynamicWidget />
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={handleQuickStart}
-            className="w-full bg-purple-600 text-white rounded-lg py-4 font-bold text-lg"
-          >
-            Connect to Camera
-          </button>
-        )}
+      <div className="p-4 bg-white">
+        <button
+          onClick={() => navigate('/app')}
+          className="w-full py-3 border border-gray-300 rounded-lg font-medium text-gray-800"
+        >
+          Go to App Home
+        </button>
       </div>
     </motion.div>
   );

@@ -1,9 +1,12 @@
-export type MySolanaProject = {
+export type CameraNetwork = {
   "version": "0.1.0",
-  "name": "my_solana_project",
+  "name": "camera_network",
   "instructions": [
     {
       "name": "initialize",
+      "docs": [
+        "Initialize the camera registry (admin only)"
+      ],
       "accounts": [
         {
           "name": "authority",
@@ -11,7 +14,7 @@ export type MySolanaProject = {
           "isSigner": true
         },
         {
-          "name": "registry",
+          "name": "cameraRegistry",
           "isMut": true,
           "isSigner": false
         },
@@ -25,6 +28,9 @@ export type MySolanaProject = {
     },
     {
       "name": "registerCamera",
+      "docs": [
+        "Register a new camera to the network"
+      ],
       "accounts": [
         {
           "name": "owner",
@@ -32,14 +38,35 @@ export type MySolanaProject = {
           "isSigner": true
         },
         {
-          "name": "registry",
+          "name": "cameraRegistry",
           "isMut": true,
           "isSigner": false
         },
         {
           "name": "camera",
           "isMut": true,
-          "isSigner": false
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "camera"
+              },
+              {
+                "kind": "arg",
+                "type": {
+                  "defined": "RegisterCameraArgs"
+                },
+                "path": "args.name"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "path": "owner"
+              }
+            ]
+          }
         },
         {
           "name": "systemProgram",
@@ -58,6 +85,9 @@ export type MySolanaProject = {
     },
     {
       "name": "updateCamera",
+      "docs": [
+        "Update camera information"
+      ],
       "accounts": [
         {
           "name": "owner",
@@ -80,58 +110,10 @@ export type MySolanaProject = {
       ]
     },
     {
-      "name": "recordActivity",
-      "accounts": [
-        {
-          "name": "owner",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "systemProgram",
-          "isMut": false,
-          "isSigner": false
-        }
-      ],
-      "args": [
-        {
-          "name": "args",
-          "type": {
-            "defined": "RecordActivityArgs"
-          }
-        }
-      ]
-    },
-    {
-      "name": "setCameraActive",
-      "accounts": [
-        {
-          "name": "owner",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        }
-      ],
-      "args": [
-        {
-          "name": "args",
-          "type": {
-            "defined": "SetCameraActiveArgs"
-          }
-        }
-      ]
-    },
-    {
       "name": "deregisterCamera",
+      "docs": [
+        "Deregister a camera from the network"
+      ],
       "accounts": [
         {
           "name": "owner",
@@ -139,63 +121,185 @@ export type MySolanaProject = {
           "isSigner": true
         },
         {
-          "name": "registry",
+          "name": "cameraRegistry",
           "isMut": true,
           "isSigner": false
         },
         {
           "name": "camera",
           "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "systemProgram",
-          "isMut": false,
           "isSigner": false
         }
       ],
       "args": []
+    },
+    {
+      "name": "setCameraActive",
+      "docs": [
+        "Set camera active or inactive status"
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "camera",
+          "isMut": true,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "isActive",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "checkIn",
+      "docs": [
+        "Check in user to a camera"
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "camera",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "session",
+          "isMut": true,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "session"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "path": "user"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "account": "CameraAccount",
+                "path": "camera"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "useFaceRecognition",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "checkOut",
+      "docs": [
+        "Check out user from a camera"
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "camera",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "session",
+          "isMut": true,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "session"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "path": "user"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "account": "CameraAccount",
+                "path": "camera"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "enrollFace",
+      "docs": [
+        "Enroll a face for facial recognition"
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "faceNft",
+          "isMut": true,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "face-nft"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "encryptedEmbedding",
+          "type": "bytes"
+        }
+      ]
     }
   ],
   "accounts": [
-    {
-      "name": "cameraAccount",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "owner",
-            "type": "publicKey"
-          },
-          {
-            "name": "isActive",
-            "type": "bool"
-          },
-          {
-            "name": "activityCounter",
-            "type": "u64"
-          },
-          {
-            "name": "lastActivityType",
-            "type": {
-              "option": {
-                "defined": "ActivityType"
-              }
-            }
-          },
-          {
-            "name": "metadata",
-            "type": {
-              "defined": "CameraMetadata"
-            }
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
     {
       "name": "cameraRegistry",
       "type": {
@@ -210,6 +314,220 @@ export type MySolanaProject = {
             "type": "u64"
           },
           {
+            "name": "feeAccount",
+            "type": "publicKey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "cameraAccount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "publicKey"
+          },
+          {
+            "name": "metadata",
+            "type": {
+              "defined": "CameraMetadata"
+            }
+          },
+          {
+            "name": "isActive",
+            "type": "bool"
+          },
+          {
+            "name": "activityCounter",
+            "type": "u64"
+          },
+          {
+            "name": "lastActivityAt",
+            "type": "i64"
+          },
+          {
+            "name": "lastActivityType",
+            "type": "u8"
+          },
+          {
+            "name": "accessCount",
+            "type": "u64"
+          },
+          {
+            "name": "features",
+            "type": {
+              "defined": "CameraFeatures"
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "userSession",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "publicKey"
+          },
+          {
+            "name": "camera",
+            "type": "publicKey"
+          },
+          {
+            "name": "checkInTime",
+            "type": "i64"
+          },
+          {
+            "name": "lastActivity",
+            "type": "i64"
+          },
+          {
+            "name": "enabledFeatures",
+            "type": {
+              "defined": "SessionFeatures"
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "faceData",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "publicKey"
+          },
+          {
+            "name": "dataHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "authorizedCameras",
+            "type": {
+              "vec": "publicKey"
+            }
+          },
+          {
+            "name": "lastUsed",
+            "type": "i64"
+          },
+          {
+            "name": "creationDate",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "gestureConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "publicKey"
+          },
+          {
+            "name": "gestureType",
+            "type": "u8"
+          },
+          {
+            "name": "dataHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "createdAt",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "cameraMessage",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "publicKey"
+          },
+          {
+            "name": "camera",
+            "type": "publicKey"
+          },
+          {
+            "name": "message",
+            "type": "string"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "accessGrant",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "camera",
+            "type": "publicKey"
+          },
+          {
+            "name": "grantor",
+            "type": "publicKey"
+          },
+          {
+            "name": "grantee",
+            "type": "publicKey"
+          },
+          {
+            "name": "expiresAt",
+            "type": "i64"
+          },
+          {
             "name": "bump",
             "type": "u8"
           }
@@ -219,19 +537,92 @@ export type MySolanaProject = {
   ],
   "types": [
     {
-      "name": "RecordActivityArgs",
+      "name": "CameraMetadata",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "activityType",
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "model",
+            "type": "string"
+          },
+          {
+            "name": "location",
             "type": {
-              "defined": "ActivityType"
+              "option": {
+                "array": [
+                  "i64",
+                  2
+                ]
+              }
             }
           },
           {
-            "name": "metadata",
+            "name": "registrationDate",
+            "type": "i64"
+          },
+          {
+            "name": "description",
             "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CameraFeatures",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "faceRecognition",
+            "type": "bool"
+          },
+          {
+            "name": "gestureControl",
+            "type": "bool"
+          },
+          {
+            "name": "videoRecording",
+            "type": "bool"
+          },
+          {
+            "name": "liveStreaming",
+            "type": "bool"
+          },
+          {
+            "name": "messaging",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionFeatures",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "faceRecognition",
+            "type": "bool"
+          },
+          {
+            "name": "gestureControl",
+            "type": "bool"
+          },
+          {
+            "name": "videoRecording",
+            "type": "bool"
+          },
+          {
+            "name": "liveStreaming",
+            "type": "bool"
+          },
+          {
+            "name": "messaging",
+            "type": "bool"
           }
         ]
       }
@@ -261,20 +652,14 @@ export type MySolanaProject = {
             }
           },
           {
-            "name": "fee",
-            "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "SetCameraActiveArgs",
-      "type": {
-        "kind": "struct",
-        "fields": [
+            "name": "description",
+            "type": "string"
+          },
           {
-            "name": "isActive",
-            "type": "bool"
+            "name": "features",
+            "type": {
+              "defined": "CameraFeatures"
+            }
           }
         ]
       }
@@ -302,10 +687,34 @@ export type MySolanaProject = {
             }
           },
           {
-            "name": "model",
+            "name": "description",
             "type": {
               "option": "string"
             }
+          },
+          {
+            "name": "features",
+            "type": {
+              "option": {
+                "defined": "CameraFeatures"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ActivityArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "activityType",
+            "type": "u8"
+          },
+          {
+            "name": "metadata",
+            "type": "string"
           }
         ]
       }
@@ -316,6 +725,12 @@ export type MySolanaProject = {
         "kind": "enum",
         "variants": [
           {
+            "name": "CheckIn"
+          },
+          {
+            "name": "CheckOut"
+          },
+          {
             "name": "PhotoCapture"
           },
           {
@@ -325,42 +740,10 @@ export type MySolanaProject = {
             "name": "LiveStream"
           },
           {
-            "name": "Custom"
-          }
-        ]
-      }
-    },
-    {
-      "name": "CameraMetadata",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "name",
-            "type": "string"
+            "name": "FaceRecognition"
           },
           {
-            "name": "location",
-            "type": {
-              "option": {
-                "array": [
-                  "i64",
-                  2
-                ]
-              }
-            }
-          },
-          {
-            "name": "model",
-            "type": "string"
-          },
-          {
-            "name": "registrationDate",
-            "type": "i64"
-          },
-          {
-            "name": "lastActivity",
-            "type": "i64"
+            "name": "Other"
           }
         ]
       }
@@ -368,10 +751,15 @@ export type MySolanaProject = {
   ],
   "events": [
     {
-      "name": "ActivityRecorded",
+      "name": "CameraRegistered",
       "fields": [
         {
           "name": "camera",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "owner",
           "type": "publicKey",
           "index": false
         },
@@ -381,25 +769,93 @@ export type MySolanaProject = {
           "index": false
         },
         {
-          "name": "activityNumber",
-          "type": "u64",
-          "index": false
-        },
-        {
-          "name": "activityType",
-          "type": {
-            "defined": "ActivityType"
-          },
+          "name": "model",
+          "type": "string",
           "index": false
         },
         {
           "name": "timestamp",
           "type": "i64",
           "index": false
+        }
+      ]
+    },
+    {
+      "name": "UserCheckedIn",
+      "fields": [
+        {
+          "name": "user",
+          "type": "publicKey",
+          "index": false
         },
         {
-          "name": "metadata",
-          "type": "string",
+          "name": "camera",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "session",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
+    },
+    {
+      "name": "UserCheckedOut",
+      "fields": [
+        {
+          "name": "user",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "camera",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "session",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "duration",
+          "type": "i64",
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
+    },
+    {
+      "name": "ActivityRecorded",
+      "fields": [
+        {
+          "name": "camera",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "user",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "activityType",
+          "type": "u8",
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
           "index": false
         }
       ]
@@ -418,28 +874,76 @@ export type MySolanaProject = {
     },
     {
       "code": 6002,
+      "name": "CameraNotFound",
+      "msg": "Camera not found in registry"
+    },
+    {
+      "code": 6003,
+      "name": "CameraNameExists",
+      "msg": "Camera name already exists"
+    },
+    {
+      "code": 6004,
       "name": "InvalidCameraData",
       "msg": "Invalid camera data provided"
     },
     {
-      "code": 6003,
-      "name": "CameraIdExists",
-      "msg": "Camera ID already exists"
+      "code": 6005,
+      "name": "NoActiveSession",
+      "msg": "No active session found"
     },
     {
-      "code": 6004,
-      "name": "InsufficientFee",
-      "msg": "The fee is insufficient"
+      "code": 6006,
+      "name": "SessionExists",
+      "msg": "Session already exists"
+    },
+    {
+      "code": 6007,
+      "name": "AccessDenied",
+      "msg": "Access denied to this camera"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidFaceData",
+      "msg": "Face data invalid or not properly formatted"
+    },
+    {
+      "code": 6009,
+      "name": "FaceDataExists",
+      "msg": "Face data already registered for this user"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidGestureData",
+      "msg": "Gesture data invalid or improperly formatted"
+    },
+    {
+      "code": 6011,
+      "name": "CameraAlreadyAuthorized",
+      "msg": "Camera is already authorized for face recognition"
+    },
+    {
+      "code": 6012,
+      "name": "InvalidAccessDuration",
+      "msg": "Invalid temporary access duration"
+    },
+    {
+      "code": 6013,
+      "name": "AccessGrantExpired",
+      "msg": "Access grant has expired"
     }
   ]
 };
 
-export const IDL: MySolanaProject = {
+export const IDL: CameraNetwork = {
   "version": "0.1.0",
-  "name": "my_solana_project",
+  "name": "camera_network",
   "instructions": [
     {
       "name": "initialize",
+      "docs": [
+        "Initialize the camera registry (admin only)"
+      ],
       "accounts": [
         {
           "name": "authority",
@@ -447,7 +951,7 @@ export const IDL: MySolanaProject = {
           "isSigner": true
         },
         {
-          "name": "registry",
+          "name": "cameraRegistry",
           "isMut": true,
           "isSigner": false
         },
@@ -461,6 +965,9 @@ export const IDL: MySolanaProject = {
     },
     {
       "name": "registerCamera",
+      "docs": [
+        "Register a new camera to the network"
+      ],
       "accounts": [
         {
           "name": "owner",
@@ -468,14 +975,35 @@ export const IDL: MySolanaProject = {
           "isSigner": true
         },
         {
-          "name": "registry",
+          "name": "cameraRegistry",
           "isMut": true,
           "isSigner": false
         },
         {
           "name": "camera",
           "isMut": true,
-          "isSigner": false
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "camera"
+              },
+              {
+                "kind": "arg",
+                "type": {
+                  "defined": "RegisterCameraArgs"
+                },
+                "path": "args.name"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "path": "owner"
+              }
+            ]
+          }
         },
         {
           "name": "systemProgram",
@@ -494,6 +1022,9 @@ export const IDL: MySolanaProject = {
     },
     {
       "name": "updateCamera",
+      "docs": [
+        "Update camera information"
+      ],
       "accounts": [
         {
           "name": "owner",
@@ -516,58 +1047,10 @@ export const IDL: MySolanaProject = {
       ]
     },
     {
-      "name": "recordActivity",
-      "accounts": [
-        {
-          "name": "owner",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "systemProgram",
-          "isMut": false,
-          "isSigner": false
-        }
-      ],
-      "args": [
-        {
-          "name": "args",
-          "type": {
-            "defined": "RecordActivityArgs"
-          }
-        }
-      ]
-    },
-    {
-      "name": "setCameraActive",
-      "accounts": [
-        {
-          "name": "owner",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        }
-      ],
-      "args": [
-        {
-          "name": "args",
-          "type": {
-            "defined": "SetCameraActiveArgs"
-          }
-        }
-      ]
-    },
-    {
       "name": "deregisterCamera",
+      "docs": [
+        "Deregister a camera from the network"
+      ],
       "accounts": [
         {
           "name": "owner",
@@ -575,63 +1058,185 @@ export const IDL: MySolanaProject = {
           "isSigner": true
         },
         {
-          "name": "registry",
+          "name": "cameraRegistry",
           "isMut": true,
           "isSigner": false
         },
         {
           "name": "camera",
           "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "systemProgram",
-          "isMut": false,
           "isSigner": false
         }
       ],
       "args": []
+    },
+    {
+      "name": "setCameraActive",
+      "docs": [
+        "Set camera active or inactive status"
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "camera",
+          "isMut": true,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "isActive",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "checkIn",
+      "docs": [
+        "Check in user to a camera"
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "camera",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "session",
+          "isMut": true,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "session"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "path": "user"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "account": "CameraAccount",
+                "path": "camera"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "useFaceRecognition",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "checkOut",
+      "docs": [
+        "Check out user from a camera"
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "camera",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "session",
+          "isMut": true,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "session"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "path": "user"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "account": "CameraAccount",
+                "path": "camera"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "enrollFace",
+      "docs": [
+        "Enroll a face for facial recognition"
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "faceNft",
+          "isMut": true,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "face-nft"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "encryptedEmbedding",
+          "type": "bytes"
+        }
+      ]
     }
   ],
   "accounts": [
-    {
-      "name": "cameraAccount",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "owner",
-            "type": "publicKey"
-          },
-          {
-            "name": "isActive",
-            "type": "bool"
-          },
-          {
-            "name": "activityCounter",
-            "type": "u64"
-          },
-          {
-            "name": "lastActivityType",
-            "type": {
-              "option": {
-                "defined": "ActivityType"
-              }
-            }
-          },
-          {
-            "name": "metadata",
-            "type": {
-              "defined": "CameraMetadata"
-            }
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
     {
       "name": "cameraRegistry",
       "type": {
@@ -646,6 +1251,220 @@ export const IDL: MySolanaProject = {
             "type": "u64"
           },
           {
+            "name": "feeAccount",
+            "type": "publicKey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "cameraAccount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "publicKey"
+          },
+          {
+            "name": "metadata",
+            "type": {
+              "defined": "CameraMetadata"
+            }
+          },
+          {
+            "name": "isActive",
+            "type": "bool"
+          },
+          {
+            "name": "activityCounter",
+            "type": "u64"
+          },
+          {
+            "name": "lastActivityAt",
+            "type": "i64"
+          },
+          {
+            "name": "lastActivityType",
+            "type": "u8"
+          },
+          {
+            "name": "accessCount",
+            "type": "u64"
+          },
+          {
+            "name": "features",
+            "type": {
+              "defined": "CameraFeatures"
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "userSession",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "publicKey"
+          },
+          {
+            "name": "camera",
+            "type": "publicKey"
+          },
+          {
+            "name": "checkInTime",
+            "type": "i64"
+          },
+          {
+            "name": "lastActivity",
+            "type": "i64"
+          },
+          {
+            "name": "enabledFeatures",
+            "type": {
+              "defined": "SessionFeatures"
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "faceData",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "publicKey"
+          },
+          {
+            "name": "dataHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "authorizedCameras",
+            "type": {
+              "vec": "publicKey"
+            }
+          },
+          {
+            "name": "lastUsed",
+            "type": "i64"
+          },
+          {
+            "name": "creationDate",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "gestureConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "publicKey"
+          },
+          {
+            "name": "gestureType",
+            "type": "u8"
+          },
+          {
+            "name": "dataHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "createdAt",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "cameraMessage",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "publicKey"
+          },
+          {
+            "name": "camera",
+            "type": "publicKey"
+          },
+          {
+            "name": "message",
+            "type": "string"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "accessGrant",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "camera",
+            "type": "publicKey"
+          },
+          {
+            "name": "grantor",
+            "type": "publicKey"
+          },
+          {
+            "name": "grantee",
+            "type": "publicKey"
+          },
+          {
+            "name": "expiresAt",
+            "type": "i64"
+          },
+          {
             "name": "bump",
             "type": "u8"
           }
@@ -655,19 +1474,92 @@ export const IDL: MySolanaProject = {
   ],
   "types": [
     {
-      "name": "RecordActivityArgs",
+      "name": "CameraMetadata",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "activityType",
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "model",
+            "type": "string"
+          },
+          {
+            "name": "location",
             "type": {
-              "defined": "ActivityType"
+              "option": {
+                "array": [
+                  "i64",
+                  2
+                ]
+              }
             }
           },
           {
-            "name": "metadata",
+            "name": "registrationDate",
+            "type": "i64"
+          },
+          {
+            "name": "description",
             "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CameraFeatures",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "faceRecognition",
+            "type": "bool"
+          },
+          {
+            "name": "gestureControl",
+            "type": "bool"
+          },
+          {
+            "name": "videoRecording",
+            "type": "bool"
+          },
+          {
+            "name": "liveStreaming",
+            "type": "bool"
+          },
+          {
+            "name": "messaging",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionFeatures",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "faceRecognition",
+            "type": "bool"
+          },
+          {
+            "name": "gestureControl",
+            "type": "bool"
+          },
+          {
+            "name": "videoRecording",
+            "type": "bool"
+          },
+          {
+            "name": "liveStreaming",
+            "type": "bool"
+          },
+          {
+            "name": "messaging",
+            "type": "bool"
           }
         ]
       }
@@ -697,20 +1589,14 @@ export const IDL: MySolanaProject = {
             }
           },
           {
-            "name": "fee",
-            "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "SetCameraActiveArgs",
-      "type": {
-        "kind": "struct",
-        "fields": [
+            "name": "description",
+            "type": "string"
+          },
           {
-            "name": "isActive",
-            "type": "bool"
+            "name": "features",
+            "type": {
+              "defined": "CameraFeatures"
+            }
           }
         ]
       }
@@ -738,10 +1624,34 @@ export const IDL: MySolanaProject = {
             }
           },
           {
-            "name": "model",
+            "name": "description",
             "type": {
               "option": "string"
             }
+          },
+          {
+            "name": "features",
+            "type": {
+              "option": {
+                "defined": "CameraFeatures"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ActivityArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "activityType",
+            "type": "u8"
+          },
+          {
+            "name": "metadata",
+            "type": "string"
           }
         ]
       }
@@ -752,6 +1662,12 @@ export const IDL: MySolanaProject = {
         "kind": "enum",
         "variants": [
           {
+            "name": "CheckIn"
+          },
+          {
+            "name": "CheckOut"
+          },
+          {
             "name": "PhotoCapture"
           },
           {
@@ -761,42 +1677,10 @@ export const IDL: MySolanaProject = {
             "name": "LiveStream"
           },
           {
-            "name": "Custom"
-          }
-        ]
-      }
-    },
-    {
-      "name": "CameraMetadata",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "name",
-            "type": "string"
+            "name": "FaceRecognition"
           },
           {
-            "name": "location",
-            "type": {
-              "option": {
-                "array": [
-                  "i64",
-                  2
-                ]
-              }
-            }
-          },
-          {
-            "name": "model",
-            "type": "string"
-          },
-          {
-            "name": "registrationDate",
-            "type": "i64"
-          },
-          {
-            "name": "lastActivity",
-            "type": "i64"
+            "name": "Other"
           }
         ]
       }
@@ -804,10 +1688,15 @@ export const IDL: MySolanaProject = {
   ],
   "events": [
     {
-      "name": "ActivityRecorded",
+      "name": "CameraRegistered",
       "fields": [
         {
           "name": "camera",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "owner",
           "type": "publicKey",
           "index": false
         },
@@ -817,25 +1706,93 @@ export const IDL: MySolanaProject = {
           "index": false
         },
         {
-          "name": "activityNumber",
-          "type": "u64",
-          "index": false
-        },
-        {
-          "name": "activityType",
-          "type": {
-            "defined": "ActivityType"
-          },
+          "name": "model",
+          "type": "string",
           "index": false
         },
         {
           "name": "timestamp",
           "type": "i64",
           "index": false
+        }
+      ]
+    },
+    {
+      "name": "UserCheckedIn",
+      "fields": [
+        {
+          "name": "user",
+          "type": "publicKey",
+          "index": false
         },
         {
-          "name": "metadata",
-          "type": "string",
+          "name": "camera",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "session",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
+    },
+    {
+      "name": "UserCheckedOut",
+      "fields": [
+        {
+          "name": "user",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "camera",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "session",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "duration",
+          "type": "i64",
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
+    },
+    {
+      "name": "ActivityRecorded",
+      "fields": [
+        {
+          "name": "camera",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "user",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "activityType",
+          "type": "u8",
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
           "index": false
         }
       ]
@@ -854,18 +1811,63 @@ export const IDL: MySolanaProject = {
     },
     {
       "code": 6002,
+      "name": "CameraNotFound",
+      "msg": "Camera not found in registry"
+    },
+    {
+      "code": 6003,
+      "name": "CameraNameExists",
+      "msg": "Camera name already exists"
+    },
+    {
+      "code": 6004,
       "name": "InvalidCameraData",
       "msg": "Invalid camera data provided"
     },
     {
-      "code": 6003,
-      "name": "CameraIdExists",
-      "msg": "Camera ID already exists"
+      "code": 6005,
+      "name": "NoActiveSession",
+      "msg": "No active session found"
     },
     {
-      "code": 6004,
-      "name": "InsufficientFee",
-      "msg": "The fee is insufficient"
+      "code": 6006,
+      "name": "SessionExists",
+      "msg": "Session already exists"
+    },
+    {
+      "code": 6007,
+      "name": "AccessDenied",
+      "msg": "Access denied to this camera"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidFaceData",
+      "msg": "Face data invalid or not properly formatted"
+    },
+    {
+      "code": 6009,
+      "name": "FaceDataExists",
+      "msg": "Face data already registered for this user"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidGestureData",
+      "msg": "Gesture data invalid or improperly formatted"
+    },
+    {
+      "code": 6011,
+      "name": "CameraAlreadyAuthorized",
+      "msg": "Camera is already authorized for face recognition"
+    },
+    {
+      "code": 6012,
+      "name": "InvalidAccessDuration",
+      "msg": "Invalid temporary access duration"
+    },
+    {
+      "code": 6013,
+      "name": "AccessGrantExpired",
+      "msg": "Access grant has expired"
     }
   ]
 };

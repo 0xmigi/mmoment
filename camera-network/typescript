@@ -1,0 +1,191 @@
+Script started on Mon Apr 28 13:40:51 2025
+/Users/azuolascompy/.fig/shell/zshrc.pre.zsh:1: no such file or directory: /Users/azuolascompy/.local/bin/fig
+/Users/azuolascompy/.fig/shell/zshrc.post.zsh:1: no such file or directory: /Users/azuolascompy/.local/bin/fig
+[1m[7m%[27m[1m[0m                                                                                                                                                                                         ]2;azuolascompy@MacBookPro:~/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network]1;..amera-network[0m[27m[24m[J[01;32m➜  [36mcamera-network[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004hccd xcrip     scripts[?1l>[?2004l
+]2;cd scripts]1;cd[1m[7m%[27m[1m[0m                                                                                                                                                                                         ]2;azuolascompy@MacBookPro:~/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network/scripts]1;..twork/scripts[0m[27m[24m[J[01;32m➜  [36mscripts[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004hfface-recognition-test[?1l>[?2004l
+]2;face-recognition-test]1;face-recognition-testzsh: command not found: face-recognition-test
+[1m[7m%[27m[1m[0m                                                                                                                                                                                         ]2;azuolascompy@MacBookPro:~/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network/scripts]1;..twork/scripts[0m[27m[24m[J[01;31m➜  [36mscripts[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004hyyarn face-recognition-test[?1l>[?2004l
+]2;yarn face-recognition-test]1;yarn[2K[1G[1myarn run v1.22.22[22m
+[2K[1G[33mwarning[39m ../package.json: No license field
+[2K[1G[31merror[39m Command "face-recognition-test" not found.
+[2K[1G[34minfo[39m Visit [1mhttps://yarnpkg.com/en/docs/cli/run[22m for documentation about this command.
+[1m[7m%[27m[1m[0m                                                                                                                                                                                         ]2;azuolascompy@MacBookPro:~/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network/scripts]1;..twork/scripts[0m[27m[24m[J[01;31m➜  [36mscripts[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004hyyarn face-recognition-test.js[?1l>[?2004l
+]2;yarn face-recognition-test.js]1;yarn[2K[1G[1myarn run v1.22.22[22m
+[2K[1G[33mwarning[39m ../package.json: No license field
+[2K[1G[31merror[39m Command "face-recognition-test.js" not found.
+[2K[1G[34minfo[39m Visit [1mhttps://yarnpkg.com/en/docs/cli/run[22m for documentation about this command.
+[1m[7m%[27m[1m[0m                                                                                                                                                                                         ]2;azuolascompy@MacBookPro:~/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network/scripts]1;..twork/scripts[0m[27m[24m[J[01;31m➜  [36mscripts[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004h...[?1l>[?2004l
+]2;..]1;..[1m[7m%[27m[1m[0m                                                                                                                                                                                         ]2;azuolascompy@MacBookPro:~/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network]1;..amera-network[0m[27m[24m[J[01;32m➜  [36mcamera-network[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004hyyarn deploy-working-camera[?1l>[?2004l
+]2;yarn deploy-working-camera]1;yarn[2K[1G[1myarn run v1.22.22[22m
+[2K[1G[33mwarning[39m ../package.json: No license field
+[2K[1G[2m$ node scripts/deploy-working-camera.js[22m
+=== DEPLOYING WORKING CAMERA NETWORK PROGRAM ===
+Creating program directory...
+Ensuring program files are in place...
+Copying lib.rs file...
+Creating Cargo.toml...
+Updating Anchor.toml configuration...
+Adding camera_network program to Anchor.toml
+
+Building program with Anchor...
+Running: yarn anchor build
+[2K[1G[33mwarning[39m ../package.json: No license field
+[2K[1G[31merror[39m Command "anchor" not found.
+[2K[1G[34minfo[39m Visit [1mhttps://yarnpkg.com/en/docs/cli/run[22m for documentation about this command.
+
+❌ ERROR DURING DEPLOYMENT: Command failed: yarn anchor build
+
+This could be due to:
+1. Insufficient funds in your wallet
+2. Network issues with Solana devnet
+3. Build errors in the program
+4. Program ID mismatch issues
+
+If none of these solutions help, try:
+1. Run: yarn clean (to clean the project)
+2. Run: yarn anchor build (to rebuild)
+3. Check your test-wallet.json is valid
+[2K[1G[31merror[39m Command failed with exit code 1.
+[2K[1G[34minfo[39m Visit [1mhttps://yarnpkg.com/en/docs/cli/run[22m for documentation about this command.
+[1m[7m%[27m[1m[0m                                                                                                                                                                                         ]2;azuolascompy@MacBookPro:~/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network]1;..amera-network[0m[27m[24m[J[01;31m➜  [36mcamera-network[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004hyyarn clearn  n       y  ssolana balance[?1l>[?2004l
+]2;solana balance]1;solana12.19425708 SOL
+[1m[7m%[27m[1m[0m                                                                                                                                                                                         ]2;azuolascompy@MacBookPro:~/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network]1;..amera-network[0m[27m[24m[J[01;32m➜  [36mcamera-network[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004hssolana wallet[?1l>[?2004l
+]2;solana wallet]1;solana[1;31merror:[0m Found argument '[33mwallet[0m' which wasn't expected, or isn't valid in this context
+
+USAGE:
+    solana [FLAGS] [OPTIONS] <SUBCOMMAND>
+
+For more information try [32m--help[0m
+[1m[7m%[27m[1m[0m                                                                                                                                                                                         ]2;azuolascompy@MacBookPro:~/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network]1;..amera-network[0m[27m[24m[J[01;31m➜  [36mcamera-network[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004hw ssolana balance[?1l>[?2004l
+]2;solana balance]1;solana12.19425708 SOL
+[1m[7m%[27m[1m[0m                                                                                                                                                                                         ]2;azuolascompy@MacBookPro:~/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network]1;..amera-network[0m[27m[24m[J[01;32m➜  [36mcamera-network[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004hssolana address[?1l>[?2004l
+]2;solana address]1;solana4yV9hhbG6swyNRdSTsWRxhzsw715kou1GtSyF2QohtHW
+[1m[7m%[27m[1m[0m                                                                                                                                                                                         ]2;azuolascompy@MacBookPro:~/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network]1;..amera-network[0m[27m[24m[J[01;32m➜  [36mcamera-network[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004hyyarn camera-network[?1l>[?2004l
+]2;yarn camera-network]1;yarn[2K[1G[1myarn run v1.22.22[22m
+[2K[1G[33mwarning[39m ../package.json: No license field
+[2K[1G[2m$ node scripts/camera-network-client.js[22m
+=== CAMERA NETWORK CLIENT ===
+Connecting to Solana devnet...
+IDL file found at: /Users/azuolascompy/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network/target/idl/camera_network.json
+(node:9903) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Loading wallet from /Users/azuolascompy/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network/test-wallet.json
+Wallet public key: BRmmwLEvvfGYUsJEzPD7PTzvwKqzPXaBhGxPrN3Lvoed
+Wallet balance: 3.55066736 SOL
+Successfully loaded IDL from: /Users/azuolascompy/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network/target/idl/camera_network.json
+
+=== INITIALIZING REGISTRY ===
+Registry already exists with authority: BRmmwLEvvfGYUsJEzPD7PTzvwKqzPXaBhGxPrN3Lvoed
+Camera count: 9
+
+=== REGISTERING CAMERA ===
+Camera name: Camera-9252
+Camera PDA: 7CpSfiMtr4tbUzKTw6suE71pG4tUn5kgYqppapvcB8Ei
+Camera registered successfully. Transaction signature: 4n6m35FiiQgERB5CNTTscALhVaFst7xRbvUaYwmKqRavGc4sVPXcLTrjgfgRFbnQPugqCAx8xJxpu3Vx8YsJKjSN
+Transaction explorer URL: https://explorer.solana.com/tx/4n6m35FiiQgERB5CNTTscALhVaFst7xRbvUaYwmKqRavGc4sVPXcLTrjgfgRFbnQPugqCAx8xJxpu3Vx8YsJKjSN?cluster=devnet
+✅ Camera registration confirmed
+
+=== CREATED TEST USER ===
+Test user public key: 284S7TyReJWKJHKKGJgM3HvEGaViYdpjYjnaATkKXVqN
+
+=== FUNDING TEST USER ===
+Funding transaction signature: itfPnp6mikvJRGzjGUBmDAs47aVj1zGxhM9BNhDgr76Lg7qzhS4TjUy7DNBEr9NBpt8fjgL1fKsLYy95bqf8UKw
+✅ Test user funded with 0.01 SOL
+
+=== CHECKING IN TEST USER ===
+Session PDA: B3ECmax84Dk3ScmhPk3jjgTUdZ6yUqJNkTFQ2p97zHCA
+Check-in successful. Transaction signature: 4ZpE3QnF4yW8z6EkCSTvyfC3cjb2mqUJVY7gVCD3rELGA7Qp18vum4iR3jbttwcxaqs5RQmGLQQuq96o546ByVpx
+Transaction explorer URL: https://explorer.solana.com/tx/4ZpE3QnF4yW8z6EkCSTvyfC3cjb2mqUJVY7gVCD3rELGA7Qp18vum4iR3jbttwcxaqs5RQmGLQQuq96o546ByVpx?cluster=devnet
+✅ Check-in confirmed
+
+=== SESSION DATA ===
+User: 284S7TyReJWKJHKKGJgM3HvEGaViYdpjYjnaATkKXVqN
+Camera: 7CpSfiMtr4tbUzKTw6suE71pG4tUn5kgYqppapvcB8Ei
+Check-in time: 2025-04-28T17:45:39.000Z
+Enabled features:
+- Face recognition: [33mfalse[39m
+- Gesture control: [33mfalse[39m
+- Video recording: [33mtrue[39m
+- Live streaming: [33mtrue[39m
+
+=== CHECKING OUT TEST USER ===
+Check-out successful. Transaction signature: 2Won4hghKQBAo7taF6KDte1JgWPqgtmwWm6wojinHais37vwkwASWLAw1Mj4dkuXZSuCZfYEuqBffWYtNg7EsTtx
+Transaction explorer URL: https://explorer.solana.com/tx/2Won4hghKQBAo7taF6KDte1JgWPqgtmwWm6wojinHais37vwkwASWLAw1Mj4dkuXZSuCZfYEuqBffWYtNg7EsTtx?cluster=devnet
+✅ Check-out confirmed
+✅ Session successfully closed
+
+🎉 DEMONSTRATION COMPLETED SUCCESSFULLY! 🎉
+You have successfully:
+1. Initialized the camera registry
+2. Registered a camera with full features
+3. Created a test user and funded it
+4. Checked in the test user to the camera
+5. Checked out the test user
+
+To run this demonstration again, use: yarn camera-client
+[2K[1G✨  Done in 8.38s.
+[1m[7m%[27m[1m[0m                                                                                                                                                                                         ]2;azuolascompy@MacBookPro:~/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network]1;..amera-network[0m[27m[24m[J[01;32m➜  [36mcamera-network[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004h[7myarn camera-network[27m[19D[27my[27ma[27mr[27mn[27m [27mc[27ma[27mm[27me[27mr[27ma[27m-[27mn[27me[27mt[27mw[27mo[27mr[27mk[?1l>[?2004l
+]2;yarn camera-network]1;yarn[2K[1G[1myarn run v1.22.22[22m
+[2K[1G[33mwarning[39m ../package.json: No license field
+[2K[1G[2m$ node scripts/camera-network-client.js[22m
+=== CAMERA NETWORK CLIENT ===
+Connecting to Solana devnet...
+IDL file found at: /Users/azuolascompy/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network/target/idl/camera_network.json
+(node:13055) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Loading wallet from /Users/azuolascompy/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network/test-wallet.json
+Wallet public key: BRmmwLEvvfGYUsJEzPD7PTzvwKqzPXaBhGxPrN3Lvoed
+Wallet balance: 3.53787336 SOL
+Successfully loaded IDL from: /Users/azuolascompy/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network/target/idl/camera_network.json
+
+=== INITIALIZING REGISTRY ===
+Registry already exists with authority: BRmmwLEvvfGYUsJEzPD7PTzvwKqzPXaBhGxPrN3Lvoed
+Camera count: 10
+
+=== REGISTERING CAMERA ===
+Camera name: Camera-8908
+Camera PDA: 7ZejyuEeQZWhrwjoR57trEyhDbkFwJX5RBKgsyGZXg4i
+Camera registered successfully. Transaction signature: PHKoe64f1bkcd753tPGXSoGQAWQU85K9pdxVwcqwhEGwB4RLnEXFVJ4vkGGMB8Uk3dzkDpyCYLi1FMFyXvXBj9y
+Transaction explorer URL: https://explorer.solana.com/tx/PHKoe64f1bkcd753tPGXSoGQAWQU85K9pdxVwcqwhEGwB4RLnEXFVJ4vkGGMB8Uk3dzkDpyCYLi1FMFyXvXBj9y?cluster=devnet
+✅ Camera registration confirmed
+
+=== CREATED TEST USER ===
+Test user public key: FYAm1jhuVyRJAZuuNyAGFX6ueL2Uf5HbWdXpfFVjjhFx
+
+=== FUNDING TEST USER ===
+Funding transaction signature: 22ePGwtQ2vBhr6e7konBz7c9LjSvwX9TK4QuFLgJXcTyyMvjVcb7wZQnUZpmjCDjPDaJ5SphHbQduuPfhRL4fA8p
+✅ Test user funded with 0.01 SOL
+
+=== CHECKING IN TEST USER ===
+Session PDA: CNPAkUiSBaZ1c4YwFHtXShNcxEvnECn1Wty4Xb44wrmH
+Check-in successful. Transaction signature: 5KmS72VBiwD2QAj5HoPu7PVpJXJf7zcfiQqi1fwCKYpknAjtPyXczCoiGWcR4DLNZmLimdh1iYynB7skeKwp5K1w
+Transaction explorer URL: https://explorer.solana.com/tx/5KmS72VBiwD2QAj5HoPu7PVpJXJf7zcfiQqi1fwCKYpknAjtPyXczCoiGWcR4DLNZmLimdh1iYynB7skeKwp5K1w?cluster=devnet
+✅ Check-in confirmed
+
+=== SESSION DATA ===
+User: FYAm1jhuVyRJAZuuNyAGFX6ueL2Uf5HbWdXpfFVjjhFx
+Camera: 7ZejyuEeQZWhrwjoR57trEyhDbkFwJX5RBKgsyGZXg4i
+Check-in time: 2025-04-28T18:19:26.000Z
+Enabled features:
+- Face recognition: [33mfalse[39m
+- Gesture control: [33mfalse[39m
+- Video recording: [33mtrue[39m
+- Live streaming: [33mtrue[39m
+
+=== CHECKING OUT TEST USER ===
+Check-out successful. Transaction signature: 3MA8RWkm86uxWh21RmbCxja2RsDhX8qHnph1hrcUk3dZrc5qrSHeyvDS3Zp6wmUbKrkmpZWfJFuPibr7xXWoPVfD
+Transaction explorer URL: https://explorer.solana.com/tx/3MA8RWkm86uxWh21RmbCxja2RsDhX8qHnph1hrcUk3dZrc5qrSHeyvDS3Zp6wmUbKrkmpZWfJFuPibr7xXWoPVfD?cluster=devnet
+✅ Check-out confirmed
+✅ Session successfully closed
+
+🎉 DEMONSTRATION COMPLETED SUCCESSFULLY! 🎉
+You have successfully:
+1. Initialized the camera registry
+2. Registered a camera with full features
+3. Created a test user and funded it
+4. Checked in the test user to the camera
+5. Checked out the test user
+
+To run this demonstration again, use: yarn camera-client
+[2K[1G✨  Done in 10.34s.
+[1m[7m%[27m[1m[0m                                                                                                                                                                                         ]2;azuolascompy@MacBookPro:~/Library/Mobile Documents/com~apple~CloudDocs/learning/boulderframe/mmoment/camera-network]1;..amera-network[0m[27m[24m[J[01;32m➜  [36mcamera-network[00m [01;34mgit:([31mmain[34m) [33m✗[00m [K[?1h=[?2004h

@@ -2,13 +2,26 @@ import { useState, useEffect } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, SystemProgram, Transaction, Connection } from '@solana/web3.js';
-import { Program, AnchorProvider, BN } from '@coral-xyz/anchor';
+import { Program, AnchorProvider, Idl } from '@coral-xyz/anchor';
 import { CAMERA_ACTIVATION_PROGRAM_ID } from '../../anchor/setup';
-import { IDL, MySolanaProject } from '../../anchor/idl';
+import { IDL } from '../../anchor/idl';
 import { isSolanaWallet } from '@dynamic-labs/solana';
+import { useNavigate } from 'react-router-dom';
+
+// Define IDL type for stricter checking
+// type CameraActivationIdl = typeof IDL;
+
+// Define account types from IDL
+// type CameraAccountData = IdlAccounts<CameraActivationIdl>['cameraAccount'];
+// type FaceDataAccount = IdlAccounts<CameraActivationIdl>['faceData']; // Define FaceData type
+// type UserSessionAccount = IdlAccounts<CameraActivationIdl>['userSession']; // Define UserSession type
+// type CameraRegistryAccount = IdlAccounts<CameraActivationIdl>['cameraRegistry']; // Define Registry type
+
+// Define a type for the program
+// type CameraProgram = Program<Idl>; // Removed unused type
 
 // Simple cache for account info to reduce RPC calls
-const accountInfoCache = new Map<string, { data: any, timestamp: number }>();
+const accountInfoCache = new Map<string, { data: unknown, timestamp: number }>(); // Use unknown instead of any
 const CACHE_TTL = 30000; // 30 seconds
 
 // Simplified helper to get account info with caching
@@ -34,38 +47,92 @@ async function getCachedAccountInfo(connection: Connection, pubkey: PublicKey) {
 // Anchor instruction discriminators (first 8 bytes of sha256 hash of method name)
 
 // Add these types for camera data
-interface ActivityType {
-  photoCapture?: {};
-  videoRecord?: {};
-  liveStream?: {};
-}
+// interface ActivityType { // Removed unused type
+//   photoCapture?: Record<string, never>; // Use Record<string, never> for empty objects
+//   videoRecord?: Record<string, never>;
+//   liveStream?: Record<string, never>;
+// }
 
 interface CameraData {
   publicKey: string;
   owner: string;
   isActive: boolean;
-  activityCounter?: number;
-  lastActivityType?: ActivityType;
-  metadata: {
-    name: string;
-    model: string;
-    registrationDate: number;
-    lastActivity: number;
-    location?: [number, number] | null;
-  };
+  name: string;
+  model: string;
+  location?: [number, number] | null;
+  activeSessions: number;
+  totalSessions: number;
+  registrationDate: number;
+  lastActivity: number;
+  userCheckedIn?: boolean;
 }
+
+// Add a helper for transaction confirmation with retries and timeouts
+const confirmTransactionWithRetry = async (connection: Connection, signature: string, maxRetries = 3, timeoutMs = 60000) => {
+  console.log(`Confirming transaction ${signature} with ${maxRetries} retries and ${timeoutMs}ms timeout`);
+  
+  // Create a timeout promise
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Transaction confirmation timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+  
+  // Function to attempt confirmation with retries
+  const attemptConfirmation = async (attemptsLeft: number): Promise<void> => {
+    try {
+      // Get the latest blockhash
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      
+      // Set up confirmation options with higher commitment
+      const confirmationOptions = {
+        blockhash,
+        lastValidBlockHeight,
+        signature,
+        commitment: 'confirmed' as const
+      };
+      
+      // Race the confirmation against the timeout
+      await Promise.race([
+        connection.confirmTransaction(confirmationOptions),
+        timeoutPromise
+      ]);
+      
+      console.log(`Transaction ${signature} confirmed successfully`);
+      
+      // Verify transaction success by checking status
+      const status = await connection.getSignatureStatus(signature);
+      if (status?.value?.err) {
+        throw new Error(`Transaction failed with error: ${JSON.stringify(status.value.err)}`);
+      }
+      
+      return;
+    } catch (error) {
+      if (attemptsLeft <= 1) {
+        console.error(`All ${maxRetries} confirmation attempts failed for ${signature}`);
+        throw error;
+      }
+      
+      console.log(`Confirmation attempt failed, ${attemptsLeft - 1} retries left for ${signature}`);
+      return attemptConfirmation(attemptsLeft - 1);
+    }
+  };
+  
+  return attemptConfirmation(maxRetries);
+};
 
 export function SolDevNetDebug() {
   const dynamicContext = useDynamicContext();
   const { primaryWallet } = dynamicContext;
   const { connection } = useConnection();
+  const navigate = useNavigate();
 
   // State variables
   const [loading, setLoading] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [txResult, setTxResult] = useState<string | null>(null);
-  const [program, setProgram] = useState<Program<MySolanaProject> | null>(null);
+  const [program, setProgram] = useState<Program<Idl> | null>(null);
 
   // Form state
   const [cameraName, setCameraName] = useState('');
@@ -78,6 +145,20 @@ export function SolDevNetDebug() {
   // Add state for registered cameras
   const [registeredCameras, setRegisteredCameras] = useState<CameraData[]>([]);
   const [loadingCameras, setLoadingCameras] = useState(false);
+  
+  // Add this to the state variables near the top of the component
+  const [useFaceRecognition, setUseFaceRecognition] = useState<{[key: string]: boolean}>({});
+
+  // Add state for user sessions
+  const [userSessions, setUserSessions] = useState<{[key: string]: boolean}>({});
+
+  // --- Face Enrollment State ---
+  const [jetsonStreamUrl] = useState<string>(''); // TODO: Set this to your Jetson stream URL - Removed unused setter
+  const [capturedEmbedding, setCapturedEmbedding] = useState<Uint8Array | null>(null);
+  const [enrollmentLoading, setEnrollmentLoading] = useState<boolean>(false);
+  const [enrollmentStatus, setEnrollmentStatus] = useState<string>('');
+  const [enrollmentError, setEnrollmentError] = useState<string | null>(null);
+  // ----------------------------
 
   // Initialize program when wallet is connected
   useEffect(() => {
@@ -89,15 +170,29 @@ export function SolDevNetDebug() {
         connection,
         {
           publicKey: new PublicKey(primaryWallet.address),
-          // We don't need these methods as we'll use the wallet directly
-          signTransaction: async (tx: Transaction) => tx,
-          signAllTransactions: async (txs: Transaction[]) => txs,
+          // Add proper signTransaction and signAllTransactions methods
+          signTransaction: async (tx: Transaction) => {
+            if (!isSolanaWallet(primaryWallet)) {
+              throw new Error('Not a Solana wallet');
+            }
+            // Use Dynamic's getSigner method
+            const signer = await primaryWallet.getSigner();
+            return await signer.signTransaction(tx);
+          },
+          signAllTransactions: async (txs: Transaction[]) => {
+            if (!isSolanaWallet(primaryWallet)) {
+              throw new Error('Not a Solana wallet');
+            }
+            // Use Dynamic's getSigner method
+            const signer = await primaryWallet.getSigner();
+            return await Promise.all(txs.map(tx => signer.signTransaction(tx)));
+          },
         } as any,
         { commitment: 'confirmed' }
       );
 
-      // Create the program
-      const prog = new Program<MySolanaProject>(IDL as any, CAMERA_ACTIVATION_PROGRAM_ID, provider);
+      // Create the program with the general Idl type
+      const prog = new Program(IDL as Idl, CAMERA_ACTIVATION_PROGRAM_ID, provider);
       setProgram(prog);
       console.log('Program initialized with ID:', prog.programId.toString());
     } catch (err) {
@@ -181,110 +276,90 @@ export function SolDevNetDebug() {
         throw new Error('This is not a Solana wallet');
       }
 
-      // Get the connection from the wallet
-      const walletConnection = await primaryWallet.getConnection();
-
-      // Get the signer
-      const signer = await primaryWallet.getSigner();
-
       const ownerPublicKey = new PublicKey(primaryWallet.address);
 
-      // Find the camera PDA using the camera name for derivation
-      const cameraNameBuffer = Buffer.from(cameraName.trim());
-      console.log('Using camera name for PDA:', cameraName);
-      console.log('Camera name buffer length:', cameraNameBuffer.length);
-      console.log('Camera name bytes:', [...cameraNameBuffer]);
-
-      // Get the IDL structure for registerCamera
-      const registerCameraInstruction = program.idl.instructions.find(i => i.name === 'registerCamera');
-      if (registerCameraInstruction) {
-        console.log('Register Camera Instruction:', {
-          accounts: registerCameraInstruction.accounts.map(a => ({
-            name: a.name,
-            isMut: a.isMut,
-            isSigner: a.isSigner
-          })),
-          args: registerCameraInstruction.args
-        });
-      }
-
-      const [cameraAddress] = await PublicKey.findProgramAddress(
+      // Find the camera PDA - EXACTLY as in the test scripts
+      const [cameraPda] = PublicKey.findProgramAddressSync(
         [
           Buffer.from('camera'),
-          cameraNameBuffer,
+          Buffer.from(cameraName.trim()),
           ownerPublicKey.toBuffer()
         ],
         CAMERA_ACTIVATION_PROGRAM_ID
       );
-
-      console.log('Derived camera address:', cameraAddress.toString());
+      console.log('Camera PDA:', cameraPda.toString());
 
       // Find the registry PDA
-      const [registryAddress] = await PublicKey.findProgramAddress(
+      const [registryPda] = PublicKey.findProgramAddressSync(
         [Buffer.from('camera-registry')],
         CAMERA_ACTIVATION_PROGRAM_ID
       );
+      console.log('Registry PDA:', registryPda.toString());
 
-      // Create the args object matching the Rust RegisterCameraArgs struct
-      const args = {
-        name: cameraName,
-        model: cameraModel,
-        location: null, // No location
-        fee: new BN(100) // Minimum fee required by the program
+      // Use `any` for args type for simplicity
+      const registerCameraArgs: any = {
+        name: cameraName.trim(),
+        model: cameraModel.trim(),
+        location: null,  // Explicitly null for no location
+        description: "Camera registered via debug interface",
+        features: {
+          faceRecognition: true,
+          gestureControl: true,
+          videoRecording: true,
+          liveStreaming: true,
+          messaging: false
+        }
       };
 
-      console.log('Register camera args:', JSON.stringify(args, null, 2));
+      console.log('Camera registration args:', registerCameraArgs);
 
-      // Build the transaction instruction
-      const ix = await program.methods
-        .registerCamera(args)
+      // Log all the important data for debugging
+      console.log('Camera PDA:', cameraPda.toString());
+      console.log('Registry PDA:', registryPda.toString());
+      console.log('Owner:', ownerPublicKey.toString());
+      console.log('Program ID:', CAMERA_ACTIVATION_PROGRAM_ID.toString());
+        
+      // IMPORTANT: Exactly match the working test script pattern
+      const tx = await program.methods
+        .registerCamera(registerCameraArgs)
         .accounts({
           owner: ownerPublicKey,
-          camera: cameraAddress,
-          registry: registryAddress,
+          registry: registryPda,  // Use registry to match the TypeScript interface
+          camera: cameraPda,
           systemProgram: SystemProgram.programId,
         })
-        .instruction();
-
-      // Create a new transaction and add the instruction
-      const transaction = new Transaction().add(ix);
-
-      // Set recent blockhash and fee payer
-      transaction.recentBlockhash = (await walletConnection.getLatestBlockhash()).blockhash;
-      transaction.feePayer = ownerPublicKey;
-
-      // Sign and send the transaction using the signer
-      console.log('Sending transaction to register camera...');
-      const result = await signer.signAndSendTransaction(transaction);
-      const signature = result.signature;
-      console.log('Transaction sent, signature:', signature);
-
-      setTxResult(signature);
-      setStatusMessage(`Camera registered! Transaction: ${signature}`);
+        .rpc();
+      
+      console.log('Camera registration sent with signature:', tx);
+      
+      // Get the connection
+      const connection = await primaryWallet.getConnection();
+      
+      // Use improved confirmation handling
+      try {
+        await confirmTransactionWithRetry(connection, tx);
+      console.log('Camera registered successfully, signature:', tx);
+      setTxResult(tx);
+      setStatusMessage(`Camera registered successfully! Transaction: ${tx}`);
       setStatusType('success');
-
-      // After successful registration, immediately fetch cameras
-      await fetchRegisteredCameras();
+      } catch (confirmError) {
+        console.error('Transaction confirmation error:', confirmError);
+        setStatusMessage(`Transaction sent but confirmation timed out. It may still succeed. Check the explorer: ${tx}`);
+        setStatusType('info');
+      }
 
       // Clear form
       setCameraName('');
       setCameraModel('');
+
+      // Refresh list of cameras
+      await fetchRegisteredCameras();
     } catch (err) {
       console.error('Error registering camera:', err);
 
-      // Provide more detailed error message
       let errorMessage = 'Failed to register camera';
       if (err instanceof Error) {
         errorMessage += ': ' + err.message;
-
-        // Check for common errors
-        if (err.message.includes('This transaction has already been processed')) {
-          errorMessage += '. You may have already registered a camera with this name.';
-        } else if (err.message.includes('insufficient funds')) {
-          errorMessage += '. Please make sure you have enough SOL to cover the transaction.';
-        } else if (err.message.includes('blockhash')) {
-          errorMessage += '. Network might be congested, please try again.';
-        }
       }
 
       setError(errorMessage);
@@ -295,10 +370,117 @@ export function SolDevNetDebug() {
     }
   };
 
-  // Record activity
+  // Function to create face data if it doesn't exist
+  const createFaceData = async (userPublicKey: PublicKey) => {
+    if (!program) {
+      throw new Error('Program not available');
+    }
 
-  // Add a specialized function for taking pictures without using activity keypair
-  const takePicture = async (camera: CameraData) => {
+    console.log('Creating face data for user:', userPublicKey.toString());
+    
+    // Find the face data PDA - exactly as in face-recognition-test.js
+    const [faceDataPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from('face-nft'),
+        userPublicKey.toBuffer()
+      ],
+      CAMERA_ACTIVATION_PROGRAM_ID
+    );
+    console.log('Face Data PDA:', faceDataPda.toString());
+    
+    // Generate mock embedding data (random 128 bytes)
+    // Just like in the face-recognition-test.js script
+    const mockEmbedding = Array(32).fill(0).map(() => Math.floor(Math.random() * 256));
+    console.log('Generated mock face embedding data');
+    
+    // Get the connection for transaction submission
+    if (!primaryWallet || !isSolanaWallet(primaryWallet)) {
+      throw new Error('Invalid wallet');
+    }
+    
+    const connection = await primaryWallet.getConnection();
+    
+    try {
+      // Create the method call with proper account naming
+      const tx = await program.methods
+        .enrollFace(mockEmbedding)
+        .accounts({
+          user: userPublicKey,
+          faceNft: faceDataPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+      
+      console.log('Face data creation transaction sent with signature:', tx);
+      
+      // Confirm transaction
+      await connection.confirmTransaction(tx, 'confirmed');
+      console.log('Face data creation successful');
+      
+      return faceDataPda;
+    } catch (createErr) { // Use error variable
+      console.error('Error creating face data:', createErr);
+      // Rethrow or handle as needed, e.g., set an error state
+      throw createErr; // Rethrowing the error might be better
+    }
+  };
+
+  // Add a function to check user session status for all cameras
+  const checkUserSessionStatus = async () => {
+    if (!primaryWallet?.address || !program || !connection) return;
+    
+    try {
+      const userPublicKey = new PublicKey(primaryWallet.address);
+      
+      // Create a map to store session status
+      const sessionStatus: {[key: string]: boolean} = {};
+      
+      // Check each camera
+      for (const camera of registeredCameras) {
+        const cameraPublicKey = new PublicKey(camera.publicKey);
+        
+        // Find the session PDA
+        const [sessionPda] = PublicKey.findProgramAddressSync(
+          [
+            Buffer.from('session'),
+            userPublicKey.toBuffer(),
+            cameraPublicKey.toBuffer()
+          ],
+          CAMERA_ACTIVATION_PROGRAM_ID
+        );
+        
+        // Check if session exists
+        try {
+          await program.account.userSession.fetch(sessionPda);
+          sessionStatus[camera.publicKey] = true;
+        } catch (err) {
+          sessionStatus[camera.publicKey] = false;
+        }
+      }
+      
+      setUserSessions(sessionStatus);
+      
+      // Update the cameras with session status
+      setRegisteredCameras(cameras => 
+        cameras.map(camera => ({
+          ...camera,
+          userCheckedIn: sessionStatus[camera.publicKey] || false
+        }))
+      );
+    } catch (err) {
+      console.error('Error checking session status:', err);
+    }
+  };
+  
+  // Update useEffect to check session status after fetching cameras
+  useEffect(() => {
+    if (registeredCameras.length > 0 && primaryWallet?.address) {
+      checkUserSessionStatus();
+    }
+  }, [registeredCameras.length, primaryWallet?.address]);
+
+  // Update takePicture to update session status after check-in
+  const takePicture = async (camera: CameraData, useFaceRec: boolean) => {
     if (!primaryWallet?.address || !program) {
       setStatusMessage('Wallet or program not available');
       setStatusType('error');
@@ -316,7 +498,7 @@ export function SolDevNetDebug() {
       setLoading(true);
       setError(null);
       setTxResult(null);
-      setStatusMessage(`Taking picture with camera ${camera.metadata.name}...`);
+      setStatusMessage(`Checking in to camera ${camera.name}...`);
       setStatusType('info');
 
       // Check if it's a Solana wallet
@@ -324,55 +506,134 @@ export function SolDevNetDebug() {
         throw new Error('This is not a Solana wallet');
       }
 
-      const ownerPublicKey = new PublicKey(primaryWallet.address);
+      const userPublicKey = new PublicKey(primaryWallet.address);
       const cameraPublicKey = new PublicKey(camera.publicKey);
 
-      // Create metadata with timestamp
-      const metadata = JSON.stringify({
-        timestamp: new Date().toISOString(),
-        action: 'photo_capture',
-        userAddress: primaryWallet.address
-      });
+      console.log('User address:', userPublicKey.toString());
+      console.log('Camera address:', cameraPublicKey.toString());
+      console.log('Using face recognition:', useFaceRec);
 
-      console.log('Using camera:', cameraPublicKey.toString());
-      console.log('Using metadata:', metadata);
+      // Find the session PDA - EXACTLY as in the tests
+      const [sessionPda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('session'),
+          userPublicKey.toBuffer(),
+          cameraPublicKey.toBuffer()
+        ],
+        CAMERA_ACTIVATION_PROGRAM_ID
+      );
+      
+      console.log('Session PDA:', sessionPda.toString());
 
-      // Get the connection and signer
+      // Find the face data PDA
+      const [faceDataPda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('face-nft'),
+          userPublicKey.toBuffer()
+        ],
+        CAMERA_ACTIVATION_PROGRAM_ID
+      );
+      console.log('Face Data PDA:', faceDataPda.toString());
+
+      // Check if face data exists
+      let faceDataExists = false;
+      try {
+        // Fetch with generic account type
+        const faceAccount = await program.account.faceData.fetch(faceDataPda);
+        if (faceAccount) { // Check if account data is valid
+           faceDataExists = true;
+           console.log('Face data exists');
+        }
+      } catch (faceFetchErr) { // Use the error variable
+        console.log('No face data found:', faceFetchErr);
+        
+        // If face recognition is requested but no data exists, create it
+        if (useFaceRec) {
+          try {
+            console.log('Creating face data for face recognition...');
+            await createFaceData(userPublicKey);
+            faceDataExists = true;
+            console.log('Face data created successfully');
+          } catch (createErr) {
+            console.error('Error creating face data:', createErr);
+            setStatusMessage('Failed to create face recognition data. Proceeding without it.');
+            setStatusType('error');
+            // Continue without face recognition
+            useFaceRec = false;
+          }
+        }
+      }
+      
+      // Get the connection to send directly
       const connection = await primaryWallet.getConnection();
-      const signer = await primaryWallet.getSigner();
-
-      // Create instruction
-      const ix = await program.methods
-        .recordActivity({
-          activityType: { photoCapture: {} },
-          metadata
-        })
-        .accounts({
-          owner: ownerPublicKey,
+      
+      try {
+        // MATCH THE EXACT APPROACH FROM THE JAVASCRIPT TEST SCRIPTS
+        const checkInArgs = [];
+        
+        // Create a method call that matches the face-recognition-checkin.js script
+        const methodCall = program.methods.checkIn(useFaceRec);
+        
+        // Define the accounts like in the test script
+        const accountsObj: Record<string, PublicKey> = {
+          user: userPublicKey,
           camera: cameraPublicKey,
-          systemProgram: SystemProgram.programId,
-        })
-        .instruction();
-
-      // Create and send transaction
-      const transaction = new Transaction().add(ix);
-      transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-      transaction.feePayer = ownerPublicKey;
-
-      const result = await signer.signAndSendTransaction(transaction);
-      const signature = result.signature;
-
-      console.log('Picture taken successfully, signature:', signature);
-      setTxResult(signature);
-      setStatusMessage(`Picture taken successfully! Transaction: ${signature}`);
+          session: sessionPda,
+          systemProgram: SystemProgram.programId
+        };
+        
+        // Only add faceAccount if using face recognition and it exists
+        if (useFaceRec && faceDataExists) {
+          console.log('Adding face account to check-in transaction');
+          accountsObj.faceNft = faceDataPda;
+        }
+        
+        console.log('Check-in accounts:', accountsObj);
+        
+        // Directly send the transaction using the RPC method like in the test scripts
+        const tx = await methodCall
+          .accounts(accountsObj)
+        .rpc();
+      
+      console.log('Check-in transaction sent with signature:', tx);
+      
+        // Use improved confirmation handling
+        try {
+          await confirmTransactionWithRetry(connection, tx);
+      console.log('Check-in successful, signature:', tx);
+      setTxResult(tx);
+          const faceRecText = useFaceRec ? ' with face recognition' : '';
+          setStatusMessage(`Successfully checked in${faceRecText}! Transaction: ${tx}`);
       setStatusType('success');
+        } catch (confirmError) {
+          console.error('Transaction confirmation error:', confirmError);
+          setStatusMessage(`Check-in sent but confirmation timed out. It may still succeed. Check the explorer: ${tx}`);
+          setStatusType('info');
+        }
+        
+        // Update session status after sending transaction
+        setUserSessions(prev => ({
+          ...prev,
+          [camera.publicKey]: true
+        }));
+        
+        // Update camera in the UI to show checked in
+        setRegisteredCameras(cameras => 
+          cameras.map(c => c.publicKey === camera.publicKey ? 
+            {...c, userCheckedIn: true} : c
+          )
+        );
 
       // Refresh cameras to see updated activity count
       await fetchRegisteredCameras();
+      } catch (txErr) {
+        console.error('Transaction error:', txErr);
+        throw txErr;
+      }
     } catch (err) {
-      console.error('Error taking picture:', err);
+      console.error('Error checking in:', err);
 
-      let errorMessage = 'Failed to take picture';
+      let errorMessage = 'Failed to check in';
       if (err instanceof Error) {
         errorMessage += ': ' + err.message;
 
@@ -381,6 +642,138 @@ export function SolDevNetDebug() {
           errorMessage = 'Camera is currently inactive. Please activate it first.';
         } else if (err.message.includes('Unauthorized')) {
           errorMessage = 'You are not authorized to use this camera.';
+        } else if (err.message.includes('SessionAlreadyActive')) {
+          errorMessage = 'You already have an active session with this camera.';
+        } else if (err.message.includes('0xbc0')) {
+          errorMessage = 'Transaction simulation failed. This may be due to program constraints or insufficient funds.';
+        }
+      }
+
+      setError(errorMessage);
+      setStatusMessage(errorMessage);
+      setStatusType('error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Update checkOutCamera to update session status after check-out
+  const checkOutCamera = async (camera: CameraData) => {
+    if (!primaryWallet?.address || !program) {
+      setStatusMessage('Wallet or program not available');
+      setStatusType('error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      setTxResult(null);
+      setStatusMessage(`Checking out from camera ${camera.name}...`);
+      setStatusType('info');
+
+      // Check if it's a Solana wallet
+      if (!isSolanaWallet(primaryWallet)) {
+        throw new Error('This is not a Solana wallet');
+      }
+
+      const userPublicKey = new PublicKey(primaryWallet.address);
+      const cameraPublicKey = new PublicKey(camera.publicKey);
+
+      // Find the session PDA - EXACTLY as in the tests
+      const [sessionPda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('session'),
+          userPublicKey.toBuffer(),
+          cameraPublicKey.toBuffer()
+        ],
+        CAMERA_ACTIVATION_PROGRAM_ID
+      );
+
+      console.log('Session PDA for checkout:', sessionPda.toString());
+
+      // Check if the session exists before trying to check out
+      try {
+        // Fetch with generic account type
+        await program.account.userSession.fetch(sessionPda);
+        console.log('Found session, proceeding with checkout');
+      } catch (checkoutFetchErr) { // Use the error variable
+        console.log('No session found, cannot check out:', checkoutFetchErr);
+        setStatusMessage('No active session found for this camera. Cannot check out.');
+        setStatusType('error');
+        setLoading(false);
+        return;
+      }
+
+      // Get the connection
+      const connection = await primaryWallet.getConnection();
+        
+      try {
+        // MATCH THE EXACT APPROACH FROM THE JAVASCRIPT TEST SCRIPTS
+        // Create a method call like in the test script
+        const methodCall = program.methods.checkOut();
+        
+        // Define the accounts like in the test script
+        const accountsObj: Record<string, PublicKey> = {
+          user: userPublicKey,
+          camera: cameraPublicKey,
+          session: sessionPda,
+          systemProgram: SystemProgram.programId
+        };
+        
+        console.log('Check-out accounts:', accountsObj);
+        
+        // Directly send the transaction using the RPC method like in the test scripts
+        const tx = await methodCall
+          .accounts(accountsObj)
+        .rpc();
+      
+      console.log('Check-out transaction sent with signature:', tx);
+      
+        // Use improved confirmation handling
+        try {
+          await confirmTransactionWithRetry(connection, tx);
+      console.log('Check-out successful, signature:', tx);
+      setTxResult(tx);
+      setStatusMessage(`Successfully checked out! Transaction: ${tx}`);
+      setStatusType('success');
+        } catch (confirmError) {
+          console.error('Transaction confirmation error:', confirmError);
+          setStatusMessage(`Check-out sent but confirmation timed out. It may still succeed. Check the explorer: ${tx}`);
+          setStatusType('info');
+        }
+
+        // Update session status after sending transaction
+        setUserSessions(prev => ({
+          ...prev,
+          [camera.publicKey]: false
+        }));
+        
+        // Update camera in the UI to show checked out
+        setRegisteredCameras(cameras => 
+          cameras.map(c => c.publicKey === camera.publicKey ? 
+            {...c, userCheckedIn: false} : c
+          )
+        );
+
+      // Refresh cameras to see updated session count
+      await fetchRegisteredCameras();
+      } catch (txErr) {
+        console.error('Transaction error:', txErr);
+        throw txErr;
+      }
+    } catch (err) {
+      console.error('Error checking out:', err);
+
+      let errorMessage = 'Failed to check out';
+      if (err instanceof Error) {
+        errorMessage += ': ' + err.message;
+
+        // Special error messages
+        if (err.message.includes('SessionNotFound')) {
+          errorMessage = 'No active session found for this camera.';
+        } else if (err.message.includes('AccountNotInitialized')) {
+          errorMessage = 'Session account not initialized. You may need to check in first.';
         }
       }
 
@@ -420,12 +813,13 @@ export function SolDevNetDebug() {
       console.log('Registry address:', registryAddress.toString());
 
       // Try to fetch the registry account, but don't fail if it doesn't exist
-      let registryAccount;
+      let registryAccount: any | undefined; // Use `any` type
       try {
+        // Explicitly use the cameraRegistry type
         registryAccount = await program.account.cameraRegistry.fetch(registryAddress);
         console.log('Registry account successfully fetched:', registryAccount);
-      } catch (err) {
-        console.warn('Could not fetch registry account, it may not be initialized yet:', err);
+      } catch (registryFetchErr) { // Use the error variable
+        console.warn('Could not fetch registry account, it may not be initialized yet:', registryFetchErr);
       }
 
       // Try to fetch raw camera accounts without relying on specific structure
@@ -438,65 +832,58 @@ export function SolDevNetDebug() {
       // Try to properly parse the camera accounts using the IDL
       const cameras: CameraData[] = [];
 
-      // Log the IDL structure to debug
-      console.log('IDL structure for cameraAccount:',
-        program.idl.accounts.find(a => a.name === 'cameraAccount')
-      );
-
       try {
-        console.log('Fetching all camera accounts directly with program...');
+        // Use the correct account type from program.account
         const cameraAccounts = await program.account.cameraAccount.all();
-        console.log('Camera accounts successfully fetched:', cameraAccounts.length);
+        console.log('Found camera accounts:', cameraAccounts.length);
 
-        if (cameraAccounts.length === 0) {
-          console.log('No camera accounts found with Anchor, trying manual approach');
-          throw new Error('No camera accounts found with Anchor');
-        }
-
-        // Format each camera account data, handling potential format differences
-        for (const account of cameraAccounts) {
+        for (const accountInfo of cameraAccounts) {
           try {
-            const data = account.account;
-            console.log('Raw camera account data:', {
-              publicKey: account.publicKey.toString(),
-              data: JSON.stringify(data, (_, value) => {
-                if (typeof value === 'object' && value !== null && 'toNumber' in value) {
-                  return value.toNumber();
-                }
-                return value;
-              }, 2)
-            });
-
+            // Use `any` for account data for flexibility
+            const account = accountInfo.account as any;
+            
+            // Access metadata properly through the account structure
             const camera: CameraData = {
-              publicKey: account.publicKey.toString(),
-              owner: data.owner?.toString() || 'unknown',
-              isActive: !!data.isActive, // Convert to boolean explicitly
-              metadata: {
-                name: data.metadata?.name || 'Unnamed Camera',
-                model: data.metadata?.model || 'Unknown Model',
-                registrationDate: data.metadata?.registrationDate?.toNumber() || 0,
-                lastActivity: data.metadata?.lastActivity?.toNumber() || 0,
-                location: null
-              }
+              publicKey: accountInfo.publicKey.toString(),
+              owner: account.owner.toString(),
+              isActive: !!account.isActive,
+              name: account.metadata?.name || 'Unnamed Camera',
+              model: account.metadata?.model || 'Unknown Model',
+              location: null, // Explicitly set to null for now until we handle i64 array conversions
+              activeSessions: account.accessCount?.toNumber() || 0,
+              totalSessions: account.accessCount?.toNumber() || 0,
+              registrationDate: account.metadata?.registrationDate?.toNumber() || 0,
+              lastActivity: account.lastActivityAt?.toNumber() || 0,
+              // Set the userCheckedIn flag based on the stored sessions
+              userCheckedIn: userSessions[accountInfo.publicKey.toString()] || false
             };
 
-            // Handle optional new fields that might not be in old accounts
-            if (data.activityCounter !== undefined) {
-              try {
-                camera.activityCounter = data.activityCounter.toNumber();
-              } catch (e) {
-                console.warn('Could not convert activityCounter to number:', e);
-              }
-            }
-
-            if (data.lastActivityType) {
-              camera.lastActivityType = data.lastActivityType;
-            }
-
             cameras.push(camera);
-            console.log('Successfully parsed camera account:', camera.publicKey);
+            console.log('Successfully parsed camera account:', camera);
           } catch (error) {
             console.error('Error parsing camera account:', error);
+          }
+        }
+
+        // Log each camera's PDA derivation for validation
+        for (const camera of cameras) {
+          try {
+            const ownerPublicKey = new PublicKey(camera.owner);
+            const [expectedPda] = PublicKey.findProgramAddressSync(
+              [
+                Buffer.from('camera'),
+                Buffer.from(camera.name),
+                ownerPublicKey.toBuffer()
+              ],
+              CAMERA_ACTIVATION_PROGRAM_ID
+            );
+            console.log(`Camera "${camera.name}" PDA validation:`, {
+              stored: camera.publicKey,
+              computed: expectedPda.toString(),
+              match: camera.publicKey === expectedPda.toString()
+            });
+          } catch (err) {
+            console.error('Error validating camera PDA:', err);
           }
         }
       } catch (error) {
@@ -527,35 +914,30 @@ export function SolDevNetDebug() {
               const decodedAccount = await program.coder.accounts.decode(
                 'cameraAccount',
                 account.account.data
-              );
+              ) as any; // Use `any` type for flexibility
 
               // If successful, we found a camera account
               console.log('Successfully decoded as camera account:', decodedAccount);
 
-              // Create a CameraData object from the decoded account
+              // Create a CameraData object from the decoded account using the new structure
               const camera: CameraData = {
                 publicKey: account.pubkey.toString(),
                 owner: decodedAccount.owner.toString(),
                 isActive: !!decodedAccount.isActive,
-                metadata: {
-                  name: decodedAccount.metadata.name,
-                  model: decodedAccount.metadata.model,
-                  registrationDate: decodedAccount.metadata.registrationDate.toNumber(),
-                  lastActivity: decodedAccount.metadata.lastActivity.toNumber(),
-                  location: null
-                }
+                name: decodedAccount.name || 'Unnamed Camera',
+                model: decodedAccount.model || 'Unknown Model',
+                location: decodedAccount.location && Array.isArray(decodedAccount.location) && decodedAccount.location.length === 2 
+                  ? [decodedAccount.location[0], decodedAccount.location[1]] 
+                  : null,
+                activeSessions: decodedAccount.activeSessions?.toNumber() || 0,
+                totalSessions: decodedAccount.totalSessions?.toNumber() || 0,
+                registrationDate: decodedAccount.registrationDate?.toNumber() || 0,
+                lastActivity: decodedAccount.lastActivity?.toNumber() || 0,
+                // Set the userCheckedIn flag based on the stored sessions
+                userCheckedIn: userSessions[account.pubkey.toString()] || false
               };
 
-              if (decodedAccount.activityCounter) {
-                camera.activityCounter = decodedAccount.activityCounter.toNumber();
-              }
-
-              if (decodedAccount.lastActivityType) {
-                camera.lastActivityType = decodedAccount.lastActivityType;
-              }
-
               cameras.push(camera);
-
               continue;
             } catch (error) {
               const decodeError = error as Error;
@@ -573,13 +955,14 @@ export function SolDevNetDebug() {
                 publicKey: account.pubkey.toString(),
                 owner: 'unknown (data format changed)',
                 isActive: false,
-                metadata: {
-                  name: 'Camera (data format changed)',
-                  model: 'Unknown Model',
-                  registrationDate: 0,
-                  lastActivity: 0,
-                  location: null
-                }
+                name: 'Camera (data format changed)',
+                model: 'Unknown Model',
+                location: null,
+                activeSessions: 0,
+                totalSessions: 0,
+                registrationDate: 0,
+                lastActivity: 0,
+                userCheckedIn: false
               });
             }
           } catch (err) {
@@ -611,25 +994,25 @@ export function SolDevNetDebug() {
     }
   }, [initialized, program]);
 
-  // Add a helper function to get camera status display
-  const getCameraStatusDisplay = (camera: CameraData) => {
-    const isOldFormat = camera.owner === 'unknown (data format changed)';
-
-    // If it's an old format, we don't know the status
-    if (isOldFormat) {
-      return (
-        <span className="text-yellow-600 bg-yellow-100 px-2 py-0.5 rounded text-xs">
-          Unknown Format
-        </span>
-      );
-    }
-
-    return (
-      <span className={`text-${camera.isActive ? 'green' : 'red'}-600 bg-${camera.isActive ? 'green' : 'red'}-100 px-2 py-0.5 rounded text-xs`}>
-        {camera.isActive ? 'Active' : 'Inactive'}
-      </span>
-    );
-  };
+  // Add a helper function to get camera status display - Removed as unused
+  // const getCameraStatusDisplay = (camera: CameraData) => {
+  //   const isOldFormat = camera.owner === 'unknown (data format changed)';
+  //
+  //   // If it's an old format, we don't know the status
+  //   if (isOldFormat) {
+  //     return (
+  //       <span className="text-yellow-600 bg-yellow-100 px-2 py-0.5 rounded text-xs">
+  //         Unknown Format
+  //       </span>
+  //     );
+  //   }
+  //
+  //   return (
+  //     <span className={`text-${camera.isActive ? 'green' : 'red'}-600 bg-${camera.isActive ? 'green' : 'red'}-100 px-2 py-0.5 rounded text-xs`}>
+  //       {camera.isActive ? 'Active' : 'Inactive'}
+  //     </span>
+  //   );
+  // };
 
   // Add a function to deregister a camera
   const deregisterCamera = async (camera: CameraData) => {
@@ -643,7 +1026,7 @@ export function SolDevNetDebug() {
       setLoading(true);
       setError(null);
       setTxResult(null);
-      setStatusMessage(`Deregistering camera ${camera.metadata.name}...`);
+      setStatusMessage(`Deregistering camera ${camera.name}...`);
       setStatusType('info');
 
       // Check if it's a Solana wallet
@@ -651,24 +1034,25 @@ export function SolDevNetDebug() {
         throw new Error('This is not a Solana wallet');
       }
 
-      // Get the connection from the wallet
-      const walletConnection = await primaryWallet.getConnection();
-
-      // Get the signer
-      const signer = await primaryWallet.getSigner();
-
       const ownerPublicKey = new PublicKey(primaryWallet.address);
 
       // Get the camera public key
       const cameraPublicKey = new PublicKey(camera.publicKey);
 
       // Find the registry PDA
-      const [registryAddress] = await PublicKey.findProgramAddress(
+      const [registryAddress] = PublicKey.findProgramAddressSync(
         [Buffer.from('camera-registry')],
         CAMERA_ACTIVATION_PROGRAM_ID
       );
+     
+      // Use Dynamic's signer to create and send the transaction directly
+      const signer = await primaryWallet.getSigner();
+      const connection = await primaryWallet.getConnection();
 
-      // Build the transaction instruction
+      // Set up transaction manually with proper signing
+      const transaction = new Transaction();
+      
+      // Create the instruction with the correct accounts
       const ix = await program.methods
         .deregisterCamera()
         .accounts({
@@ -678,20 +1062,26 @@ export function SolDevNetDebug() {
           systemProgram: SystemProgram.programId,
         })
         .instruction();
-
-      // Create a new transaction and add the instruction
-      const transaction = new Transaction().add(ix);
-
-      // Set recent blockhash and fee payer
-      transaction.recentBlockhash = (await walletConnection.getLatestBlockhash()).blockhash;
+      
+      // Add the instruction to the transaction
+      transaction.add(ix);
+      
+      // Get a recent blockhash for the transaction
+      const { blockhash } = await connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
       transaction.feePayer = ownerPublicKey;
+      
+      // Sign and send the transaction
+      const signedTx = await signer.signTransaction(transaction);
+      const txid = await connection.sendRawTransaction(signedTx.serialize());
+      
+      console.log('Deregister transaction sent with signature:', txid);
+      
+      // Wait for confirmation
+      await connection.confirmTransaction(txid, 'confirmed');
 
-      // Sign and send the transaction using the signer
-      const result = await signer.signAndSendTransaction(transaction);
-      const signature = result.signature;
-
-      setTxResult(signature);
-      setStatusMessage(`Camera deregistered! Transaction: ${signature}`);
+      setTxResult(txid);
+      setStatusMessage(`Camera deregistered! Transaction: ${txid}`);
       setStatusType('success');
 
       // Refresh the camera list
@@ -705,6 +1095,8 @@ export function SolDevNetDebug() {
 
         if (err.message.includes('Unauthorized')) {
           errorMessage += '. Only the camera owner can deregister it.';
+        } else if (err.message.includes('blockhash')) {
+          errorMessage = 'Network error: Could not get recent blockhash. Please try again.';
         }
       }
 
@@ -716,131 +1108,400 @@ export function SolDevNetDebug() {
     }
   };
 
-  // Render the camera list
-  const renderCameraList = () => {
-    if (loadingCameras) {
-      return <div className="text-center py-4">Loading cameras...</div>;
+  // Toggle camera active state
+  const toggleCameraActive = async (camera: CameraData) => {
+    if (!primaryWallet?.address || !program) {
+      setStatusMessage('Wallet or program not available');
+      setStatusType('error');
+      return;
     }
 
-    if (registeredCameras.length === 0) {
-      return <div className="text-center py-4">No cameras registered yet</div>;
+    try {
+      setLoading(true);
+      setError(null);
+      setTxResult(null);
+      const newActiveState = !camera.isActive;
+      setStatusMessage(`${newActiveState ? 'Activating' : 'Deactivating'} camera ${camera.name}...`);
+      setStatusType('info');
+
+      // Check if it's a Solana wallet
+      if (!isSolanaWallet(primaryWallet)) {
+        throw new Error('This is not a Solana wallet');
+      }
+
+      const ownerPublicKey = new PublicKey(primaryWallet.address);
+      const cameraPublicKey = new PublicKey(camera.publicKey);
+
+      // Use Dynamic's signer to create and send the transaction directly
+      const signer = await primaryWallet.getSigner();
+      const connection = await primaryWallet.getConnection();
+
+      // Set up transaction manually with proper signing
+      const transaction = new Transaction();
+      
+      // Create the instruction with the correct accounts
+      const ix = await program.methods
+        .setCameraActive(newActiveState)
+        .accounts({
+          owner: ownerPublicKey,
+          camera: cameraPublicKey,
+        })
+        .instruction();
+      
+      // Add the instruction to the transaction
+      transaction.add(ix);
+      
+      // Get a recent blockhash for the transaction
+      const { blockhash } = await connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = ownerPublicKey;
+      
+      // Sign and send the transaction
+      const signedTx = await signer.signTransaction(transaction);
+      const txid = await connection.sendRawTransaction(signedTx.serialize());
+      
+      console.log('Toggle active transaction sent with signature:', txid);
+      
+      // Wait for confirmation
+      await connection.confirmTransaction(txid, 'confirmed');
+
+      console.log(`Camera ${newActiveState ? 'activated' : 'deactivated'} successfully, signature:`, txid);
+      setTxResult(txid);
+      setStatusMessage(`Camera ${newActiveState ? 'activated' : 'deactivated'} successfully! Transaction: ${txid}`);
+      setStatusType('success');
+
+      // Refresh cameras to see updated state
+      await fetchRegisteredCameras();
+    } catch (err) {
+      console.error('Error toggling camera active state:', err);
+
+      let errorMessage = 'Failed to update camera state';
+      if (err instanceof Error) {
+        errorMessage += ': ' + err.message;
+        
+        if (err.message.includes('blockhash')) {
+          errorMessage = 'Network error: Could not get recent blockhash. Please try again.';
+        }
+      }
+
+      setError(errorMessage);
+      setStatusMessage(errorMessage);
+      setStatusType('error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- Face Enrollment Functions ---
+  const captureFace = async () => {
+    if (!primaryWallet?.address) {
+      setEnrollmentError('Wallet not connected');
+      return;
+    }
+    setEnrollmentLoading(true);
+    setEnrollmentStatus('Requesting face capture from Jetson...');
+    setEnrollmentError(null);
+    setCapturedEmbedding(null); // Clear previous embedding
+
+    try {
+      // --- TODO: Replace with your actual Jetson endpoint ---
+      const JETSON_CAPTURE_ENDPOINT = 'http://JETSON_IP_ADDRESS:PORT/capture_face'; 
+      
+      console.log(`Sending request to Jetson: ${JETSON_CAPTURE_ENDPOINT}`);
+      
+      // Example fetch request (adjust headers/method as needed)
+      const response = await fetch(JETSON_CAPTURE_ENDPOINT, {
+        method: 'POST', // or 'GET' depending on your Jetson API
+      });
+
+      if (!response.ok) {
+        throw new Error(`Jetson API error: ${response.statusText}`);
+      }
+
+      // --- TODO: Adjust how you process the response based on what Jetson sends ---
+      // Assuming Jetson sends embedding as base64 string in JSON: { embedding: "base64data..." }
+      const data = await response.json();
+      if (!data.embedding) {
+          throw new Error('No embedding data received from Jetson');
+      }
+      
+      // Convert base64 embedding to Uint8Array
+      const embeddingBytes = Buffer.from(data.embedding, 'base64'); 
+      console.log(`Received embedding (${embeddingBytes.length} bytes)`);
+
+      // --- TODO: Validate embedding size/format if necessary ---
+      // Example: Check if it matches the expected size (e.g., 128 bytes)
+      if (embeddingBytes.length === 0) { // Example simple validation
+         throw new Error(`Invalid embedding size: ${embeddingBytes.length}`);
+      }
+
+      setCapturedEmbedding(embeddingBytes);
+      setEnrollmentStatus('Face embedding captured successfully!');
+      
+    } catch (err) {
+      console.error('Error capturing face:', err);
+      const message = err instanceof Error ? err.message : 'Unknown error during face capture';
+      setEnrollmentError(`Failed to capture face: ${message}`);
+      setEnrollmentStatus('');
+    } finally {
+      setEnrollmentLoading(false);
+    }
+  };
+
+  const mintFaceNFT = async () => {
+      if (!primaryWallet?.address || !program || !connection) {
+          setEnrollmentError('Wallet, program, or connection not available');
+          return;
+      }
+      if (!capturedEmbedding) {
+          setEnrollmentError('No face embedding captured. Please capture first.');
+          return;
+      }
+
+      setEnrollmentLoading(true);
+      setEnrollmentStatus('Minting Face NFT...');
+      setEnrollmentError(null);
+      setTxResult(null); // Clear previous general tx results
+
+      try {
+          if (!isSolanaWallet(primaryWallet)) {
+              throw new Error('Not a Solana wallet');
+          }
+          
+          const userPublicKey = new PublicKey(primaryWallet.address);
+
+          // Find the face data PDA (matches enroll_face.rs)
+          const [faceDataPda] = PublicKey.findProgramAddressSync(
+              [
+                  Buffer.from('face-nft'),
+                  userPublicKey.toBuffer()
+              ],
+              CAMERA_ACTIVATION_PROGRAM_ID
+          );
+          console.log('Target Face Data PDA:', faceDataPda.toString());
+          console.log('User:', userPublicKey.toString());
+          console.log('Embedding size:', capturedEmbedding.length);
+
+          // Get the connection
+          const connection = await primaryWallet.getConnection();
+
+          // Use generic type for accounts
+          const accounts: any = {
+              user: userPublicKey,
+              faceNft: faceDataPda,
+              systemProgram: SystemProgram.programId,
+          };
+
+          // Call the enrollFace instruction
+          const tx = await program.methods
+              .enrollFace(Buffer.from(capturedEmbedding)) // Pass embedding as Buffer
+              .accounts(accounts)
+              .rpc();
+          
+          console.log('Enroll Face transaction sent:', tx);
+
+          // Use confirmation helper
+          await confirmTransactionWithRetry(connection, tx);
+
+          console.log('Face NFT minted successfully, signature:', tx);
+          setTxResult(tx); // Show general success message too
+          setEnrollmentStatus(`Face NFT minted successfully! Check general status below. Tx: ${tx}`);
+          setCapturedEmbedding(null); // Clear embedding after successful mint
+
+      } catch (err) {
+          console.error('Error minting Face NFT:', err);
+          const message = err instanceof Error ? err.message : 'Unknown error during minting';
+          // Check for specific program errors if possible from the message
+          if (message.includes('InvalidFaceData')) {
+             setEnrollmentError('Failed to mint: Invalid face data provided by Jetson.');
+          } else {
+             setEnrollmentError(`Failed to mint Face NFT: ${message}`);
+          }
+          setEnrollmentStatus('');
+      } finally {
+          setEnrollmentLoading(false);
+      }
+  };
+  // ---------------------------------
+
+  // Add a component for navigating to the camera view
+  const CameraNavigationButton = ({ camera }: { camera: CameraData }) => {
+    const navigateToCamera = () => {
+      if (camera && camera.publicKey) {
+        // Navigate directly to the camera view instead of quickstart
+        navigate(`/app/camera/${encodeURIComponent(camera.publicKey)}`);
+      }
+    };
+
+    return (
+      <button
+        onClick={navigateToCamera}
+        className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm mr-2"
+      >
+        View Camera
+      </button>
+    );
+  };
+
+  // Render the camera list
+  const renderCameraList = () => {
+    const noCamera = registeredCameras.length === 0;
+
+    if (loadingCameras) {
+      return (
+        <div className="flex justify-center items-center py-4">
+          <div className="spinner mr-2"></div>
+          <span>Loading cameras...</span>
+        </div>
+      );
+    }
+
+    if (noCamera) {
+      return (
+        <div className="bg-gray-50 rounded-lg p-4 text-center text-gray-500">
+          No cameras registered. Register a camera to get started.
+        </div>
+      );
     }
 
     return (
-      <div className="space-y-4">
-        {registeredCameras.map((camera, index) => {
-          const isOldFormat = camera.owner === 'unknown (data format changed)';
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {registeredCameras.map((camera) => {
+          const isOldFormat = !camera.name || camera.name === 'Camera (data format changed)';
           const isOwner = camera.owner === primaryWallet?.address;
-
+          const isActive = camera.isActive;
+          
+          // Initialize face recognition toggle for this camera if not set
+          if (useFaceRecognition[camera.publicKey] === undefined) {
+            setUseFaceRecognition(prev => ({
+              ...prev,
+              [camera.publicKey]: false
+            }));
+          }
+          
           return (
-            <div key={index} className="bg-white p-4 rounded-lg shadow">
-              <div className="flex justify-between items-start">
+            <div 
+              key={camera.publicKey} 
+              className={`bg-white rounded-lg shadow-sm border p-4 ${
+                camera.userCheckedIn ? 'border-blue-400' : 
+                isActive ? 'border-green-200' : 'border-gray-200'
+              }`}
+            >
+              <div className="flex flex-col h-full">
                 <div>
                   <div className="flex items-center">
-                    <h3 className="font-bold">{camera.metadata.name || 'Unknown Camera'}</h3>
+                    <h3 className="font-bold">{camera.name || 'Unknown Camera'}</h3>
                     {isOldFormat && (
                       <span className="ml-2 bg-yellow-100 text-yellow-800 text-xs px-2 py-0.5 rounded">Old Format</span>
                     )}
+                    {camera.userCheckedIn && (
+                      <span className="ml-2 bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded">
+                        You're Checked In
+                      </span>
+                    )}
                   </div>
-                  <p className="text-sm text-gray-600">Model: {camera.metadata.model || 'Unknown'}</p>
+                  <p className="text-sm text-gray-600">Model: {camera.model || 'Unknown'}</p>
                   <p className="text-sm text-gray-600">Public Key: <span className="font-mono">{camera.publicKey}</span></p>
                   <p className="text-sm text-gray-600 mt-1">
-                    Status: {getCameraStatusDisplay(camera)}
+                    Status: <span className={`font-medium ${isActive ? 'text-green-600' : 'text-red-600'}`}>
+                      {isActive ? 'Active' : 'Inactive'}
+                    </span>
                   </p>
-                  <p className="text-sm text-gray-600">Owner: {
-                    camera.owner === 'unknown (data format changed)'
-                      ? 'Unknown (old format)'
-                      : `${camera.owner.slice(0, 8)}...${camera.owner.slice(-8)}`
-                  }</p>
 
-                  {!isOldFormat && camera.activityCounter !== undefined && (
+                  {!isOldFormat && camera.activeSessions !== undefined && (
                     <p className="text-sm text-gray-600">
-                      Activity Counter: <span className="font-medium">{camera.activityCounter}</span>
+                      Active Sessions: <span className="font-medium">{camera.activeSessions}</span>
                     </p>
                   )}
 
-                  {!isOldFormat && camera.lastActivityType && (
+                  {!isOldFormat && camera.totalSessions !== undefined && (
                     <p className="text-sm text-gray-600">
-                      Last Activity: <span className="font-medium">{Object.keys(camera.lastActivityType)[0]}</span>
+                      Total Sessions: <span className="font-medium">{camera.totalSessions}</span>
+                    </p>
+                  )}
+
+                  <p className="text-sm text-gray-600">
+                    Owner: <span className="font-mono text-xs">{camera.owner.substring(0, 8)}...</span>
+                    {isOwner && <span className="ml-1 text-blue-600 text-xs">(you)</span>}
+                  </p>
+
+                  {camera.registrationDate && (
+                    <p className="text-sm text-gray-600">
+                      Registered: <span>{new Date(camera.registrationDate * 1000).toLocaleDateString()}</span>
                     </p>
                   )}
                 </div>
 
-                <div className="flex flex-col items-end space-y-2">
-                  <div className={`w-3 h-3 rounded-full ${isOldFormat
-                      ? 'bg-yellow-500'
-                      : (camera.isActive ? 'bg-green-500' : 'bg-red-500')
-                    }`} />
-
-                  {/* Owner actions */}
-                  {isOwner && !isOldFormat && (
-                    <div className="flex flex-col space-y-2">
-                      <button
-                        onClick={() => deregisterCamera(camera)}
-                        disabled={loading}
-                        className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-3 rounded text-sm"
-                      >
-                        {loading ? 'Processing...' : 'Deregister Camera'}
-                      </button>
+                <div className="flex flex-col mt-4 gap-2">
+                  {isActive && (
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox"
+                          id={`face-recognition-${camera.publicKey}`}
+                          checked={useFaceRecognition[camera.publicKey] || false}
+                          onChange={() => {
+                            setUseFaceRecognition(prev => ({
+                              ...prev,
+                              [camera.publicKey]: !prev[camera.publicKey]
+                            }));
+                          }}
+                          className="mr-2 h-4 w-4 text-blue-600"
+                        />
+                        <label htmlFor={`face-recognition-${camera.publicKey}`} className="text-sm text-gray-700">
+                          Use Face Recognition
+                        </label>
+                      </div>
                     </div>
                   )}
 
-                  {/* Camera control buttons - available to all users */}
-                  {!isOldFormat && camera.isActive && (
+                  <div className="flex flex-wrap gap-2">
+                    {isActive && !camera.userCheckedIn && (
                     <button
-                      onClick={() => takePicture(camera)}
+                      className="btn-primary text-sm py-1 px-3"
+                        onClick={() => takePicture(camera, useFaceRecognition[camera.publicKey] || false)}
                       disabled={loading}
-                      className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-3 rounded text-sm flex items-center gap-1"
                     >
-                      {loading ? (
-                        <>
-                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          Processing...
-                        </>
-                      ) : (
-                        <>
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                          </svg>
-                          Take Picture
-                        </>
-                      )}
+                      Check In
                     </button>
                   )}
 
-                  <button
-                    onClick={() => {
-                      // Set the selected camera in the dropdown for NFC URL generation
-                      const dropdown = document.getElementById('nfc-camera-select') as HTMLSelectElement;
-                      if (dropdown) {
-                        dropdown.value = camera.publicKey;
-
-                        // Trigger the NFC URL generation
-                        const generateButton = document.querySelector('button[disabled]') as HTMLButtonElement;
-                        if (generateButton && !generateButton.disabled) {
-                          generateButton.click();
-                        }
-                      }
-                    }}
-                    className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100"
-                  >
-                    Use for NFC
-                  </button>
-
-                  <div className="flex flex-col space-y-2 mb-4">
-                    {/* Direct path to camera view - no redirection */}
-                    <a
-                      href={`/app/camera/${camera.publicKey}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+                    {/* Only show check out if user is checked in */}
+                    {isActive && camera.userCheckedIn && (
+                    <button
+                      className="bg-orange-500 hover:bg-orange-600 text-white text-sm py-1 px-3 rounded"
+                      onClick={() => checkOutCamera(camera)}
+                      disabled={loading}
                     >
-                      Open Camera
-                    </a>
+                      Check Out
+                    </button>
+                  )}
+
+                  {isOwner && (
+                    <button
+                      className={`text-sm py-1 px-3 rounded ${
+                        isActive
+                          ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                          : 'bg-green-100 text-green-700 hover:bg-green-200'
+                      }`}
+                      onClick={() => toggleCameraActive(camera)}
+                      disabled={loading}
+                    >
+                      {isActive ? 'Deactivate' : 'Activate'}
+                    </button>
+                  )}
+
+                  {isOwner && (
+                    <button
+                      className="bg-red-500 hover:bg-red-600 text-white text-sm py-1 px-3 rounded"
+                      onClick={() => deregisterCamera(camera)}
+                      disabled={loading}
+                    >
+                      Deregister
+                    </button>
+                  )}
+
+                    <CameraNavigationButton camera={camera} />
                   </div>
                 </div>
               </div>
@@ -881,7 +1542,25 @@ export function SolDevNetDebug() {
 
         {txResult && (
           <div className="bg-green-100 text-green-800 p-4 rounded mb-4">
-            Transaction successful: {txResult}
+            <div className="flex flex-col">
+              <div className="mb-2">Transaction sent: {txResult}</div>
+              <div className="flex">
+                <a 
+                  href={`https://explorer.solana.com/tx/${txResult}?cluster=devnet`} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="bg-green-700 hover:bg-green-800 text-white px-3 py-1 rounded text-sm mr-2"
+                >
+                  View in Explorer
+                </a>
+                <button
+                  onClick={() => navigator.clipboard.writeText(txResult)}
+                  className="bg-gray-200 text-gray-700 px-3 py-1 rounded text-sm hover:bg-gray-300"
+                >
+                  Copy Signature
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -927,8 +1606,9 @@ export function SolDevNetDebug() {
         </div>
       </div>
 
-      {/* Camera Management */}
+      {/* Camera Management & Face Enrollment */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        {/* Camera Management */}
         <div className="bg-white p-4 rounded-lg shadow">
           <h2 className="font-semibold mb-4">Camera Management</h2>
           <div className="bg-blue-50 p-3 mb-4 rounded-md text-sm">
@@ -971,6 +1651,70 @@ export function SolDevNetDebug() {
           </div>
         </div>
 
+        {/* --- Face Enrollment Section --- */}
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h2 className="font-semibold mb-4">Face Enrollment</h2>
+          <div className="bg-blue-50 p-3 mb-4 rounded-md text-sm">
+            <p className="font-semibold">Enroll your face for recognition:</p>
+            <ol className="list-decimal pl-5 mt-1 space-y-1">
+              <li>Ensure your Jetson is running and accessible.</li>
+              <li>Position your face clearly in the camera view below.</li>
+              <li>Click "Capture Face" to get the embedding from the Jetson.</li>
+              <li>Click "Mint Face NFT" to store it on-chain with your wallet.</li>
+            </ol>
+          </div>
+
+          {/* TODO: Live Camera Feed */}
+          <div className="mb-4 p-2 border border-gray-300 rounded bg-gray-100 h-48 flex items-center justify-center text-gray-500">
+            {jetsonStreamUrl ? (
+              <img src={jetsonStreamUrl} alt="Jetson Camera Feed" className="max-h-full max-w-full" />
+            ) : (
+              <span>Camera Feed Placeholder (Set Jetson Stream URL in code)</span>
+            )}
+          </div>
+
+          {/* Enrollment Status/Error Display */}
+          {enrollmentStatus && (
+            <div className={`p-2 rounded mb-2 text-sm ${enrollmentError ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
+              {enrollmentStatus}
+            </div>
+          )}
+          {enrollmentError && (
+            <div className="p-2 rounded mb-2 text-sm bg-red-100 text-red-700">
+              Error: {enrollmentError}
+            </div>
+          )}
+
+          <div className="space-y-3">
+             <p className="text-sm text-gray-600">
+                Enrolling for Wallet: <span className="font-mono">{primaryWallet?.address ? `${primaryWallet.address.slice(0, 8)}...` : 'N/A'}</span>
+             </p>
+            
+            <button
+              onClick={captureFace}
+              disabled={enrollmentLoading || !primaryWallet?.address}
+              className="w-full bg-teal-600 text-white py-2 px-4 rounded-md hover:bg-teal-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              {enrollmentLoading && enrollmentStatus.includes('Jetson') ? 'Capturing...' : '1. Capture Face from Jetson'}
+            </button>
+
+            {capturedEmbedding && (
+                 <div className="text-sm text-green-700">
+                    Embedding captured ({capturedEmbedding.length} bytes). Ready to mint.
+                 </div>
+            )}
+
+            <button
+              onClick={mintFaceNFT}
+              disabled={enrollmentLoading || !primaryWallet?.address || !capturedEmbedding}
+              className="w-full bg-purple-600 text-white py-2 px-4 rounded-md hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              {enrollmentLoading && enrollmentStatus.includes('Minting') ? 'Minting...' : '2. Mint Face NFT'}
+            </button>
+          </div>
+        </div>
+        {/* ----------------------------- */}
+
         {/* NFC URL Generator */}
         <div className="bg-white p-4 rounded-lg shadow">
           <h2 className="font-semibold mb-4">NFC URL Generator</h2>
@@ -994,7 +1738,7 @@ export function SolDevNetDebug() {
               ) : (
                 registeredCameras.map((camera, index) => (
                   <option key={index} value={camera.publicKey}>
-                    {camera.metadata.name || 'Unnamed Camera'} ({camera.publicKey.slice(0, 8)}...)
+                    {camera.name || 'Unnamed Camera'} ({camera.publicKey.slice(0, 8)}...)
                   </option>
                 ))
               )}

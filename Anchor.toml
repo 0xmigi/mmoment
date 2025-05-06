@@ -5,21 +5,23 @@ seeds = true
 skip-lint = false
 
 [programs.localnet]
-my_solana_project = "7BYuxsNyaxxsxwzcRzFd6UJGnUctN6V1vDQxjGPaK2L4"
-camera_activation = "77HrUp2XLQGe4tN6pMmHxLLkZnERhVgjJBRxujaVBF2"
+camera_network = "Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S"
 
 [programs.devnet]
-my_solana_project = "7BYuxsNyaxxsxwzcRzFd6UJGnUctN6V1vDQxjGPaK2L4"
+camera_network = "Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
 cluster = "devnet"
-wallet = "/Users/azuolascompy/.config/solana/id.json"
+wallet = "./test-wallet.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+camera-network = "node scripts/camera-network-client.js"
+face-test = "node scripts/face-recognition-test.js"
+face-checkin = "node scripts/face-recognition-checkin.js"
 
 [test]
 startup_wait = 10000
