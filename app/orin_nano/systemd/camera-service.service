@@ -1,0 +1,16 @@
+[Unit]
+Description=Jetson Camera API Service
+After=network.target
+
+[Service]
+Type=simple
+User=azuolas
+WorkingDirectory=/home/azuolas/jetson_system/camera_service
+# Run port cleanup script before starting
+ExecStartPre=/bin/bash -c "lsof -ti:5002 | xargs -r kill -9"
+ExecStart=/usr/bin/python3 /home/azuolas/jetson_system/camera_service/api.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target 

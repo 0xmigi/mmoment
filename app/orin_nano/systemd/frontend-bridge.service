@@ -1,0 +1,15 @@
+[Unit]
+Description=Jetson Camera Frontend Bridge
+After=network.target
+Wants=camera-service.service
+
+[Service]
+Type=simple
+User=azuolas
+WorkingDirectory=/home/azuolas/jetson_system/frontend_bridge
+ExecStart=/usr/bin/python3 /home/azuolas/jetson_system/frontend_bridge/frontend_bridge.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target 
