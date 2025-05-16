@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jetson Camera API Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .panel {
+            background-color: white;
+            border-radius: 5px;
+            padding: 15px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .panel-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .stream-container {
+            width: 100%;
+            text-align: center;
+        }
+        .stream-image {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+        }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .btn {
+            padding: 8px 15px;
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn:hover {
+            background-color: #3367d6;
+        }
+        .btn-danger {
+            background-color: #ea4335;
+        }
+        .btn-danger:hover {
+            background-color: #d33426;
+        }
+        .btn-success {
+            background-color: #34a853;
+        }
+        .btn-success:hover {
+            background-color: #2d9249;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .status {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            height: 100px;
+            overflow-y: auto;
+        }
+        .result-image {
+            max-width: 100%;
+            height: auto;
+            margin-top: 15px;
+            border: 1px solid #ddd;
+        }
+        .gesture-display {
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            margin: 15px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Jetson Camera API Test (Buffer-based)</h1>
+    
+    <div class="container">
+        <!-- Camera Stream Panel -->
+        <div class="panel">
+            <div class="panel-title">Camera Stream</div>
+            <div class="stream-container">
+                <img id="streamImage" class="stream-image" src="/stream" alt="Camera Stream">
+            </div>
+            <div class="controls">
+                <button id="refreshStream" class="btn">Refresh Stream</button>
+            </div>
+        </div>
+        
+        <!-- User Connection Panel -->
+        <div class="panel">
+            <div class="panel-title">User Connection</div>
+            <div class="form-group">
+                <input type="text" id="walletAddress" placeholder="Enter wallet address">
+            </div>
+            <div class="controls">
+                <button id="connect" class="btn btn-success">Connect</button>
+                <button id="disconnect" class="btn btn-danger">Disconnect</button>
+            </div>
+            <div class="status" id="connectionStatus">
+                Ready to connect...
+            </div>
+        </div>
+        
+        <!-- FaceNet Status Panel -->
+        <div class="panel">
+            <div class="panel-title">FaceNet Status</div>
+            <div id="facenetStatus" class="status" style="margin-bottom: 15px;">
+                Checking FaceNet availability...
+            </div>
+            <div class="controls">
+                <button id="checkFaceNet" class="btn">Check FaceNet Status</button>
+                <button id="showFaceNetDetails" class="btn">Show Details</button>
+            </div>
+            <div id="facenetDetails" style="display: none; margin-top: 15px; background-color: #f8f9fa; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 12px; white-space: pre-wrap; overflow-x: auto;">
+            </div>
+        </div>
+        
+        <!-- Face Recognition Panel -->
+        <div class="panel">
+            <div class="panel-title">Face Recognition</div>
+            <div id="faceEnrollment" style="margin-bottom: 15px; padding: 10px; background-color: #e6f4ff; border-radius: 4px; display: none;">
+                <h3 style="margin-top: 0;">Face Enrollment Tips</h3>
+                <ul>
+                    <li>Position your face clearly in the center of the camera view</li>
+                    <li>Ensure good lighting on your face (avoid backlighting)</li>
+                    <li>Remove glasses, hats, or other items that might obscure facial features</li>
+                    <li>Make sure only your face is visible in the frame</li>
+                    <li>Maintain a neutral expression and face the camera directly</li>
+                </ul>
+            </div>
+            <div class="controls">
+                <button id="enrollFace" class="btn">Enroll Face</button>
+                <button id="recognizeFace" class="btn">Recognize Face</button>
+                <button id="listEnrolledFaces" class="btn">List Enrolled Faces</button>
+                <button id="clearAllFaces" class="btn btn-danger">Clear All Faces</button>
+            </div>
+            <div class="controls">
+                <button id="toggleFaceBoxes" class="btn">Toggle Face Boxes</button>
+                <button id="showFaceEnrollmentTips" class="btn">Show Enrollment Tips</button>
+            </div>
+            <div class="status" id="faceStatus">
+                Please click 'Recognize Face' to start face recognition.
+            </div>
+            <img id="faceResult" class="result-image" style="display: none;">
+        </div>
+        
+        <!-- Gesture Recognition Panel -->
+        <div class="panel">
+            <div class="panel-title">Gesture Recognition</div>
+            <div class="gesture-display" id="currentGesture">No gesture detected</div>
+            <div class="controls">
+                <button id="startGestureDetection" class="btn btn-success">Start Gesture Detection</button>
+                <button id="stopGestureDetection" class="btn btn-danger">Stop Detection</button>
+            </div>
+            <div class="status" id="gestureStatus">
+                Click 'Start Gesture Detection' to begin.
+            </div>
+        </div>
+        
+        <!-- Capture Panel -->
+        <div class="panel">
+            <div class="panel-title">Capture Moment</div>
+            <div class="controls">
+                <button id="capturePhoto" class="btn">Capture Photo</button>
+                <button id="clearGallery" class="btn">Clear Gallery</button>
+                <button id="startRecording" class="btn btn-success">Start Recording</button>
+                <button id="stopRecording" class="btn btn-danger">Stop Recording</button>
+            </div>
+            <div class="status" id="captureStatus">
+                No images captured yet. Make a peace sign gesture or click "Capture Photo" to take a picture.
+            </div>
+            <img id="captureResult" class="result-image" style="display: none;">
+        </div>
+        
+        <!-- Recorded Videos Panel -->
+        <div class="panel">
+            <div class="panel-title">Recorded Videos</div>
+            <div class="controls">
+                <button id="listVideos" class="btn">View All Videos</button>
+                <button id="clearVideos" class="btn btn-danger">Clear Videos</button>
+            </div>
+            <div class="status" id="videoStatus">
+                No videos recorded yet. Make a thumbs up gesture to start recording, and forward palm to stop.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let sessionInfo = {
+            sessionId: null,
+            walletAddress: null
+        };
+        let gestureInterval = null;
+        let faceBoxesEnabled = true;
+        let gestureDetectionEnabled = true;
+
+        // DOM Elements
+        const streamImage = document.getElementById('streamImage');
+        const walletAddressInput = document.getElementById('walletAddress');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const faceStatus = document.getElementById('faceStatus');
+        const gestureStatus = document.getElementById('gestureStatus');
+        const captureStatus = document.getElementById('captureStatus');
+        const videoStatus = document.getElementById('videoStatus');
+        const currentGesture = document.getElementById('currentGesture');
+        const faceResult = document.getElementById('faceResult');
+        const captureResult = document.getElementById('captureResult');
+
+        // Button Event Listeners
+        document.getElementById('refreshStream').addEventListener('click', refreshStream);
+        document.getElementById('connect').addEventListener('click', connectWallet);
+        document.getElementById('disconnect').addEventListener('click', disconnectWallet);
+        document.getElementById('enrollFace').addEventListener('click', enrollFace);
+        document.getElementById('recognizeFace').addEventListener('click', recognizeFace);
+        document.getElementById('toggleFaceBoxes').addEventListener('click', toggleFaceBoxes);
+        document.getElementById('showFaceEnrollmentTips').addEventListener('click', toggleFaceEnrollmentTips);
+        document.getElementById('checkFaceNet').addEventListener('click', checkFaceNetStatus);
+        document.getElementById('showFaceNetDetails').addEventListener('click', toggleFaceNetDetails);
+        document.getElementById('startGestureDetection').addEventListener('click', startGestureDetection);
+        document.getElementById('stopGestureDetection').addEventListener('click', stopGestureDetection);
+        document.getElementById('capturePhoto').addEventListener('click', capturePhoto);
+        document.getElementById('startRecording').addEventListener('click', startRecording);
+        document.getElementById('stopRecording').addEventListener('click', stopRecording);
+        document.getElementById('listVideos').addEventListener('click', listVideos);
+        document.getElementById('listEnrolledFaces').addEventListener('click', listEnrolledFaces);
+        document.getElementById('clearAllFaces').addEventListener('click', clearAllFaces);
+
+        // Utility functions
+        function updateStatus(element, message) {
+            element.innerHTML = `[${new Date().toLocaleTimeString()}] ${message}<br>` + element.innerHTML;
+        }
+
+        function refreshStream() {
+            streamImage.src = '/stream?' + new Date().getTime();
+            updateStatus(connectionStatus, 'Stream refreshed');
+        }
+
+        // API Functions
+        async function fetchAPI(endpoint, method = 'GET', data = null) {
+            try {
+                const options = {
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                };
+
+                if (data) {
+                    options.body = JSON.stringify(data);
+                }
+
+                // Add timeout handling
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+                options.signal = controller.signal;
+
+                const response = await fetch(endpoint, options);
+                clearTimeout(timeoutId);
+                
+                return await response.json();
+            } catch (error) {
+                console.error(`API Error (${endpoint}):`, error);
+                // Special handling for timeout errors
+                if (error.name === 'AbortError') {
+                    return { 
+                        success: true, 
+                        timeout: true, 
+                        message: "Request took too long, but the operation may have succeeded. Please check the results."
+                    };
+                }
+                return { success: false, error: error.message };
+            }
+        }
+
+        // API Endpoints
+        async function connectWallet() {
+            const walletAddress = walletAddressInput.value.trim();
+            if (!walletAddress) {
+                updateStatus(connectionStatus, 'Error: Please enter a wallet address');
+                return;
+            }
+
+            updateStatus(connectionStatus, `Connecting wallet ${walletAddress}...`);
+
+            const result = await fetchAPI('/connect', 'POST', { wallet_address: walletAddress });
+
+            if (result.success) {
+                sessionInfo.sessionId = result.session_id;
+                sessionInfo.walletAddress = walletAddress;
+                updateStatus(connectionStatus, `Connected successfully! Session ID: ${result.session_id}`);
+            } else {
+                updateStatus(connectionStatus, `Connection failed: ${result.error || 'Unknown error'}`);
+            }
+        }
+
+        async function disconnectWallet() {
+            if (!sessionInfo.sessionId) {
+                updateStatus(connectionStatus, 'Error: Not connected');
+                return;
+            }
+
+            updateStatus(connectionStatus, 'Disconnecting...');
+
+            const result = await fetchAPI('/disconnect', 'POST', {
+                wallet_address: sessionInfo.walletAddress,
+                session_id: sessionInfo.sessionId
+            });
+
+            if (result.success) {
+                sessionInfo.sessionId = null;
+                sessionInfo.walletAddress = null;
+                updateStatus(connectionStatus, 'Disconnected successfully');
+            } else {
+                updateStatus(connectionStatus, `Disconnection failed: ${result.error || 'Unknown error'}`);
+            }
+        }
+
+        async function enrollFace() {
+            if (!sessionInfo.sessionId) {
+                updateStatus(faceStatus, "<span style='color:red'>❌ Must connect a wallet first!</span>");
+                return;
+            }
+
+            const faceEnrollmentTips = document.getElementById('faceEnrollment');
+            faceEnrollmentTips.style.display = 'block';
+            
+            try {
+                updateStatus(faceStatus, "📸 Enrolling face...");
+                
+                const response = await fetch('/enroll_face', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        wallet_address: sessionInfo.walletAddress,
+                        session_id: sessionInfo.sessionId
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateStatus(faceStatus, `<span style='color:green'>✅ Face enrolled successfully!</span>`);
+                    enableFaceBoxes();
+                } else {
+                    updateStatus(faceStatus, `<span style='color:red'>❌ Error: ${data.error}</span>`);
+                }
+                
+                if (data.include_image && data.image) {
+                    faceResult.src = "data:image/jpeg;base64," + data.image;
+                    faceResult.style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error enrolling face:', error);
+                updateStatus(faceStatus, `<span style='color:red'>❌ Error enrolling face: ${error.message}</span>`);
+            }
+        }
+
+        async function recognizeFace() {
+            updateStatus(faceStatus, 'Recognizing faces... Please look at the camera (this may take up to 30 seconds)');
+            
+            // Include session info if we have it
+            const data = sessionInfo.sessionId ? {
+                wallet_address: sessionInfo.walletAddress,
+                session_id: sessionInfo.sessionId
+            } : {};
+
+            const result = await fetchAPI('/recognize_face', 'POST', data);
+
+            if (result.success) {
+                if (result.timeout) {
+                    updateStatus(faceStatus, 'Face recognition request timed out. Please try again.');
+                    // Refresh the stream after a delay
+                    setTimeout(refreshStream, 1000);
+                    faceResult.style.display = 'none';
+                    return;
+                }
+                
+                const recognizedCount = result.recognized_faces;
+                const detectedCount = result.detected_faces;
+                
+                let statusMessage = `Faces detected: ${detectedCount}, Recognized: ${recognizedCount}`;
+                
+                if (recognizedCount > 0) {
+                    // Show information about recognized faces
+                    statusMessage += '<br>Recognized wallets:';
+                    for (const [wallet, data] of Object.entries(result.recognized_data)) {
+                        statusMessage += `<br>- ${wallet.substring(0, 10)}... (${(data.confidence * 100).toFixed(1)}%)`;
+                    }
+                    
+                    // Check if the current wallet was recognized
+                    if (result.wallet_recognized) {
+                        statusMessage += `<br><strong>Your wallet was recognized! (${(result.wallet_confidence * 100).toFixed(1)}% confidence)</strong>`;
+                    }
+                } else if (detectedCount > 0) {
+                    statusMessage += '<br>Faces detected but not recognized. Please enroll your face first.';
+                }
+                
+                updateStatus(faceStatus, statusMessage);
+                
+                // Don't show the image, even if the server sent one
+                faceResult.style.display = 'none';
+                
+                // Refresh the stream after recognition
+                setTimeout(refreshStream, 1000);
+            } else {
+                updateStatus(faceStatus, `Face recognition failed: ${result.error || 'Unknown error'}`);
+                faceResult.style.display = 'none';
+            }
+        }
+        
+        async function toggleFaceBoxes() {
+            faceBoxesEnabled = !faceBoxesEnabled;
+            updateStatus(faceStatus, `Toggling face boxes to: ${faceBoxesEnabled ? 'ON' : 'OFF'}`);
+
+            // First make sure visualization is enabled
+            await fetchAPI('/toggle_face_visualization', 'POST', {
+                enabled: true
+            });
+            
+            // Then toggle box display
+            const result = await fetchAPI('/toggle_face_boxes', 'POST', {
+                enabled: faceBoxesEnabled
+            });
+
+            if (result.success) {
+                updateStatus(faceStatus, `Face boxes ${faceBoxesEnabled ? 'enabled' : 'disabled'}`);
+            } else {
+                updateStatus(faceStatus, `Failed to toggle face boxes: ${result.error || 'Unknown error'}`);
+            }
+        }
+
+        async function startGestureDetection() {
+            updateStatus(gestureStatus, 'Starting gesture detection...');
+            
+            // Enable gesture visualization
+            const result = await fetchAPI('/toggle_gesture_visualization', 'POST', {
+                enabled: true
+            });
+
+            if (result.success) {
+                gestureDetectionEnabled = true;
+                updateStatus(gestureStatus, 'Gesture detection started');
+                
+                // Start polling for current gesture
+                gestureInterval = setInterval(async () => {
+                    try {
+                        const gestureResult = await fetchAPI('/current_gesture');
+                        if (gestureResult.success) {
+                            const gesture = gestureResult.gesture;
+                            const confidence = gestureResult.confidence;
+                            
+                            if (gesture !== 'none' && confidence > 0.7) {
+                                currentGesture.innerText = `${gesture.toUpperCase()} (${confidence.toFixed(2)})`;
+                                
+                                // Auto-actions based on gestures
+                                if (gesture === 'peace' && confidence > 0.85) {
+                                    capturePhoto();
+                                } else if (gesture === 'thumbs_up' && confidence > 0.85) {
+                                    startRecording();
+                                } else if (gesture === 'palm' && confidence > 0.85) {
+                                    stopRecording();
+                                }
+                            } else {
+                                currentGesture.innerText = 'No gesture detected';
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error polling gesture:', error);
+                    }
+                }, 500);
+            } else {
+                updateStatus(gestureStatus, `Failed to start gesture detection: ${result.error || 'Unknown error'}`);
+            }
+        }
+
+        async function stopGestureDetection() {
+            updateStatus(gestureStatus, 'Stopping gesture detection...');
+            
+            // Clear polling interval
+            if (gestureInterval) {
+                clearInterval(gestureInterval);
+                gestureInterval = null;
+            }
+            
+            // Disable gesture visualization
+            const result = await fetchAPI('/toggle_gesture_visualization', 'POST', {
+                enabled: false
+            });
+
+            if (result.success) {
+                gestureDetectionEnabled = false;
+                currentGesture.innerText = 'Gesture detection disabled';
+                updateStatus(gestureStatus, 'Gesture detection stopped');
+            } else {
+                updateStatus(gestureStatus, `Failed to stop gesture detection: ${result.error || 'Unknown error'}`);
+            }
+        }
+
+        async function capturePhoto() {
+            if (!sessionInfo.sessionId) {
+                updateStatus(captureStatus, 'Error: Please connect your wallet first');
+                return;
+            }
+
+            updateStatus(captureStatus, 'Capturing photo...');
+
+            const result = await fetchAPI('/capture_moment', 'POST', {
+                wallet_address: sessionInfo.walletAddress,
+                session_id: sessionInfo.sessionId
+            });
+
+            if (result.success) {
+                updateStatus(captureStatus, 'Photo captured successfully!');
+                captureResult.src = result.image_data;
+                captureResult.style.display = 'block';
+            } else {
+                updateStatus(captureStatus, `Photo capture failed: ${result.error || 'Unknown error'}`);
+            }
+        }
+
+        async function startRecording() {
+            if (!sessionInfo.sessionId) {
+                updateStatus(videoStatus, 'Error: Please connect your wallet first');
+                return;
+            }
+
+            updateStatus(videoStatus, 'Starting recording...');
+
+            const result = await fetchAPI('/start_recording', 'POST', {
+                wallet_address: sessionInfo.walletAddress,
+                session_id: sessionInfo.sessionId,
+                duration: 10  // 10 seconds max
+            });
+
+            if (result.success) {
+                updateStatus(videoStatus, `Recording started! Maximum duration: 10 seconds.`);
+            } else {
+                updateStatus(videoStatus, `Recording failed to start: ${result.error || 'Unknown error'}`);
+            }
+        }
+
+        async function stopRecording() {
+            if (!sessionInfo.sessionId) {
+                updateStatus(videoStatus, 'Error: Please connect your wallet first');
+                return;
+            }
+
+            updateStatus(videoStatus, 'Stopping recording...');
+
+            const result = await fetchAPI('/stop_recording', 'POST', {
+                wallet_address: sessionInfo.walletAddress,
+                session_id: sessionInfo.sessionId
+            });
+
+            if (result.success) {
+                updateStatus(videoStatus, 'Recording stopped successfully!');
+                listVideos();
+            } else {
+                updateStatus(videoStatus, `Failed to stop recording: ${result.error || 'Unknown error'}`);
+            }
+        }
+
+        async function listVideos() {
+            updateStatus(videoStatus, 'Fetching videos...');
+
+            const result = await fetchAPI('/list_videos');
+
+            if (result.success) {
+                const videoCount = result.videos.length;
+                if (videoCount > 0) {
+                    let videoList = `Found ${videoCount} videos:<br>`;
+                    result.videos.forEach(video => {
+                        videoList += `<a href="${video.url}" target="_blank">${video.filename}</a> (${formatDate(video.timestamp)})<br>`;
+                    });
+                    videoStatus.innerHTML = videoList;
+                } else {
+                    updateStatus(videoStatus, 'No videos found.');
+                }
+            } else {
+                updateStatus(videoStatus, `Failed to list videos: ${result.error || 'Unknown error'}`);
+            }
+        }
+        
+        async function listEnrolledFaces() {
+            updateStatus(faceStatus, 'Fetching enrolled faces...');
+
+            const result = await fetchAPI('/get_enrolled_faces');
+
+            if (result.success) {
+                const faceCount = result.count;
+                if (faceCount > 0) {
+                    let faceList = `Found ${faceCount} enrolled faces:<br><ul>`;
+                    result.faces.forEach(face => {
+                        faceList += `<li>${face}</li>`;
+                    });
+                    faceList += '</ul>';
+                    faceStatus.innerHTML = faceList;
+                } else {
+                    updateStatus(faceStatus, 'No enrolled faces found.');
+                }
+            } else {
+                updateStatus(faceStatus, `Failed to list faces: ${result.error || 'Unknown error'}`);
+            }
+        }
+        
+        async function clearAllFaces() {
+            if (!confirm('Are you sure you want to clear all enrolled faces? This cannot be undone.')) {
+                return;
+            }
+            
+            updateStatus(faceStatus, 'Clearing all enrolled faces...');
+
+            const result = await fetchAPI('/clear_enrolled_faces', 'POST');
+
+            if (result.success) {
+                updateStatus(faceStatus, 'All enrolled faces have been cleared successfully.');
+            } else {
+                updateStatus(faceStatus, `Failed to clear faces: ${result.error || 'Unknown error'}`);
+            }
+        }
+
+        // Helper functions
+        function formatDate(timestamp) {
+            return new Date(timestamp).toLocaleString();
+        }
+
+        // FaceNet Status Functions
+        async function checkFaceNetStatus() {
+            const facenetStatus = document.getElementById('facenetStatus');
+            facenetStatus.innerHTML = "Checking FaceNet availability...";
+            
+            try {
+                const response = await fetch('/facenet/check');
+                const data = await response.json();
+                
+                const statusElement = document.getElementById('facenetStatus');
+                if (data.available) {
+                    statusElement.innerHTML = `<div style="background-color: #d4edda; color: #155724; padding: 10px; border-radius: 4px;">
+                        <strong>✅ FaceNet is available and working properly</strong><br>
+                        Face recognition features are fully operational.
+                    </div>`;
+                } else {
+                    statusElement.innerHTML = `<div style="background-color: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px;">
+                        <strong>❌ FaceNet is not available or not working</strong><br>
+                        Face recognition features will not function correctly.<br>
+                        See details for more information.
+                    </div>`;
+                }
+                
+                // Store details for display
+                const details = document.getElementById('facenetDetails');
+                details.innerHTML = JSON.stringify(data.details, null, 2);
+                
+            } catch (error) {
+                console.error('Error checking FaceNet status:', error);
+                facenetStatus.innerHTML = `<div style="background-color: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px;">
+                    <strong>❌ Error checking FaceNet status</strong><br>
+                    ${error.message}
+                </div>`;
+            }
+        }
+        
+        function toggleFaceNetDetails() {
+            const details = document.getElementById('facenetDetails');
+            if (details.style.display === 'none') {
+                details.style.display = 'block';
+            } else {
+                details.style.display = 'none';
+            }
+        }
+
+        // Initialize
+        async function init() {
+            try {
+                // Check health
+                const health = await fetchAPI('/health');
+                if (health.status === 'ok') {
+                    updateStatus(connectionStatus, `API is healthy. Buffer FPS: ${health.buffer_fps}`);
+                } else {
+                    updateStatus(connectionStatus, `API health check failed: ${health.buffer_service}`);
+                }
+                
+                // Set default wallet input value
+                walletAddressInput.value = 'test_wallet_' + Math.floor(Math.random() * 1000);
+            } catch (error) {
+                console.error('Initialization error:', error);
+                updateStatus(connectionStatus, `Initialization error: ${error.message}`);
+            }
+            
+            // Check FaceNet status on load
+            checkFaceNetStatus();
+        }
+
+        // Run initialization
+        window.addEventListener('load', init);
+
+        // Add new function to toggle face enrollment tips
+        function toggleFaceEnrollmentTips() {
+            const faceEnrollmentTips = document.getElementById('faceEnrollment');
+            if (faceEnrollmentTips.style.display === 'none') {
+                faceEnrollmentTips.style.display = 'block';
+            } else {
+                faceEnrollmentTips.style.display = 'none';
+            }
+        }
+
+        // Function to enable face boxes
+        function enableFaceBoxes() {
+            if (!faceBoxesEnabled) {
+                toggleFaceBoxes();
+            }
+        }
+    </script>
+</body>
+</html> 
