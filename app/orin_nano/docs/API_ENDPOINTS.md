@@ -202,9 +202,11 @@ This document describes the available API endpoints for the Camera Service.
 ### List Photos
 - **Endpoint**: `/list_photos`
 - **Method**: GET
-- **Description**: List available photos
+- **Description**: List all captured photos
 - **Parameters**:
-  - `limit` (integer, optional): Maximum number of photos to return (default: 10)
+  - `wallet_address` (string, optional): Filter by wallet address
+  - `page` (integer, optional): Page number for pagination
+  - `limit` (integer, optional): Number of items per page
 - **Response**:
   ```json
   {
@@ -214,20 +216,24 @@ This document describes the available API endpoints for the Camera Service.
         "filename": "photo_1234567890.jpg",
         "path": "/path/to/photos/photo_1234567890.jpg",
         "timestamp": 1234567890,
-        "size": 102400,
-        "wallet_address": "user-wallet-address"
+        "wallet_address": "user-wallet-address",
+        "url": "/photos/photo_1234567890.jpg"
       }
     ],
-    "count": 1
+    "count": 1,
+    "page": 1,
+    "total_pages": 1
   }
   ```
 
 ### List Videos
 - **Endpoint**: `/list_videos`
 - **Method**: GET
-- **Description**: List available videos
+- **Description**: List all recorded videos
 - **Parameters**:
-  - `limit` (integer, optional): Maximum number of videos to return (default: 10)
+  - `wallet_address` (string, optional): Filter by wallet address
+  - `page` (integer, optional): Page number for pagination
+  - `limit` (integer, optional): Number of items per page
 - **Response**:
   ```json
   {
@@ -237,28 +243,19 @@ This document describes the available API endpoints for the Camera Service.
         "filename": "video_1234567890.mp4",
         "path": "/path/to/videos/video_1234567890.mp4",
         "timestamp": 1234567890,
+        "duration": 10.5,
         "size": 1024000,
-        "duration": 5.2,
-        "wallet_address": "user-wallet-address"
+        "wallet_address": "user-wallet-address",
+        "url": "/videos/video_1234567890.mp4"
       }
     ],
-    "count": 1
+    "count": 1,
+    "page": 1,
+    "total_pages": 1
   }
   ```
 
-### Get Photo
-- **Endpoint**: `/photos/<filename>`
-- **Method**: GET
-- **Description**: Get a specific photo by filename
-- **Response**: Photo file (image/jpeg)
-
-### Get Video
-- **Endpoint**: `/videos/<filename>`
-- **Method**: GET
-- **Description**: Get a specific video by filename
-- **Response**: Video file (video/mp4)
-
-## Visualization Settings
+## Camera Controls
 
 ### Toggle Face Detection
 - **Endpoint**: `/toggle_face_detection`
@@ -270,17 +267,16 @@ This document describes the available API endpoints for the Camera Service.
   ```json
   {
     "success": true,
-    "enabled": true,
-    "message": "Face detection is always enabled"
+    "enabled": true
   }
   ```
 
 ### Toggle Face Visualization
 - **Endpoint**: `/toggle_face_visualization`
 - **Method**: POST
-- **Description**: Enable or disable face visualization
+- **Description**: Enable or disable face box visualization
 - **Parameters**:
-  - `enabled` (boolean, required): Whether to enable face visualization
+  - `enabled` (boolean, required): Whether to enable face box visualization
 - **Response**:
   ```json
   {
@@ -289,67 +285,79 @@ This document describes the available API endpoints for the Camera Service.
   }
   ```
 
-### Toggle Face Boxes
-- **Endpoint**: `/toggle_face_boxes`
+### Reset Camera
+- **Endpoint**: `/camera/reset`
 - **Method**: POST
-- **Description**: Enable or disable face bounding boxes
-- **Parameters**:
-  - `enabled` (boolean, required): Whether to enable face boxes
+- **Description**: Reset the camera if it's not responding
+- **Parameters**: None
 - **Response**:
   ```json
   {
     "success": true,
-    "enabled": true
+    "message": "Camera reset successfully"
   }
   ```
-
-## Camera Management
-
-### Camera Health Check
-- **Endpoint**: `/health`
-- **Method**: GET
-- **Description**: Get camera service health status
-- **Response**:
-  ```json
-  {
-    "status": "ok",
-    "buffer_service": "running",
-    "buffer_fps": 30,
-    "active_sessions": 1,
-    "timestamp": 1234567890,
-    "camera": {
-      "index": 0,
-      "preferred_device": "/dev/video0",
-      "resolution": "1280x720",
-      "target_fps": 30
-    }
-  }
-  ```
-
-### Camera Stream
-- **Endpoint**: `/stream`
-- **Method**: GET
-- **Description**: Stream the camera feed as MJPEG
-- **Response**: MJPEG stream
 
 ### Camera Diagnostics
 - **Endpoint**: `/camera/diagnostics`
 - **Method**: GET
-- **Description**: Get detailed camera diagnostic information
-- **Response**: JSON with camera status
-
-### Camera Reset
-- **Endpoint**: `/camera/reset`
-- **Method**: POST
-- **Description**: Reset the camera connection
+- **Description**: Get camera diagnostic information
+- **Parameters**: None
 - **Response**:
   ```json
   {
     "success": true,
-    "message": "Camera reset successful",
-    "was_running": true,
-    "now_running": true,
-    "camera_index": 0,
-    "preferred_device": "/dev/video0"
+    "device": "/dev/video1",
+    "resolution": "1280x720",
+    "fps": 30,
+    "buffer_size": 3,
+    "active": true,
+    "reconnect_attempts": 0,
+    "frame_counter": 1234
+  }
+  ```
+
+## API Testing
+
+### Health Check
+- **Endpoint**: `/health`
+- **Method**: GET
+- **Description**: Check if the camera service is healthy
+- **Parameters**: None
+- **Response**:
+  ```json
+  {
+    "status": "ok",
+    "buffer": {
+      "running": true,
+      "fps": 29.8,
+      "buffer_size": 30,
+      "frame_count": 1234
+    },
+    "face_detection": {
+      "enabled": true,
+      "model": "facenet",
+      "visualize": true
+    },
+    "gesture_detection": {
+      "enabled": true,
+      "visualize": true
+    },
+    "camera_device": "/dev/video1"
+  }
+  ```
+
+### Version Information
+- **Endpoint**: `/version`
+- **Method**: GET
+- **Description**: Get API version information
+- **Parameters**: None
+- **Response**:
+  ```json
+  {
+    "api": "Camera Service API",
+    "version": "1.0.0",
+    "build_date": "2023-01-01",
+    "git_hash": "abc123"
   }
   ``` 

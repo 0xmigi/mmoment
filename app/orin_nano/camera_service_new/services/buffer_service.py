@@ -57,7 +57,15 @@ class BufferService:
         
         # Camera settings
         self._camera_index = 0
-        self._preferred_device = self._config.get('camera', {}).get('preferred_device', '/dev/video1')
+        # Check for environment variable override for camera device
+        env_camera_device = os.environ.get('CAMERA_DEVICE')
+        if env_camera_device:
+            logger.info(f"Using camera device from environment variable: {env_camera_device}")
+            self._preferred_device = env_camera_device
+        else:
+            self._preferred_device = self._config.get('camera', {}).get('preferred_device', '/dev/video1')
+            logger.info(f"Using camera device from config: {self._preferred_device}")
+            
         self._width = self._config.get('camera', {}).get('width', 1280)
         self._height = self._config.get('camera', {}).get('height', 720)
         self._fps = self._config.get('camera', {}).get('fps', 30)

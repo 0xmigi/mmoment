@@ -1,71 +1,125 @@
 # Jetson Camera System
 
-This is a cleaned-up and reorganized version of the Jetson Camera System with a proper directory structure.
+This repository contains the Jetson Camera System which provides facial recognition, gesture detection, and camera control capabilities for the mmoment project.
 
-## Directory Structure
+## Overview
 
-The Jetson Camera system is organized in the following directory structure:
+The Jetson Camera System consists of the following components:
+
+1. **Camera Service** - Provides low-level camera controls and vision processing
+2. **Frontend Bridge** - Provides an API for frontend applications to interact with the camera
+3. **Solana Middleware** - Handles blockchain integration for NFT moments
+
+## Quick Start
+
+To get the system up and running:
+
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/your-username/mmoment.git
+   cd mmoment/app/orin_nano
+   ```
+
+2. Run the installation script:
+   ```bash
+   ./install_services.sh
+   ```
+
+3. Start all services:
+   ```bash
+   ./start_services.sh
+   ```
+
+4. Access the camera system through:
+   - Web Interface: http://localhost:5003
+   - Camera Stream: http://localhost:5003/stream
+   - API Test Page: http://localhost:5003/api-test
+
+## File Structure
 
 ```
-/home/azuolas/jetson_system/
-├── camera_service/     # Camera API service files
-├── frontend_bridge/    # Frontend bridge files
-│   └── api_test.html   # Test page for API functionality
-├── solana_middleware/  # Solana middleware files
-├── systemd/            # Systemd service files
-├── data/               # Data files
-│   ├── faces/          # Facial recognition data
-│   ├── face_embeddings/# Face embeddings for recognition
-│   ├── videos/         # Recorded videos
-│   ├── images/         # Captured images
-│   └── recordings/     # Additional video recordings
-└── docs/               # Documentation
-    ├── SYSTEM_SETUP.md        # System setup documentation
-    └── FRONTEND_INTEGRATION.md# Frontend integration guide
+mmoment/app/orin_nano/
+├── camera_service_new/     # Buffer-based camera service
+├── frontend_bridge/        # Frontend API bridge
+├── solana_middleware/      # Blockchain integration
+├── systemd/                # Systemd service definitions
+├── docs/                   # Documentation
+│   ├── API_ENDPOINTS.md    # API reference
+│   ├── SYSTEM_SETUP.md     # System setup guide 
+│   ├── FRONTEND_INTEGRATION.md # Frontend integration guide
+│   └── HARDWARE.md         # Hardware setup guide
+├── data/                   # Data storage
+└── [other configuration files]
 ```
-
-## Setup Instructions
-
-To complete the setup of the cleaned-up system:
-
-1. **Install the services**:
-   ```bash
-   sudo /home/azuolas/jetson_system/install_services.sh
-   ```
-
-2. **Start the services**:
-   ```bash
-   sudo /home/azuolas/jetson_system/start_services.sh
-   ```
-
-3. **Test the system**:
-   Open a browser and navigate to `https://jetson.mmoment.xyz/api-test`
-   
-4. **Clean up duplicates**:
-   After verifying that everything works correctly:
-   ```bash
-   /home/azuolas/jetson_system/cleanup_duplicates.sh
-   ```
-
-## Available Scripts
-
-- `install_services.sh`: Installs systemd service files
-- `start_services.sh`: Starts all services
-- `cleanup_duplicates.sh`: Removes duplicate data directories
 
 ## Documentation
 
-For more details on the system:
+All documentation for the system can be found in the `docs/` directory:
 
-- [System Setup](docs/SYSTEM_SETUP.md)
-- [Frontend Integration](docs/FRONTEND_INTEGRATION.md)
+- [API Endpoints](docs/API_ENDPOINTS.md) - Complete reference of all available API endpoints
+- [System Setup](docs/SYSTEM_SETUP.md) - How to set up the system from scratch
+- [Frontend Integration](docs/FRONTEND_INTEGRATION.md) - Guide for frontend developers
+- [Hardware Setup](docs/HARDWARE.md) - Information about hardware requirements and setup
 
-## Example URLs
+## Camera Service
 
-- API Test Page: `https://jetson.mmoment.xyz/api-test`
-- Health Check: `https://jetson.mmoment.xyz/health`
-- Stream Test: `https://jetson.mmoment.xyz/test-stream`
+The optimized Camera Service provides:
 
-## Important Note
+- High-performance frame buffer (~30fps)
+- Face recognition and gesture detection
+- Media capture (photos and videos)
+- Status and health monitoring
 
-The original system files in `/home/azuolas/jetson_camera_service` are preserved until you manually delete them after confirming the new system works correctly. 
+For more details, see the [Camera Service documentation](camera_service_new/README.md).
+
+## Frontend Bridge
+
+The Frontend Bridge provides:
+
+- RESTful API for frontend applications
+- MJPEG streaming
+- Session management
+- CORS handling for web applications
+
+## Solana Middleware
+
+The Solana Middleware provides:
+
+- Wallet connection management
+- NFT minting functionality
+- Blockchain transaction handling
+- PDA verification
+
+## Managing Services
+
+The system uses systemd for service management. To control services:
+
+```bash
+# Start all services
+sudo systemctl start camera-service.service solana-middleware.service frontend-bridge.service cloudflared-compat.service
+
+# Check status
+sudo systemctl status camera-service.service
+
+# Restart a specific service
+sudo systemctl restart frontend-bridge.service
+
+# Stop all services
+sudo systemctl stop camera-service.service solana-middleware.service frontend-bridge.service cloudflared-compat.service
+```
+
+## Troubleshooting
+
+See the [System Setup](docs/SYSTEM_SETUP.md) document for troubleshooting steps and common issues.
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a new Pull Request
+
+## License
+
+This project is proprietary software owned by mmoment. 

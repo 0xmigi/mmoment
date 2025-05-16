@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NEW BUFFER-BASED Jetson Camera API Test (Local Testing)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 15px;
+            background-color: #f4f4f4;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+        h1 {
+            text-align: center;
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #333;
+            font-size: 20px;
+        }
+        h2 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 16px;
+            color: #333;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .section {
+            background-color: white;
+            padding: 12px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .stream-container {
+            width: 100%;
+            max-width: 640px;
+            margin: 10px auto;
+            position: relative;
+            overflow: hidden;
+        }
+        .stream-img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            margin: 10px 0;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        button {
+            padding: 6px 10px;
+            margin: 2px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .output {
+            background-color: #f8f9fa;
+            padding: 8px;
+            margin-top: 10px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            font-family: monospace;
+            font-size: 11px;
+            max-height: 80px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .status {
+            text-align: center;
+            font-weight: bold;
+            padding: 8px;
+            margin: 8px 0;
+            border-radius: 4px;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .input-group {
+            margin-bottom: 10px;
+        }
+        input[type="text"],
+        input[type="number"] {
+            padding: 6px;
+            width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .gesture-image {
+            font-size: 20px;
+            text-align: center;
+            margin: 5px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 60px;
+            background-color: #e9ecef;
+            border-radius: 6px;
+            font-weight: bold;
+        }
+        .gesture-image strong {
+            letter-spacing: 1px;
+        }
+        .gesture-label {
+            text-align: center;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+        .gesture-row {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .gesture-card {
+            text-align: center;
+            margin: 0 10px;
+            background-color: #f8f9fa;
+            padding: 8px;
+            border-radius: 8px;
+            min-width: 100px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .recording-timer {
+            font-size: 18px;
+            margin-top: 5px;
+            color: #dc3545;
+        }
+        .face-boxes {
+            display: flex;
+            gap: 5px;
+        }
+        .icon-container {
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <h1>NEW BUFFER-BASED Jetson Camera API Test (Local Port Forward)</h1>
+    
+    <div class="container">
+        <div class="section">
+            <h2>Camera Stream</h2>
+            <div class="stream-container">
+                <img id="streamImage" class="stream-img" src="http://localhost:5003/stream" alt="Camera Stream">
+            </div>
+            <div class="controls">
+                <button id="refreshStream">Refresh Stream</button>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>User Connection</h2>
+            <div class="input-group">
+                <input type="text" id="walletInput" placeholder="Wallet Address" value="test_wallet_123">
+            </div>
+            <div class="controls">
+                <button id="connectBtn">Connect</button>
+                <button id="disconnectBtn">Disconnect</button>
+            </div>
+            <div id="connectionStatus" class="status disconnected">Ready to connect</div>
+        </div>
+        
+        <div class="section">
+            <h2>Gesture Recognition</h2>
+            <div class="gesture-row">
+                <div class="gesture-card">
+                    <div class="gesture-image"><strong>PEACE</strong></div>
+                    <div class="gesture-label">Peace Sign<br>Take Picture</div>
+                </div>
+                <div class="gesture-card">
+                    <div class="gesture-image"><strong>THUMBS UP</strong></div>
+                    <div class="gesture-label">Thumbs Up<br>Start Recording</div>
+                </div>
+                <div class="gesture-card">
+                    <div class="gesture-image"><strong>PALM</strong></div>
+                    <div class="gesture-label">Forward Palm<br>Stop Recording</div>
+                </div>
+            </div>
+            <div id="currentGesture" class="status">Gesture Detection: Inactive</div>
+            <div class="controls">
+                <button id="startGestureBtn">Start Gesture Detection</button>
+                <button id="stopGestureBtn">Stop Detection</button>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Face Recognition</h2>
+            <div class="controls">
+                <button id="enrollFaceBtn">Enroll Face</button>
+                <button id="recognizeFaceBtn">Recognize Face</button>
+                <button id="listFacesBtn">List Enrolled Faces</button>
+                <button id="clearFacesBtn">Clear All Faces</button>
+            </div>
+            <div id="faceStatus" class="status">Please click 'Recognize Face' to start face recognition.</div>
+        </div>
+        
+        <div class="section">
+            <h2>Capture Moment</h2>
+            <div class="controls">
+                <button id="captureMomentBtn">Capture Moment</button>
+                <button id="clearGalleryBtn">Clear Gallery</button>
+                <button id="startRecordingBtn">Start Recording</button>
+                <button id="stopRecordingBtn">Stop Recording</button>
+            </div>
+            <div id="recordingStatus"></div>
+            <div id="captureStatus" class="status">No images captured yet. Make a peace sign gesture or click "Capture Moment" to take a picture.</div>
+            <div>
+                <img id="captureImage" style="max-width: 100%; display: none;">
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Recorded Videos</h2>
+            <div class="controls">
+                <button id="listVideosBtn">View All Videos</button>
+                <button id="clearVideosBtn">Clear Videos</button>
+            </div>
+            <div id="videosStatus" class="status">No videos recorded yet. Make a thumbs up gesture to start recording, and forward palm to stop.</div>
+        </div>
+        
+        <div class="section">
+            <h2>System Controls</h2>
+            <div class="face-boxes">
+                <span>Face Boxes: </span>
+                <button id="enableFaceBoxesBtn">Enable</button>
+                <button id="disableFaceBoxesBtn">Disable</button>
+            </div>
+            <div class="face-boxes">
+                <span>Gesture Tags: </span>
+                <button id="enableGestureTagsBtn">Enable</button>
+                <button id="disableGestureTagsBtn">Disable</button>
+            </div>
+            <div class="controls">
+                <button id="healthCheckBtn">Health Check</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Configuration
+        const isProduction = false;
+        const API_URL = 'http://localhost:5003';
+        console.log("Using API endpoint:", API_URL);
+        
+        // Global state
+        let walletAddress = null;
+        let sessionId = null;
+        let recordingInterval = null;
+        let recordingStartTime = 0;
+        let isGestureDetectionActive = false;
+        
+        window.onload = function() {
+            console.log("Page loaded. Using API URL:", API_URL);
+            
+            // Initialize UI references
+            const streamImage = document.getElementById('streamImage');
+            const refreshStreamBtn = document.getElementById('refreshStream');
+            const walletInput = document.getElementById('walletInput');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const connectionStatus = document.getElementById('connectionStatus');
+            const startGestureBtn = document.getElementById('startGestureBtn');
+            const stopGestureBtn = document.getElementById('stopGestureBtn');
+            const currentGesture = document.getElementById('currentGesture');
+            const enrollFaceBtn = document.getElementById('enrollFaceBtn');
+            const recognizeFaceBtn = document.getElementById('recognizeFaceBtn');
+            const listFacesBtn = document.getElementById('listFacesBtn');
+            const clearFacesBtn = document.getElementById('clearFacesBtn');
+            const faceStatus = document.getElementById('faceStatus');
+            const captureMomentBtn = document.getElementById('captureMomentBtn');
+            const clearGalleryBtn = document.getElementById('clearGalleryBtn');
+            const startRecordingBtn = document.getElementById('startRecordingBtn');
+            const stopRecordingBtn = document.getElementById('stopRecordingBtn');
+            const recordingStatus = document.getElementById('recordingStatus');
+            const captureStatus = document.getElementById('captureStatus');
+            const captureImage = document.getElementById('captureImage');
+            const listVideosBtn = document.getElementById('listVideosBtn');
+            const clearVideosBtn = document.getElementById('clearVideosBtn');
+            const videosStatus = document.getElementById('videosStatus');
+            const enableFaceBoxesBtn = document.getElementById('enableFaceBoxesBtn');
+            const disableFaceBoxesBtn = document.getElementById('disableFaceBoxesBtn');
+            const enableGestureTagsBtn = document.getElementById('enableGestureTagsBtn');
+            const disableGestureTagsBtn = document.getElementById('disableGestureTagsBtn');
+            const healthCheckBtn = document.getElementById('healthCheckBtn');
+            
+            // Refresh Stream
+            refreshStreamBtn.addEventListener('click', function() {
+                streamImage.src = `${API_URL}/stream?t=${new Date().getTime()}`;
+            });
+            
+            // Connect Wallet
+            connectBtn.addEventListener('click', function() {
+                walletAddress = walletInput.value || 'test_wallet_123';
+                
+                fetch(`${API_URL}/connect`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        wallet_address: walletAddress
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        sessionId = data.session_id;
+                        connectionStatus.className = 'status connected';
+                        connectionStatus.textContent = `Connected: Session ID ${sessionId}`;
+                        console.log('Connected with session ID:', sessionId);
+                    } else {
+                        connectionStatus.className = 'status disconnected';
+                        connectionStatus.textContent = `Error: ${data.error || 'Unknown error'}`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Connection error:', error);
+                    connectionStatus.className = 'status disconnected';
+                    connectionStatus.textContent = `Connection error: ${error.message}`;
+                });
+            });
+            
+            // Disconnect Wallet
+            disconnectBtn.addEventListener('click', function() {
+                if (!sessionId) {
+                    connectionStatus.textContent = 'Not connected';
+                    return;
+                }
+                
+                fetch(`${API_URL}/disconnect`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        wallet_address: walletAddress,
+                        session_id: sessionId
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        sessionId = null;
+                        walletAddress = null;
+                        connectionStatus.className = 'status disconnected';
+                        connectionStatus.textContent = 'Disconnected';
+                    } else {
+                        connectionStatus.textContent = `Error: ${data.error || 'Unknown error'}`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Disconnection error:', error);
+                    connectionStatus.textContent = `Disconnection error: ${error.message}`;
+                });
+            });
+            
+            // Gesture detection
+            startGestureBtn.addEventListener('click', function() {
+                fetch(`${API_URL}/toggle_gesture_visualization`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        enabled: true
+                    })
+                })
+                .then(() => {
+                    isGestureDetectionActive = true;
+                    currentGesture.textContent = 'Gesture Detection: Active';
+                    
+                    // Poll for current gesture
+                    const pollGesture = setInterval(() => {
+                        if (!isGestureDetectionActive) {
+                            clearInterval(pollGesture);
+                            return;
+                        }
+                        
+                        fetch(`${API_URL}/current_gesture`)
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data.success) {
+                                    const gesture = data.gesture;
+                                    const confidence = data.confidence;
+                                    
+                                    if (gesture !== 'none' && confidence > 0.7) {
+                                        currentGesture.textContent = `Detected: ${gesture.toUpperCase()} (${(confidence * 100).toFixed(0)}%)`;
+                                        
+                                        // Auto actions
+                                        if (gesture === 'peace' && confidence > 0.8) {
+                                            captureMomentBtn.click();
+                                        } else if (gesture === 'thumbs_up' && confidence > 0.8) {
+                                            startRecordingBtn.click();
+                                        } else if (gesture === 'palm' && confidence > 0.8) {
+                                            stopRecordingBtn.click();
+                                        }
+                                    } else {
+                                        currentGesture.textContent = 'Gesture Detection: Active (No gesture)';
+                                    }
+                                }
+                            })
+                            .catch(error => {
+                                console.error('Gesture polling error:', error);
+                            });
+                    }, 500);
+                });
+            });
+            
+            stopGestureBtn.addEventListener('click', function() {
+                isGestureDetectionActive = false;
+                fetch(`${API_URL}/toggle_gesture_visualization`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        enabled: false
+                    })
+                })
+                .then(() => {
+                    currentGesture.textContent = 'Gesture Detection: Inactive';
+                });
+            });
+            
+            // Face recognition
+            enrollFaceBtn.addEventListener('click', function() {
+                if (!sessionId) {
+                    faceStatus.textContent = 'Error: Please connect wallet first';
+                    return;
+                }
+                
+                faceStatus.textContent = 'Enrolling face...';
+                
+                fetch(`${API_URL}/enroll_face`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        wallet_address: walletAddress,
+                        session_id: sessionId
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        faceStatus.textContent = 'Face enrolled successfully!';
+                    } else {
+                        faceStatus.textContent = `Error: ${data.error || 'Unknown error'}`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Face enrollment error:', error);
+                    faceStatus.textContent = `Enrollment error: ${error.message}`;
+                });
+            });
+            
+            recognizeFaceBtn.addEventListener('click', function() {
+                faceStatus.textContent = 'Recognizing face...';
+                
+                fetch(`${API_URL}/recognize_face`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(sessionId ? {
+                        wallet_address: walletAddress,
+                        session_id: sessionId
+                    } : {})
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const detectedCount = data.detected_count || 0;
+                        const recognizedCount = data.recognized_count || 0;
+                        
+                        let statusText = `Faces detected: ${detectedCount}, Recognized: ${recognizedCount}`;
+                        
+                        if (recognizedCount > 0 && data.recognized_users) {
+                            statusText += '\nRecognized: ';
+                            data.recognized_users.forEach(user => {
+                                statusText += `\n${user.wallet_address.substring(0, 10)}... (${(user.confidence * 100).toFixed(0)}%)`;
+                            });
+                        }
+                        
+                        faceStatus.textContent = statusText;
+                    } else {
+                        faceStatus.textContent = `Error: ${data.error || 'Unknown error'}`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Face recognition error:', error);
+                    faceStatus.textContent = `Recognition error: ${error.message}`;
+                });
+            });
+            
+            listFacesBtn.addEventListener('click', function() {
+                faceStatus.textContent = 'Fetching enrolled faces...';
+                
+                fetch(`${API_URL}/get_enrolled_faces`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            if (data.faces && data.faces.length > 0) {
+                                let facesText = `Enrolled faces (${data.faces.length}):`;
+                                data.faces.forEach(face => {
+                                    facesText += `\n${face}`;
+                                });
+                                faceStatus.textContent = facesText;
+                            } else {
+                                faceStatus.textContent = 'No faces enrolled yet';
+                            }
+                        } else {
+                            faceStatus.textContent = `Error: ${data.error || 'Unknown error'}`;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('List faces error:', error);
+                        faceStatus.textContent = `Error listing faces: ${error.message}`;
+                    });
+            });
+            
+            clearFacesBtn.addEventListener('click', function() {
+                if (!confirm('Are you sure you want to clear all enrolled faces?')) {
+                    return;
+                }
+                
+                fetch(`${API_URL}/clear_enrolled_faces`, {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        faceStatus.textContent = 'All faces cleared successfully';
+                    } else {
+                        faceStatus.textContent = `Error: ${data.error || 'Unknown error'}`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Clear faces error:', error);
+                    faceStatus.textContent = `Error clearing faces: ${error.message}`;
+                });
+            });
+            
+            // Capture moment
+            captureMomentBtn.addEventListener('click', function() {
+                if (!sessionId) {
+                    captureStatus.textContent = 'Error: Please connect wallet first';
+                    return;
+                }
+                
+                captureStatus.textContent = 'Capturing moment...';
+                
+                fetch(`${API_URL}/capture_moment`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        wallet_address: walletAddress,
+                        session_id: sessionId
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        captureStatus.textContent = 'Moment captured successfully!';
+                        
+                        if (data.image_data) {
+                            captureImage.src = data.image_data;
+                            captureImage.style.display = 'block';
+                        }
+                    } else {
+                        captureStatus.textContent = `Error: ${data.error || 'Unknown error'}`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Capture moment error:', error);
+                    captureStatus.textContent = `Capture error: ${error.message}`;
+                });
+            });
+            
+            // Start recording
+            startRecordingBtn.addEventListener('click', function() {
+                if (!sessionId) {
+                    videosStatus.textContent = 'Error: Please connect wallet first';
+                    return;
+                }
+                
+                recordingStatus.innerHTML = '<div class="recording-timer">RECORDING 00:00</div>';
+                recordingStartTime = Date.now();
+                
+                fetch(`${API_URL}/start_recording`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        wallet_address: walletAddress,
+                        session_id: sessionId,
+                        duration: 10 // 10 seconds max
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        videosStatus.textContent = 'Recording started (10s max)';
+                        
+                        // Update recording timer
+                        recordingInterval = setInterval(() => {
+                            const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+                            const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+                            const seconds = (elapsed % 60).toString().padStart(2, '0');
+                            recordingStatus.innerHTML = `<div class="recording-timer">RECORDING ${minutes}:${seconds}</div>`;
+                            
+                            // Auto-stop after 10 seconds
+                            if (elapsed >= 10) {
+                                stopRecordingBtn.click();
+                            }
+                        }, 1000);
+                    } else {
+                        recordingStatus.innerHTML = '';
+                        videosStatus.textContent = `Error: ${data.error || 'Unknown error'}`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Start recording error:', error);
+                    recordingStatus.innerHTML = '';
+                    videosStatus.textContent = `Recording error: ${error.message}`;
+                });
+            });
+            
+            // Stop recording
+            stopRecordingBtn.addEventListener('click', function() {
+                if (!sessionId) {
+                    videosStatus.textContent = 'Error: Please connect wallet first';
+                    return;
+                }
+                
+                if (recordingInterval) {
+                    clearInterval(recordingInterval);
+                    recordingInterval = null;
+                }
+                
+                recordingStatus.innerHTML = '';
+                videosStatus.textContent = 'Stopping recording...';
+                
+                fetch(`${API_URL}/stop_recording`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        wallet_address: walletAddress,
+                        session_id: sessionId
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        videosStatus.textContent = 'Recording stopped successfully';
+                        listVideosBtn.click();
+                    } else {
+                        videosStatus.textContent = `Error: ${data.error || 'Unknown error'}`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Stop recording error:', error);
+                    videosStatus.textContent = `Error stopping recording: ${error.message}`;
+                });
+            });
+            
+            // List videos
+            listVideosBtn.addEventListener('click', function() {
+                videosStatus.textContent = 'Fetching videos...';
+                
+                fetch(`${API_URL}/list_videos`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            if (data.videos && data.videos.length > 0) {
+                                let videosHTML = `<div>Found ${data.videos.length} videos:</div><ul>`;
+                                data.videos.forEach(video => {
+                                    const date = new Date(video.timestamp).toLocaleString();
+                                    videosHTML += `<li><a href="${API_URL}${video.url}" target="_blank">${video.filename}</a> (${date})</li>`;
+                                });
+                                videosHTML += '</ul>';
+                                videosStatus.innerHTML = videosHTML;
+                            } else {
+                                videosStatus.textContent = 'No videos found';
+                            }
+                        } else {
+                            videosStatus.textContent = `Error: ${data.error || 'Unknown error'}`;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('List videos error:', error);
+                        videosStatus.textContent = `Error listing videos: ${error.message}`;
+                    });
+            });
+            
+            // Face boxes control
+            enableFaceBoxesBtn.addEventListener('click', function() {
+                fetch(`${API_URL}/toggle_face_visualization`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        enabled: true
+                    })
+                });
+            });
+            
+            disableFaceBoxesBtn.addEventListener('click', function() {
+                fetch(`${API_URL}/toggle_face_visualization`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        enabled: false
+                    })
+                });
+            });
+            
+            // Gesture tags control
+            enableGestureTagsBtn.addEventListener('click', function() {
+                fetch(`${API_URL}/toggle_gesture_visualization`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        enabled: true
+                    })
+                });
+            });
+            
+            disableGestureTagsBtn.addEventListener('click', function() {
+                fetch(`${API_URL}/toggle_gesture_visualization`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        enabled: false
+                    })
+                });
+            });
+            
+            // Health check
+            healthCheckBtn.addEventListener('click', function() {
+                fetch(`${API_URL}/health`)
+                    .then(response => response.json())
+                    .then(data => {
+                        alert(JSON.stringify(data, null, 2));
+                    })
+                    .catch(error => {
+                        alert(`Health check error: ${error.message}`);
+                    });
+            });
+        };
+    </script>
+</body>
+</html> 
