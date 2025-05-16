@@ -1,0 +1,16 @@
+[Unit]
+Description=Cloudflare Tunnel
+After=network.target
+Wants=network-online.target
+
+[Service]
+User=azuolas
+Group=azuolas
+WorkingDirectory=/home/azuolas
+ExecStart=/usr/bin/cloudflared tunnel run
+Restart=always
+RestartSec=5
+StartLimitInterval=0
+
+[Install]
+WantedBy=multi-user.target 
