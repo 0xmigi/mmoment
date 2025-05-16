@@ -9,12 +9,7 @@ interface CameraData {
   publicKey: string;
   isActive: boolean;
   activityCounter?: number;
-  lastActivityType?: {
-    photoCapture?: {};
-    videoRecord?: {};
-    liveStream?: {};
-    custom?: {};
-  };
+  lastActivityType?: number;
   metadata: {
     name: string;
     model: string;
@@ -61,17 +56,12 @@ export function CameraSelector({ onSelect }: { onSelect: (camera: CameraData) =>
           publicKey: account.publicKey.toString(),
           isActive: data.isActive,
           activityCounter: data.activityCounter ? data.activityCounter.toNumber() : undefined,
-          lastActivityType: data.lastActivityType ? {
-            photoCapture: data.lastActivityType.photoCapture ? {} : undefined,
-            videoRecord: data.lastActivityType.videoRecord ? {} : undefined,
-            liveStream: data.lastActivityType.liveStream ? {} : undefined,
-            custom: data.lastActivityType.custom ? {} : undefined
-          } : undefined,
+          lastActivityType: data.lastActivityType || 0,
           metadata: {
             name: data.metadata.name,
             model: data.metadata.model,
             registrationDate: data.metadata.registrationDate.toNumber(),
-            lastActivity: data.metadata.lastActivity.toNumber(),
+            lastActivity: data.lastActivityAt ? data.lastActivityAt.toNumber() : 0,
             location: data.metadata.location ? 
               [data.metadata.location[0].toNumber(), data.metadata.location[1].toNumber()] as [number, number] : 
               null

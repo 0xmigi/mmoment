@@ -46,18 +46,22 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
       try {
         onStatusUpdate?.({ type: 'info', message: 'Recording camera activity...' });
         
-        // Use recordActivity instead of activateCamera
-        await program.methods.recordActivity({
-          activityType: { photoCapture: {} },
-          metadata: JSON.stringify({
-            timestamp: new Date().toISOString(),
-            action: 'photo',
-            device: 'web'
-          })
-        })
+        // Find the session PDA
+        const [sessionPda] = PublicKey.findProgramAddressSync(
+          [
+            Buffer.from('session'),
+            new PublicKey(primaryWallet.address).toBuffer(),
+            cameraKeypair.publicKey.toBuffer()
+          ],
+          program.programId
+        );
+
+        // Use checkIn instead of recordActivity
+        await program.methods.checkIn(false)
         .accounts({
-          owner: new PublicKey(primaryWallet.address),
+          user: new PublicKey(primaryWallet.address),
           camera: cameraKeypair.publicKey,
+          session: sessionPda,
           systemProgram: SystemProgram.programId,
         })
         .rpc();

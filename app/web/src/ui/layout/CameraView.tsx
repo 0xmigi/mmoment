@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, @typescript-eslint/no-non-null-assertion */
 import { useDynamicContext, useEmbeddedWallet } from '@dynamic-labs/sdk-react-core';
 import { useRef, useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
@@ -48,7 +49,7 @@ const CameraIdDisplay = ({ cameraId, selectedCamera, cameraAccount, timelineRef 
   cameraId: string | undefined;
   selectedCamera: CameraData | null;
   cameraAccount: string | null;
-  timelineRef?: React.RefObject<any>;
+  timelineRef?: React.RefObject<{ refreshTimeline?: () => void; refreshEvents?: () => void }>;
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const cameraStatus = useCameraStatus(selectedCamera?.publicKey || cameraAccount || cameraId || '');
@@ -68,7 +69,7 @@ const CameraIdDisplay = ({ cameraId, selectedCamera, cameraAccount, timelineRef 
     setIsCheckedIn(newStatus);
     // If timelineRef exists, refresh it
     if (timelineRef?.current?.refreshTimeline) {
-      timelineRef.current.refreshTimeline();
+      timelineRef.current?.refreshTimeline();
     }
   };
 
@@ -115,16 +116,16 @@ const CameraIdDisplay = ({ cameraId, selectedCamera, cameraAccount, timelineRef 
           setIsCheckedIn(true);
           // If status changed to checked in, update timeline
           if (timelineRef?.current?.refreshTimeline) {
-            timelineRef.current.refreshTimeline();
+            timelineRef.current?.refreshTimeline();
           }
         }
-      } catch (err) {
+      } catch (_) {
         if (isCheckedIn) {
           console.log("Setting check-in status: FALSE");
           setIsCheckedIn(false);
           // If status changed to checked out, update timeline
           if (timelineRef?.current?.refreshTimeline) {
-            timelineRef.current.refreshTimeline();
+            timelineRef.current?.refreshTimeline();
           }
         }
       }
@@ -150,13 +151,13 @@ const CameraIdDisplay = ({ cameraId, selectedCamera, cameraAccount, timelineRef 
     if (!id) return 'None';
     try {
       return `${id.slice(0, 6)}...${id.slice(-6)}`;
-    } catch (e) {
+    } catch (_) {
       return id;
     }
   };
 
   // The default camera PDA for development
-  const defaultDevCameraPda = '5onKAv5c6VdBZ8a7D11XqF79Hdzuv3tnysjv4B2pQWZ2';
+  const defaultDevCameraPda = 'EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA';
 
   return (
     <div>
@@ -213,7 +214,11 @@ export function CameraView() {
   const { selectedCamera, setSelectedCamera, fetchCameraById } = useCamera();
   const { program } = useProgram();
   const { connection } = useConnection();
-  const timelineRef = useRef<any>(null);
+  const timelineRef = useRef<{ 
+    addEvent?: (event: Omit<TimelineEvent, 'id'>) => void; 
+    refreshTimeline?: () => void;
+    refreshEvents?: () => void;
+  }>(null);
   const [cameraAccount, setCameraAccount] = useState<string | null>(null);
   const [isLive, setIsLive] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -267,7 +272,9 @@ export function CameraView() {
       });
 
       // Add the event to the timeline
-      timelineRef.current?.addEvent(event);
+      if (timelineRef.current?.addEvent) {
+        timelineRef.current?.addEvent(event);
+      }
     }
   };
 
@@ -588,7 +595,8 @@ export function CameraView() {
           const cameraPublicKey = new PublicKey(cameraId);
 
           // Find the session PDA
-          const [] = PublicKey.findProgramAddressSync(
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const [_sessionPda] = PublicKey.findProgramAddressSync(
             [
               Buffer.from('session'),
               userPublicKey.toBuffer(),
@@ -726,19 +734,19 @@ export function CameraView() {
             setIsCheckedIn(true);
             // Refresh timeline if status changed
             if (timelineRef.current?.refreshTimeline) {
-              timelineRef.current.refreshTimeline();
+              timelineRef.current?.refreshTimeline();
             }
           }
           return true;
         }
-      } catch (err) {
+      } catch (_) {
         console.log("[CameraView] Session account not found, user is not checked in");
         if (isCheckedIn) {
           console.log("[CameraView] Setting checked-in status to FALSE");
           setIsCheckedIn(false);
           // Refresh timeline if status changed
           if (timelineRef.current?.refreshTimeline) {
-            timelineRef.current.refreshTimeline();
+            timelineRef.current?.refreshTimeline();
           }
         }
         return false;
@@ -807,7 +815,7 @@ export function CameraView() {
 
                 // Refresh the timeline to show the transaction
                 if (timelineRef.current?.refreshEvents) {
-                  timelineRef.current.refreshEvents();
+                  timelineRef.current?.refreshEvents();
                 }
               }
             } catch (error) {
@@ -818,7 +826,7 @@ export function CameraView() {
 
               // Refresh the timeline to show the transaction
               if (timelineRef.current?.refreshEvents) {
-                timelineRef.current.refreshEvents();
+                timelineRef.current?.refreshEvents();
               }
             }
           }
@@ -856,7 +864,7 @@ export function CameraView() {
 
                 // Refresh the timeline to show the transaction
                 if (timelineRef.current?.refreshEvents) {
-                  timelineRef.current.refreshEvents();
+                  timelineRef.current?.refreshEvents();
                 }
               }
             } catch (error) {
@@ -867,7 +875,7 @@ export function CameraView() {
 
               // Refresh the timeline to show the transaction
               if (timelineRef.current?.refreshEvents) {
-                timelineRef.current.refreshEvents();
+                timelineRef.current?.refreshEvents();
               }
             }
           }
@@ -896,7 +904,7 @@ export function CameraView() {
 
           // Refresh the timeline
           if (timelineRef.current?.refreshEvents) {
-            timelineRef.current.refreshEvents();
+            timelineRef.current?.refreshEvents();
           }
         } else {
           updateToast('error', 'Failed to stop stream: ' + (response.error || 'Unknown error'));
@@ -928,7 +936,7 @@ export function CameraView() {
 
                 // Refresh the timeline to show the transaction
                 if (timelineRef.current?.refreshEvents) {
-                  timelineRef.current.refreshEvents();
+                  timelineRef.current?.refreshEvents();
                 }
               }
             } catch (error) {
@@ -939,7 +947,7 @@ export function CameraView() {
 
               // Refresh the timeline to show the transaction
               if (timelineRef.current?.refreshEvents) {
-                timelineRef.current.refreshEvents();
+                timelineRef.current?.refreshEvents();
               }
             }
           }
@@ -994,7 +1002,7 @@ export function CameraView() {
 
                   // Refresh timeline to show latest events
                   if (timelineRef.current?.refreshTimeline) {
-                    timelineRef.current.refreshTimeline();
+                    timelineRef.current?.refreshTimeline();
                   }
                 }
               });

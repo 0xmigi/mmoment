@@ -8,18 +8,14 @@ interface CameraData {
   owner: string;
   isActive: boolean;
   activityCounter?: number;
-  lastActivityType?: {
-    photoCapture?: {};
-    videoRecord?: {};
-    liveStream?: {};
-  };
+  lastActivityType?: number;
   metadata: {
     name: string;
     model: string;
     registrationDate: number;
-    lastActivity: number;
     location?: [number, number] | null;
   };
+  lastActivityAt?: number;
   publicKey: string;
 }
 
@@ -64,11 +60,11 @@ export function NFCUrlGenerator() {
             name: data.metadata.name,
             model: data.metadata.model,
             registrationDate: data.metadata.registrationDate.toNumber(),
-            lastActivity: data.metadata.lastActivity.toNumber(),
             location: data.metadata.location ? 
               [data.metadata.location[0].toNumber(), data.metadata.location[1].toNumber()] as [number, number] : 
               null
           },
+          lastActivityAt: data.lastActivityAt ? data.lastActivityAt.toNumber() : 0,
           publicKey: account.publicKey.toString()
         };
       });

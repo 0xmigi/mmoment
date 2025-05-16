@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { AnchorProvider, Program, Idl, setProvider } from '@coral-xyz/anchor';
-import { PublicKey, Transaction, Keypair } from '@solana/web3.js';
+import { PublicKey, Keypair } from '@solana/web3.js';
 import { useConnection, useAnchorWallet } from '@solana/wallet-adapter-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { isSolanaWallet } from '@dynamic-labs/solana';
-import { IDL, MySolanaProject } from './idl';
+import { IDL } from './idl';
+import type { CameraNetwork } from './idl';
 
 // Updated program ID to match the one in lib.rs
 export const CAMERA_ACTIVATION_PROGRAM_ID = new PublicKey("Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S");
@@ -13,7 +14,7 @@ export const CAMERA_ACTIVATION_PROGRAM_ID = new PublicKey("Hx5JaUCZXQqvcYzTcdgm9
 export const CAMERA_NETWORK_PROGRAM_ID = new PublicKey("Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S");
 
 // Global cache to prevent multiple initializations
-let globalProgramInstance: Program<MySolanaProject> | null = null;
+let globalProgramInstance: Program<CameraNetwork> | null = null;
 let lastWalletAddress: string | null = null;
 let setupInProgress = false;
 let lastSetupAttempt = 0;
@@ -27,7 +28,7 @@ export function useCameraActivationProgram() {
   const dynamicContext = useDynamicContext();
   const { primaryWallet } = dynamicContext;
   
-  const [program, setProgram] = useState<Program<MySolanaProject> | null>(globalProgramInstance);
+  const [program, setProgram] = useState<Program<CameraNetwork> | null>(globalProgramInstance);
   const [loading, setLoading] = useState<boolean>(!globalProgramInstance);
   const [error, setError] = useState<Error | null>(null);
   
@@ -150,7 +151,7 @@ export const useCameraNetworkProgram = () => {
   const wallet = useAnchorWallet();
   
   const [programId] = useState(CAMERA_NETWORK_PROGRAM_ID);
-  const [program, setProgram] = useState<Program<MySolanaProject> | null>(null);
+  const [program, setProgram] = useState<Program<CameraNetwork> | null>(null);
   const [registryAddress, setRegistryAddress] = useState<PublicKey | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -178,7 +179,7 @@ export const useCameraNetworkProgram = () => {
         setProvider(provider);
 
         // Initialize program
-        const program = new Program(IDL as Idl, programId, provider) as unknown as Program<MySolanaProject>;
+        const program = new Program(IDL as Idl, programId, provider) as unknown as Program<CameraNetwork>;
         setProgram(program);
         console.log("[useCameraNetworkProgram] Program initialized");
 
@@ -218,7 +219,7 @@ export const useCameraNetworkProgram = () => {
  */
 export const useCameraNetworkProgramWithoutWallet = (walletKeyPair?: Keypair) => {
   const { connection } = useConnection();
-  const [program, setProgram] = useState<Program<MySolanaProject> | null>(null);
+  const [program, setProgram] = useState<Program<CameraNetwork> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
@@ -266,7 +267,7 @@ export const useCameraNetworkProgramWithoutWallet = (walletKeyPair?: Keypair) =>
           IDL as Idl,
           CAMERA_NETWORK_PROGRAM_ID,
           provider
-        ) as unknown as Program<MySolanaProject>;
+        ) as unknown as Program<CameraNetwork>;
         setProgram(program);
 
         setLoading(false);
@@ -325,7 +326,7 @@ export const findFaceDataPDA = (user: PublicKey) => {
 export function useProgram() {
   const { connection } = useConnection();
   const { primaryWallet } = useDynamicContext();
-  const [program, setProgram] = useState<Program<MySolanaProject> | null>(null);
+  const [program, setProgram] = useState<Program<CameraNetwork> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 

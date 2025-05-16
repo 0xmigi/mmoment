@@ -204,6 +204,17 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
     try {
       const cameraPublicKey = new PublicKey(transactionData.cameraAccount);
+      
+      // Find the session PDA for the transaction
+      const [sessionPda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('session'),
+          new PublicKey(primaryWallet.address).toBuffer(),
+          cameraPublicKey.toBuffer()
+        ],
+        program.programId
+      );
+
       setStatus('Preparing transaction...');
 
       // Check if it's a Solana wallet
@@ -211,39 +222,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         throw new Error('This is not a Solana wallet');
       }
 
-      // Create activity type based on transaction type
-      let activityType;
-      switch (transactionData.type) {
-        case 'photo':
-          activityType = { photoCapture: {} };
-          break;
-        case 'video':
-          activityType = { videoRecord: {} };
-          break;
-        case 'stream':
-          activityType = { liveStream: {} };
-          break;
-        default:
-          activityType = { custom: {} };
-      }
-
-      // Create metadata with timestamp and other relevant info
-      const metadata = JSON.stringify({
-        timestamp: new Date().toISOString(),
-        action: `${transactionData.type}_capture`,
-        userAddress: primaryWallet.address,
-        cameraId: transactionData.cameraAccount
-      });
-
-      // Create the recordActivity instruction
+      // Instead of recordActivity (which doesn't exist), use checkIn with useFaceRecognition=false
       const ix = await program.methods
-        .recordActivity({
-          activityType,
-          metadata
-        })
+        .checkIn(false)
         .accounts({
-          owner: new PublicKey(primaryWallet.address),
+          user: new PublicKey(primaryWallet.address),
           camera: cameraPublicKey,
+          session: sessionPda,
           systemProgram: SystemProgram.programId,
         })
         .instruction();

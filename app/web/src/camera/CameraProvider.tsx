@@ -1,19 +1,37 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import type React from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
+import type { Transaction, VersionedTransaction, Connection } from '@solana/web3.js';
 import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import { IDL } from '../anchor/idl';
 import { isSolanaWallet } from '@dynamic-labs/solana';
 import { CAMERA_ACTIVATION_PROGRAM_ID, useProgram } from '../anchor/setup';
 
+// Define types for specific structures
+interface CameraAccountData {
+  owner: PublicKey;
+  isActive: boolean;
+  activityCounter?: { toNumber: () => number };
+  metadata?: {
+    name: string;
+    model: string;
+    registrationDate?: { toNumber: () => number };
+    location?: number[];
+  };
+  lastActivityAt?: { toNumber: () => number };
+}
+
+// We need a type that can handle both Transaction and VersionedTransaction
+type SolanaTransaction = Transaction | VersionedTransaction;
+
 // Simple cache for account info to reduce RPC calls
-const accountInfoCache = new Map<string, { data: any, timestamp: number }>();
+const accountInfoCache = new Map<string, { data: CameraData | null; timestamp: number }>();
 const CACHE_TTL = 30000; // 30 seconds
 
-// Helper to get account info with caching
-
 // Export fetchCameraByPublicKey so it can be imported directly
-export const fetchCameraByPublicKey = async (publicKey: string, connection: any) => {
+export const fetchCameraByPublicKey = async (publicKey: string, connection: Connection): Promise<CameraData | null> => {
   try {
     console.log(`[CameraProvider] Fetching camera by public key: ${publicKey}`);
     
@@ -29,19 +47,22 @@ export const fetchCameraByPublicKey = async (publicKey: string, connection: any)
     }
     
     // Create a provider without a wallet (read-only)
+    const dummyWallet = {
+      publicKey: PublicKey.default,
+      // Using the any type here explicitly since the Anchor types are complex
+      signTransaction: async <T extends SolanaTransaction>(tx: T): Promise<T> => tx,
+      signAllTransactions: async <T extends SolanaTransaction>(txs: T[]): Promise<T[]> => txs
+    };
+    
     const provider = new AnchorProvider(
       connection,
-      {
-        publicKey: PublicKey.default,
-        signTransaction: async (tx: any) => tx,
-        signAllTransactions: async (txs: any) => txs,
-      } as any,
+      dummyWallet,
       { commitment: 'confirmed' }
     );
     
     // Create a direct program instance
     const program = new Program(
-      IDL as any,
+      IDL,
       CAMERA_ACTIVATION_PROGRAM_ID,
       provider
     );
@@ -49,29 +70,35 @@ export const fetchCameraByPublicKey = async (publicKey: string, connection: any)
     console.log(`[CameraProvider] Program instance created directly with ID: ${CAMERA_ACTIVATION_PROGRAM_ID.toString()}`);
     
     // Fetch the camera account
-    const cameraAccount: any = await program.account.cameraAccount.fetch(cameraPubkey);
-    
-    if (cameraAccount) {
-      console.log('[CameraProvider] Camera account found:', cameraAccount);
-      const cameraData = {
-        publicKey,
-        owner: cameraAccount.owner.toString(),
-        isActive: cameraAccount.isActive,
-        activityCounter: cameraAccount.activityCounter?.toNumber() || 0,
-        metadata: {
-          name: cameraAccount.metadata?.name || 'Unnamed Camera',
-          model: cameraAccount.metadata?.model || 'Unknown Model',
-          registrationDate: cameraAccount.metadata?.registrationDate?.toNumber() || 0,
-          lastActivity: cameraAccount.metadata?.lastActivity?.toNumber() || 0,
-          location: null
-        }
-      };
+    try {
+      const cameraAccount = await program.account.cameraAccount.fetch(cameraPubkey) as unknown as CameraAccountData;
       
-      // Cache the result
-      accountInfoCache.set(`camera_account_${key}`, { data: cameraData, timestamp: now });
-      
-      return cameraData;
+      if (cameraAccount) {
+        console.log('[CameraProvider] Camera account found:', cameraAccount);
+        const cameraData: CameraData = {
+          publicKey,
+          owner: cameraAccount.owner.toString(),
+          isActive: cameraAccount.isActive,
+          activityCounter: cameraAccount.activityCounter?.toNumber() || 0,
+          metadata: {
+            name: cameraAccount.metadata?.name || 'Unnamed Camera',
+            model: cameraAccount.metadata?.model || 'Unknown Model',
+            registrationDate: cameraAccount.metadata?.registrationDate?.toNumber() || 0,
+            location: null
+          }
+        };
+        
+        // Cache the result
+        accountInfoCache.set(`camera_account_${key}`, { data: cameraData, timestamp: now });
+        
+        return cameraData;
+      }
+    } catch (error) {
+      console.error('[CameraProvider] Error fetching camera account:', error);
     }
+    
+    // If we got here, no camera was found or there was an error
+    accountInfoCache.set(`camera_account_${key}`, { data: null, timestamp: now });
     return null;
   } catch (error) {
     console.error('[CameraProvider] Error fetching camera:', error);
@@ -93,17 +120,12 @@ export interface CameraData {
   owner: string;
   isActive: boolean;
   activityCounter?: number;
-  lastActivityType?: {
-    photoCapture?: {};
-    videoRecord?: {};
-    liveStream?: {};
-    custom?: {};
-  };
+  lastActivityType?: number;
+  lastActivityAt?: number;
   metadata: {
     name: string;
     model: string;
     registrationDate: number;
-    lastActivity: number;
     location?: [number, number] | null;
   };
 }
@@ -235,7 +257,7 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Function to check camera initialization status
-  const checkInitialization = async () => {
+  const checkInitialization = useCallback(async () => {
     if (!primaryWallet?.address || !program || programLoading) {
       setLoading(false);
       return;
@@ -282,11 +304,11 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
           const cameraAccount = await program.account.cameraAccount.fetch(cameraAddress);
           console.log('Camera account found:', cameraAccount);
           setIsInitialized(true);
-        } catch (err) {
+        } catch {
           console.log('Camera account not found, need to register camera');
           setIsInitialized(false);
         }
-      } catch (err) {
+      } catch {
         console.log('Registry not initialized, initializing...');
         
         // Initialize the registry directly without explicitly using the signer
@@ -294,7 +316,7 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
         const tx = await program.methods.initialize()
           .accounts({
             authority: new PublicKey(primaryWallet.address),
-            registry: registryAddress,
+            cameraRegistry: registryAddress,
             systemProgram: SystemProgram.programId,
           })
           .rpc();
@@ -311,7 +333,7 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [primaryWallet, program, programLoading, cameraKeypair]);
 
   // Expose a function to refresh camera status
   const refreshCameraStatus = async () => {
@@ -321,8 +343,10 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
 
   // Check initialization when wallet connects or program changes
   useEffect(() => {
-    checkInitialization();
-  }, [primaryWallet?.address, program, programLoading]);
+    if (primaryWallet?.address && program && !programLoading) {
+      checkInitialization();
+    }
+  }, [primaryWallet?.address, program, programLoading, checkInitialization]);
 
   // Add effect to clear camera when on default route
   useEffect(() => {
@@ -335,7 +359,7 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
       localStorage.removeItem('directCameraId');
       localStorage.removeItem(SELECTED_CAMERA_STORAGE_KEY);
     }
-  }, [window.location.pathname, selectedCamera]);
+  }, [selectedCamera]);
 
   return (
     <CameraContext.Provider 
@@ -359,6 +383,7 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useCamera() {
   const context = useContext(CameraContext);
   if (context === undefined) {
