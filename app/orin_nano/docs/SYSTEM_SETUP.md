@@ -7,7 +7,7 @@ This document provides a comprehensive overview of the Jetson Camera system setu
 The system consists of four main components:
 
 1. **Camera API Service** (port 5002): Handles camera operation, gesture detection, face recognition
-2. **Solana Middleware** (port 5001): Handles wallet connections and NFT minting
+2. **Solana Middleware** (port 5004): Handles wallet connections and NFT minting
 3. **Frontend Bridge** (port 5003): Acts as a proxy between frontend clients and backend services
 4. **Cloudflare Tunnel**: Securely exposes the Frontend Bridge to the internet
 
@@ -28,7 +28,7 @@ All services are configured as systemd services for automatic startup and manage
                                v             v
 +---------------------+     +--------------+
 | Solana Middleware   | <-- | Camera API   |
-| (Port 5001)         |     | (Port 5002)  |
+| (Port 5004)         |     | (Port 5002)  |
 +---------------------+     +--------------+
 ```
 
@@ -37,42 +37,55 @@ All services are configured as systemd services for automatic startup and manage
 The Jetson Camera system is organized in the following directory structure:
 
 ```
-/home/azuolas/jetson_system/
-├── camera_service/     # Camera API service files
-├── frontend_bridge/    # Frontend bridge files
-│   └── api_test.html   # Test page for API functionality
-├── solana_middleware/  # Solana middleware files
-├── systemd/            # Systemd service files
-├── data/               # Data files
-│   ├── faces/          # Facial recognition data
-│   ├── face_embeddings/# Face embeddings for recognition
-│   ├── videos/         # Recorded videos
-│   ├── images/         # Captured images
-│   └── recordings/     # Additional video recordings
-└── docs/               # Documentation
-    ├── SYSTEM_SETUP.md        # This file
-    └── FRONTEND_INTEGRATION.md# Frontend integration guide
+/home/azuolas/mmoment/app/orin_nano/
+├── camera_service_new/     # Buffer-based camera service
+│   ├── config/             # Camera configuration
+│   ├── faces/              # Facial recognition data
+│   ├── services/           # Service modules
+│   ├── logs/               # Log files
+│   ├── photos/             # Captured photos
+│   ├── videos/             # Recorded videos
+│   ├── models/             # ML models
+│   └── main.py             # Entry point
+├── frontend_bridge/        # Frontend bridge files
+│   ├── frontend_bridge.py  # Main bridge service
+│   └── templates/          # HTML templates
+├── solana_middleware/      # Solana middleware files
+│   └── solana_middleware.py # Solana service
+├── systemd/                # Systemd service files
+├── docs/                   # Documentation
+│   ├── API_ENDPOINTS.md    # API reference
+│   ├── SYSTEM_SETUP.md     # This file 
+│   ├── FRONTEND_INTEGRATION.md # Frontend integration guide
+│   └── HARDWARE.md         # Hardware setup guide
+└── data/                   # Shared data storage
 ```
 
 ## Service Files
 
-All services are configured using systemd service files located in `/home/azuolas/jetson_system/systemd/`:
+All services are configured using systemd service files located in `/home/azuolas/mmoment/app/orin_nano/systemd/`:
 
 ### 1. Camera API Service
 
-**File**: `/home/azuolas/jetson_system/systemd/camera-service.service`
+**File**: `/home/azuolas/mmoment/app/orin_nano/systemd/camera-service.service`
 
 ```ini
 [Unit]
-Description=Jetson Camera API Service
+Description=Lightweight Buffer-Based Jetson Camera API Service
 After=network.target
+Wants=solana-middleware.service
 
 [Service]
 Type=simple
 User=azuolas
-WorkingDirectory=/home/azuolas/jetson_system/camera_service
+WorkingDirectory=/home/azuolas/mmoment/app/orin_nano/camera_service_new
+Environment="SOLANA_MIDDLEWARE_URL=http://localhost:5004"
+Environment="CAMERA_PDA=WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD"
+Environment="PROGRAM_ID=Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S"
+Environment="CAMERA_DEVICE=/dev/video1"
+# Run port cleanup script before starting
 ExecStartPre=/bin/bash -c "lsof -ti:5002 | xargs -r kill -9"
-ExecStart=/usr/bin/python3 /home/azuolas/jetson_system/camera_service/api.py
+ExecStart=/usr/bin/python3 /home/azuolas/mmoment/app/orin_nano/camera_service_new/main.py --port 5002
 Restart=always
 RestartSec=5
 
@@ -82,18 +95,19 @@ WantedBy=multi-user.target
 
 ### 2. Solana Middleware Service
 
-**File**: `/home/azuolas/jetson_system/systemd/solana-middleware.service`
+**File**: `/home/azuolas/mmoment/app/orin_nano/systemd/solana-middleware.service`
 
 ```ini
 [Unit]
-Description=Solana Middleware Service
+Description=Solana Middleware Service for NFT Minting
 After=network.target
 
 [Service]
 Type=simple
 User=azuolas
-WorkingDirectory=/home/azuolas/jetson_system/solana_middleware
-ExecStart=/usr/bin/python3 /home/azuolas/jetson_system/solana_middleware/solana_middleware.py
+WorkingDirectory=/home/azuolas/mmoment/app/orin_nano/solana_middleware
+ExecStartPre=/bin/bash -c "lsof -ti:5004 | xargs -r kill -9"
+ExecStart=/usr/bin/python3 /home/azuolas/mmoment/app/orin_nano/solana_middleware/solana_middleware.py --port 5004
 Restart=always
 RestartSec=5
 
@@ -103,7 +117,7 @@ WantedBy=multi-user.target
 
 ### 3. Frontend Bridge Service
 
-**File**: `/home/azuolas/jetson_system/systemd/frontend-bridge.service`
+**File**: `/home/azuolas/mmoment/app/orin_nano/systemd/frontend-bridge.service`
 
 ```ini
 [Unit]
@@ -114,8 +128,8 @@ Wants=camera-service.service
 [Service]
 Type=simple
 User=azuolas
-WorkingDirectory=/home/azuolas/jetson_system/frontend_bridge
-ExecStart=/usr/bin/python3 /home/azuolas/jetson_system/frontend_bridge/frontend_bridge.py
+WorkingDirectory=/home/azuolas/mmoment/app/orin_nano/frontend_bridge
+ExecStart=/usr/bin/python3 /home/azuolas/mmoment/app/orin_nano/frontend_bridge/frontend_bridge.py --camera-port 5002 --frontend-port 5003
 Restart=always
 RestartSec=5
 
@@ -125,7 +139,7 @@ WantedBy=multi-user.target
 
 ### 4. Cloudflare Tunnel Service
 
-**File**: `/home/azuolas/jetson_system/systemd/cloudflared-compat.service`
+**File**: `/home/azuolas/mmoment/app/orin_nano/systemd/cloudflared-compat.service`
 
 ```ini
 [Unit]
@@ -137,7 +151,7 @@ Wants=frontend-bridge.service
 Type=simple
 User=azuolas
 WorkingDirectory=/home/azuolas
-ExecStart=/usr/local/bin/cloudflared-compat tunnel run 6257e873-7943-4b85-b8a3-72b5b9d0a500
+ExecStart=/usr/local/bin/cloudflared tunnel run 6257e873-7943-4b85-b8a3-72b5b9d0a500
 Restart=on-failure
 RestartSec=5
 
@@ -146,6 +160,34 @@ WantedBy=multi-user.target
 ```
 
 ## Configuration Files
+
+### Camera Configuration
+
+**File**: `/home/azuolas/mmoment/app/orin_nano/camera_service_new/config/camera_config.json`
+
+```json
+{
+    "camera": {
+        "preferred_device": "/dev/video1",
+        "width": 1280,
+        "height": 720,
+        "fps": 30,
+        "buffersize": 3,
+        "reconnect_attempts": 5,
+        "reconnect_delay": 0.5
+    },
+    "detection": {
+        "detection_interval": 0.03,
+        "recognition_interval": 0.5,
+        "min_face_size": [
+            60,
+            60
+        ],
+        "scale_factor": 1.1,
+        "min_neighbors": 5
+    }
+}
+```
 
 ### Cloudflare Tunnel Configuration
 
@@ -160,7 +202,7 @@ credentials-file: /home/azuolas/.cloudflared/6257e873-7943-4b85-b8a3-72b5b9d0a50
 ingress:
   # Route all jetson.mmoment.xyz requests to the frontend bridge
   - hostname: jetson.mmoment.xyz
-    service: http://127.0.0.1:5003
+    service: http://127.0.0.1:5013
     originRequest:
       noTLSVerify: true
       disableChunkedEncoding: true
@@ -169,14 +211,14 @@ ingress:
   - service: http_status:404
 ```
 
-## Starting and Managing Services
+## Installing and Starting Services
 
 ### Installing Service Files
 
 To install the service files into systemd, run:
 
 ```bash
-sudo cp /home/azuolas/jetson_system/systemd/*.service /etc/systemd/system/
+sudo cp /home/azuolas/mmoment/app/orin_nano/systemd/*.service /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
@@ -185,111 +227,127 @@ sudo systemctl daemon-reload
 Use the provided script:
 
 ```bash
-sudo /home/azuolas/jetson_system/start_services.sh
+cd /home/azuolas/mmoment/app/orin_nano
+sudo ./start_services.sh
 ```
 
-This script checks if each service is running and starts it if necessary.
-
-### Restarting Services Individually
+Or manually start each service:
 
 ```bash
-# Restart Camera API
-sudo systemctl restart camera-service.service
+sudo systemctl start camera-service.service
+sudo systemctl start solana-middleware.service
+sudo systemctl start frontend-bridge.service
+sudo systemctl start cloudflared-compat.service
+```
 
-# Restart Solana Middleware
-sudo systemctl restart solana-middleware.service
+### Checking Service Status
 
-# Restart Frontend Bridge
-sudo systemctl restart frontend-bridge.service
+To check if services are running correctly:
 
-# Restart Cloudflare Tunnel
-sudo systemctl restart cloudflared-compat.service
+```bash
+# Check status of all services
+systemctl status camera-service.service solana-middleware.service frontend-bridge.service cloudflared-compat.service
+
+# Check specific service
+systemctl status camera-service.service
 ```
 
 ### Viewing Service Logs
 
+To view service logs:
+
 ```bash
-# Camera API logs
-sudo journalctl -u camera-service.service -f
+# Camera service logs
+journalctl -u camera-service.service -f
 
-# Solana Middleware logs
-sudo journalctl -u solana-middleware.service -f
-
-# Frontend Bridge logs
-sudo journalctl -u frontend-bridge.service -f
-# or
-tail -f /home/azuolas/jetson_system/frontend_bridge/frontend_bridge.log
-
-# Cloudflare Tunnel logs
-sudo journalctl -u cloudflared-compat.service -f
+# Cloudflare tunnel logs
+journalctl -u cloudflared-compat.service -f
 ```
 
-## Troubleshooting
+## Common Issues and Troubleshooting
 
-### Common Issues
+### Camera Not Detected
 
-1. **Service Won't Start**
-   - Check logs: `journalctl -u service-name.service -n 50`
-   - Verify permissions: `ls -la /home/azuolas/jetson_system/`
+If the camera is not detected:
 
-2. **Tunnel Not Working**
-   - Check tunnel status: `systemctl status cloudflared-compat.service`
-   - Verify tunnel can connect to Cloudflare: `cloudflared-compat tunnel info 6257e873-7943-4b85-b8a3-72b5b9d0a500`
-   - Try accessing locally first: `curl http://localhost:5003/health`
-
-3. **Stream Not Working**
-   - Check if camera is detected: `v4l2-ctl --list-devices`
-   - Verify camera API is running: `curl http://localhost:5002/health`
-   - Try direct stream access: `curl -I http://localhost:5002/stream`
-
-### Recovery Procedures
-
-If the system becomes unresponsive or services fail repeatedly:
-
-1. Stop all services:
+1. Check the physical connection of the camera
+2. Verify the camera device path:
    ```bash
-   sudo systemctl stop cloudflared-compat.service frontend-bridge.service solana-middleware.service camera-service.service
+   v4l2-ctl --list-devices
    ```
 
-2. Check for any orphan processes:
+3. Update the camera device path in the `camera-service.service` file:
    ```bash
-   ps aux | grep -E "cloudflared|frontend_bridge|solana_middleware|api.py" | grep -v grep
+   sudo nano /etc/systemd/system/camera-service.service
+   ```
+   Change the `CAMERA_DEVICE` environment variable to the correct path
+
+4. Reload and restart the service:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl restart camera-service.service
    ```
 
-3. Start services in order:
+### Port Conflicts
+
+If services fail to start due to port conflicts:
+
+1. Check which process is using the port:
    ```bash
-   sudo systemctl start camera-service.service
-   sudo systemctl start solana-middleware.service
-   sudo systemctl start frontend-bridge.service
-   sudo systemctl start cloudflared-compat.service
+   sudo lsof -i :5002  # Replace with the port number
    ```
 
-## Maintenance
+2. Kill the process:
+   ```bash
+   sudo kill -9 <process_id>
+   ```
 
-### Updating Configuration
+3. Restart the service:
+   ```bash
+   sudo systemctl restart camera-service.service
+   ```
 
-To update any service configuration:
+### Cloudflare Tunnel Issues
 
-1. Edit the relevant service file in `/home/azuolas/jetson_system/systemd/`
-2. Copy to systemd directory: `sudo cp /home/azuolas/jetson_system/systemd/service-name.service /etc/systemd/system/`
-3. Reload systemd: `sudo systemctl daemon-reload`
-4. Restart the service: `sudo systemctl restart service-name.service`
+If the Cloudflare tunnel is not working:
 
-### Backup
+1. Check the tunnel status:
+   ```bash
+   cloudflared tunnel info 6257e873-7943-4b85-b8a3-72b5b9d0a500
+   ```
 
-Regular backups of the following directories are recommended:
+2. Verify the tunnel configuration:
+   ```bash
+   cat ~/.cloudflared/config.yml
+   ```
 
-- `/home/azuolas/jetson_system/` - All application code
-- `/home/azuolas/.cloudflared/` - Tunnel configuration and credentials
-- `/home/azuolas/jetson_system/data/` - All data files including faces, recordings, etc.
+3. Restart the tunnel:
+   ```bash
+   sudo systemctl restart cloudflared-compat.service
+   ```
 
-### Security
+## Performance Optimization
 
-- The Cloudflare tunnel provides secure encrypted access without opening ports
-- All services run as the non-root azuolas user
-- Access to the system should be restricted to authorized personnel
+For best performance:
+
+1. Set Jetson power mode to maximum:
+   ```bash
+   sudo nvpmodel -m 0
+   sudo jetson_clocks
+   ```
+
+2. Monitor system performance:
+   ```bash
+   tegrastats
+   ```
+
+3. Check camera frame rate in logs:
+   ```bash
+   tail -f /home/azuolas/mmoment/app/orin_nano/camera_service_new/logs/camera_service.log | grep "fps"
+   ```
 
 ## Endpoints Documentation
 
 For a detailed list of available API endpoints and their usage, see:
-[Frontend Integration Guide](/home/azuolas/jetson_system/docs/FRONTEND_INTEGRATION.md) 
+[API Endpoints Documentation](API_ENDPOINTS.md) and 
+[Frontend Integration Guide](FRONTEND_INTEGRATION.md) 

@@ -1,46 +1,83 @@
-# Rust/Anchor
-target/
-**/*.rs.bk
-.anchor/
-.DS_Store
-test-ledger/
-
-# Node
+# Node modules
 node_modules/
+
+# Build artifacts
 dist/
 build/
+*.o
+*.a
+
+# Environment variables
 .env
 .env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# Debug
+# Logs
+*.log
+logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Keys and local config
-*keypair.json
-.idea/
-.vscode/
-*.sw*
-.env
-.env.local
-app/web/src/assets/cyberchunk.png
-# Keypair files
-*.keypair.json
-/keys/**/*.json
-new_keypair.json
-
-# Build output
-/target/
-/dist/
-/node_modules/
-
-# Environment files
-.env
-.env.local
-
-# IDE files
+# Editor directories and files
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Orin Nano image files
+app/orin_nano/data/images/
+app/orin_nano/data/videos/
+app/orin_nano/data/faces/
+app/orin_nano/data/face_embeddings/
+app/orin_nano/data/recordings/
+app/orin_nano/frontend_bridge/recordings/
+
+# Camera service new images and models
+app/orin_nano/camera_service_new/faces/
+app/orin_nano/camera_service_new/photos/
+app/orin_nano/camera_service_new/test_results/
+app/orin_nano/camera_service_new/models/
+!app/orin_nano/camera_service_new/models/.gitkeep
+
+# Allow gitkeep files
+!app/orin_nano/data/images/.gitkeep
+!app/orin_nano/data/videos/.gitkeep
+!app/orin_nano/data/faces/.gitkeep
+!app/orin_nano/data/face_embeddings/.gitkeep
+!app/orin_nano/data/recordings/.gitkeep
+
+# Large model files
+app/orin_nano/camera_service/models/*.caffemodel
+app/orin_nano/camera_service/models/*.t7
+app/orin_nano/camera_service/models/*.pb
+app/orin_nano/camera_service_new/models/*.caffemodel
+app/orin_nano/camera_service_new/models/*.t7
+app/orin_nano/camera_service_new/models/*.pb
+app/orin_nano/camera_service_new/models/*.tflite
+app/orin_nano/camera_service_new/models/*.h5
+
+# Credentials
+*.pem
+*.key 
+# Python
+__pycache__/
+*.py[cod]
+*.class
+.env
+.venv
+env/
+venv/
+ENV/

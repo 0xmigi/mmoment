@@ -8,6 +8,30 @@ This document provides information on how to integrate with the Jetson Camera AP
 - **Camera PDA**: `WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD`
 - **Program ID**: `Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S`
 
+## Service Architecture
+
+The camera system consists of the following components:
+
+- **Camera Service** - Port 5002 (internal)
+- **Frontend Bridge** - Port 5003 (internal)
+- **Solana Middleware** - Port 5004 (internal)
+- **Cloudflare Tunnel** - Exposes the Frontend Bridge to the internet
+
+All API requests should be made to the Frontend Bridge through the Cloudflare Tunnel at `https://jetson.mmoment.xyz`.
+
+## Local Testing 
+
+To test the API locally without going through the Cloudflare tunnel:
+
+1. Access the API directly using internal ports:
+   - Camera Service: `http://localhost:5002`
+   - Frontend Bridge: `http://localhost:5003`
+   - Solana Middleware: `http://localhost:5004`
+
+2. For testing the stream locally:
+   - Open a browser on your Jetson device and navigate to `http://localhost:5003/test-stream`
+   - Or use SSH port forwarding: `ssh -L 5003:localhost:5003 azuolas@192.168.1.232`
+
 ## Endpoint Status
 
 Below is the current status of all endpoints:
@@ -70,10 +94,10 @@ Returns basic information about the API.
     "health": "/health",
     "connect": "/connect",
     "disconnect": "/disconnect",
-    "enroll-face": "/enroll-face",
-    "recognize-face": "/recognize-face",
-    "detect-gesture": "/detect-gesture",
-    "capture-moment": "/capture-moment",
+    "enroll_face": "/enroll_face",
+    "recognize_face": "/recognize_face",
+    "detect_gesture": "/detect_gesture",
+    "capture_moment": "/capture_moment",
     "stream": "/stream"
   },
   "camera_pda": "WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD"
@@ -88,7 +112,7 @@ Checks the health of the camera API and solana middleware.
 {
   "status": "ok",
   "camera_service": "ok",
-  "solana_middleware": "skipped",
+  "solana_middleware": "ok",
   "camera_pda": "WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD",
   "program_id": "Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S",
   "active_sessions": 0
@@ -151,7 +175,7 @@ Disconnects a wallet from the camera.
 
 ### Facial Recognition Endpoints
 
-#### `POST /enroll-face`
+#### `POST /enroll_face`
 Enrolls a face for facial recognition.
 
 **Request Body:**
@@ -171,7 +195,7 @@ Enrolls a face for facial recognition.
 }
 ```
 
-#### `POST /recognize-face`
+#### `POST /recognize_face`
 Recognizes a face against enrolled users.
 
 **Request Body:**
@@ -193,7 +217,7 @@ Recognizes a face against enrolled users.
 
 ### Gesture Detection Endpoints
 
-#### `POST /detect-gesture`
+#### `POST /detect_gesture`
 Detects a gesture from the camera.
 
 **Request Body:**
@@ -229,7 +253,7 @@ Returns the current gesture detected by the camera (polling endpoint).
 
 ### Capture Endpoints
 
-#### `POST /capture-moment`
+#### `POST /capture_moment`
 Captures and mints a moment as NFT.
 
 **Request Body:**
@@ -255,7 +279,7 @@ Captures and mints a moment as NFT.
 
 ### Visualization Control Endpoints
 
-#### `POST /toggle-face-detection`
+#### `POST /toggle_face_detection`
 Toggles face detection on/off.
 
 **Request Body:**
@@ -265,7 +289,7 @@ Toggles face detection on/off.
 }
 ```
 
-#### `POST /toggle-face-visualization`
+#### `POST /toggle_face_visualization`
 Toggles face visualization on/off.
 
 **Request Body:**
@@ -275,7 +299,7 @@ Toggles face visualization on/off.
 }
 ```
 
-#### `POST /toggle-gesture-visualization`
+#### `POST /toggle_gesture_visualization`
 Toggles gesture visualization on/off.
 
 **Request Body:**

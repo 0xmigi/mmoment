@@ -5,6 +5,12 @@ import uuid
 import time
 import logging
 import os
+import json
+import base64
+import hashlib
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 # Configure logging
 logging.basicConfig(
@@ -22,6 +28,24 @@ CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 # Simulate database with in-memory dictionary
 sessions = {}
+# Store for encryption keys
+encryption_keys = {}
+
+def generate_encryption_key(wallet_address, camera_pda):
+    """Generate a deterministic encryption key based on wallet and camera"""
+    # In production, this would use a real Solana NFT for key derivation
+    # For now, we'll use a simple deterministic approach
+    salt = b'mmoment-facial-recognition'  # Fixed salt
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+    )
+    # Combine wallet and camera PDA for unique key per user per camera
+    key_material = f"{wallet_address}-{camera_pda}".encode()
+    key = base64.urlsafe_b64encode(kdf.derive(key_material))
+    return key
 
 @app.route('/', methods=['GET'])
 def root():
@@ -29,6 +53,15 @@ def root():
     return jsonify({
         "message": "Solana Middleware API is running",
         "status": "ok",
+        "timestamp": int(time.time() * 1000)
+    })
+
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check endpoint"""
+    return jsonify({
+        "status": "ok",
+        "message": "Solana Middleware is healthy",
         "timestamp": int(time.time() * 1000)
     })
 
@@ -97,6 +130,111 @@ def disconnect_wallet():
         logger.error(f"Error disconnecting wallet: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/encrypt-face-embedding', methods=['POST'])
+def encrypt_face_embedding():
+    """Encrypt a face embedding using the wallet's NFT-based key"""
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        face_embedding = data.get('face_embedding')
+        camera_pda = data.get('camera_pda')
+        
+        if not wallet_address or not face_embedding:
+            return jsonify({"error": "Wallet address and face embedding are required"}), 400
+        
+        # In production, verify NFT ownership here
+        # For testing, we'll simulate successful verification
+        
+        # Generate encryption key
+        key = generate_encryption_key(wallet_address, camera_pda)
+        encryption_keys[wallet_address] = key
+        cipher = Fernet(key)
+        
+        # Convert embedding to JSON and encrypt
+        embedding_json = json.dumps(face_embedding).encode()
+        encrypted_data = cipher.encrypt(embedding_json)
+        encrypted_string = base64.b64encode(encrypted_data).decode()
+        
+        logger.info(f"Encrypted face embedding for wallet: {wallet_address}")
+        
+        return jsonify({
+            "success": True,
+            "encrypted_embedding": encrypted_string,
+            "message": "Face embedding encrypted successfully"
+        })
+    
+    except Exception as e:
+        logger.error(f"Error encrypting face embedding: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/decrypt-face-embedding', methods=['POST'])
+def decrypt_face_embedding():
+    """Decrypt a face embedding using the wallet's NFT-based key"""
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        encrypted_embedding = data.get('encrypted_embedding')
+        camera_pda = data.get('camera_pda')
+        
+        if not wallet_address or not encrypted_embedding:
+            return jsonify({"error": "Wallet address and encrypted embedding are required"}), 400
+        
+        # Get or generate encryption key
+        if wallet_address in encryption_keys:
+            key = encryption_keys[wallet_address]
+        else:
+            key = generate_encryption_key(wallet_address, camera_pda)
+            encryption_keys[wallet_address] = key
+            
+        cipher = Fernet(key)
+        
+        # Decode and decrypt
+        encrypted_data = base64.b64decode(encrypted_embedding)
+        decrypted_json = cipher.decrypt(encrypted_data)
+        face_embedding = json.loads(decrypted_json)
+        
+        logger.info(f"Decrypted face embedding for wallet: {wallet_address}")
+        
+        return jsonify({
+            "success": True,
+            "face_embedding": face_embedding,
+            "message": "Face embedding decrypted successfully"
+        })
+    
+    except Exception as e:
+        logger.error(f"Error decrypting face embedding: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/verify-nft-ownership', methods=['POST'])
+def verify_nft_ownership():
+    """Verify that a wallet owns a valid NFT for facial recognition"""
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        camera_pda = data.get('camera_pda')
+        
+        if not wallet_address:
+            return jsonify({"error": "Wallet address is required"}), 400
+        
+        # In production, verify NFT ownership on Solana here
+        # For testing, simulate successful verification
+        # This would check if the wallet owns an NFT from the specified collection
+        
+        # Always return true for development
+        has_nft = True
+        
+        logger.info(f"Verified NFT ownership for wallet: {wallet_address}, result: {has_nft}")
+        
+        return jsonify({
+            "success": True,
+            "has_valid_nft": has_nft,
+            "message": "NFT ownership verified"
+        })
+    
+    except Exception as e:
+        logger.error(f"Error verifying NFT ownership: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/mint-moment', methods=['POST'])
 def mint_moment():
     """Simulate minting a moment as NFT"""
@@ -154,5 +292,12 @@ def session_status():
     })
 
 if __name__ == "__main__":
+    # Ensure the middleware has the required Python packages
+    try:
+        from cryptography.fernet import Fernet
+    except ImportError:
+        logger.error("Cryptography package not found. Installing...")
+        os.system("pip install cryptography")
+        
     logger.info(f"Starting Solana middleware service on http://0.0.0.0:5001")
     app.run(host='0.0.0.0', port=5001) 

@@ -6,8 +6,8 @@ Wants=camera-service.service
 [Service]
 Type=simple
 User=azuolas
-WorkingDirectory=/home/azuolas/jetson_system/frontend_bridge
-ExecStart=/usr/bin/python3 /home/azuolas/jetson_system/frontend_bridge/frontend_bridge.py
+WorkingDirectory=/home/azuolas/mmoment/app/orin_nano/frontend_bridge
+ExecStart=/usr/bin/python3 /home/azuolas/mmoment/app/orin_nano/frontend_bridge/frontend_bridge.py --camera-port 5002 --frontend-port 5003
 Restart=always
 RestartSec=5
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import flask
-from flask import Flask, jsonify, request, send_file, Response
+from flask import Flask, jsonify, request, send_file, Response, redirect
 import requests
 import os
 import json
@@ -13,7 +13,14 @@ import traceback
 import base64
 import numpy as np
 import threading
+import argparse
 from urllib.parse import unquote
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description='Frontend Bridge for Jetson Camera API')
+parser.add_argument('--camera-port', type=int, default=5002, help='Port of the camera API (default: 5002)')
+parser.add_argument('--frontend-port', type=int, default=5003, help='Port to run the frontend bridge on (default: 5003)')
+args = parser.parse_args()
 
 # Configure logging
 logging.basicConfig(
@@ -37,11 +44,16 @@ CORS(app, resources={r"/*": {
     "allow_origin": "*"
 }})
 
-# Globals for configuration
-CAMERA_SERVICE_URL = os.environ.get('CAMERA_SERVICE_URL', 'http://localhost:5002')
+# Globals for configuration - use command-line args or environment variables
+CAMERA_SERVICE_URL = os.environ.get('CAMERA_SERVICE_URL', f'http://localhost:{args.camera_port}')
 SOLANA_MIDDLEWARE_URL = os.environ.get('SOLANA_MIDDLEWARE_URL', 'http://localhost:5001')
 CAMERA_PDA = os.environ.get('CAMERA_PDA', 'WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD')
 PROGRAM_ID = 'Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S'
+
+# Log configuration
+logger.info(f"Starting frontend bridge with:")
+logger.info(f"Camera API URL: {CAMERA_SERVICE_URL}")
+logger.info(f"Frontend port: {args.frontend_port}")
 
 # Active session store
 active_sessions = {}
@@ -634,11 +646,13 @@ def capture_moment():
             
         # If direct frame fetch failed, try capture-moment endpoint
         try:
+            # CRITICAL: Add for_recording=True to force clean frames with no face boxes
             response = requests.post(
                 f"{CAMERA_SERVICE_URL}/api/{CAMERA_PDA}/capture-moment",
                 json={
                     "wallet_address": wallet_address,
-                    "session_id": session_id
+                    "session_id": session_id,
+                    "for_recording": True  # Force clean frame with no face boxes
                 },
                 timeout=10
             )
@@ -651,11 +665,13 @@ def capture_moment():
             
         # Try alternative endpoint without API prefix
         try:
+            # CRITICAL: Add for_recording=True to force clean frames with no face boxes
             response = requests.post(
                 f"{CAMERA_SERVICE_URL}/capture-moment",
                 json={
                     "wallet_address": wallet_address,
-                    "session_id": session_id
+                    "session_id": session_id,
+                    "for_recording": True  # Force clean frame with no face boxes
                 },
                 timeout=10
             )
@@ -749,65 +765,39 @@ def capture_moment_underscore():
 
 @app.route('/stream')
 def video_stream():
-    """Stream video from the camera - direct proxy without processing"""
+    """Proxy for camera stream - forwards the MJPEG stream from the camera service"""
     try:
-        # First try with API path prefix
-        try:
-            response = requests.get(
-                f"{CAMERA_SERVICE_URL}/api/{CAMERA_PDA}/stream", 
-                stream=True,
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                # Check the content type to ensure it's an MJPEG stream
-                content_type = response.headers.get('content-type', '')
-                if 'multipart/x-mixed-replace' in content_type:
-                    # Return the stream directly to the client with proper content type
-                    logger.info(f"Successfully proxying MJPEG camera stream with content type: {content_type}")
-                    return Response(
-                        response.iter_content(chunk_size=8192),
-                        content_type=content_type,
-                        direct_passthrough=True
-                    )
+        # Forward the stream from the camera service
+        def generate():
+            try:
+                # Connect to the camera service stream endpoint
+                response = requests.get(f'{CAMERA_SERVICE_URL}/stream', stream=True)
+                
+                # Check if the response is successful
+                if response.status_code == 200:
+                    # Forward the headers from the camera service
+                    headers = {
+                        'Content-Type': response.headers.get('Content-Type'),
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0'
+                    }
+                    
+                    # Iterate through the chunks and yield them
+                    for chunk in response.iter_content(chunk_size=1024):
+                        yield chunk
                 else:
-                    logger.warning(f"Unexpected content type from camera stream: {content_type}")
-        except Exception as e:
-            logger.error(f"Error accessing API prefix stream: {e}")
+                    logger.error(f"Failed to connect to camera stream: {response.status_code}")
+                    yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + b'Error connecting to stream' + b'\r\n'
+            except Exception as e:
+                logger.error(f"Error in stream proxy: {str(e)}")
+                yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + b'Error connecting to stream' + b'\r\n'
         
-        # If API prefix fails, try without prefix
-        try:
-            response = requests.get(
-                f"{CAMERA_SERVICE_URL}/stream", 
-                stream=True,
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                # Check the content type to ensure it's an MJPEG stream
-                content_type = response.headers.get('content-type', '')
-                if 'multipart/x-mixed-replace' in content_type:
-                    # Return the stream directly to the client with proper content type
-                    logger.info(f"Successfully proxying MJPEG camera stream with content type: {content_type}")
-                    return Response(
-                        response.iter_content(chunk_size=8192),
-                        content_type=content_type,
-                        direct_passthrough=True
-                    )
-                else:
-                    logger.warning(f"Unexpected content type from camera stream: {content_type}")
-        except Exception as e:
-            logger.error(f"Error accessing direct stream endpoint: {e}")
-        
-        # If still failed, return error
-        logger.error("Both stream endpoint approaches failed")
-        return "Video stream unavailable", 503
-            
+        # Return the stream
+        return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
     except Exception as e:
-        logger.error(f"Error in video_stream: {e}")
-        
-        # Return a simple error message
-        return "Video stream unavailable", 503
+        logger.error(f"Error in stream endpoint: {e}")
+        return Response("Stream error", status=500)
 
 # Create a thread to continuously pull frames from the camera stream
 def frame_capture_thread():
@@ -1212,7 +1202,8 @@ def start_gesture_polling():
         return '', 200
         
     try:
-        data = request.json
+        # Create fallback data if no JSON provided
+        data = request.json or {}
         wallet_address = data.get('wallet_address', 'anonymous')
         session_id = data.get('session_id', f"fallback_{int(time.time())}")
         
@@ -2243,6 +2234,7 @@ def configure_gestures():
         }), 500
 
 @app.route('/clear-all-faces', methods=['POST', 'OPTIONS'])
+@app.route('/clear_all_faces', methods=['POST', 'OPTIONS'])  # Add snake_case alias
 def clear_all_faces():
     """Clear all enrolled faces"""
     # Handle OPTIONS request
@@ -2250,20 +2242,51 @@ def clear_all_faces():
         return '', 200
         
     try:
-        # Forward the request to the camera API
-        result = requests.post(
-            f"{CAMERA_SERVICE_URL}/api/{CAMERA_PDA}/clear-all-faces"
-        )
+        logger.info("[CLEAR FACES DEBUG] Frontend bridge clear_all_faces endpoint called")
         
-        if result.status_code != 200:
-            return jsonify({
-                "success": False,
-                "error": f"Error clearing faces: {result.text}"
-            }), result.status_code
+        # Try multiple endpoints with preference for snake_case
+        urls = [
+            f"{CAMERA_SERVICE_URL}/clear_all_faces",  # Snake case
+            f"{CAMERA_SERVICE_URL}/api/{CAMERA_PDA}/clear_all_faces",  # Snake case with API prefix
+            f"{CAMERA_SERVICE_URL}/clear-all-faces",  # Hyphenated
+            f"{CAMERA_SERVICE_URL}/api/{CAMERA_PDA}/clear-all-faces"  # Hyphenated with API prefix
+        ]
+        
+        success = False
+        response_data = None
+        
+        logger.info(f"[CLEAR FACES DEBUG] Attempting to clear faces with CAMERA_SERVICE_URL: {CAMERA_SERVICE_URL}")
+        logger.info(f"[CLEAR FACES DEBUG] CAMERA_PDA: {CAMERA_PDA}")
+        
+        for url in urls:
+            try:
+                logger.info(f"[CLEAR FACES DEBUG] Trying to clear faces using URL: {url}")
+                result = requests.post(url, timeout=10)  # Increased timeout
+                
+                logger.info(f"[CLEAR FACES DEBUG] Got response from {url}: Status: {result.status_code}, Content: {result.text[:100]}...")
+                
+                if result.status_code == 200:
+                    success = True
+                    response_data = result.json()
+                    logger.info(f"[CLEAR FACES DEBUG] Successfully cleared faces using {url}")
+                    break
+                else:
+                    logger.warning(f"[CLEAR FACES DEBUG] Failed to clear faces using {url}: {result.status_code} - {result.text}")
+            except Exception as e:
+                logger.error(f"[CLEAR FACES DEBUG] Error using {url} to clear faces: {e}")
+                
+        if success and response_data:
+            logger.info(f"[CLEAR FACES DEBUG] Returning success response: {response_data}")
+            return jsonify(response_data)
             
-        return result.json()
+        # If all attempts failed, return an error
+        logger.error("[CLEAR FACES DEBUG] All clear faces attempts failed")
+        return jsonify({
+            "success": False,
+            "error": "Failed to clear faces after trying multiple endpoints"
+        }), 500
     except Exception as e:
-        logger.error(f"Error clearing faces: {e}")
+        logger.error(f"[CLEAR FACES DEBUG] Error clearing faces: {e}")
         return jsonify({
             "success": False,
             "error": f"Error clearing faces: {str(e)}"
@@ -2334,29 +2357,20 @@ def try_both_url_patterns(endpoint, method='GET', json_data=None, query_params="
         return dummy_response
 
 def main():
-    """Main entry point"""
-    logger.info(f"Starting frontend bridge service on http://0.0.0.0:5003")
-    logger.info(f"Connected to camera service at {CAMERA_SERVICE_URL}")
-    logger.info(f"Connected to Solana middleware at {SOLANA_MIDDLEWARE_URL}")
-    logger.info(f"Using camera PDA: {CAMERA_PDA}")
+    """Start the Flask server"""
+    # Configure server
+    host = '0.0.0.0'
+    port = args.frontend_port
+
+    # Start frame capture thread for caching
+    threading.Thread(target=frame_capture_thread, daemon=True).start()
     
-    # DISABLED: No longer starting the frame capture thread to avoid performance issues
-    # thread = threading.Thread(target=frame_capture_thread, daemon=True)
-    # thread.start()
-    # logger.info("Started background frame capture thread")
+    # Log startup info
+    logger.info(f"Starting frontend bridge on {host}:{port}")
+    logger.info(f"Connecting to camera API at {CAMERA_SERVICE_URL}")
     
-    # Enable face detection and visualization by default
-    try:
-        requests.post(
-            f"{CAMERA_SERVICE_URL}/set-config",
-            json={"enable_face_detection": True, "enable_face_visualization": True},
-            timeout=2
-        )
-        logger.info("Enabled face detection and visualization")
-    except Exception as e:
-        logger.error(f"Failed to enable face detection: {e}")
-    
-    app.run(host='0.0.0.0', port=5003)
+    # Run the Flask app
+    app.run(host=host, port=port, threaded=True, debug=False)
 
 @app.route('/current-frame', methods=['GET', 'POST', 'OPTIONS'])
 def current_frame():
@@ -2462,6 +2476,81 @@ def current_frame():
 def current_frame_underscore():
     """Snake case alias for current-frame"""
     return current_frame()
+
+@app.route('/buffer-test')
+def buffer_test_page():
+    """Redirect to new API test page as buffer_test.html no longer exists"""
+    from flask import redirect
+    logger.info("Redirecting buffer-test to new_api_test.html")
+    return redirect('/new_api_test.html')
+
+@app.route('/new-api-test')
+@app.route('/new_api_test')
+@app.route('/new_api_test.html')
+def new_api_test_page():
+    """New testing page for API with direct camera access"""
+    try:
+        # Serve the new_api_test.html file directly from the frontend_bridge directory
+        import os
+        from flask import send_file
+        
+        file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'new_api_test.html')
+        
+        if os.path.exists(file_path):
+            logger.info(f"Serving new API test page from: {file_path}")
+            return send_file(file_path, mimetype='text/html')
+        else:
+            logger.error(f"New API test HTML file not found at: {file_path}")
+            return f"<html><body><h1>New API Test Error</h1><p>HTML file not found: {file_path}</p></body></html>"
+    except Exception as e:
+        logger.error(f"Error serving new_api_test.html: {e}")
+        return f"<html><body><h1>New API Test Error</h1><p>Failed to load new API test page: {str(e)}</p></body></html>"
+
+# Add a route to proxy API requests to the buffer service
+@app.route('/buffer-api/<path:subpath>', methods=['GET', 'POST', 'OPTIONS'])
+def buffer_api_proxy(subpath):
+    """Proxy requests to the buffer service API"""
+    buffer_service_url = 'http://127.0.0.1:5013'
+    
+    try:
+        # Forward the request to the buffer service
+        if request.method == 'GET':
+            # Include query parameters
+            url = f"{buffer_service_url}/{subpath}"
+            if request.query_string:
+                url += f"?{request.query_string.decode('utf-8')}"
+                
+            response = requests.get(
+                url,
+                headers={key: value for key, value in request.headers if key != 'Host'},
+                stream=True
+            )
+        elif request.method == 'POST':
+            response = requests.post(
+                f"{buffer_service_url}/{subpath}",
+                headers={key: value for key, value in request.headers if key != 'Host'},
+                data=request.get_data(),
+                stream=True
+            )
+        elif request.method == 'OPTIONS':
+            # Handle OPTIONS preflight
+            return '', 200
+        else:
+            return jsonify({"error": "Method not supported"}), 405
+            
+        # Return the response from the buffer service
+        return Response(
+            response.content,
+            status=response.status_code,
+            content_type=response.headers.get('content-type', 'application/json'),
+            headers=dict(response.headers)
+        )
+    except Exception as e:
+        logger.error(f"Error proxying to buffer service: {e}")
+        return jsonify({
+            "success": False,
+            "error": f"Failed to proxy request: {str(e)}"
+        }), 500
 
 if __name__ == "__main__":
     main() 
