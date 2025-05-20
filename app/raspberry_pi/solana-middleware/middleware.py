@@ -33,7 +33,7 @@ load_dotenv()
 # Configuration
 SOLANA_RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.devnet.solana.com")
 PROGRAM_ID = os.getenv("SOLANA_PROGRAM_ID", "7BYuxsNyaxxsxwzcRzFd6UJGnUctN6V1vDQxjGPaK2L4")
-CAMERA_PDA = os.getenv("CAMERA_PDA", "5onKAv5c6VdBZ8a7D11XqF79Hdzuv3tnysjv4B2pQWZ2")
+CAMERA_PDA = os.getenv("CAMERA_PDA", "EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA")
 CAMERA_API_URL = os.getenv("CAMERA_API_URL", "http://localhost:5001")
 MIDDLEWARE_PORT = int(os.getenv("MIDDLEWARE_PORT", "5002"))
 VERIFICATION_TIMEOUT = int(os.getenv("VERIFICATION_TIMEOUT", "15"))

@@ -6,10 +6,10 @@ After=network.target
 User=azuolas
 Group=azuolas
 WorkingDirectory=/home/azuolas/mmoment/app/raspberry_pi/new-camera-service
-Environment="PATH=/home/azuolas/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 ExecStart=/usr/bin/python3 -m camera_service.main
 Restart=always
-Environment=PYTHONPATH=/home/azuolas/mmoment/app/raspberry_pi/new-camera-service:/home/azuolas/camera-venv/lib/python3.11/site-packages
+Environment=PYTHONPATH=/home/azuolas/mmoment/app/raspberry_pi/new-camera-service:/usr/lib/python3/dist-packages
 Environment=LIVEPEER_API_KEY=7019f80b-f416-45d4-9b90-1ea130039e97
 Environment=LIVEPEER_STREAM_KEY=a183-5r72-7vui-u9vy
 Environment=LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live

@@ -40,7 +40,25 @@ class LivepeerStreamService:
             self.frame_rate = 15  # Match buffer service frame rate
             self.stop_streaming_event = threading.Event()
             self.ffmpeg_process = None
-            logger.debug("LivepeerStreamService initialized for MJPEG buffer")
+            
+            # Check if hardware acceleration is available
+            self.hw_accel_available = self._check_hw_acceleration()
+            logger.debug(f"LivepeerStreamService initialized for MJPEG buffer. Hardware acceleration available: {self.hw_accel_available}")
+
+    def _check_hw_acceleration(self):
+        """Check if h264_v4l2m2m hardware acceleration is available"""
+        try:
+            # Try to query the hardware encoder
+            result = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-encoders"],
+                capture_output=True, 
+                text=True, 
+                check=False
+            )
+            return "h264_v4l2m2m" in result.stdout
+        except Exception as e:
+            logger.warning(f"Failed to check hardware acceleration: {e}")
+            return False
 
     @property
     def is_streaming(self):
@@ -68,26 +86,36 @@ class LivepeerStreamService:
                 ingest_url = f"{self.ingest_url}/{self.stream_key}"
                 logger.info(f"Using Livepeer ingest URL: {ingest_url}")
                 
-                # Modify FFmpeg command to accept MJPEG input
+                # Start with basic command
                 ffmpeg_cmd = [
                     "ffmpeg",
                     "-f", "mjpeg",  # Input format is MJPEG
                     "-i", "-",  # Read from stdin
-                    "-c:v", "libx264",
-                    "-preset", "veryfast",  # Faster encoding, less CPU
-                    "-tune", "zerolatency",  # Optimize for streaming
-                    "-pix_fmt", "yuv420p",  # Required for compatibility
-                    "-b:v", "1M",  # Lower bitrate
-                    "-maxrate", "1M",  # Lower max bitrate
-                    "-bufsize", "2M",  # Smaller buffer
-                    "-g", str(self.frame_rate * 2),  # Set keyframe interval to 2 seconds
-                    "-force_key_frames", f"expr:gte(t,n_forced*{2})",  # Force keyframe every 2 seconds
-                    "-x264opts", "no-scenecut",  # Disable scene detection to maintain keyframe interval
-                    "-f", "flv",  # Output format
-                    ingest_url
                 ]
+                
+                # Simplify encoding to troubleshoot connectivity issues
+                # Use software encoding with minimal settings
+                logger.info("Using simplified encoding settings for troubleshooting")
+                ffmpeg_cmd.extend([
+                    "-c:v", "libx264",
+                    "-preset", "ultrafast",  # Use ultrafast preset to minimize CPU usage
+                    "-tune", "zerolatency",  # Optimize for streaming
+                    "-pix_fmt", "yuv420p",   # Required for compatibility
+                    "-b:v", "500k",          # Lower bitrate
+                    "-maxrate", "500k",      # Lower max bitrate 
+                    "-bufsize", "1000k",     # Smaller buffer
+                    "-g", str(self.frame_rate),  # Set keyframe interval to 1 second
+                    "-r", str(self.frame_rate),  # Framerate
+                    "-f", "flv",             # Output format
+                    ingest_url
+                ])
 
                 logger.info(f"Starting FFmpeg with command: {' '.join(ffmpeg_cmd)}")
+                
+                # Check system resources before starting
+                if not self._check_system_resources():
+                    logger.error("Insufficient system resources to start streaming")
+                    return {"status": "error", "message": "Insufficient system resources"}
                 
                 # Start FFmpeg process
                 self.ffmpeg_process = subprocess.Popen(
@@ -118,18 +146,71 @@ class LivepeerStreamService:
                 logger.error(f"Failed to start stream: {e}")
                 self.stop_stream()  # Cleanup on failure
                 raise RuntimeError(f"Failed to start stream: {e}")
+    
+    def _check_system_resources(self):
+        """Check if system has enough resources to stream"""
+        try:
+            # Check CPU temperature
+            try:
+                with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+                    temp = float(f.read()) / 1000.0
+                    logger.info(f"Current CPU temperature: {temp}°C")
+                    if temp > 75:
+                        logger.warning(f"CPU temperature too high: {temp}°C")
+                        return False
+            except Exception as e:
+                logger.warning(f"Failed to check CPU temperature: {e}")
+            
+            # Check available memory
+            try:
+                import psutil
+                mem = psutil.virtual_memory()
+                logger.info(f"Available memory: {mem.available / 1024 / 1024:.1f} MB")
+                if mem.available < 300 * 1024 * 1024:  # Less than 300MB available
+                    logger.warning(f"Not enough memory available: {mem.available / 1024 / 1024:.1f} MB")
+                    return False
+            except Exception as e:
+                logger.warning(f"Failed to check memory: {e}")
+            
+            # Check CPU load
+            try:
+                load = os.getloadavg()[0]
+                logger.info(f"Current CPU load: {load}")
+                if load > 3.5:  # High load for a 4-core Pi
+                    logger.warning(f"CPU load too high: {load}")
+                    return False
+            except Exception as e:
+                logger.warning(f"Failed to check CPU load: {e}")
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error checking system resources: {e}")
+            return True  # Default to allow if check fails
 
     def _stream_frames(self):
         """Stream MJPEG frames to FFmpeg process"""
         frames_sent = 0
         start_time = time.time()
         last_log = start_time
+        last_resource_check = start_time
+        error_count = 0
+        max_errors = 5  # Maximum number of errors before giving up
         
         try:
             while not self.stop_streaming_event.is_set():
                 if not self.buffer_service.is_running:
                     logger.error("Buffer service not running")
                     break
+
+                current_time = time.time()
+                
+                # Check system resources every 10 seconds
+                if current_time - last_resource_check >= 10:
+                    if not self._check_system_resources():
+                        logger.warning("Stopping stream due to insufficient system resources")
+                        break
+                    last_resource_check = current_time
 
                 # Get JPEG frame directly from buffer
                 jpeg_data = self.buffer_service.get_jpeg_frame()
@@ -142,24 +223,49 @@ class LivepeerStreamService:
                     self.ffmpeg_process.stdin.write(jpeg_data)
                     self.ffmpeg_process.stdin.flush()
                     frames_sent += 1
+                    error_count = 0  # Reset error count on successful frame
 
                     # Log streaming stats every 10 seconds (less frequently)
-                    current_time = time.time()
                     if current_time - last_log >= 10:
                         elapsed = current_time - start_time
                         fps = frames_sent / elapsed
                         logger.debug(f"Streaming stats - Frames sent: {frames_sent}, FPS: {fps:.1f}")
                         last_log = current_time
+                        
+                        # Check FFmpeg stderr for errors (non-blocking)
+                        if hasattr(self.ffmpeg_process, 'stderr') and self.ffmpeg_process.stderr:
+                            stderr_data = None
+                            try:
+                                # Try to read stderr without blocking
+                                import select
+                                if select.select([self.ffmpeg_process.stderr], [], [], 0)[0]:
+                                    stderr_data = self.ffmpeg_process.stderr.read(1024).decode('utf-8', errors='ignore')
+                                    if stderr_data and 'Error' in stderr_data:
+                                        logger.warning(f"FFmpeg error: {stderr_data}")
+                            except Exception as e:
+                                logger.error(f"Error checking FFmpeg stderr: {e}")
 
                 except BrokenPipeError:
-                    logger.error("FFmpeg process pipe broken")
-                    break
+                    error_count += 1
+                    logger.error(f"FFmpeg process pipe broken (error {error_count}/{max_errors})")
+                    if error_count >= max_errors:
+                        logger.error("Too many pipe errors, stopping stream")
+                        break
+                    # Brief pause to avoid spinning on errors
+                    time.sleep(0.5)
                 except Exception as e:
-                    logger.error(f"Error writing frame to FFmpeg: {e}")
-                    break
+                    error_count += 1
+                    logger.error(f"Error writing frame to FFmpeg: {e} (error {error_count}/{max_errors})")
+                    if error_count >= max_errors:
+                        logger.error("Too many errors, stopping stream")
+                        break
+                    time.sleep(0.5)
 
-                # Simple rate control
-                time.sleep(1.0 / self.frame_rate)
+                # More adaptive rate control
+                target_interval = 1.0 / self.frame_rate
+                elapsed = time.time() - current_time
+                if elapsed < target_interval:
+                    time.sleep(target_interval - elapsed)
 
         except Exception as e:
             logger.error(f"Streaming thread error: {e}")

@@ -122,8 +122,8 @@ class SolanaAuthService:
             
         # Use the camera public key from your Solana program when no keypair is available
         # This is the actual public key from the registered camera in the program
-        logger.info("Using hardcoded camera public key: 5onKAv5c6VdBZ8a7D11XqF79Hdzuv3tnysjv4B2pQWZ2")
-        return "5onKAv5c6VdBZ8a7D11XqF79Hdzuv3tnysjv4B2pQWZ2"
+        logger.info("Using hardcoded camera public key: EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA")
+        return "EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA"
         
     def check_camera_registered(self):
         """Check if the camera is registered with the Solana program"""

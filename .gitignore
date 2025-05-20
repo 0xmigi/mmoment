@@ -72,3 +72,12 @@ app/orin_nano/camera_service_new/models/*.h5
 # Credentials
 *.pem
 *.key 
+# Python
+__pycache__/
+*.py[cod]
+*.class
+.env
+.venv
+env/
+venv/
+ENV/
