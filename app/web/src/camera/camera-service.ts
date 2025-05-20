@@ -41,6 +41,49 @@ export class CameraActionService {
     }
   }
 
+  // New enhanced debug fetch function
+  private async debugFetch(url: string, options: RequestInit = {}): Promise<Response> {
+    const startTime = Date.now();
+    const requestId = Math.random().toString(36).substring(2, 8);
+    
+    console.log(`🔍 [DEBUG FETCH ${requestId}] Starting request to ${url} at ${new Date().toISOString()}`);
+    console.log(`🔍 [DEBUG FETCH ${requestId}] Request options:`, {
+      method: options.method || 'GET',
+      headers: options.headers || {},
+      body: options.body ? (typeof options.body === 'string' ? options.body : '[binary data]') : undefined,
+      mode: options.mode || 'cors',
+      credentials: options.credentials || 'same-origin'
+    });
+    
+    try {
+      const response = await fetch(url, options);
+      const endTime = Date.now();
+      
+      console.log(`✅ [DEBUG FETCH ${requestId}] Response received in ${endTime - startTime}ms`);
+      console.log(`✅ [DEBUG FETCH ${requestId}] Status: ${response.status} ${response.statusText}`);
+      
+      // Log response headers
+      const headers: Record<string, string> = {};
+      response.headers.forEach((value, key) => {
+        headers[key] = value;
+      });
+      console.log(`📋 [DEBUG FETCH ${requestId}] Response headers:`, headers);
+      
+      return response;
+    } catch (error) {
+      const endTime = Date.now();
+      console.error(`❌ [DEBUG FETCH ${requestId}] Request failed after ${endTime - startTime}ms:`, error);
+      
+      if (error instanceof TypeError && error.message.includes('NetworkError')) {
+        console.error(`❌ [DEBUG FETCH ${requestId}] This appears to be a network error, possibly CORS or connectivity related`);
+      } else if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+        console.error(`❌ [DEBUG FETCH ${requestId}] Generic fetch failure, could be network connectivity or CORS`);
+      }
+      
+      throw error;
+    }
+  }
+
   public static getInstance(): CameraActionService {
     if (!CameraActionService.instance) {
       CameraActionService.instance = new CameraActionService();
@@ -65,7 +108,8 @@ export class CameraActionService {
         console.log(`⚠️ BYPASS MODE: Redirecting to camera API directly: ${cameraUrl}`);
         
         try {
-          const response = await fetch(cameraUrl, {
+          // Use the debug fetch for better logging
+          const response = await this.debugFetch(cameraUrl, {
             method,
             headers: {
               'Content-Type': 'application/json',
@@ -89,7 +133,8 @@ export class CameraActionService {
     try {
       console.log(`📦 Request payload:`, data);
       
-      const response = await fetch(url, {
+      // Use the debug fetch for better logging
+      const response = await this.debugFetch(url, {
         method,
         headers: {
           'Content-Type': 'application/json'
@@ -117,58 +162,159 @@ export class CameraActionService {
     }
   }
 
-
   /**
    * Takes a photo via the Solana middleware using the transaction signature
    */
   public async capturePhoto(txSignature: string, walletAddress: string, retryCount = 0): Promise<CameraActionResponse> {
     try {
       this.log(`Capturing photo with transaction: ${txSignature}`);
-      const url = `${CONFIG.CAMERA_API_URL}/api/capture`;
       
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          tx_signature: txSignature,
-          wallet_address: walletAddress
-        }),
-        mode: 'cors',
-        credentials: 'omit'
-      });
+      // First try with middleware URL
+      let url = `${CONFIG.CAMERA_API_URL}/api/capture`;
+      console.log(`📸 Capture photo request to middleware: ${url} at ${new Date().toISOString()}`);
+      
+      let response;
+      let directCameraFallback = false;
+      
+      try {
+        // Try middleware first
+        response = await this.debugFetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json, image/*, */*'
+          },
+          body: JSON.stringify({
+            tx_signature: txSignature,
+            wallet_address: walletAddress
+          }),
+          mode: 'cors',
+          credentials: 'omit'
+        });
+      } catch (middlewareError) {
+        console.error(`❌ Middleware API failed, trying direct camera API:`, middlewareError);
+        
+        // If middleware fails, try direct camera URL
+        directCameraFallback = true;
+        url = `${CONFIG.CAMERA_API_URL.replace('middleware', 'camera')}/api/capture`;
+        console.log(`📸 Trying direct camera API: ${url}`);
+        
+        response = await this.debugFetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json, image/*, */*'
+          },
+          body: JSON.stringify({
+            tx_signature: txSignature,
+            wallet_address: walletAddress
+          }),
+          mode: 'cors',
+          credentials: 'omit'
+        });
+      }
       
       if (!response.ok) {
         const errorText = await response.text();
         this.log(`Camera API Error: ${response.status} - ${errorText}`);
+        console.error(`❌ Camera API Error Status: ${response.status}, URL: ${url}, Error: ${errorText}`);
         
-        if (retryCount < 2 && 
-            (response.status === 429 || response.status === 503 || response.status >= 500)) {
-          this.log(`Retrying capture (${retryCount + 1})...`);
-          return this.capturePhoto(txSignature, walletAddress, retryCount + 1);
+        // Check specifically for connectivity issues
+        if (response.status === 0 || response.status === 404 || response.status === 503) {
+          console.error('❌ This appears to be a connectivity issue to the camera API');
         }
         
-        return {
-          success: false,
-          error: `Camera API error: ${response.status} ${errorText}`
-        };
+        // If we already tried direct camera, or if we have specific errors that don't warrant trying direct camera
+        if (directCameraFallback || ![404, 503, 502, 504].includes(response.status)) {
+          if (retryCount < 2 && 
+              (response.status === 429 || response.status === 503 || response.status >= 500)) {
+            console.log(`🔄 Retrying capture (${retryCount + 1})...`);
+            return this.capturePhoto(txSignature, walletAddress, retryCount + 1);
+          }
+          
+          return {
+            success: false,
+            error: `Camera API error: ${response.status} ${errorText}`
+          };
+        }
+        
+        // If we haven't tried direct camera yet, try it now
+        try {
+          console.log(`🔄 Middleware failed with ${response.status}, trying direct camera API...`);
+          url = `${CONFIG.CAMERA_API_URL.replace('middleware', 'camera')}/api/capture`;
+          
+          response = await this.debugFetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json, image/*, */*'
+            },
+            body: JSON.stringify({
+              tx_signature: txSignature,
+              wallet_address: walletAddress
+            }),
+            mode: 'cors',
+            credentials: 'omit'
+          });
+          
+          if (!response.ok) {
+            const directErrorText = await response.text();
+            console.error(`❌ Direct camera API also failed: ${response.status}, ${directErrorText}`);
+            
+            if (retryCount < 2) {
+              console.log(`🔄 Retrying capture (${retryCount + 1})...`);
+              return this.capturePhoto(txSignature, walletAddress, retryCount + 1);
+            }
+            
+            return {
+              success: false,
+              error: `Camera API error: ${response.status} ${directErrorText}`
+            };
+          }
+        } catch (directError) {
+          console.error(`❌ Exception with direct camera API:`, directError);
+          
+          if (retryCount < 2) {
+            console.log(`🔄 Retrying capture (${retryCount + 1})...`);
+            return this.capturePhoto(txSignature, walletAddress, retryCount + 1);
+          }
+          
+          return {
+            success: false,
+            error: `Failed to connect to camera: ${directError instanceof Error ? directError.message : String(directError)}`
+          };
+        }
       }
+      
+      console.log(`✅ Photo captured successfully from ${url}`);
       
       // Get the image data directly from the response
       const imageBlob = await response.blob();
       this.log(`Received photo: ${imageBlob.size} bytes, ${imageBlob.type}`);
+      console.log(`📊 Photo details: ${imageBlob.size} bytes, type: ${imageBlob.type}`);
+      
+      if (imageBlob.size === 0) {
+        console.error('❌ Received empty image blob from camera API');
+        return {
+          success: false,
+          error: 'Camera returned empty image'
+        };
+      }
       
       // Upload to IPFS
+      console.log(`📤 Uploading photo to IPFS, size: ${imageBlob.size} bytes`);
       const results = await unifiedIpfsService.uploadFile(imageBlob, walletAddress, 'image');
       
       if (results.length === 0) {
+        console.error('❌ Failed to upload image to IPFS');
         return { 
           success: false, 
           error: 'Failed to upload image to IPFS' 
         };
       }
 
+      console.log(`✅ Successfully uploaded to IPFS with ${results.length} results`);
+      
       // Save transaction ID with the media object
       results.forEach(media => {
         // Attach the real transaction ID
@@ -206,9 +352,15 @@ export class CameraActionService {
       };
     } catch (error) {
       this.log('Error capturing photo:', error);
+      console.error('❌ Exception during photo capture:', error);
+      
+      // Special handling for network errors
+      if (error instanceof TypeError && error.message.includes('NetworkError')) {
+        console.error('❌ Network error during photo capture - likely CORS or connectivity issue');
+      }
       
       if (retryCount < 2) {
-        this.log(`Retrying capture (${retryCount + 1})...`);
+        console.log(`🔄 Retrying capture after error (${retryCount + 1})...`);
         return this.capturePhoto(txSignature, walletAddress, retryCount + 1);
       }
       

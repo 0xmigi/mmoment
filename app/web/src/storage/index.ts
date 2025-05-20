@@ -5,6 +5,12 @@ export * from './storage-provider';
 export * from './storage-service';
 export * from './ipfs';
 
+// Configuration
+export { getPinataCredentials, updatePinataCredentials } from './config';
+
+// UI Components
+export { PinataSettings } from './PinataSettings';
+
 // Fix for ambiguous exports
 // Export types from walrus/index.ts
 export type { WalrusStorageQuota } from './walrus';

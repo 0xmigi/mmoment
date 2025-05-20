@@ -2,6 +2,38 @@
 
 This directory contains scripts for interacting with your Solana program.
 
+## Pinata IPFS Integration
+
+This project uses Pinata IPFS for storing and retrieving media files.
+
+### Development Setup
+
+For local development, the app stores Pinata credentials in your browser's localStorage. Initial default credentials are provided that should work out of the box.
+
+You can update these credentials at any time using the settings panel:
+1. Look for the gear/settings icon in the bottom right corner of the app
+2. Enter your Pinata JWT, API Key, and API Secret
+3. Click "Save Credentials"
+
+Your credentials will be stored in your browser's localStorage and never committed to the source code.
+
+### Production Setup
+
+For production deployment:
+
+1. Create an account at [Pinata](https://app.pinata.cloud/) if you don't have one
+2. Go to the [API Keys](https://app.pinata.cloud/developers/keys) page
+3. Create a new key with Admin privileges
+4. Copy the JWT, API Key, and API Secret
+5. Add these environment variables to your Vercel dashboard or other hosting platform:
+   ```
+   VITE_PINATA_JWT=your_jwt_token
+   VITE_PINATA_API_KEY=your_api_key
+   VITE_PINATA_API_SECRET=your_api_secret
+   ```
+
+**Important:** Never commit API credentials to your source code or version control!
+
 ## Module Format Issues
 
 When working with Node.js v23.0.0 and Solana/Anchor libraries, you may encounter issues with module formats (CommonJS vs ES Modules). Here's how to resolve them:

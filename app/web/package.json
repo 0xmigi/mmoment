@@ -26,7 +26,7 @@
     "@solana/wallet-adapter-wallets": "^0.19.32",
     "@solana/web3.js": "1.91.6",
     "@vercel/speed-insights": "^1.1.0",
-    "axios": "^1.7.7",
+    "axios": "^1.9.0",
     "bn.js": "^5.2.1",
     "buffer": "^6.0.3",
     "crypto-browserify": "^3.12.1",
@@ -67,8 +67,8 @@
     "@solana/web3.js": "1.91.6"
   },
   "browserslist": [
-    ">0.2%", 
-    "not dead", 
+    ">0.2%",
+    "not dead",
     "not op_mini all"
   ]
 }
