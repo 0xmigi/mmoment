@@ -57,8 +57,10 @@ const rpcEndpoint = cluster === 'localnet' ? 'http://localhost:8899' : devnetEnd
 
 // Get the appropriate API URL based on environment with fallbacks
 const getCameraApiUrl = () => {
-  // Primary URL should always be HTTPS
-  const primaryUrl = "https://middleware.mmoment.xyz";
+  // Centralized middleware URL for all cameras
+  const centralMiddlewareUrl = "https://pi5-middleware.mmoment.xyz";
+  
+  // Alternative middleware URLs for failover (in order of preference)
   
   // Only use localhost if we're explicitly in local development
   const forceLocal = import.meta.env.VITE_FORCE_LOCAL === 'true';
@@ -66,9 +68,36 @@ const getCameraApiUrl = () => {
     console.log('Using local camera API (forced by VITE_FORCE_LOCAL)');
     return "http://localhost:5002";
   }
+  
+  // Override middleware URL if specified in environment
+  const overrideUrl = import.meta.env.VITE_CAMERA_API_URL;
+  if (overrideUrl) {
+    console.log(`Using override camera API URL: ${overrideUrl}`);
+    return overrideUrl;
+  }
 
-  // Default to HTTPS
-  return primaryUrl;
+  // Default to centralized middleware
+  return centralMiddlewareUrl;
+};
+
+// Function to get the direct camera hardware URL
+const getCameraHardwareUrl = () => {
+  // Central URL for all camera hardware
+  const centralCameraUrl = "https://camera.mmoment.xyz";
+  
+  // Only use localhost if we're explicitly in local development
+  const forceLocal = import.meta.env.VITE_FORCE_LOCAL === 'true';
+  if (forceLocal && window.location.hostname === 'localhost') {
+    return "http://localhost:5001";
+  }
+  
+  // Override camera URL if specified in environment
+  const overrideUrl = import.meta.env.VITE_CAMERA_HARDWARE_URL;
+  if (overrideUrl) {
+    return overrideUrl;
+  }
+
+  return centralCameraUrl;
 };
 
 // Get WebSocket URL for timeline updates from Railway backend
@@ -98,6 +127,7 @@ export const CONFIG = {
   getNextEndpoint,
   // Camera API is your Pi5 device with the Python/Flask server
   CAMERA_API_URL: getCameraApiUrl(),
+  CAMERA_HARDWARE_URL: getCameraHardwareUrl(),
   // Timeline backend is your Railway service
   BACKEND_URL: isProduction 
     ? "https://mmoment-production.up.railway.app"
@@ -107,7 +137,7 @@ export const CONFIG = {
   isMobileBrowser: isMobileBrowser(),
   LIVEPEER_PLAYBACK_ID: process.env.REACT_APP_LIVEPEER_PLAYBACK_ID || '',
   TIMELINE_WS_URL: getTimelineWebSocketUrl(),
-  CAMERA_PDA: import.meta.env.VITE_CAMERA_PDA || '5onKAv5c6VdBZ8a7D11XqF79Hdzuv3tnysjv4B2pQWZ2',
+  CAMERA_PDA: import.meta.env.VITE_CAMERA_PDA || 'EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA',
   isUsingDifferentLocalPorts: isUsingDifferentLocalPorts()
 };
 

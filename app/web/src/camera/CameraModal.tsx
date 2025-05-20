@@ -38,7 +38,6 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
   const [isCheckedIn, setIsCheckedIn] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [useFaceRecognition, setUseFaceRecognition] = useState(false);
 
   // Check if current user is the owner
   const isOwner = primaryWallet?.address === camera.owner;
@@ -157,6 +156,36 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   };
 
+  // Add check-in event to timeline
+  const addCheckInEvent = (transactionId: string) => {
+    if (primaryWallet?.address) {
+      timelineService.emitEvent({
+        type: 'check_in',
+        user: {
+          address: primaryWallet.address
+        },
+        timestamp: Date.now(),
+        transactionId: transactionId,
+        cameraId: camera.id
+      });
+    }
+  };
+
+  // Add check-out event to timeline
+  const addCheckOutEvent = (transactionId: string) => {
+    if (primaryWallet?.address) {
+      timelineService.emitEvent({
+        type: 'check_out',
+        user: {
+          address: primaryWallet.address
+        },
+        timestamp: Date.now(),
+        transactionId: transactionId,
+        cameraId: camera.id
+      });
+    }
+  };
+
   // Handle check-in
   const handleCheckIn = async () => {
     if (!camera.id || !primaryWallet?.address) {
@@ -182,79 +211,6 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         CAMERA_ACTIVATION_PROGRAM_ID
       );
 
-      // Find the face data PDA if using face recognition
-      let faceDataPda: PublicKey | null = null;
-      let faceDataExists = false;
-
-      if (useFaceRecognition) {
-        [faceDataPda] = PublicKey.findProgramAddressSync(
-          [
-            Buffer.from('face-nft'),
-            userPublicKey.toBuffer()
-          ],
-          CAMERA_ACTIVATION_PROGRAM_ID
-        );
-
-        // Check if face data exists
-        try {
-          await program.account.faceData.fetch(faceDataPda);
-          faceDataExists = true;
-        } catch (err) {
-          // Face data doesn't exist, create it first
-          try {
-            // Create a mock facial embedding with 128 float values
-            // Use Buffer.from as seen in working test scripts
-            const mockEmbedding = Buffer.from(Array(128).fill(0).map(() => Math.floor(Math.random() * 256)));
-            
-            console.log('Creating face enrollment with embedding size:', mockEmbedding.length);
-            
-            // Create instruction
-            const enrollIx = await program.methods
-              .enrollFace(mockEmbedding)
-              .accounts({
-                user: userPublicKey,
-                faceNft: faceDataPda,
-                systemProgram: SystemProgram.programId,
-              })
-              .instruction();
-
-            // Create transaction
-            const enrollTx = new Transaction().add(enrollIx);
-            const { blockhash } = await connection.getLatestBlockhash();
-            enrollTx.recentBlockhash = blockhash;
-            enrollTx.feePayer = userPublicKey;
-
-            // Sign and send transaction
-            try {
-              // Use getSigner instead of directly accessing signTransaction
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const signer = await (primaryWallet as any).getSigner();
-              const signedTx = await signer.signTransaction(enrollTx);
-              const enrollSig = await connection.sendRawTransaction(signedTx.serialize());
-              await connection.confirmTransaction(enrollSig, 'confirmed');
-              
-              console.log('Face enrollment transaction confirmed:', enrollSig);
-              faceDataExists = true;
-            } catch (signError) {
-              console.error('Transaction signing error:', signError);
-              throw new Error('Failed to sign face enrollment transaction. Please try again.');
-            }
-          } catch (createErr) {
-            console.error('Error creating face data:', createErr);
-            // More descriptive error message
-            if (createErr instanceof Error) {
-              const errMsg = createErr.message;
-              if (errMsg.includes('insufficient funds')) {
-                throw new Error('Insufficient SOL to create face recognition data. Please add more SOL to your wallet.');
-              } else if (errMsg.includes('invalid program')) {
-                throw new Error('Face recognition program error. Please try again without face recognition.');
-              }
-            }
-            throw new Error('Failed to create face recognition data. Please try again without checking the face recognition option.');
-          }
-        }
-      }
-
       // Create the accounts object for check-in
       const accounts: any = {
         user: userPublicKey,
@@ -263,14 +219,9 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         systemProgram: SystemProgram.programId
       };
 
-      // Add face account only if using face recognition and it exists
-      if (useFaceRecognition && faceDataExists && faceDataPda) {
-        accounts.faceNft = faceDataPda;
-      }
-
       // Create check-in instruction
       const ix = await program.methods
-        .checkIn(useFaceRecognition)
+        .checkIn(false)
         .accounts(accounts)
         .instruction();
 
@@ -282,12 +233,38 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
 
       // Sign and send transaction
       try {
-        // Use getSigner instead of directly accessing signTransaction
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const signer = await (primaryWallet as any).getSigner();
-        const signedTx = await signer.signTransaction(tx);
+        // Get the signer object, accounting for different wallet interfaces
+        let signedTx;
+        
+        // Check if wallet has a getSigner method (Dynamic wallet)
+        if (typeof (primaryWallet as any).getSigner === 'function') {
+          const signer = await (primaryWallet as any).getSigner();
+          
+          // Check if signer has signTransaction
+          if (typeof signer.signTransaction === 'function') {
+            console.log('Using signer.signTransaction for check-in');
+            signedTx = await signer.signTransaction(tx);
+          } else {
+            console.log('Signer does not have signTransaction, using fallback for check-in');
+            // Fallback to direct wallet signTransaction if available
+            signedTx = await (primaryWallet as any).signTransaction(tx);
+          }
+        } else {
+          // Standard wallet adapter interface
+          console.log('Using primaryWallet.signTransaction directly for check-in');
+          signedTx = await (primaryWallet as any).signTransaction(tx);
+        }
+        
+        if (!signedTx) {
+          throw new Error('Transaction signing failed - no signed transaction returned');
+        }
+        
+        console.log('Transaction signed successfully, sending to network for check-in');
         const signature = await connection.sendRawTransaction(signedTx.serialize());
+        
+        console.log('Check-in transaction sent, confirming:', signature);
         await connection.confirmTransaction(signature, 'confirmed');
+        console.log('Check-in transaction confirmed successfully');
         
         setIsCheckedIn(true);
         
@@ -303,7 +280,11 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         }
       } catch (signError) {
         console.error('Transaction signing error:', signError);
-        throw new Error('Failed to sign check-in transaction. Please try again.');
+        if (signError instanceof Error) {
+          setError(`Failed to sign check-in transaction: ${signError.message}`);
+        } else {
+          setError('Failed to sign check-in transaction. Please try again.');
+        }
       }
       
     } catch (error) {
@@ -378,11 +359,38 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
 
       // Sign and send transaction
       try {
-        // Cast to any to avoid TypeScript errors with different wallet interfaces
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const signedTx = await (primaryWallet as any).getSigner().signTransaction(tx);
+        // Get the signer object, accounting for different wallet interfaces
+        let signedTx;
+        
+        // Check if wallet has a getSigner method (Dynamic wallet)
+        if (typeof (primaryWallet as any).getSigner === 'function') {
+          const signer = await (primaryWallet as any).getSigner();
+          
+          // Check if signer has signTransaction
+          if (typeof signer.signTransaction === 'function') {
+            console.log('Using signer.signTransaction');
+            signedTx = await signer.signTransaction(tx);
+          } else {
+            console.log('Signer does not have signTransaction, using fallback');
+            // Fallback to direct wallet signTransaction if available
+            signedTx = await (primaryWallet as any).signTransaction(tx);
+          }
+        } else {
+          // Standard wallet adapter interface
+          console.log('Using primaryWallet.signTransaction directly');
+          signedTx = await (primaryWallet as any).signTransaction(tx);
+        }
+        
+        if (!signedTx) {
+          throw new Error('Transaction signing failed - no signed transaction returned');
+        }
+        
+        console.log('Transaction signed successfully, sending to network');
         const signature = await connection.sendRawTransaction(signedTx.serialize());
+        
+        console.log('Transaction sent, confirming:', signature);
         await connection.confirmTransaction(signature, 'confirmed');
+        console.log('Transaction confirmed successfully');
         
         setIsCheckedIn(false);
         
@@ -398,7 +406,11 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         }
       } catch (signError) {
         console.error('Transaction signing error:', signError);
-        throw new Error('Failed to sign check-out transaction. Please try again.');
+        if (signError instanceof Error) {
+          setError(`Failed to sign check-out transaction: ${signError.message}`);
+        } else {
+          setError('Failed to sign check-out transaction. Please try again.');
+        }
       }
       
     } catch (error) {
@@ -411,36 +423,6 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       }
     } finally {
       setLoading(false);
-    }
-  };
-
-  // Add check-in event to timeline
-  const addCheckInEvent = (transactionId: string) => {
-    if (primaryWallet?.address) {
-      timelineService.emitEvent({
-        type: 'check_in',
-        user: {
-          address: primaryWallet.address
-        },
-        timestamp: Date.now(),
-        transactionId: transactionId,
-        cameraId: camera.id
-      } as any);
-    }
-  };
-
-  // Add check-out event to timeline
-  const addCheckOutEvent = (transactionId: string) => {
-    if (primaryWallet?.address) {
-      timelineService.emitEvent({
-        type: 'check_out',
-        user: {
-          address: primaryWallet.address
-        },
-        timestamp: Date.now(),
-        transactionId: transactionId,
-        cameraId: camera.id
-      } as any);
     }
   };
 
@@ -559,63 +541,46 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                   <div className="text-sm">{camera.model || "pi5"}</div>
                 </div>
 
-                {/* Activity */}
-                {camera.activityCounter !== undefined && (
-                  <div className="mb-4">
-                    <div className="text-sm text-gray-700">Activity</div>
-                    <div className="text-sm">{camera.activityCounter} total interactions</div>
-                  </div>
-                )}
-
-                {/* Error display */}
-                {error && (
-                  <div className="mb-4 p-2 bg-red-50 rounded-lg text-sm text-red-700">
-                    {error}
-                  </div>
-                )}
-
-                {/* Face Recognition option */}
-                {!isCheckedIn && (
-                  <div className="mb-4">
-                    <label className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        checked={useFaceRecognition}
-                        onChange={(e) => setUseFaceRecognition(e.target.checked)}
-                        className="rounded text-blue-600"
-                        disabled={loading}
-                      />
-                      <span className="text-sm text-gray-700">Use Face Recognition</span>
-                    </label>
-                  </div>
-                )}
-
-                {/* Check In/Out button - Always show for everyone */}
-                <div className="mb-2 mt-10">
-                  {isCheckedIn ? (
-                    <button
-                      onClick={handleCheckOut}
-                      disabled={loading}
-                      className={`w-full py-2 rounded-lg font-medium ${
-                        loading ? 'bg-red-300 text-red-800 cursor-not-allowed' : 'bg-red-600 text-white hover:bg-red-700'
-                      }`}
-                    >
-                      {loading ? 'Processing...' : 'Check Out'}
-                    </button>
-                  ) : (
-                    <button
-                      onClick={handleCheckIn}
-                      disabled={loading}
-                      className={`w-full py-2 rounded-lg font-medium ${
-                        loading ? 'bg-blue-300 text-blue-800 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'
-                      }`}
-                    >
-                      {loading ? 'Processing...' : 'Check In'}
-                    </button>
-                  )}
+                {/* Activity Counter */}
+                <div className="mb-4">
+                  <div className="text-sm text-gray-700">Activity</div>
+                  <div className="text-sm font-medium">{camera.activityCounter || 0} total interactions</div>
                 </div>
+
+                {/* Error Message */}
+                {error && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+                    <h3 className="text-sm font-medium text-red-800">Error</h3>
+                    <p className="text-xs text-red-700 mt-1">{error}</p>
+                  </div>
+                )}
+
+                {/* Check In/Out Button */}
+                {isCheckedIn ? (
+                  <button
+                    onClick={handleCheckOut}
+                    disabled={loading}
+                    className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
+                  >
+                    {loading ? 'Processing...' : 'Check Out'}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleCheckIn}
+                    disabled={loading}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+                  >
+                    {loading ? 'Processing...' : 'Check In'}
+                  </button>
+                )}
               </>
             )}
+          </div>
+          <div className="text-xs text-gray-500 mt-3 text-center px-4">
+            {isCheckedIn ? 
+              "You're currently checked in to this camera. Click the button above to check out." :
+              "Check in to interact with this camera and record events on the timeline."}
+            {error && <div className="mt-1 text-xs text-red-600">Try using a different wallet if you continue to see errors.</div>}
           </div>
         </Dialog.Panel>
       </div>

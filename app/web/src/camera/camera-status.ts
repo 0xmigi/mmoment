@@ -13,10 +13,27 @@ class CameraStatusService {
   private readonly MOBILE_CHECK_INTERVAL = 10000; // Longer interval for mobile
   private readonly FETCH_TIMEOUT = 8000; // 8 second timeout for fetch operations
   private debugMode = true; // Enable debug logs
+  private forceOnlineMode = false; // New flag to force online status when we know the camera is working
 
   private constructor() {
     this.logDebug('CameraStatusService initialized');
     this.startPolling();
+    
+    // Check localStorage for previous status
+    try {
+      const savedStatus = localStorage.getItem('camera_status');
+      if (savedStatus) {
+        const parsed = JSON.parse(savedStatus);
+        // Apply saved status if it exists
+        if (parsed && typeof parsed === 'object') {
+          this.logDebug('Restored camera status from localStorage:', parsed);
+          this.currentStatus = {...this.currentStatus, ...parsed};
+          this.notifyCallbacks();
+        }
+      }
+    } catch (e) {
+      this.logDebug('Error loading saved camera status:', e);
+    }
   }
 
   static getInstance(): CameraStatusService {
@@ -54,6 +71,12 @@ class CameraStatusService {
   }
 
   private async checkStatus(force = false): Promise<void> {
+    // If we're in forced online mode, don't do normal status checks
+    if (this.forceOnlineMode) {
+      this.logDebug('In forced online mode, skipping normal status check');
+      return;
+    }
+
     const now = Date.now();
     const isMobile = CONFIG.isMobileBrowser;
     const minInterval = isMobile ? this.MOBILE_CHECK_INTERVAL : this.MIN_CHECK_INTERVAL;
@@ -78,6 +101,12 @@ class CameraStatusService {
     } catch (error) {
       this.logDebug('Status check failed or timed out:', error);
       
+      // Don't set camera offline if we've recently had successful operations
+      if (this.hasRecentSuccessfulOperation()) {
+        this.logDebug('Ignoring status check failure due to recent successful operation');
+        return;
+      }
+      
       // Mobile gets more retries with longer delays
       const maxRetries = CONFIG.isMobileBrowser ? 5 : 3;
       
@@ -94,10 +123,15 @@ class CameraStatusService {
         }, retryDelay);
       } else {
         this.logDebug('Max retries reached, setting camera to offline');
-        const newStatus = { isLive: false, isStreaming: false, owner: this.currentStatus.owner };
-        if (this.hasStatusChanged(newStatus)) {
-          this.currentStatus = newStatus;
-          this.notifyCallbacks();
+        
+        // Don't set offline if we know it was working recently
+        if (!this.hasRecentSuccessfulOperation()) {
+          const newStatus = { isLive: false, isStreaming: false, owner: this.currentStatus.owner };
+          if (this.hasStatusChanged(newStatus)) {
+            this.currentStatus = newStatus;
+            this.notifyCallbacks();
+            this.saveStatus();
+          }
         }
         
         // Reset retry count after a while to allow future attempts
@@ -108,11 +142,67 @@ class CameraStatusService {
     }
   }
 
+  // Check if we've had a successful camera operation recently (in the last 5 minutes)
+  private hasRecentSuccessfulOperation(): boolean {
+    try {
+      const lastSuccessTimeStr = localStorage.getItem('last_successful_camera_operation');
+      if (!lastSuccessTimeStr) return false;
+      
+      const lastSuccessTime = parseInt(lastSuccessTimeStr, 10);
+      const now = Date.now();
+      const fiveMinutes = 5 * 60 * 1000;
+      
+      return !isNaN(lastSuccessTime) && (now - lastSuccessTime < fiveMinutes);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Record a successful camera operation
+  public recordSuccessfulOperation(): void {
+    try {
+      localStorage.setItem('last_successful_camera_operation', Date.now().toString());
+      this.logDebug('Recorded successful camera operation');
+    } catch (e) {
+      this.logDebug('Error recording successful operation:', e);
+    }
+  }
+
+  // New method: set streaming mode
+  public setStreaming(isStreaming: boolean): void {
+    this.logDebug(`Setting streaming mode to: ${isStreaming}`);
+    this.forceOnlineMode = true;
+    this.recordSuccessfulOperation();
+    
+    const newStatus = { 
+      ...this.currentStatus,
+      isLive: true, 
+      isStreaming 
+    };
+    
+    if (this.hasStatusChanged(newStatus)) {
+      this.currentStatus = newStatus;
+      this.notifyCallbacks();
+      this.saveStatus();
+    }
+  }
+
+  // Save current status to localStorage
+  private saveStatus(): void {
+    try {
+      localStorage.setItem('camera_status', JSON.stringify(this.currentStatus));
+    } catch (e) {
+      this.logDebug('Error saving camera status:', e);
+    }
+  }
+
   // Separate the actual status check logic for better error handling
   private async _performStatusCheck(): Promise<void> {
     const isMobile = CONFIG.isMobileBrowser;
     
     try {
+      console.log(`[CameraStatus] Checking health at ${new Date().toISOString()} - ${CONFIG.CAMERA_API_URL}/api/health`);
+      
       // Try a simple health check first
       const healthResponse = await this.fetchWithTimeout(
         `${CONFIG.CAMERA_API_URL}/api/health`,
@@ -129,6 +219,7 @@ class CameraStatusService {
       this.logDebug('Health response status:', healthResponse.status);
 
       if (!healthResponse.ok) {
+        console.error(`[CameraStatus] Health check failed with status: ${healthResponse.status}, trying direct camera API`);
         throw new Error(`Health check failed with status: ${healthResponse.status}`);
       }
 
@@ -136,6 +227,22 @@ class CameraStatusService {
       try {
         healthData = await healthResponse.json();
         this.logDebug('Health data:', healthData);
+        console.log(`[CameraStatus] Health data:`, healthData);
+        
+        // If the health check returns camera_api field and it contains status: connected
+        // This is a more reliable indicator than just a 200 OK
+        if (healthData.camera_api && healthData.camera_api.status === 'connected') {
+          this.logDebug('Camera API is explicitly connected');
+          this.recordSuccessfulOperation();
+        }
+        
+        // If healthData contains a camera object with an "available" state
+        if (healthData.camera_api?.camera?.state === 'available' || 
+            healthData.camera?.state === 'available' || 
+            healthData.camera_api?.state === 'available') {
+          this.logDebug('Camera is marked as available');
+          this.recordSuccessfulOperation();
+        }
       } catch (e) {
         this.logDebug('Failed to parse health response as JSON:', e);
       }
@@ -161,6 +268,11 @@ class CameraStatusService {
           const streamData = await streamResponse.json();
           this.logDebug('Stream data:', streamData);
           isStreaming = streamData.isActive;
+          
+          // If streaming is active, record a successful operation
+          if (isStreaming) {
+            this.recordSuccessfulOperation();
+          }
         } else {
           this.logDebug('Stream info request failed, assuming not streaming');
         }
@@ -184,11 +296,64 @@ class CameraStatusService {
         this.logDebug('Status changed, updating');
         this.currentStatus = newStatus;
         this.notifyCallbacks();
+        this.saveStatus();
       }
 
       this.retryCount = 0;
+      this.recordSuccessfulOperation();
     } catch (error) {
       this.logDebug('Status check operation failed:', error);
+      
+      // Try direct camera API as fallback
+      console.log(`[CameraStatus] Trying direct camera API at ${CONFIG.CAMERA_API_URL.replace('middleware', 'camera')}/api/health`);
+      try {
+        const directCameraResponse = await this.fetchWithTimeout(
+          `${CONFIG.CAMERA_API_URL.replace('middleware', 'camera')}/api/health`,
+          {
+            headers: isMobile ? {
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache'
+            } : undefined
+          },
+          this.FETCH_TIMEOUT
+        );
+        
+        if (directCameraResponse.ok) {
+          console.log(`[CameraStatus] Direct camera API check succeeded`);
+          let cameraData;
+          try {
+            cameraData = await directCameraResponse.json();
+            console.log(`[CameraStatus] Direct camera data:`, cameraData);
+            
+            // If we can directly connect to the camera, record it as a successful operation
+            this.recordSuccessfulOperation();
+          } catch (e) {
+            console.log(`[CameraStatus] Failed to parse direct camera response as JSON`);
+          }
+          
+          const newStatus = {
+            isLive: true,
+            isStreaming: false, // We don't know for sure, default to false
+            owner: cameraData?.owner || ''
+          };
+          
+          if (this.hasStatusChanged(newStatus)) {
+            this.logDebug('Status changed from direct camera check, updating');
+            this.currentStatus = newStatus;
+            this.notifyCallbacks();
+            this.saveStatus();
+          }
+          
+          this.retryCount = 0;
+          return; // Successfully used direct camera API
+        } else {
+          console.log(`[CameraStatus] Direct camera API check failed with status: ${directCameraResponse.status}`);
+        }
+      } catch (directError) {
+        console.log(`[CameraStatus] Direct camera API check failed:`, directError);
+      }
+      
+      // If we get here, both middleware and direct camera checks failed
       throw error; // Re-throw to let the main checkStatus method handle retries
     }
   }
@@ -200,28 +365,34 @@ class CameraStatusService {
   }
 
   private startPolling() {
-    this.logDebug('Starting status polling');
-    this.checkStatus(true);
+    // Stop existing interval if any
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+    }
     
-    // Use different polling intervals for mobile vs desktop
-    const pollInterval = CONFIG.isMobileBrowser ? 15000 : 5000;
-    this.logDebug(`Setting poll interval to ${pollInterval}ms (mobile: ${CONFIG.isMobileBrowser})`);
+    // Start a new polling interval
+    const pollingInterval = CONFIG.isMobileBrowser ? 15000 : 10000; // Longer on mobile
+    this.pollInterval = setInterval(() => {
+      this.checkStatus().catch(e => this.logDebug('Poll check status failed:', e));
+    }, pollingInterval);
     
-    this.pollInterval = setInterval(() => this.checkStatus(), pollInterval);
+    this.logDebug(`Status polling started with interval: ${pollingInterval}ms`);
+    
+    // Do an initial check
+    this.checkStatus(true).catch(e => this.logDebug('Initial check status failed:', e));
   }
 
   subscribe(callback: StatusCallback): () => void {
-    this.logDebug('New subscriber added');
     this.callbacks.add(callback);
-    callback(this.currentStatus);
+    callback(this.currentStatus); // immediately call with current status
+    
+    // Return unsubscribe function
     return () => {
-      this.logDebug('Subscriber removed');
       this.callbacks.delete(callback);
     };
   }
 
   private notifyCallbacks() {
-    this.logDebug(`Notifying ${this.callbacks.size} subscribers of status:`, this.currentStatus);
     this.callbacks.forEach(callback => callback(this.currentStatus));
   }
 
@@ -229,10 +400,9 @@ class CameraStatusService {
     return { ...this.currentStatus };
   }
 
-  // Force check and reset - useful for debugging
   public forceCheck() {
-    this.logDebug('Force checking status');
-    this.retryCount = 0;
+    // Reset forced online mode for new check
+    this.forceOnlineMode = false;
     return this.checkStatus(true);
   }
 
@@ -240,33 +410,26 @@ class CameraStatusService {
     this.logDebug('Cleaning up CameraStatusService');
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
+      this.pollInterval = null;
     }
-    this.callbacks.clear();
   }
 
-  // Method to set camera status to online directly (used after successful actions)
-  public setOnline(isStreaming: boolean) {
-    this.logDebug(`Manually setting camera status to online, streaming: ${isStreaming}`);
+  public setOnline(isStreaming: boolean = false) {
+    this.logDebug(`Setting camera status to online, streaming: ${isStreaming}`);
+    this.forceOnlineMode = true;
+    this.recordSuccessfulOperation();
     
     const newStatus = {
       isLive: true,
-      isStreaming,
-      owner: 'user' // Default owner when manually set
+      isStreaming: isStreaming || this.currentStatus.isStreaming,
+      owner: this.currentStatus.owner
     };
     
-    // Only update if actually changing the status
     if (this.hasStatusChanged(newStatus)) {
       this.currentStatus = newStatus;
       this.notifyCallbacks();
+      this.saveStatus();
     }
-    
-    // Reset retry counter when manually setting online
-    this.retryCount = 0;
-    
-    // Schedule a check soon to get the actual status
-    setTimeout(() => {
-      this.checkStatus(true);
-    }, 2000);
   }
 }
 

@@ -808,10 +808,17 @@ export function CameraView() {
                 // Ensure camera shows as online
                 cameraStatus.setOnline(false);
               } else {
-                // This is expected when no physical camera is connected
-                // Show a user-friendly message instead of an error
-                updateToast('success', 'Transaction confirmed, but no physical camera is connected');
-                console.log('No physical camera connected or camera is offline');
+                // Check camera status to see if it's truly offline
+                const status = cameraStatus.getCurrentStatus();
+                
+                if (status.isLive) {
+                  // Camera is actually connected, but there was an error with the capture
+                  updateToast('error', `Failed to capture photo: ${response.error || 'Unknown error'}`);
+                } else {
+                  // Camera is offline
+                  updateToast('info', 'Transaction confirmed, but no physical camera is connected');
+                  console.log('No physical camera connected or camera is offline');
+                }
 
                 // Refresh the timeline to show the transaction
                 if (timelineRef.current?.refreshEvents) {
@@ -820,9 +827,18 @@ export function CameraView() {
               }
             } catch (error) {
               console.error('Error capturing photo:', error);
-              // This is expected when no physical camera is connected
-              updateToast('success', 'Transaction confirmed, but no physical camera is connected');
-              console.log('No physical camera connected or camera is offline');
+              
+              // Check camera status to see if it's truly offline
+              const status = cameraStatus.getCurrentStatus();
+              
+              if (status.isLive) {
+                // Camera is connected, but there was an error
+                updateToast('error', `Error capturing photo: ${error instanceof Error ? error.message : 'Unknown error'}`);
+              } else {
+                // Camera is offline
+                updateToast('info', 'Transaction confirmed, but no physical camera is connected');
+                console.log('No physical camera connected or camera is offline');
+              }
 
               // Refresh the timeline to show the transaction
               if (timelineRef.current?.refreshEvents) {
@@ -857,10 +873,20 @@ export function CameraView() {
               const response = await cameraActionService.recordVideo(signature, primaryWallet.address);
               if (response.success) {
                 updateToast('success', 'Video recorded and uploaded to IPFS');
+                // Ensure camera shows as online
+                cameraStatus.setOnline(false);
               } else {
-                // This is expected when no physical camera is connected
-                updateToast('success', 'Transaction confirmed, but no physical camera is connected');
-                console.log('No physical camera connected or camera is offline');
+                // Check camera status to see if it's truly offline
+                const status = cameraStatus.getCurrentStatus();
+                
+                if (status.isLive) {
+                  // Camera is actually connected, but there was an error with recording
+                  updateToast('error', `Failed to record video: ${response.error || 'Unknown error'}`);
+                } else {
+                  // Camera is offline
+                  updateToast('info', 'Transaction confirmed, but no physical camera is connected');
+                  console.log('No physical camera connected or camera is offline');
+                }
 
                 // Refresh the timeline to show the transaction
                 if (timelineRef.current?.refreshEvents) {
@@ -869,9 +895,18 @@ export function CameraView() {
               }
             } catch (error) {
               console.error('Error recording video:', error);
-              // This is expected when no physical camera is connected
-              updateToast('success', 'Transaction confirmed, but no physical camera is connected');
-              console.log('No physical camera connected or camera is offline');
+              
+              // Check camera status to see if it's truly offline
+              const status = cameraStatus.getCurrentStatus();
+              
+              if (status.isLive) {
+                // Camera is connected, but there was an error
+                updateToast('error', `Error recording video: ${error instanceof Error ? error.message : 'Unknown error'}`);
+              } else {
+                // Camera is offline
+                updateToast('info', 'Transaction confirmed, but no physical camera is connected');
+                console.log('No physical camera connected or camera is offline');
+              }
 
               // Refresh the timeline to show the transaction
               if (timelineRef.current?.refreshEvents) {
@@ -929,10 +964,20 @@ export function CameraView() {
               if (response.success) {
                 updateToast('success', 'Stream started');
                 setIsStreaming(true);
+                // Ensure camera shows as streaming
+                cameraStatus.setStreaming(true);
               } else {
-                // This is expected when no physical camera is connected
-                updateToast('success', 'Transaction confirmed, but no physical camera is connected');
-                console.log('No physical camera connected or camera is offline');
+                // Check camera status to see if it's truly offline
+                const status = cameraStatus.getCurrentStatus();
+                
+                if (status.isLive) {
+                  // Camera is actually connected, but there was an error with streaming
+                  updateToast('error', `Failed to start stream: ${response.error || 'Unknown error'}`);
+                } else {
+                  // Camera is offline
+                  updateToast('info', 'Transaction confirmed, but no physical camera is connected');
+                  console.log('No physical camera connected or camera is offline');
+                }
 
                 // Refresh the timeline to show the transaction
                 if (timelineRef.current?.refreshEvents) {
@@ -941,9 +986,18 @@ export function CameraView() {
               }
             } catch (error) {
               console.error('Error starting stream:', error);
-              // This is expected when no physical camera is connected
-              updateToast('success', 'Transaction confirmed, but no physical camera is connected');
-              console.log('No physical camera connected or camera is offline');
+              
+              // Check camera status to see if it's truly offline
+              const status = cameraStatus.getCurrentStatus();
+              
+              if (status.isLive) {
+                // Camera is connected, but there was an error
+                updateToast('error', `Error starting stream: ${error instanceof Error ? error.message : 'Unknown error'}`);
+              } else {
+                // Camera is offline
+                updateToast('info', 'Transaction confirmed, but no physical camera is connected');
+                console.log('No physical camera connected or camera is offline');
+              }
 
               // Refresh the timeline to show the transaction
               if (timelineRef.current?.refreshEvents) {
