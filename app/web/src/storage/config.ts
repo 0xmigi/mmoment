@@ -3,9 +3,9 @@
 
 // Default development credentials - these will be stored in localStorage, not in the source code
 const DEV_CREDENTIALS = {
-  PINATA_JWT: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySW5mb3JtYXRpb24iOnsiaWQiOiI4MTUxMzVjMi0xYzI0LTRiMWItOTEwOC00MjU2MGFlYzJhYzMiLCJlbWFpbCI6IjB4bWlnaS5ldGhAZ21haWwuY29tIiwiZW1haWxfdmVyaWZpZWQiOnRydWUsInBpbl9wb2xpY3kiOnsicmVnaW9ucyI6W3siZGVzaXJlZFJlcGxpY2F0aW9uQ291bnQiOjEsImlkIjoiRlJBMSJ9LHsiZGVzaXJlZFJlcGxpY2F0aW9uQ291bnQiOjEsImlkIjoiTllDMSJ9XSwidmVyc2lvbiI6MX0sIm1mYV9lbmFibGVkIjpmYWxzZSwic3RhdHVzIjoiQUNUSVZFIn0sImF1dGhlbnRpY2F0aW9uVHlwZSI6InNjb3BlZEtleSIsInNjb3BlZEtleUtleSI6ImJhNWJlZTBmYzM5YTM1ZTQ0MmI2Iiwic2NvcGVkS2V5U2VjcmV0IjoiOTVhNGRmOTIwMjU3ZTUwNDE5MWY5MDI1NzE3MjZjMDgzZDNlY2ZiZWEwOGMxMzY2MjhlNTgzMDc0NzFkMTlhOCIsImV4cCI6MTc3OTI4ODk3Mn0.e9zzPNZIeA49R4NG3zT1rAOqDEHO60QJHc1FFBTBiik',
-  PINATA_API_KEY: '***REMOVED***',
-  PINATA_API_SECRET: '***REMOVED***'
+  PINATA_JWT: 'your_pinata_jwt_here',
+  PINATA_API_KEY: 'your_pinata_api_key_here',
+  PINATA_API_SECRET: 'your_pinata_api_secret_here'
 };
 
 // Credential storage key

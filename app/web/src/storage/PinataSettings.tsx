@@ -94,7 +94,7 @@ export function PinataSettings() {
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="***REMOVED***..."
+              placeholder="ba5bee0fc39a35e442b6..."
             />
           </div>
           
@@ -107,7 +107,7 @@ export function PinataSettings() {
               value={apiSecret}
               onChange={(e) => setApiSecret(e.target.value)}
               className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="***REMOVED***..."
+              placeholder="95a4df920257e504191f902571726c083d3ecfbea08c136628e58307471d19a8..."
             />
           </div>
 
