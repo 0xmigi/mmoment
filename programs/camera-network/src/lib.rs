@@ -52,4 +52,9 @@ pub mod camera_network {
     pub fn enroll_face(ctx: Context<EnrollFace>, encrypted_embedding: Vec<u8>) -> Result<()> {
         instructions::enroll_face::handler(ctx, encrypted_embedding)
     }
+    
+    /// Record a camera activity (photo, video, stream)
+    pub fn record_activity(ctx: Context<RecordActivity>, args: RecordActivityArgs) -> Result<()> {
+        instructions::record_activity::handler(ctx, args)
+    }
 } 

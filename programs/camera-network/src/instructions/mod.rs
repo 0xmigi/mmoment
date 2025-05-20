@@ -6,6 +6,7 @@ pub mod check_in;
 pub mod check_out;
 pub mod set_camera_active;
 pub mod enroll_face;
+pub mod record_activity;
 
 pub use initialize::*;
 pub use register_camera::*;
@@ -14,4 +15,5 @@ pub use deregister_camera::*;
 pub use check_in::*;
 pub use check_out::*;
 pub use set_camera_active::*;
-pub use enroll_face::*; 
+pub use enroll_face::*;
+pub use record_activity::*; 
