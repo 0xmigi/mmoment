@@ -51,14 +51,14 @@ The core vision processing system built on the Jetson platform:
 - Media capture (photos and videos)
 - Real-time video streaming
 
-### 3. Frontend Bridge (app/orin_nano/frontend_bridge)
+### 3. Camera Service API (app/orin_nano/camera_service)
 
-Middleware API for connecting camera systems to web applications:
+Direct RESTful API for connecting camera systems to web applications:
 
-- RESTful API for frontend integration
-- MJPEG streaming
-- Session management
-- Cross-origin request handling
+- High-performance video streaming
+- Face recognition and gesture detection
+- Photo/video capture with user attribution
+- Session management and blockchain integration
 
 ### 4. Solana Blockchain Integration (app/orin_nano/solana_middleware)
 

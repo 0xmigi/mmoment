@@ -6,14 +6,14 @@ Wants=solana-middleware.service
 [Service]
 Type=simple
 User=azuolas
-WorkingDirectory=/home/azuolas/mmoment/app/orin_nano/camera_service_new
+WorkingDirectory=/home/azuolas/mmoment/app/orin_nano/camera_service
 Environment="SOLANA_MIDDLEWARE_URL=http://localhost:5004"
 Environment="CAMERA_PDA=WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD"
 Environment="PROGRAM_ID=Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S"
 Environment="CAMERA_DEVICE=/dev/video1"  # Logitech StreamCam
 # Run port cleanup script before starting
 ExecStartPre=/bin/bash -c "lsof -ti:5002 | xargs -r kill -9"
-ExecStart=/usr/bin/python3 /home/azuolas/mmoment/app/orin_nano/camera_service_new/main.py --port 5002
+ExecStart=/usr/bin/python3 /home/azuolas/mmoment/app/orin_nano/camera_service/main.py --port 5002
 Restart=always
 RestartSec=5
 

@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Service API Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1, h2, h3 {
+            color: #333;
+        }
+        .card {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .column {
+            flex: 1;
+            min-width: 300px;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 15px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .api-section {
+            margin-bottom: 30px;
+        }
+        #stream {
+            width: 100%;
+            max-width: 640px;
+            height: auto;
+            border: 1px solid #ddd;
+        }
+        pre {
+            background-color: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            overflow: auto;
+            max-height: 200px;
+            font-family: monospace;
+        }
+        .logs {
+            background-color: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        .success {
+            color: #4CAF50;
+        }
+        .error {
+            color: #f44336;
+        }
+        .info {
+            color: #2196F3;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .thumbnail {
+            width: 100%;
+            height: 100px;
+            object-fit: cover;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9);
+        }
+        .modal-content {
+            margin: auto;
+            display: block;
+            max-width: 80%;
+            max-height: 80%;
+        }
+        .close {
+            position: absolute;
+            top: 15px;
+            right: 35px;
+            color: #f1f1f1;
+            font-size: 40px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Camera Service API Test</h1>
+    
+    <div class="container">
+        <div class="column">
+            <div class="card">
+                <h2>Camera Stream</h2>
+                <img id="stream" src="" alt="Camera Stream">
+                <div>
+                    <button id="start-stream">Start Stream</button>
+                    <button id="stop-stream">Stop Stream</button>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>User Session</h2>
+                <div class="api-section">
+                    <h3>Connect User</h3>
+                    <div>
+                        <label for="wallet-address">Wallet Address:</label>
+                        <input type="text" id="wallet-address" value="TEST_WALLET_" placeholder="Enter wallet address">
+                        <button id="connect-btn">Connect</button>
+                    </div>
+                    <pre id="connect-response"></pre>
+                </div>
+                
+                <div class="api-section">
+                    <h3>Disconnect User</h3>
+                    <button id="disconnect-btn" disabled>Disconnect</button>
+                    <pre id="disconnect-response"></pre>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Face Recognition</h2>
+                <div class="api-section">
+                    <h3>Enroll Face</h3>
+                    <button id="enroll-face-btn" disabled>Enroll Face</button>
+                    <div id="enrolled-face"></div>
+                    <pre id="enroll-response"></pre>
+                </div>
+                
+                <div class="api-section">
+                    <h3>Recognize Face</h3>
+                    <button id="recognize-face-btn">Recognize Face</button>
+                    <pre id="recognize-response"></pre>
+                </div>
+                
+                <div class="api-section">
+                    <h3>List Enrolled Faces</h3>
+                    <button id="list-faces-btn">List Faces</button>
+                    <pre id="list-faces-response"></pre>
+                </div>
+                
+                <div class="api-section">
+                    <h3>Clear All Faces</h3>
+                    <button id="clear-faces-btn">Clear All Faces</button>
+                    <pre id="clear-faces-response"></pre>
+                </div>
+            </div>
+        </div>
+        
+        <div class="column">
+            <div class="card">
+                <h2>Gesture Detection</h2>
+                <div class="api-section">
+                    <h3>Current Gesture</h3>
+                    <button id="current-gesture-btn">Get Current Gesture</button>
+                    <pre id="current-gesture-response"></pre>
+                </div>
+                
+                <div class="api-section">
+                    <h3>Gesture Visualization</h3>
+                    <button id="enable-gesture-viz-btn">Enable Visualization</button>
+                    <button id="disable-gesture-viz-btn">Disable Visualization</button>
+                    <pre id="gesture-viz-response"></pre>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Media Capture</h2>
+                <div class="api-section">
+                    <h3>Capture Photo</h3>
+                    <button id="capture-photo-btn" disabled>Capture Photo</button>
+                    <div id="captured-photo"></div>
+                    <pre id="capture-photo-response"></pre>
+                </div>
+                
+                <div class="api-section">
+                    <h3>Record Video</h3>
+                    <button id="start-recording-btn" disabled>Start Recording</button>
+                    <button id="stop-recording-btn" disabled>Stop Recording</button>
+                    <input type="number" id="recording-duration" value="5" min="1" max="30"> seconds
+                    <pre id="recording-response"></pre>
+                </div>
+                
+                <div class="api-section">
+                    <h3>Media Gallery</h3>
+                    <button id="list-photos-btn">List Photos</button>
+                    <button id="list-videos-btn">List Videos</button>
+                    <pre id="media-list-response"></pre>
+                    <div id="media-grid" class="grid"></div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>API Logs</h2>
+                <button id="clear-logs-btn">Clear Logs</button>
+                <div id="logs" class="logs"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="imageModal" class="modal">
+        <span class="close">&times;</span>
+        <img class="modal-content" id="modalImage">
+    </div>
+    
+    <script>
+        // Global variables
+        let sessionInfo = null;
+        const apiUrl = window.location.origin;
+        
+        // DOM Elements
+        const streamImg = document.getElementById('stream');
+        const connectBtn = document.getElementById('connect-btn');
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        const walletAddressInput = document.getElementById('wallet-address');
+        const enrollFaceBtn = document.getElementById('enroll-face-btn');
+        const recognizeFaceBtn = document.getElementById('recognize-face-btn');
+        const listFacesBtn = document.getElementById('list-faces-btn');
+        const clearFacesBtn = document.getElementById('clear-faces-btn');
+        const currentGestureBtn = document.getElementById('current-gesture-btn');
+        const enableGestureVizBtn = document.getElementById('enable-gesture-viz-btn');
+        const disableGestureVizBtn = document.getElementById('disable-gesture-viz-btn');
+        const capturePhotoBtn = document.getElementById('capture-photo-btn');
+        const startRecordingBtn = document.getElementById('start-recording-btn');
+        const stopRecordingBtn = document.getElementById('stop-recording-btn');
+        const recordingDurationInput = document.getElementById('recording-duration');
+        const listPhotosBtn = document.getElementById('list-photos-btn');
+        const listVideosBtn = document.getElementById('list-videos-btn');
+        const mediaGrid = document.getElementById('media-grid');
+        const logsDiv = document.getElementById('logs');
+        const clearLogsBtn = document.getElementById('clear-logs-btn');
+        
+        // Response Elements
+        const connectResponse = document.getElementById('connect-response');
+        const disconnectResponse = document.getElementById('disconnect-response');
+        const enrollResponse = document.getElementById('enroll-response');
+        const recognizeResponse = document.getElementById('recognize-response');
+        const listFacesResponse = document.getElementById('list-faces-response');
+        const clearFacesResponse = document.getElementById('clear-faces-response');
+        const currentGestureResponse = document.getElementById('current-gesture-response');
+        const gestureVizResponse = document.getElementById('gesture-viz-response');
+        const capturePhotoResponse = document.getElementById('capture-photo-response');
+        const recordingResponse = document.getElementById('recording-response');
+        const mediaListResponse = document.getElementById('media-list-response');
+        
+        // Modal
+        const modal = document.getElementById('imageModal');
+        const modalImg = document.getElementById('modalImage');
+        const closeModal = document.getElementsByClassName('close')[0];
+        
+        // Helper Functions
+        function log(message, type = 'info') {
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry ${type}`;
+            logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logsDiv.appendChild(logEntry);
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+        }
+        
+        async function callApi(endpoint, method = 'GET', data = null) {
+            const url = `${apiUrl}${endpoint}`;
+            const options = {
+                method,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            };
+            
+            if (data) {
+                options.body = JSON.stringify(data);
+            }
+            
+            log(`${method} ${endpoint}${data ? ' with data: ' + JSON.stringify(data) : ''}`);
+            
+            try {
+                const response = await fetch(url, options);
+                const responseText = await response.text();
+                let responseData;
+                
+                try {
+                    responseData = JSON.parse(responseText);
+                    log(`Response: ${JSON.stringify(responseData).substring(0, 150)}${JSON.stringify(responseData).length > 150 ? '...' : ''}`, response.ok ? 'success' : 'error');
+                } catch (e) {
+                    responseData = responseText;
+                    log(`Response: ${responseText.substring(0, 150)}${responseText.length > 150 ? '...' : ''}`, response.ok ? 'success' : 'error');
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status} ${response.statusText}`);
+                }
+                
+                return responseData;
+            } catch (error) {
+                log(`Error: ${error.message}`, 'error');
+                throw error;
+            }
+        }
+        
+        function updateSessionButtons() {
+            const isConnected = sessionInfo !== null;
+            disconnectBtn.disabled = !isConnected;
+            enrollFaceBtn.disabled = !isConnected;
+            capturePhotoBtn.disabled = !isConnected;
+            startRecordingBtn.disabled = !isConnected;
+            stopRecordingBtn.disabled = !isConnected || !isRecording;
+        }
+        
+        function formatJson(json) {
+            return JSON.stringify(json, null, 2);
+        }
+        
+        function showModal(src) {
+            modal.style.display = 'block';
+            modalImg.src = src;
+        }
+        
+        // Event Listeners
+        document.getElementById('start-stream').addEventListener('click', () => {
+            streamImg.src = `${apiUrl}/stream`;
+            log('Started camera stream');
+        });
+        
+        document.getElementById('stop-stream').addEventListener('click', () => {
+            streamImg.src = '';
+            log('Stopped camera stream');
+        });
+        
+        connectBtn.addEventListener('click', async () => {
+            try {
+                const walletAddress = walletAddressInput.value || `TEST_WALLET_${Date.now()}`;
+                walletAddressInput.value = walletAddress;
+                
+                const data = await callApi('/connect', 'POST', { wallet_address: walletAddress });
+                connectResponse.textContent = formatJson(data);
+                
+                sessionInfo = {
+                    session_id: data.session_id,
+                    wallet_address: walletAddress
+                };
+                
+                updateSessionButtons();
+                log(`Connected with wallet: ${walletAddress}`, 'success');
+            } catch (error) {
+                connectResponse.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        disconnectBtn.addEventListener('click', async () => {
+            try {
+                if (!sessionInfo) {
+                    throw new Error('Not connected');
+                }
+                
+                const data = await callApi('/disconnect', 'POST', sessionInfo);
+                disconnectResponse.textContent = formatJson(data);
+                
+                sessionInfo = null;
+                updateSessionButtons();
+                log('Disconnected from camera', 'success');
+            } catch (error) {
+                disconnectResponse.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        enrollFaceBtn.addEventListener('click', async () => {
+            try {
+                if (!sessionInfo) {
+                    throw new Error('Not connected');
+                }
+                
+                const data = await callApi('/enroll_face', 'POST', sessionInfo);
+                enrollResponse.textContent = formatJson(data);
+                
+                // Display the enrolled face if available
+                const enrolledFaceDiv = document.getElementById('enrolled-face');
+                enrolledFaceDiv.innerHTML = '';
+                
+                if (data.include_image && data.image) {
+                    const img = document.createElement('img');
+                    img.src = `data:image/jpeg;base64,${data.image}`;
+                    img.style.maxWidth = '100%';
+                    img.style.cursor = 'pointer';
+                    img.addEventListener('click', () => showModal(img.src));
+                    enrolledFaceDiv.appendChild(img);
+                }
+                
+                log('Face enrolled successfully', 'success');
+            } catch (error) {
+                enrollResponse.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        recognizeFaceBtn.addEventListener('click', async () => {
+            try {
+                const data = await callApi('/recognize_face', 'POST');
+                recognizeResponse.textContent = formatJson(data);
+                log(`Recognized ${data.recognized_count || 0} face(s)`, 'success');
+            } catch (error) {
+                recognizeResponse.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        listFacesBtn.addEventListener('click', async () => {
+            try {
+                const data = await callApi('/get_enrolled_faces');
+                listFacesResponse.textContent = formatJson(data);
+                log(`Listed ${data.count} enrolled face(s)`, 'success');
+            } catch (error) {
+                listFacesResponse.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        clearFacesBtn.addEventListener('click', async () => {
+            try {
+                const data = await callApi('/clear_enrolled_faces', 'POST');
+                clearFacesResponse.textContent = formatJson(data);
+                log('Cleared all enrolled faces', 'success');
+            } catch (error) {
+                clearFacesResponse.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        currentGestureBtn.addEventListener('click', async () => {
+            try {
+                const data = await callApi('/current_gesture');
+                currentGestureResponse.textContent = formatJson(data);
+                log(`Current gesture: ${data.gesture || 'none'}`, 'success');
+            } catch (error) {
+                currentGestureResponse.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        enableGestureVizBtn.addEventListener('click', async () => {
+            try {
+                const data = await callApi('/toggle_gesture_visualization', 'POST', { enabled: true });
+                gestureVizResponse.textContent = formatJson(data);
+                log('Enabled gesture visualization', 'success');
+            } catch (error) {
+                gestureVizResponse.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        disableGestureVizBtn.addEventListener('click', async () => {
+            try {
+                const data = await callApi('/toggle_gesture_visualization', 'POST', { enabled: false });
+                gestureVizResponse.textContent = formatJson(data);
+                log('Disabled gesture visualization', 'success');
+            } catch (error) {
+                gestureVizResponse.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        capturePhotoBtn.addEventListener('click', async () => {
+            try {
+                if (!sessionInfo) {
+                    throw new Error('Not connected');
+                }
+                
+                const data = await callApi('/capture_moment', 'POST', sessionInfo);
+                capturePhotoResponse.textContent = formatJson(data);
+                
+                // Display the captured photo
+                const capturedPhotoDiv = document.getElementById('captured-photo');
+                capturedPhotoDiv.innerHTML = '';
+                
+                if (data.image_data) {
+                    const img = document.createElement('img');
+                    img.src = data.image_data;
+                    img.style.maxWidth = '100%';
+                    img.style.cursor = 'pointer';
+                    img.addEventListener('click', () => showModal(img.src));
+                    capturedPhotoDiv.appendChild(img);
+                }
+                
+                log('Photo captured successfully', 'success');
+            } catch (error) {
+                capturePhotoResponse.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        let isRecording = false;
+        
+        startRecordingBtn.addEventListener('click', async () => {
+            try {
+                if (!sessionInfo) {
+                    throw new Error('Not connected');
+                }
+                
+                const duration = parseInt(recordingDurationInput.value) || 5;
+                const data = await callApi('/start_recording', 'POST', {
+                    ...sessionInfo,
+                    duration
+                });
+                
+                recordingResponse.textContent = formatJson(data);
+                
+                if (data.success) {
+                    isRecording = true;
+                    stopRecordingBtn.disabled = false;
+                    startRecordingBtn.disabled = true;
+                    
+                    log(`Started recording video (${duration}s)`, 'success');
+                    
+                    // Auto-stop after duration + 1s
+                    if (duration > 0) {
+                        setTimeout(() => {
+                            stopRecordingBtn.click();
+                        }, (duration + 1) * 1000);
+                    }
+                }
+            } catch (error) {
+                recordingResponse.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        stopRecordingBtn.addEventListener('click', async () => {
+            try {
+                if (!sessionInfo || !isRecording) {
+                    throw new Error('Not recording');
+                }
+                
+                const data = await callApi('/stop_recording', 'POST', sessionInfo);
+                recordingResponse.textContent = formatJson(data);
+                
+                isRecording = false;
+                stopRecordingBtn.disabled = true;
+                startRecordingBtn.disabled = !sessionInfo;
+                
+                log('Stopped recording video', 'success');
+                
+                // Refresh video list
+                listVideosBtn.click();
+            } catch (error) {
+                recordingResponse.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        listPhotosBtn.addEventListener('click', async () => {
+            try {
+                const data = await callApi('/list_photos');
+                mediaListResponse.textContent = formatJson(data);
+                
+                // Display photo thumbnails
+                mediaGrid.innerHTML = '';
+                
+                if (data.photos && data.photos.length > 0) {
+                    data.photos.forEach(photo => {
+                        const img = document.createElement('img');
+                        img.src = `${apiUrl}/photos/${photo.filename}`;
+                        img.alt = photo.filename;
+                        img.className = 'thumbnail';
+                        img.addEventListener('click', () => showModal(img.src));
+                        mediaGrid.appendChild(img);
+                    });
+                }
+                
+                log(`Listed ${data.count} photos`, 'success');
+            } catch (error) {
+                mediaListResponse.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        listVideosBtn.addEventListener('click', async () => {
+            try {
+                const data = await callApi('/list_videos');
+                mediaListResponse.textContent = formatJson(data);
+                
+                // Display video thumbnails (just placeholders)
+                mediaGrid.innerHTML = '';
+                
+                if (data.videos && data.videos.length > 0) {
+                    data.videos.forEach(video => {
+                        const videoLink = document.createElement('a');
+                        videoLink.href = `${apiUrl}/videos/${video.filename}`;
+                        videoLink.target = '_blank';
+                        videoLink.textContent = video.filename;
+                        videoLink.style.display = 'block';
+                        videoLink.style.margin = '5px 0';
+                        mediaGrid.appendChild(videoLink);
+                    });
+                }
+                
+                log(`Listed ${data.count} videos`, 'success');
+            } catch (error) {
+                mediaListResponse.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        clearLogsBtn.addEventListener('click', () => {
+            logsDiv.innerHTML = '';
+            log('Logs cleared', 'info');
+        });
+        
+        // Modal close button
+        closeModal.addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+        
+        // Close modal on click outside
+        window.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+        
+        // Initialize
+        window.addEventListener('load', () => {
+            log('Camera Service API Test initialized');
+            // Set a random wallet address
+            walletAddressInput.value = `TEST_WALLET_${Date.now()}`;
+        });
+    </script>
+</body>
+</html> 
