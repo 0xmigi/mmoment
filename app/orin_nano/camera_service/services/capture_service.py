@@ -344,6 +344,10 @@ class CaptureService:
             avg_fps = frame_count / duration if duration > 0 else 0
             logger.info(f"Recording completed: {frame_count} frames in {duration:.2f}s (avg {avg_fps:.1f} FPS)")
             
+            # Convert MOV to MP4 for better browser compatibility
+            if self._current_recording_path and os.path.exists(self._current_recording_path):
+                self._convert_to_mp4(self._current_recording_path)
+            
             # Run cleanup
             self._cleanup_videos()
     
@@ -358,6 +362,62 @@ class CaptureService:
         timestamp = int(time.time())
         prefix = f"{user_id}_" if user_id else ""
         return f"{prefix}video_{timestamp}_{uuid.uuid4().hex[:6]}.{self._video_format}"
+    
+    def _convert_to_mp4(self, mov_path: str) -> None:
+        """
+        Convert MOV file to MP4 with H.264 codec for better browser compatibility.
+        This runs in the background and doesn't block the recording response.
+        """
+        try:
+            # Generate MP4 filename
+            mp4_path = mov_path.replace('.mov', '.mp4')
+            
+            # Skip if MP4 already exists
+            if os.path.exists(mp4_path):
+                logger.info(f"MP4 version already exists: {mp4_path}")
+                return
+            
+            logger.info(f"Converting {mov_path} to MP4 for browser compatibility...")
+            
+            # Use ffmpeg to convert with H.264 codec
+            import subprocess
+            
+            # FFmpeg command for efficient conversion
+            cmd = [
+                'ffmpeg', '-y',  # Overwrite output file
+                '-i', mov_path,  # Input file
+                '-c:v', 'libx264',  # H.264 video codec
+                '-preset', 'fast',  # Fast encoding preset
+                '-crf', '23',  # Good quality/size balance
+                '-c:a', 'aac',  # AAC audio codec (if audio exists)
+                '-movflags', '+faststart',  # Optimize for web streaming
+                mp4_path  # Output file
+            ]
+            
+            # Run conversion in background
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60  # 60 second timeout
+            )
+            
+            if result.returncode == 0:
+                # Check if the MP4 file was created and has reasonable size
+                if os.path.exists(mp4_path) and os.path.getsize(mp4_path) > 1000:
+                    logger.info(f"Successfully converted to MP4: {mp4_path}")
+                else:
+                    logger.warning(f"MP4 conversion produced invalid file: {mp4_path}")
+                    # Clean up invalid file
+                    if os.path.exists(mp4_path):
+                        os.remove(mp4_path)
+            else:
+                logger.error(f"FFmpeg conversion failed: {result.stderr}")
+                
+        except subprocess.TimeoutExpired:
+            logger.error(f"FFmpeg conversion timed out for {mov_path}")
+        except Exception as e:
+            logger.error(f"Error converting {mov_path} to MP4: {e}")
     
     def _cleanup_photos(self) -> None:
         """Clean up old photos if the limit is reached"""
@@ -519,6 +579,62 @@ class CaptureService:
         """Get the full path for a video filename"""
         path = os.path.join(self._videos_dir, filename)
         return path if os.path.exists(path) else None
+    
+    def _convert_to_mp4(self, mov_path: str) -> None:
+        """
+        Convert MOV file to MP4 with H.264 codec for better browser compatibility.
+        This runs in the background and doesn't block the recording response.
+        """
+        try:
+            # Generate MP4 filename
+            mp4_path = mov_path.replace('.mov', '.mp4')
+            
+            # Skip if MP4 already exists
+            if os.path.exists(mp4_path):
+                logger.info(f"MP4 version already exists: {mp4_path}")
+                return
+            
+            logger.info(f"Converting {mov_path} to MP4 for browser compatibility...")
+            
+            # Use ffmpeg to convert with H.264 codec
+            import subprocess
+            
+            # FFmpeg command for efficient conversion
+            cmd = [
+                'ffmpeg', '-y',  # Overwrite output file
+                '-i', mov_path,  # Input file
+                '-c:v', 'libx264',  # H.264 video codec
+                '-preset', 'fast',  # Fast encoding preset
+                '-crf', '23',  # Good quality/size balance
+                '-c:a', 'aac',  # AAC audio codec (if audio exists)
+                '-movflags', '+faststart',  # Optimize for web streaming
+                mp4_path  # Output file
+            ]
+            
+            # Run conversion in background
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60  # 60 second timeout
+            )
+            
+            if result.returncode == 0:
+                # Check if the MP4 file was created and has reasonable size
+                if os.path.exists(mp4_path) and os.path.getsize(mp4_path) > 1000:
+                    logger.info(f"Successfully converted to MP4: {mp4_path}")
+                else:
+                    logger.warning(f"MP4 conversion produced invalid file: {mp4_path}")
+                    # Clean up invalid file
+                    if os.path.exists(mp4_path):
+                        os.remove(mp4_path)
+            else:
+                logger.error(f"FFmpeg conversion failed: {result.stderr}")
+                
+        except subprocess.TimeoutExpired:
+            logger.error(f"FFmpeg conversion timed out for {mov_path}")
+        except Exception as e:
+            logger.error(f"Error converting {mov_path} to MP4: {e}")
 
 def get_capture_service() -> CaptureService:
     """Get the singleton CaptureService instance."""
