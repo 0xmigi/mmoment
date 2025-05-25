@@ -787,7 +787,7 @@ def register_routes(app):
         try:
             # We're using our simplified face recognition which is always available
             simple_face_model_path = os.path.join(
-                os.path.expanduser('~/mmoment/app/orin_nano/camera_service_new/models/simple_model'),
+                os.path.expanduser('~/mmoment/app/orin_nano/camera_service/models/simple_model'),
                 'simple_face_features.json'
             )
             

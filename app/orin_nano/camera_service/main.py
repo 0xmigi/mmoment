@@ -20,7 +20,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(os.path.expanduser('~/mmoment/app/orin_nano/camera_service_new/logs/camera_service.log'))
+        logging.FileHandler(os.path.expanduser('~/mmoment/app/orin_nano/camera_service/logs/camera_service.log'))
     ]
 )
 
@@ -29,7 +29,7 @@ logger = logging.getLogger('CameraService')
 # Create required directories
 def create_directories():
     """Create required directories for the camera service"""
-    base_dir = os.path.expanduser('~/mmoment/app/orin_nano/camera_service_new')
+    base_dir = os.path.expanduser('~/mmoment/app/orin_nano/camera_service')
     
     dirs = [
         os.path.join(base_dir, 'logs'),

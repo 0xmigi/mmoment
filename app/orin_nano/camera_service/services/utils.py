@@ -219,7 +219,7 @@ def check_facenet_availability() -> Dict[str, Any]:
     """
     try:
         # Check if the FaceNet model file exists
-        model_path = os.path.expanduser('~/mmoment/app/orin_nano/camera_service_new/models/facenet_model/facenet_keras.h5')
+        model_path = os.path.expanduser('~/mmoment/app/orin_nano/camera_service/models/facenet_model/facenet_keras.h5')
         model_exists = os.path.exists(model_path)
         
         # Check if TensorFlow is available

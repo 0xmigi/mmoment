@@ -51,7 +51,7 @@ class CaptureService:
         self._current_recording_path = None
         
         # Storage paths
-        self._base_dir = os.path.expanduser("~/mmoment/app/orin_nano/camera_service_new")
+        self._base_dir = os.path.expanduser("~/mmoment/app/orin_nano/camera_service")
         self._photos_dir = os.path.join(self._base_dir, "photos")
         self._videos_dir = os.path.join(self._base_dir, "videos")
         

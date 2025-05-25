@@ -190,11 +190,11 @@ class FaceService:
         # Enrolled faces storage
         self._faces_lock = threading.Lock()
         self._enrolled_faces = {}  # Dict of name -> face image (for OpenCV)
-        self._faces_dir = os.path.expanduser("~/mmoment/app/orin_nano/camera_service_new/faces")
+        self._faces_dir = os.path.expanduser("~/mmoment/app/orin_nano/camera_service/faces")
         Path(self._faces_dir).mkdir(parents=True, exist_ok=True)
         
         # Recognition model path
-        self._model_dir = os.path.expanduser("~/mmoment/app/orin_nano/camera_service_new/models/simple_model")
+        self._model_dir = os.path.expanduser("~/mmoment/app/orin_nano/camera_service/models/simple_model")
         Path(self._model_dir).mkdir(parents=True, exist_ok=True)
         self._model_path = os.path.join(self._model_dir, "simple_face_features.json")
         

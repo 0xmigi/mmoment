@@ -87,7 +87,7 @@ class BufferService:
 
     def _load_camera_config(self):
         """Load camera configuration from file"""
-        config_path = os.path.expanduser("~/mmoment/app/orin_nano/camera_service_new/config/camera_config.json")
+        config_path = os.path.expanduser("~/mmoment/app/orin_nano/camera_service/config/camera_config.json")
         try:
             if os.path.exists(config_path):
                 with open(config_path, 'r') as f:
@@ -288,7 +288,7 @@ class BufferService:
 
     def _save_preferred_device(self, device_path):
         """Save the preferred device to the config file"""
-        config_path = os.path.expanduser("~/mmoment/app/orin_nano/camera_service_new/config/camera_config.json")
+        config_path = os.path.expanduser("~/mmoment/app/orin_nano/camera_service/config/camera_config.json")
         try:
             import json
             config = self._config.copy()
