@@ -731,6 +731,12 @@ def register_routes(app):
         """Simple test page for direct API testing"""
         return render_template('simple_test.html')
         
+    # Local test page route
+    @app.route('/local-test')
+    def local_test():
+        """Local camera test page"""
+        return render_template('local_test.html')
+        
     # API test page route
     @app.route('/api-test')
     def api_test():
