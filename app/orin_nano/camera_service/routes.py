@@ -65,10 +65,25 @@ def register_routes(app):
         """Index route with API information"""
         return jsonify({
             'name': 'Jetson Camera API',
-            'version': '1.0.0',
-            'description': 'Lightweight, optimized camera API for Jetson',
+            'version': '2.0.0',
+            'description': 'Lightweight, optimized camera API for Jetson with standardized endpoints',
             'buffer_based': True,
-            'endpoints': {
+            'standardized_endpoints': {
+                'health': '/api/health',
+                'stream_info': '/api/stream/info',
+                'capture': '/api/capture',
+                'record': '/api/record',
+                'photos': '/api/photos',
+                'videos': '/api/videos',
+                'session_connect': '/api/session/connect',
+                'session_disconnect': '/api/session/disconnect',
+                'face_enroll': '/api/face/enroll',
+                'face_recognize': '/api/face/recognize',
+                'gesture_current': '/api/gesture/current',
+                'visualization_face': '/api/visualization/face',
+                'visualization_gesture': '/api/visualization/gesture'
+            },
+            'legacy_endpoints': {
                 'health': '/health',
                 'stream': '/stream',
                 'connect': '/connect',
@@ -83,6 +98,109 @@ def register_routes(app):
             }
         })
 
+    # ========================================
+    # STANDARDIZED API ROUTES (Pi5 Compatible)
+    # ========================================
+    
+    # Health & Status
+    @app.route('/api/health')
+    def api_health():
+        """Standardized health check endpoint"""
+        return health()
+    
+    @app.route('/api/stream/info')
+    def api_stream_info():
+        """Stream metadata endpoint (standardized)"""
+        buffer_service = get_services()['buffer']
+        buffer_status = buffer_service.get_status()
+        
+        return jsonify({
+            'success': True,
+            'playbackId': 'jetson-camera-stream',
+            'isActive': buffer_status['running'],
+            'streamType': 'mjpeg',
+            'resolution': f"{buffer_service._width}x{buffer_service._height}",
+            'fps': buffer_status['fps'],
+            'streamUrl': '/stream'
+        })
+    
+    # Camera Actions
+    @app.route('/api/capture', methods=['POST'])
+    @require_session
+    def api_capture():
+        """Standardized capture endpoint"""
+        return capture_moment()
+    
+    @app.route('/api/record', methods=['POST'])
+    @require_session
+    def api_record():
+        """Standardized record endpoint"""
+        return start_recording()
+    
+    # Media Access
+    @app.route('/api/photos')
+    def api_photos():
+        """Standardized photos list endpoint"""
+        return list_photos()
+    
+    @app.route('/api/videos')
+    def api_videos():
+        """Standardized videos list endpoint"""
+        return list_videos()
+    
+    @app.route('/api/photos/<filename>')
+    def api_get_photo(filename):
+        """Standardized photo access endpoint"""
+        return get_photo(filename)
+    
+    @app.route('/api/videos/<filename>')
+    def api_get_video(filename):
+        """Standardized video access endpoint"""
+        return get_video(filename)
+    
+    # Session Management
+    @app.route('/api/session/connect', methods=['POST'])
+    def api_session_connect():
+        """Standardized session connect endpoint"""
+        return connect()
+    
+    @app.route('/api/session/disconnect', methods=['POST'])
+    @require_session
+    def api_session_disconnect():
+        """Standardized session disconnect endpoint"""
+        return disconnect()
+    
+    # Computer Vision (Jetson-specific)
+    @app.route('/api/face/enroll', methods=['POST'])
+    @require_session
+    def api_face_enroll():
+        """Standardized face enrollment endpoint"""
+        return enroll_face()
+    
+    @app.route('/api/face/recognize', methods=['POST'])
+    def api_face_recognize():
+        """Standardized face recognition endpoint"""
+        return recognize_face()
+    
+    @app.route('/api/gesture/current', methods=['GET'])
+    def api_gesture_current():
+        """Standardized current gesture endpoint"""
+        return current_gesture()
+    
+    @app.route('/api/visualization/face', methods=['POST'])
+    def api_visualization_face():
+        """Standardized face visualization toggle"""
+        return toggle_face_visualization()
+    
+    @app.route('/api/visualization/gesture', methods=['POST'])
+    def api_visualization_gesture():
+        """Standardized gesture visualization toggle"""
+        return toggle_gesture_visualization()
+
+    # ========================================
+    # LEGACY ROUTES (For backward compatibility)
+    # ========================================
+    
     # Health check route
     @app.route('/health')
     def health():
@@ -719,31 +837,27 @@ def register_routes(app):
         
         return response
 
-    # Test page route
+    # Test page routes
     @app.route('/test-page')
     def test_page():
         """Test page to verify functionality"""
         return render_template('test.html')
         
-    # Simple test page route
     @app.route('/simple-test')
     def simple_test():
         """Simple test page for direct API testing"""
         return render_template('simple_test.html')
         
-    # Local test page route
     @app.route('/local-test')
     def local_test():
         """Local camera test page"""
         return render_template('local_test.html')
         
-    # API test page route
     @app.route('/api-test')
     def api_test():
         """Interactive API testing page"""
         return render_template('api_test.html')
     
-    # Direct test page route
     @app.route('/direct-test')
     def direct_test():
         """Direct camera service test page (bypasses frontend bridge)"""
@@ -914,36 +1028,4 @@ def register_routes(app):
     # Add internal server error handler
     @app.errorhandler(500)
     def internal_server_error(e):
-        return jsonify(error=str(e)), 500
-
-    # Support both snake_case and kebab-case for routes
-    # Flask doesn't natively support this, so we need to register each route twice
-    def register_alias_routes():
-        """Register alias routes for kebab-case versions"""
-        aliases = [
-            ('/toggle-face-detection', toggle_face_detection),
-            ('/toggle-face-visualization', toggle_face_visualization),
-            ('/face-settings', face_settings),
-            ('/toggle-gesture-visualization', toggle_gesture_visualization),
-            ('/enroll-face', enroll_face),
-            ('/recognize-face', recognize_face),
-            ('/capture-moment', capture_moment),
-            ('/start-recording', start_recording),
-            ('/stop-recording', stop_recording),
-            ('/list-videos', list_videos),
-            ('/list-photos', list_photos),
-            ('/current-gesture', current_gesture)
-        ]
-        
-        for route, view_func in aliases:
-            # Get the methods from the original route
-            methods = ['POST'] if view_func.__name__ in [
-                'toggle_face_detection', 'toggle_face_visualization', 'face_settings',
-                'toggle_gesture_visualization', 'enroll_face', 'recognize_face',
-                'capture_moment', 'start_recording', 'stop_recording'
-            ] else ['GET']
-            
-            app.add_url_rule(route, view_func.__name__ + '_alias', view_func, methods=methods)
-    
-    # Register all alias routes
-    register_alias_routes() 
+        return jsonify(error=str(e)), 500 

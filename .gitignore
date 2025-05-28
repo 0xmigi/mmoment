@@ -75,9 +75,75 @@ app/orin_nano/camera_service_new/models/*.h5
 # Python
 __pycache__/
 *.py[cod]
-*.class
+*$py.class
+*.so
+.Python
 .env
-.venv
 env/
 venv/
 ENV/
+
+# Model files (large binary files)
+camera_service/models/*.caffemodel
+camera_service/models/*.t7
+camera_service/models/*.pb
+
+# Data directories
+data/videos/*
+data/images/*
+data/faces/*
+data/face_embeddings/*
+data/recordings/*
+!data/videos/.gitkeep
+!data/images/.gitkeep
+!data/faces/.gitkeep
+!data/face_embeddings/.gitkeep
+!data/recordings/.gitkeep
+
+# Camera Service Media Files (NEW - COMPREHENSIVE RULES)
+app/orin_nano/camera_service/photos/
+app/orin_nano/camera_service/videos/
+app/orin_nano/camera_service/faces/
+app/orin_nano/camera_service/recordings/
+
+# Camera Service New Media Files
+app/orin_nano/camera_service_new/photos/
+app/orin_nano/camera_service_new/videos/
+app/orin_nano/camera_service_new/faces/
+app/orin_nano/camera_service_new/recordings/
+app/orin_nano/camera_service_new/test_results/
+
+# All media file extensions everywhere
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.webp
+*.mov
+*.mp4
+*.avi
+*.mkv
+*.webm
+*.flv
+*.wmv
+*.m4v
+*.3gp
+
+# Allow specific important images (like documentation)
+!README*.jpg
+!README*.png
+!docs/**/*.jpg
+!docs/**/*.png
+!*.example.jpg
+!*.example.png
+
+# Credentials
+*.json
+*.pem
+*.key
+
+# Temporary files
+*.tmp
+.DS_Store

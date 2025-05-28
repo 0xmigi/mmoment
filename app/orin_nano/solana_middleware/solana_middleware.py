@@ -65,6 +65,18 @@ def health():
         "timestamp": int(time.time() * 1000)
     })
 
+# Standardized API endpoint
+@app.route('/api/health', methods=['GET'])
+def api_health():
+    """Standardized health check endpoint"""
+    return health()
+
+# Standardized session management endpoints
+@app.route('/api/session/connect', methods=['POST'])
+def api_session_connect():
+    """Standardized session connect endpoint"""
+    return connect_wallet()
+
 @app.route('/connect-wallet', methods=['POST'])
 def connect_wallet():
     """Connect a wallet to the system and create a session"""
@@ -290,6 +302,40 @@ def session_status():
         "active_sessions": len(active_sessions),
         "sessions": active_sessions
     })
+
+# ========================================
+# STANDARDIZED API ROUTES (Pi5 Compatible)
+# ========================================
+
+@app.route('/api/session/disconnect', methods=['POST'])
+def api_session_disconnect():
+    """Standardized session disconnect endpoint"""
+    return disconnect_wallet()
+
+@app.route('/api/blockchain/encrypt-face', methods=['POST'])
+def api_encrypt_face():
+    """Standardized face encryption endpoint"""
+    return encrypt_face_embedding()
+
+@app.route('/api/blockchain/decrypt-face', methods=['POST'])
+def api_decrypt_face():
+    """Standardized face decryption endpoint"""
+    return decrypt_face_embedding()
+
+@app.route('/api/blockchain/verify-nft', methods=['POST'])
+def api_verify_nft():
+    """Standardized NFT verification endpoint"""
+    return verify_nft_ownership()
+
+@app.route('/api/blockchain/mint-moment', methods=['POST'])
+def api_mint_moment():
+    """Standardized moment minting endpoint"""
+    return mint_moment()
+
+@app.route('/api/session/status', methods=['GET'])
+def api_session_status():
+    """Standardized session status endpoint"""
+    return session_status()
 
 if __name__ == "__main__":
     # Ensure the middleware has the required Python packages

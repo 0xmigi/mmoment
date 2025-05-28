@@ -13,6 +13,7 @@ import argparse
 import threading
 from pathlib import Path
 from flask import Flask, jsonify
+from flask_cors import CORS
 
 # Configure logging
 logging.basicConfig(
@@ -117,6 +118,16 @@ def init_services():
 def create_app(services):
     """Create and configure the Flask application"""
     app = Flask(__name__, static_folder='static')
+    
+    # Configure CORS for frontend integration
+    CORS(app, resources={
+        r"/*": {
+            "origins": ["http://localhost:5173", "http://localhost:3000", "https://mmoment.xyz", "http://localhost:5002"],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Origin", "Accept"],
+            "supports_credentials": True
+        }
+    })
     
     # Configure app
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB max upload size
