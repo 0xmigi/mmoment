@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔥 FIXED CAMERA SERVICE 🔥</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        /* PROOF BANNER - BRIGHT AND UNMISTAKABLE */
+        .proof-banner {
+            background: linear-gradient(45deg, #ff0000, #ff6600, #ffff00, #00ff00, #0066ff, #6600ff);
+            background-size: 400% 400%;
+            animation: rainbow 2s ease infinite;
+            color: white;
+            text-align: center;
+            padding: 20px;
+            font-size: 2rem;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            border: 5px solid #fff;
+            margin-bottom: 20px;
+        }
+        
+        @keyframes rainbow {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .connection-status {
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .connection-buttons {
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .main-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+        
+        .camera-section {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .status-section, .face-section {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .camera-feed {
+            width: 100%;
+            max-width: 640px;
+            height: 480px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            background: #000;
+            object-fit: cover;
+        }
+        
+        .status-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-left: 4px solid #4CAF50;
+        }
+        
+        .status-card h3 {
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+        }
+        
+        .status-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        
+        .button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 5px;
+            font-size: 1rem;
+        }
+        
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        .button.success {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+        }
+        
+        .button.warning {
+            background: linear-gradient(135deg, #FF9800 0%, #f57c00 100%);
+        }
+        
+        .button.danger {
+            background: linear-gradient(135deg, #F44336 0%, #d32f2f 100%);
+        }
+        
+        .button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .control-group {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+        }
+        
+        .control-group h4 {
+            margin-bottom: 10px;
+            color: #fff;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            padding-bottom: 5px;
+        }
+        
+        .logs {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            margin-top: 15px;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            opacity: 0.8;
+        }
+        
+        .log-entry.success {
+            color: #4CAF50;
+        }
+        
+        .log-entry.error {
+            color: #F44336;
+        }
+        
+        .log-entry.warning {
+            color: #FF9800;
+        }
+        
+        .enrolled-faces {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 10px;
+            margin-top: 10px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        
+        .face-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 5px;
+            font-size: 0.9rem;
+        }
+        
+        .input-group {
+            margin: 10px 0;
+        }
+        
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .input-group input {
+            width: 100%;
+            padding: 8px;
+            border: none;
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+        }
+        
+        .connected {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        
+        .disconnected {
+            color: #F44336;
+            font-weight: bold;
+        }
+        
+        @media (max-width: 768px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="proof-banner">
+        🎉 API CLEANUP COMPLETE - STANDARDIZED ENDPOINTS ONLY! 🎉
+    </div>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 COMPLETE CAMERA SERVICE TEST</h1>
+            <p>GPU-Accelerated Face Recognition • Real-time Processing • Full Controls</p>
+        </div>
+        
+        <div class="connection-status">
+            <div id="connectionStatus" class="disconnected">⚠️ Disconnected</div>
+        </div>
+        
+        <div class="connection-buttons"><input type="text" id="userInput" placeholder="Enter your name here" style="padding: 10px; margin: 10px; border-radius: 5px; border: none; width: 200px; font-size: 16px;"><br>
+            <button class="button success" id="connectBtn" onclick="connectCamera()">🚀 START SESSION</button>
+            <button class="button danger" id="disconnectBtn" onclick="disconnectCamera()" disabled>🛑 END SESSION</button>
+        </div>
+        
+        <div class="main-grid">
+            <!-- Camera Feed Section -->
+            <div class="camera-section">
+                <div style="text-align: center;">
+                    <img id="cameraFeed" 
+                         src="/stream" 
+                         alt="Camera Feed" 
+                         class="camera-feed"
+                         onload="onStreamLoad()" 
+                         onerror="onStreamError()"
+                         style="display: none;">
+                    
+                    <div id="noStream" style="
+                        width: 100%;
+                        max-width: 640px;
+                        height: 480px;
+                        background: #333;
+                        border-radius: 10px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        color: #666;
+                        font-size: 1.2rem;
+                        margin: 0 auto;
+                    ">
+                        📹 No camera stream - Click CONNECT
+                    </div>
+                </div>
+                
+                <div class="control-group">
+                    <h4>📸 Camera Controls</h4>
+                    <button class="button success" onclick="capturePhoto()" disabled id="captureBtn">📸 Capture Photo</button>
+                    <button class="button warning" onclick="startRecording()" disabled id="recordBtn">🔴 Start Recording</button>
+                    <button class="button" onclick="stopRecording()" disabled id="stopRecordBtn">⏹️ Stop Recording</button>
+                    <button class="button" onclick="resetCamera()" disabled id="resetBtn">🔄 Reset Camera</button>
+                </div>
+                
+                <div class="control-group">
+                    <h4>👁️ Visual Settings</h4>
+                    <button class="button" onclick="toggleFaceDetection()" disabled id="faceDetectBtn">🔍 Disable Face Detection</button>
+                    <button class="button" onclick="toggleFaceBoxes()" disabled id="faceBoxBtn">📦 Hide Face Boxes</button>
+                    <button class="button" onclick="toggleGestureVisualization()" disabled id="gestureVisBtn">👋 Hide Gesture Overlay</button>
+                </div>
+            </div>
+            
+            <!-- System Status Section -->
+            <div class="status-section">
+                <h2>🛰️ System Status</h2>
+                
+                <div class="status-card">
+                    <h3>📹 Camera Buffer</h3>
+                    <div class="status-value" id="bufferFps">--</div>
+                    <div>FPS • <span id="bufferStatus">Disconnected</span></div>
+                </div>
+                
+                <div class="status-card">
+                    <h3>🧠 Face Recognition</h3>
+                    <div class="status-value" id="faceFps">--</div>
+                    <div>Processing • <span id="faceCount">0</span> faces detected</div>
+                </div>
+                
+                <div class="status-card">
+                    <h3>👋 Gesture Detection</h3>
+                    <div class="status-value" id="currentGesture">None</div>
+                    <div>Current gesture detected</div>
+                </div>
+                
+                <div class="control-group">
+                    <h4>📊 Media Library</h4>
+                    <button class="button" onclick="listPhotos()">📷 List Photos</button>
+                    <button class="button" onclick="listVideos()">🎥 List Videos</button>
+                </div>
+                
+                <div class="logs" id="systemLogs">
+                    <div class="log-entry">🚀 System ready - Click CONNECT to start</div>
+                </div>
+            </div>
+            
+            <!-- Face Management Section -->
+            <div class="face-section">
+                <h2>👤 Face Management</h2>
+                
+                <div class="control-group">
+                    <h4>📝 🎯 FACE REGISTRATION - FIXED</h4>
+                    <div class="input-group">
+                    </div>
+                    <button class="button success" onclick="enrollFace()" disabled id="enrollBtn">👤 Register Face in Frame</button>
+                </div>
+                
+                <div class="control-group">
+                    <h4>🔍 Face Recognition</h4>
+                    <button class="button" onclick="recognizeFace()" disabled id="recognizeBtn">🔍 Recognize Current Face</button>
+                    <div id="recognitionResult" style="margin-top: 10px; font-size: 0.9rem;"></div>
+                </div>
+                
+                <div class="control-group">
+                    <h4>📋 Enrolled Faces</h4>
+                    <button class="button" onclick="refreshEnrolledFaces()">🔄 Refresh List</button>
+                    <button class="button danger" onclick="clearAllFaces()">🗑️ Clear All Faces</button>
+                    <div class="enrolled-faces" id="enrolledFacesList">
+                        <div style="text-align: center; opacity: 0.6;">No faces enrolled</div>
+                    </div>
+                </div>
+                
+                <div class="control-group">
+                    <h4>👋 Gesture Control</h4>
+                    <button class="button" onclick="getCurrentGesture()" disabled id="gestureBtn">👋 Check Current Gesture</button>
+                    <div id="gestureResult" style="margin-top: 10px; font-size: 0.9rem;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isConnected = false;
+        let updateInterval;
+        let currentSession = null;
+        let isRecording = false;
+        
+        // Initialize the demo
+        function init() {
+            addLog('🚀 Demo initialized - ready to connect');
+            checkConnectionStatus();
+            refreshEnrolledFaces();
+        }
+        
+        // Check connection status
+        async function checkConnectionStatus() {
+            try {
+                const response = await fetch('/api/health');
+                const health = await response.json();
+                
+                if (health && health.status === 'ok') {
+                    setConnected(true);
+                    addLog('✅ Camera already connected', 'success');
+                } else {
+                    setConnected(false);
+                }
+            } catch (error) {
+                setConnected(false);
+                addLog('⚠️ Connection check failed - camera may be disconnected', 'warning');
+            }
+        }
+        
+        // Connect camera
+        async function connectCamera() {
+            addLog('⏳ Connecting to camera...', 'warning');
+            
+            try {
+                const response = await fetch('/api/session/connect', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        wallet_address: document.getElementById("userInput").value || "DemoUser_" + Date.now()
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    currentSession = result;
+                    setConnected(true);
+                    addLog('✅ Camera connected successfully! Session: ' + result.session_id, 'success');
+                    startStatusUpdates();
+                    refreshEnrolledFaces();
+                } else {
+                    addLog('❌ Connection failed: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                addLog('❌ Connection error: ' + error.message, 'error');
+            }
+        }
+        
+        // Disconnect camera
+        async function disconnectCamera() {
+            addLog('⏳ Disconnecting camera...', 'warning');
+            
+            try {
+                const response = await fetch('/api/session/disconnect', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        wallet_address: currentSession?.wallet_address,
+                        session_id: currentSession?.session_id
+                    })
+                });
+                
+                const result = await response.json();
+                
+                setConnected(false);
+                currentSession = null;
+                if (result.success) {
+                    addLog('✅ Camera disconnected successfully', 'success');
+                } else {
+                    addLog('⚠️ Disconnection may have failed: ' + (result.error || ''), 'warning');
+                }
+            } catch (error) {
+                setConnected(false);
+                currentSession = null;
+                addLog('⚠️ Disconnect error (camera may already be off): ' + error.message, 'warning');
+            }
+        }
+        
+        // Set connection state
+        function setConnected(connected) {
+            isConnected = connected;
+            
+            const statusElement = document.getElementById('connectionStatus');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const cameraFeed = document.getElementById('cameraFeed');
+            const noStream = document.getElementById('noStream');
+            
+            // Update UI elements
+            const controlButtons = [
+                'captureBtn', 'recordBtn', 'stopRecordBtn', 'resetBtn', 
+                'faceDetectBtn', 'faceBoxBtn', 'gestureVisBtn',
+                'enrollBtn', 'recognizeBtn', 'gestureBtn'
+            ];
+            controlButtons.forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) btn.disabled = !connected;
+            });
+            
+            if (connected) {
+                statusElement.textContent = '✅ Connected';
+                statusElement.className = 'connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                
+                // Show camera feed
+                cameraFeed.style.display = 'block';
+                noStream.style.display = 'none';
+                
+                // Force reload the stream
+                const currentSrc = cameraFeed.src;
+                cameraFeed.src = '';
+                setTimeout(() => {
+                    cameraFeed.src = currentSrc + '?t=' + Date.now();
+                }, 100);
+                
+            } else {
+                statusElement.textContent = '⚠️ Disconnected';
+                statusElement.className = 'disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                
+                // Hide camera feed
+                cameraFeed.style.display = 'none';
+                noStream.style.display = 'flex';
+                
+                // Stop status updates
+                if (updateInterval) {
+                    clearInterval(updateInterval);
+                    updateInterval = null;
+                }
+                
+                // Reset status displays
+                document.getElementById('bufferFps').textContent = '--';
+                document.getElementById('bufferStatus').textContent = 'Disconnected';
+                document.getElementById('faceFps').textContent = '--';
+                document.getElementById('faceCount').textContent = '0';
+                document.getElementById('currentGesture').textContent = 'None';
+            }
+        }
+        
+        // Start status updates
+        function startStatusUpdates() {
+            if (updateInterval) clearInterval(updateInterval);
+            updateInterval = setInterval(updateStatus, 2000);
+            updateStatus(); // Update immediately
+        }
+        
+        // Update system status
+        async function updateStatus() {
+            if (!isConnected) return;
+            
+            try {
+                // Update camera health
+                const healthResponse = await fetch('/api/health');
+                const health = await healthResponse.json();
+                
+                if (health && health.buffer_fps !== undefined) {
+                    document.getElementById('bufferFps').textContent = health.buffer_fps.toFixed(1);
+                    document.getElementById('bufferStatus').textContent = 'Connected';
+                } else {
+                    document.getElementById('bufferStatus').textContent = 'No data';
+                }
+                
+                // Update gesture status
+                getCurrentGesture();
+                
+            } catch (error) {
+                console.error('Status update error:', error);
+            }
+        }
+        
+        // Camera controls
+        async function capturePhoto() {
+            if (!isConnected) return;
+            
+            addLog('⏳ Capturing photo...', 'warning');
+            try {
+                const response = await fetch('/api/capture', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        wallet_address: currentSession?.wallet_address,
+                        session_id: currentSession?.session_id
+                    })
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    addLog('📸 Photo captured successfully!', 'success');
+                } else {
+                    addLog('❌ Capture failed: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                addLog('❌ Capture error: ' + error.message, 'error');
+            }
+        }
+        
+        async function startRecording() {
+            if (!isConnected || isRecording) return;
+            
+            addLog('⏳ Starting video recording...', 'warning');
+            try {
+                const response = await fetch('/start_recording', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        wallet_address: currentSession?.wallet_address,
+                        session_id: currentSession?.session_id
+                    })
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    isRecording = true;
+                    document.getElementById('recordBtn').disabled = true;
+                    document.getElementById('stopRecordBtn').disabled = false;
+                    addLog('🔴 Recording started!', 'success');
+                } else {
+                    addLog('❌ Recording failed: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                addLog('❌ Recording error: ' + error.message, 'error');
+            }
+        }
+        
+        async function stopRecording() {
+            if (!isConnected || !isRecording) return;
+            
+            addLog('⏳ Stopping video recording...', 'warning');
+            try {
+                const response = await fetch('/stop_recording', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        wallet_address: currentSession?.wallet_address,
+                        session_id: currentSession?.session_id
+                    })
+                });
+                const result = await response.json();
+                
+                isRecording = false;
+                document.getElementById('recordBtn').disabled = false;
+                document.getElementById('stopRecordBtn').disabled = true;
+                
+                if (result.success) {
+                    addLog('⏹️ Recording stopped successfully!', 'success');
+                } else {
+                    addLog('⚠️ Recording may not have stopped properly: ' + (result.error || ''), 'warning');
+                }
+            } catch (error) {
+                isRecording = false;
+                document.getElementById('recordBtn').disabled = false;
+                document.getElementById('stopRecordBtn').disabled = true;
+                addLog('❌ Stop recording error: ' + error.message, 'error');
+            }
+        }
+        
+        async function resetCamera() {
+            if (!isConnected) return;
+            
+            addLog('⏳ Resetting camera...', 'warning');
+            try {
+                const response = await fetch('/camera/reset', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    addLog('🔄 Camera reset successful', 'success');
+                    refreshStream();
+                } else {
+                    addLog('❌ Camera reset failed', 'error');
+                }
+            } catch (error) {
+                addLog('❌ Reset error: ' + error.message, 'error');
+            }
+        }
+        
+        // Visual controls - Track toggle states
+        let faceDetectionEnabled = true;
+        let faceBoxesEnabled = true;
+        let gestureVisualizationEnabled = true;
+        
+        async function toggleFaceDetection() {
+            if (!isConnected) return;
+            
+            try {
+                faceDetectionEnabled = !faceDetectionEnabled;
+                const response = await fetch('/toggle_face_detection', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: faceDetectionEnabled })
+                });
+                const result = await response.json();
+                
+                const btn = document.getElementById('faceDetectBtn');
+                btn.textContent = faceDetectionEnabled ? '🔍 Disable Face Detection' : '🔍 Enable Face Detection';
+                addLog(`🔍 Face detection ${faceDetectionEnabled ? 'enabled' : 'disabled'}`, 'success');
+            } catch (error) {
+                faceDetectionEnabled = !faceDetectionEnabled; // Revert on error
+                addLog('❌ Toggle error: ' + error.message, 'error');
+            }
+        }
+        
+        async function toggleFaceBoxes() {
+            if (!isConnected) return;
+            
+            try {
+                faceBoxesEnabled = !faceBoxesEnabled;
+                const response = await fetch('/api/visualization/face', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: faceBoxesEnabled })
+                });
+                const result = await response.json();
+                
+                const btn = document.getElementById('faceBoxBtn');
+                btn.textContent = faceBoxesEnabled ? '📦 Hide Face Boxes' : '📦 Show Face Boxes';
+                addLog(`📦 Face boxes ${faceBoxesEnabled ? 'enabled' : 'disabled'}`, 'success');
+            } catch (error) {
+                faceBoxesEnabled = !faceBoxesEnabled; // Revert on error
+                addLog('❌ Toggle error: ' + error.message, 'error');
+            }
+        }
+        
+        async function toggleGestureVisualization() {
+            if (!isConnected) return;
+            
+            try {
+                gestureVisualizationEnabled = !gestureVisualizationEnabled;
+                const response = await fetch('/api/visualization/gesture', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: gestureVisualizationEnabled })
+                });
+                const result = await response.json();
+                
+                const btn = document.getElementById('gestureVisBtn');
+                btn.textContent = gestureVisualizationEnabled ? '👋 Hide Gesture Overlay' : '👋 Show Gesture Overlay';
+                addLog(`👋 Gesture visualization ${gestureVisualizationEnabled ? 'enabled' : 'disabled'}`, 'success');
+            } catch (error) {
+                gestureVisualizationEnabled = !gestureVisualizationEnabled; // Revert on error
+                addLog('❌ Toggle error: ' + error.message, 'error');
+            }
+        }
+        
+        // Face management
+        async function enrollFace() {
+            const userId = document.getElementById("userInput").value.trim();
+            if (!isConnected || !userId) {
+                addLog('❌ Please enter a user ID and ensure camera is connected', 'error');
+                return;
+            }
+            
+            addLog('⏳ Enrolling face for: ' + userId, 'warning');
+            try {
+                const response = await fetch('/api/face/enroll', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        wallet_address: currentSession?.wallet_address,
+                        session_id: currentSession?.session_id,
+                        user_id: userId
+                    })
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    addLog('✅ Face enrolled successfully for: ' + userId, 'success');
+                    
+                    refreshEnrolledFaces();
+                } else {
+                    addLog('❌ Face enrollment failed: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                addLog('❌ Enrollment error: ' + error.message, 'error');
+            }
+        }
+        
+        async function recognizeFace() {
+            if (!isConnected) return;
+            
+            addLog('⏳ Recognizing current face...', 'warning');
+            try {
+                const response = await fetch('/api/face/recognize', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                const result = await response.json();
+                
+                const resultDiv = document.getElementById('recognitionResult');
+                if (result.success && result.faces && result.faces.length > 0) {
+                    const face = result.faces[0];
+                    resultDiv.innerHTML = `<strong>Recognized:</strong> ${face.user_id}<br><strong>Confidence:</strong> ${(face.confidence * 100).toFixed(1)}%`;
+                    resultDiv.style.color = '#4CAF50';
+                    addLog('🔍 Face recognized: ' + face.user_id, 'success');
+                } else {
+                    resultDiv.innerHTML = '<strong>No face recognized</strong>';
+                    resultDiv.style.color = '#FF9800';
+                    addLog('❓ No face recognized in current frame', 'warning');
+                }
+            } catch (error) {
+                addLog('❌ Recognition error: ' + error.message, 'error');
+            }
+        }
+        
+        async function refreshEnrolledFaces() {
+            try {
+                const response = await fetch('/get_enrolled_faces');
+                const result = await response.json();
+                
+                const listDiv = document.getElementById('enrolledFacesList');
+                if (result.success && result.faces && result.faces.length > 0) {
+                    listDiv.innerHTML = result.faces.map(face => 
+                        `<div class="face-item">👤 ${face}</div>`
+                    ).join('');
+                } else {
+                    listDiv.innerHTML = '<div style="text-align: center; opacity: 0.6;">No faces enrolled</div>';
+                }
+            } catch (error) {
+                addLog('❌ Error refreshing face list: ' + error.message, 'error');
+            }
+        }
+        
+        async function clearAllFaces() {
+            if (!confirm('Are you sure you want to clear all enrolled faces?')) return;
+            
+            addLog('⏳ Clearing all enrolled faces...', 'warning');
+            try {
+                const response = await fetch('/clear_enrolled_faces', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    addLog('🗑️ All faces cleared successfully', 'success');
+                    refreshEnrolledFaces();
+                } else {
+                    addLog('❌ Failed to clear faces: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                addLog('❌ Clear faces error: ' + error.message, 'error');
+            }
+        }
+        
+        // Gesture control
+        async function getCurrentGesture() {
+            if (!isConnected) return;
+            
+            try {
+                const response = await fetch('/api/gesture/current');
+                const result = await response.json();
+                
+                const gestureElement = document.getElementById('currentGesture');
+                const gestureResultDiv = document.getElementById('gestureResult');
+                
+                if (result.success && result.gesture && result.gesture !== 'none') {
+                    gestureElement.textContent = result.gesture;
+                    gestureResultDiv.innerHTML = `<strong>Current:</strong> ${result.gesture}`;
+                    gestureResultDiv.style.color = '#4CAF50';
+                } else {
+                    gestureElement.textContent = 'None';
+                    gestureResultDiv.innerHTML = '<strong>No gesture detected</strong>';
+                    gestureResultDiv.style.color = '#666';
+                }
+            } catch (error) {
+                console.error('Gesture check error:', error);
+            }
+        }
+        
+        // Media library
+        async function listPhotos() {
+            try {
+                const response = await fetch('/list_photos');
+                const result = await response.json();
+                
+                if (result.success && result.photos && result.photos.length > 0) {
+                    addLog(`📷 Found ${result.photos.length} photos`, 'success');
+                } else {
+                    addLog('📷 No photos found', 'warning');
+                }
+            } catch (error) {
+                addLog('❌ Error listing photos: ' + error.message, 'error');
+            }
+        }
+        
+        async function listVideos() {
+            try {
+                const response = await fetch('/list_videos');
+                const result = await response.json();
+                
+                if (result.success && result.videos && result.videos.length > 0) {
+                    addLog(`🎥 Found ${result.videos.length} videos`, 'success');
+                } else {
+                    addLog('🎥 No videos found', 'warning');
+                }
+            } catch (error) {
+                addLog('❌ Error listing videos: ' + error.message, 'error');
+            }
+        }
+        
+        // Stream utilities
+        function refreshStream() {
+            if (!isConnected) return;
+            
+            const feed = document.getElementById('cameraFeed');
+            feed.src = '/stream?t=' + Date.now();
+            addLog('📹 Stream refreshed', 'success');
+        }
+        
+        function onStreamLoad() {
+            addLog('📹 Camera stream loaded successfully', 'success');
+        }
+        
+        function onStreamError() {
+            addLog('❌ Camera stream failed to load', 'error');
+        }
+        
+        // Logging system
+        function addLog(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logElement = document.getElementById('systemLogs');
+            
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${timestamp}] ${message}`;
+            
+            logElement.appendChild(entry);
+            logElement.scrollTop = logElement.scrollHeight;
+            
+            // Keep only last 20 entries
+            while (logElement.children.length > 20) {
+                logElement.removeChild(logElement.firstChild);
+            }
+        }
+        
+        // Initialize when page loads
+        window.addEventListener('load', init);
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (updateInterval) {
+                clearInterval(updateInterval);
+            }
+        });
+    </script>
+</body>
+</html> 

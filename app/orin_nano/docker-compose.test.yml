@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  camera-service:
+    build:
+      context: ./services/camera-service
+      dockerfile: Dockerfile
+    environment:
+      - DISPLAY=${DISPLAY:-}
+      - CUDA_VISIBLE_DEVICES=0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - PYTHONUNBUFFERED=1
+      - CAMERA_DEVICE=/dev/video1
+      # Livepeer streaming configuration
+      - LIVEPEER_API_KEY=522d8091-867f-42b3-8f62-5eeeab60f000
+      - LIVEPEER_STREAM_KEY=2458-aycn-mgfp-2dze
+      - LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
+      - LIVEPEER_PLAYBACK_ID=24583deg6syfcql
+    privileged: true
+    runtime: nvidia
+    devices:
+      - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
+      - /dev/video2:/dev/video2
+    volumes:
+      - /dev:/dev
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      # GPU model cache
+      - /mnt/nvme/jetson_cache/insightface:/root/.insightface
+      - /mnt/nvme/jetson_cache/ultralytics:/root/.config/Ultralytics
+      # Temporary local storage
+      - ./temp_photos:/workspace/photos
+      - ./temp_videos:/workspace/videos
+      - ./temp_logs:/workspace/logs
+    restart: unless-stopped
+    network_mode: host

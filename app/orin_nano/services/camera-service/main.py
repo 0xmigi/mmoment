@@ -1,0 +1,250 @@
+#!/usr/bin/env python3
+"""
+Jetson Camera API - Main Entry Point
+
+This is the main entry point for the lightweight, optimized camera service.
+It initializes all services and starts the API server.
+"""
+
+import os
+import time
+import logging
+import argparse
+import threading
+from pathlib import Path
+from flask import Flask, jsonify
+from flask_cors import CORS
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(os.path.expanduser('~/mmoment/app/orin_nano/camera_service/logs/camera_service.log'))
+    ]
+)
+
+logger = logging.getLogger('CameraService')
+
+# Create required directories
+def create_directories():
+    """Create required directories for the camera service"""
+    base_dir = os.path.expanduser('~/mmoment/app/orin_nano/camera_service')
+    
+    dirs = [
+        os.path.join(base_dir, 'logs'),
+        os.path.join(base_dir, 'photos'),
+        os.path.join(base_dir, 'videos'),
+        os.path.join(base_dir, 'faces')
+    ]
+    
+    for directory in dirs:
+        Path(directory).mkdir(parents=True, exist_ok=True)
+        logger.info(f"Ensuring directory exists: {directory}")
+
+# Initialize all services
+def init_services():
+    """Initialize all services and return them in a dict"""
+    from services.buffer_service import get_buffer_service
+    from services.gesture_service import get_gesture_service
+    from services.capture_service import get_capture_service
+    from services.session_service import get_session_service
+    from services.livepeer_stream_service import LivepeerStreamService
+    
+    # Try to import GPU Face service (new unified service)
+    gpu_face_service = None
+    try:
+        from services.gpu_face_service import get_gpu_face_service
+        gpu_face_service = get_gpu_face_service()
+        logger.info("GPU Face service (YOLOv8 + InsightFace) initialized")
+    except ImportError:
+        logger.warning("GPU Face service not available")
+    
+    # Try to import DeepFace service (legacy)
+    deepface_service = None
+    try:
+        from services.deepface_service import get_deepface_service
+        deepface_service = get_deepface_service()
+        logger.info("DeepFace GPU service initialized")
+    except ImportError:
+        logger.warning("DeepFace GPU service not available")
+    
+    # Try to import Solana integration
+    solana_integration_service = None
+    try:
+        from services.solana_integration import get_solana_integration_service
+        solana_integration_service = get_solana_integration_service()
+        logger.info("Solana integration service initialized")
+    except ImportError:
+        logger.warning("Solana integration service not available")
+    
+    logger.info("Initializing services...")
+    
+    # Get service instances (they are singletons)
+    buffer_service = get_buffer_service()
+    gesture_service = get_gesture_service()
+    capture_service = get_capture_service()
+    session_service = get_session_service()
+    
+    # Reset and create Livepeer service to ensure it picks up current environment variables
+    LivepeerStreamService.reset_instance()
+    livepeer_service = LivepeerStreamService()
+    
+    # Start the buffer service first (it's the source of truth)
+    logger.info("Starting buffer service...")
+    if not buffer_service.start():
+        logger.error("Failed to start buffer service")
+        return None
+    
+    # Allow buffer service to initialize
+    time.sleep(1)
+    
+    # Start the GPU face service (only GPU-accelerated face recognition)
+    if gpu_face_service:
+        logger.info("Starting GPU face service...")
+        gpu_face_service.start(buffer_service)
+        logger.info("GPU face recognition enabled")
+    else:
+        logger.warning("GPU face service not available - face recognition disabled")
+    
+    # Start the gesture service if MediaPipe is available
+    logger.info("Starting gesture service...")
+    gesture_service.start(buffer_service)
+    
+    # Initialize Livepeer service with buffer service
+    logger.info("Initializing Livepeer service...")
+    livepeer_service.set_buffer_service(buffer_service)
+    
+    # Inject services into the buffer service for processing
+    logger.info("Injecting services into buffer service...")
+    buffer_service.inject_services(
+        gesture_service=gesture_service,
+        gpu_face_service=gpu_face_service
+    )
+    
+    # Build service dictionary
+    services = {
+        'buffer': buffer_service,
+        'gesture': gesture_service,
+        'capture': capture_service,
+        'session': session_service,
+        'livepeer': livepeer_service
+    }
+    
+    # Add GPU Face service if available
+    if gpu_face_service:
+        services['gpu_face'] = gpu_face_service
+        services['face'] = gpu_face_service  # Also register as 'face' for route compatibility
+        services['face_detector'] = gpu_face_service  # Also register as 'face_detector' for route compatibility
+        gpu_face_status = gpu_face_service.get_status()
+        logger.info(f"GPU Face service status: GPU={gpu_face_status['gpu_available']}, Models={gpu_face_status['models_loaded']}, Enrolled={gpu_face_status['enrolled_faces']}")
+    
+    # Add DeepFace service if available (legacy)
+    if deepface_service:
+        services['deepface'] = deepface_service
+        deepface_status = deepface_service.get_status()
+        logger.info(f"DeepFace service status: Available={deepface_status['available']}, GPU={deepface_status['gpu_enabled']}, Model={deepface_status['current_model']}")
+    
+    # Add Solana integration if available
+    if solana_integration_service:
+        services['solana'] = solana_integration_service
+        solana_status = solana_integration_service.get_health_status()
+        logger.info(f"Solana middleware status: {solana_status['status']}, Camera PDA: {solana_status['camera_pda']}")
+    
+    return services
+
+# Create Flask application
+def create_app(services):
+    """Create and configure the Flask application"""
+    app = Flask(__name__, static_folder='static')
+    
+    # Configure CORS for frontend integration
+    CORS(app, resources={
+        r"/*": {
+            "origins": [
+                "http://localhost:5173", 
+                "http://localhost:3000", 
+                "https://mmoment.xyz", 
+                "http://localhost:5002",
+                "https://jetson.mmoment.xyz",
+                "http://jetson.mmoment.xyz",
+                "https://middleware.mmoment.xyz",
+                "http://middleware.mmoment.xyz",
+                "*"  # Allow all origins for development
+            ],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Origin", "Accept", "X-Requested-With"],
+            "supports_credentials": True
+        }
+    })
+    
+    # Configure app
+    app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB max upload size
+    app.config['PROPAGATE_EXCEPTIONS'] = True
+    app.config['JSON_SORT_KEYS'] = False
+    
+    # Add services to app context
+    app.config['SERVICES'] = services
+    
+    # Register routes
+    from routes import register_routes
+    register_routes(app)
+    
+    return app
+
+# Main entry point
+def main():
+    """Main entry point for the camera service"""
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description='Jetson Camera API Server')
+    parser.add_argument('--port', type=int, default=5002, help='Port to run the server on (default: 5002)')
+    parser.add_argument('--host', type=str, default='0.0.0.0', help='Host to bind the server to (default: 0.0.0.0)')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    args = parser.parse_args()
+    
+    # Create required directories
+    create_directories()
+    
+    # Initialize services
+    services = init_services()
+    
+    if not services:
+        logger.error("Failed to initialize services. Exiting.")
+        return 1
+    
+    # Create Flask app
+    app = create_app(services)
+    
+    # Run the Flask app
+    host = os.environ.get('FLASK_HOST', args.host)
+    port = int(os.environ.get('FLASK_PORT', args.port))
+    debug = args.debug
+    
+    logger.info(f"Starting Jetson Camera API on {host}:{port}")
+    
+    try:
+        app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
+    except KeyboardInterrupt:
+        logger.info("Shutting down gracefully...")
+    except Exception as e:
+        logger.error(f"Error running server: {e}")
+        return 1
+    finally:
+        # Shut down services
+        logger.info("Stopping services...")
+        if 'livepeer' in services:
+            services['livepeer'].cleanup_stream()
+        if 'gesture' in services:
+            services['gesture'].stop()
+        if 'face' in services:
+            services['face'].stop()
+        if 'session' in services:
+            services['session'].stop()
+        if 'buffer' in services:
+            services['buffer'].stop()
+    
+    return 0
+
+if __name__ == "__main__":
+    exit(main()) 
