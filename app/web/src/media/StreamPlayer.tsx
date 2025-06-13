@@ -3,6 +3,9 @@ import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { CONFIG } from "../core/config";
 import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from '../anchor/setup';
 import { useCamera } from '../camera/CameraProvider';
+import { useParams } from 'react-router-dom';
+import { unifiedCameraService } from '../camera/unified-camera-service';
+import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 
 // Simple cache for stream info to reduce API calls
 const streamInfoCache = { 
@@ -21,6 +24,8 @@ const MOBILE_FETCH_TIMEOUT = 10000; // 10 seconds for mobile
 interface StreamInfo {
   playbackId: string;
   isActive: boolean;
+  streamType?: string;
+  streamUrl?: string;
 }
 
 const StreamPlayer = memo(() => {
@@ -35,95 +40,76 @@ const StreamPlayer = memo(() => {
   const abortControllerRef = useRef<AbortController | null>(null);
   const { program } = useProgram();
   const { selectedCamera } = useCamera();
-
-  // Helper function for fetch with timeout
-  const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout: number) => {
-    // Cancel any ongoing fetch
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-    const { signal } = controller;
-    
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-    }, timeout);
-    
-    try {
-      const response = await fetch(url, { ...options, signal });
-      clearTimeout(timeoutId);
-      return response;
-    } catch (error) {
-      clearTimeout(timeoutId);
-      throw error;
-    } finally {
-      if (abortControllerRef.current === controller) {
-        abortControllerRef.current = null;
-      }
-    }
-  };
+  const { cameraId } = useParams<{ cameraId: string }>();
+  const { primaryWallet } = useDynamicContext();
 
   const fetchStreamInfo = useCallback(async (forceRefresh = false) => {
     // Skip fetching during camera operations
-    if (isCameraOperation.current) return;
+    if (isCameraOperation.current) {
+      return;
+    }
 
-    // Prevent multiple rapid fetches
-    const now = Date.now();
-    const minTimeBetweenFetches = isMobile ? 5000 : 3000;
-    if (!forceRefresh && now - lastFetchTime.current < minTimeBetweenFetches) return;
-    
-    // Check cache first if not forced refresh
-    const cacheTTL = isMobile ? MOBILE_CACHE_TTL : STREAM_CACHE_TTL;
-    if (!forceRefresh && streamInfoCache.data && now - streamInfoCache.timestamp < cacheTTL) {
-      console.log('[StreamPlayer] Using cached stream info');
-      setStreamInfo(streamInfoCache.data);
-      setError(null);
+    const currentCameraId = cameraId || selectedCamera?.publicKey || localStorage.getItem('directCameraId');
+    if (!currentCameraId) {
+      console.log('[StreamPlayer] No camera ID available');
+      setStreamInfo(null);
       setIsLoading(false);
       return;
     }
-    
+
+    const now = Date.now();
+    const cacheAge = now - streamInfoCache.timestamp;
+    const cacheTTL = isMobile ? MOBILE_CACHE_TTL : STREAM_CACHE_TTL;
+
+    // Use cache if available and not forcing refresh
+    if (!forceRefresh && streamInfoCache.data && cacheAge < cacheTTL) {
+      console.log('[StreamPlayer] Using cached stream info');
+      setStreamInfo(streamInfoCache.data);
+      setIsLoading(false);
+      return;
+    }
+
+    // Throttle API calls
+    if (now - lastFetchTime.current < 2000) {
+      console.log('[StreamPlayer] Throttling API call');
+      return;
+    }
     lastFetchTime.current = now;
 
     try {
-      console.log('[StreamPlayer] Fetching fresh stream info');
-      const timeout = isMobile ? MOBILE_FETCH_TIMEOUT : FETCH_TIMEOUT;
+      console.log('[StreamPlayer] Fetching fresh stream info for camera:', currentCameraId);
       
-      const response = await fetchWithTimeout(
-        `${CONFIG.CAMERA_API_URL}/api/stream/info`, 
-        {
-          headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
+      // Use unified camera service to get stream info
+      const response = await unifiedCameraService.getStreamInfo(currentCameraId);
+      
+      if (response.success && response.data) {
+        const data = response.data;
+        
+        const newStreamInfo = {
+          playbackId: data.playbackId || '',
+          isActive: data.isActive,
+          streamType: data.format,
+          streamUrl: data.streamUrl || await unifiedCameraService.getStreamUrl(currentCameraId) || ''
+        };
+        
+        // Update cache
+        streamInfoCache.data = newStreamInfo;
+        streamInfoCache.timestamp = now;
+        
+        // Update state only if different
+        setStreamInfo(prev => {
+          if (prev?.playbackId === newStreamInfo.playbackId && 
+              prev?.isActive === newStreamInfo.isActive && 
+              prev?.streamType === newStreamInfo.streamType) {
+            return prev;
           }
-        },
-        timeout
-      );
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch stream info (${response.status})`);
+          return newStreamInfo;
+        });
+        setError(null);
+        setLoadingRetry(0); // Reset retry counter on success
+      } else {
+        throw new Error(response.error || 'Failed to get stream info');
       }
-      
-      const data = await response.json();
-      const newStreamInfo = {
-        playbackId: data.playbackId,
-        isActive: data.isActive
-      };
-      
-      // Update cache
-      streamInfoCache.data = newStreamInfo;
-      streamInfoCache.timestamp = now;
-      
-      // Update state only if different
-      setStreamInfo(prev => {
-        if (prev?.playbackId === data.playbackId && prev?.isActive === data.isActive) {
-          return prev;
-        }
-        return newStreamInfo;
-      });
-      setError(null);
-      setLoadingRetry(0); // Reset retry counter on success
     } catch (err) {
       console.error('Failed to get stream info:', err);
       if (!isCameraOperation.current) {
@@ -145,7 +131,7 @@ const StreamPlayer = memo(() => {
         setIsLoading(false);
       }
     }
-  }, [isMobile, loadingRetry]);
+  }, [isMobile, loadingRetry, cameraId, selectedCamera?.publicKey]);
 
   // Listen for camera operations
   useEffect(() => {
@@ -160,6 +146,7 @@ const StreamPlayer = memo(() => {
   }, []);
 
   useEffect(() => {
+    // Fetch stream info for all cameras using standardized API
     fetchStreamInfo();
     // Use different polling intervals for mobile vs desktop
     const pollingInterval = isMobile ? 30000 : 15000;
@@ -203,7 +190,7 @@ const StreamPlayer = memo(() => {
     );
   }
 
-  if (error || !streamInfo?.playbackId || !streamInfo.isActive) {
+  if (error || !streamInfo?.isActive) {
     return (
       <div className="aspect-video w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
         <div className="text-center">
@@ -225,25 +212,60 @@ const StreamPlayer = memo(() => {
     );
   }
 
+  // Handle MJPEG streams (legacy - keeping for fallback)
+  if (streamInfo.streamType === 'mjpeg' && streamInfo.streamUrl) {
+    return (
+      <div className="aspect-video bg-black rounded-lg overflow-hidden">
+        <img 
+          src={streamInfo.streamUrl}
+          alt="Camera Stream"
+          className="w-full h-full object-contain"
+          style={{ imageRendering: 'auto' }}
+        />
+      </div>
+    );
+  }
+
+  // Handle Livepeer streams (Pi5 cameras and Jetson cameras)
+  if (streamInfo.playbackId) {
+    return (
+      <div className="aspect-video bg-black rounded-lg overflow-hidden relative">
+        <Player 
+          title="Camera Stream"
+          playbackId={streamInfo.playbackId}
+          autoPlay
+          muted
+          controls={{
+            autohide: 3000,
+            hotkeys: false,
+            defaultVolume: 0
+          }}
+          aspectRatio="16to9"
+          showPipButton={!isMobile}
+          objectFit="contain"
+          priority
+          showLoadingSpinner={true}
+          lowLatency
+        />
+        {/* Show helpful message for Jetson cameras */}
+        {(() => {
+          const currentCameraId = cameraId || selectedCamera?.publicKey || localStorage.getItem('directCameraId');
+          return currentCameraId && unifiedCameraService.cameraSupports(currentCameraId, 'hasLivepeerStreaming');
+        })() && (
+          <div className="absolute top-2 left-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">
+            Livepeer stream may take 30-60 seconds to load
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Fallback for unknown stream types
   return (
-    <div className="aspect-video bg-black rounded-lg overflow-hidden">
-      <Player 
-        title="Camera Stream"
-        playbackId={streamInfo.playbackId}
-        autoPlay
-        muted
-        controls={{
-          autohide: 3000,
-          hotkeys: false,
-          defaultVolume: 0
-        }}
-        aspectRatio="16to9"
-        showPipButton={!isMobile}
-        objectFit="contain"
-        priority
-        showLoadingSpinner={true}
-        lowLatency
-      />
+    <div className="aspect-video w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
+      <div className="text-center">
+        <p className="text-gray-400">Unsupported stream format</p>
+      </div>
     </div>
   );
 });

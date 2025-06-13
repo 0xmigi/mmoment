@@ -173,46 +173,6 @@ The system creates a privacy-preserving social graph by:
 - Creating connection points based on shared experiences
 - Building communities around common activities and locations
 
-## Getting Started
-
-### Hardware Requirements
-
-For Jetson Orin Nano setup:
-- NVIDIA Jetson Orin Nano Developer Kit
-- Logitech StreamCam (or compatible USB camera)
-- 5V DC, 4A power supply
-- Network connectivity
-
-For Raspberry Pi setup:
-- Raspberry Pi 5 (or Pi Zero 2 W for simpler deployments)
-- Compatible camera module
-- Power supply
-- Network connectivity
-
-### Software Setup
-
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/0xmigi/mmoment.git
-   cd mmoment
-   ```
-
-2. Set up the camera system (Jetson Orin Nano):
-   ```bash
-   cd app/orin_nano
-   ./install_services.sh
-   ./start_services.sh
-   ```
-
-3. Launch the web application:
-   ```bash
-   cd app/web
-   yarn install
-   yarn dev
-   ```
-
-4. Connect your Solana wallet to start capturing moments!
-
 ## Development Roadmap
 
 ### Phase 1: Single Camera Prototype ✅
@@ -236,7 +196,12 @@ For Raspberry Pi setup:
 - NFT-based authentication
 - On-chain content verification
 
-### Phase 5: Deployment & Scaling 🚧
+### Phase 5: Livepeer Streaming Integration ✅
+- Migrated from MJPEG to Livepeer streaming for improved performance
+- Low-latency streaming with WebRTC support
+- Unified streaming architecture across all camera devices
+
+### Phase 6: Deployment & Scaling 🚧
 - Production-ready hardware
 - Multi-camera network support
 - Commercial venue partnerships

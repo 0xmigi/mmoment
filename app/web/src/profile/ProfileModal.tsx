@@ -1,5 +1,5 @@
 import { Dialog } from '@headlessui/react';
-import { X, ExternalLink, Download } from 'lucide-react';
+import { X, ExternalLink } from 'lucide-react';
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -59,17 +59,6 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
   const handleExplorerClick = () => {
     if (action?.transactionId) {
       window.open(`https://solscan.io/tx/${action.transactionId}?cluster=devnet`, '_blank');
-    }
-  };
-
-  const handleDownload = () => {
-    if (action?.mediaUrl) {
-      const link = document.createElement('a');
-      link.href = action.mediaUrl;
-      link.download = `${action.type}_${Date.now()}.jpg`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
     }
   };
 
@@ -199,14 +188,6 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
                         {action.transactionId ? `${action.transactionId.slice(0, 8)}...${action.transactionId.slice(-8)}` : 'Processing...'}
                       </div>
                       <div className="flex items-center gap-2">
-                        {action.mediaUrl && (
-                          <button
-                            onClick={handleDownload}
-                            className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
-                          >
-                            Download <Download className="w-3 h-3" />
-                          </button>
-                        )}
                         {action.transactionId && (
                           <button
                             onClick={handleExplorerClick}

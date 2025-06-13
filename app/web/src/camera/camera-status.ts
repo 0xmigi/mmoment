@@ -2,6 +2,15 @@ import { CONFIG } from '../core/config';
 
 type StatusCallback = (status: { isLive: boolean; isStreaming: boolean; owner: string }) => void;
 
+// Helper function to get the appropriate camera API URL
+const getCameraApiUrl = (): string => {
+  const currentCameraId = localStorage.getItem('directCameraId');
+  if (currentCameraId === CONFIG.JETSON_CAMERA_PDA) {
+    return CONFIG.JETSON_CAMERA_URL;
+  }
+  return CONFIG.CAMERA_API_URL;
+};
+
 class CameraStatusService {
   private static instance: CameraStatusService;
   private callbacks: Set<StatusCallback> = new Set();
@@ -198,162 +207,71 @@ class CameraStatusService {
 
   // Separate the actual status check logic for better error handling
   private async _performStatusCheck(): Promise<void> {
-    const isMobile = CONFIG.isMobileBrowser;
+    // Use standardized API endpoints for all cameras
+    const apiUrl = getCameraApiUrl();
+    const healthEndpoint = '/api/health';
     
     try {
-      console.log(`[CameraStatus] Checking health at ${new Date().toISOString()} - ${CONFIG.CAMERA_API_URL}/api/health`);
+      console.log(`[CameraStatus] Checking health - ${apiUrl}${healthEndpoint}`);
       
-      // Try a simple health check first
-      const healthResponse = await this.fetchWithTimeout(
-        `${CONFIG.CAMERA_API_URL}/api/health`,
-        {
-          // Add cache-busting for mobile
-          headers: isMobile ? {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-          } : undefined
-        },
-        isMobile ? this.FETCH_TIMEOUT * 1.5 : this.FETCH_TIMEOUT // Longer timeout for mobile
-      );
+      // Simple health check - if it responds with 200, camera is online
+      const healthResponse = await this.fetchWithTimeout(`${apiUrl}${healthEndpoint}`, {}, 5000);
       
-      this.logDebug('Health response status:', healthResponse.status);
+      if (healthResponse.ok) {
+        console.log(`[CameraStatus] Camera is online`);
+        this.recordSuccessfulOperation();
+        
+        const newStatus = {
+          isLive: true,
+          isStreaming: false, // We'll handle streaming separately
+          owner: ''
+        };
 
-      if (!healthResponse.ok) {
-        console.error(`[CameraStatus] Health check failed with status: ${healthResponse.status}, trying direct camera API`);
+        if (this.hasStatusChanged(newStatus)) {
+          this.currentStatus = newStatus;
+          this.notifyCallbacks();
+          this.saveStatus();
+        }
+
+        this.retryCount = 0;
+      } else {
         throw new Error(`Health check failed with status: ${healthResponse.status}`);
       }
-
-      let healthData;
-      try {
-        healthData = await healthResponse.json();
-        this.logDebug('Health data:', healthData);
-        console.log(`[CameraStatus] Health data:`, healthData);
-        
-        // If the health check returns camera_api field and it contains status: connected
-        // This is a more reliable indicator than just a 200 OK
-        if (healthData.camera_api && healthData.camera_api.status === 'connected') {
-          this.logDebug('Camera API is explicitly connected');
-          this.recordSuccessfulOperation();
-        }
-        
-        // If healthData contains a camera object with an "available" state
-        if (healthData.camera_api?.camera?.state === 'available' || 
-            healthData.camera?.state === 'available' || 
-            healthData.camera_api?.state === 'available') {
-          this.logDebug('Camera is marked as available');
-          this.recordSuccessfulOperation();
-        }
-      } catch (e) {
-        this.logDebug('Failed to parse health response as JSON:', e);
-      }
-
-      // Try to fetch stream info with a shorter timeout
-      let isStreaming = false;
-      try {
-        const streamResponse = await this.fetchWithTimeout(
-          `${CONFIG.CAMERA_API_URL}/api/stream/info`,
-          {
-            // Add cache-busting for mobile
-            headers: isMobile ? {
-              'Cache-Control': 'no-cache',
-              'Pragma': 'no-cache'
-            } : undefined
-          },
-          isMobile ? 5000 : 3000 // Shorter timeout for stream info
-        );
-        
-        this.logDebug('Stream info response status:', streamResponse.status);
-
-        if (streamResponse.ok) {
-          const streamData = await streamResponse.json();
-          this.logDebug('Stream data:', streamData);
-          isStreaming = streamData.isActive;
-          
-          // If streaming is active, record a successful operation
-          if (isStreaming) {
-            this.recordSuccessfulOperation();
-          }
-        } else {
-          this.logDebug('Stream info request failed, assuming not streaming');
-        }
-      } catch (streamError) {
-        this.logDebug('Error fetching stream info:', streamError);
-        // Don't throw here, we still want to update the isLive status
-      }
-
-      // Extract owner from the health data if available
-      const owner = healthData?.owner || healthData?.camera?.owner || '';
-
-      const newStatus = {
-        isLive: true,
-        isStreaming,
-        owner
-      };
-
-      this.logDebug('New status:', newStatus, 'Current status:', this.currentStatus);
-
-      if (this.hasStatusChanged(newStatus)) {
-        this.logDebug('Status changed, updating');
-        this.currentStatus = newStatus;
-        this.notifyCallbacks();
-        this.saveStatus();
-      }
-
-      this.retryCount = 0;
-      this.recordSuccessfulOperation();
     } catch (error) {
       this.logDebug('Status check operation failed:', error);
       
-      // Try direct camera API as fallback
-      console.log(`[CameraStatus] Trying direct camera API at ${CONFIG.CAMERA_API_URL.replace('middleware', 'camera')}/api/health`);
-      try {
-        const directCameraResponse = await this.fetchWithTimeout(
-          `${CONFIG.CAMERA_API_URL.replace('middleware', 'camera')}/api/health`,
-          {
-            headers: isMobile ? {
-              'Cache-Control': 'no-cache',
-              'Pragma': 'no-cache'
-            } : undefined
-          },
-          this.FETCH_TIMEOUT
-        );
-        
-        if (directCameraResponse.ok) {
-          console.log(`[CameraStatus] Direct camera API check succeeded`);
-          let cameraData;
-          try {
-            cameraData = await directCameraResponse.json();
-            console.log(`[CameraStatus] Direct camera data:`, cameraData);
-            
-            // If we can directly connect to the camera, record it as a successful operation
+      // For Jetson cameras, try the legacy health endpoint as fallback
+      const currentCameraId = localStorage.getItem('directCameraId');
+      if (currentCameraId === CONFIG.JETSON_CAMERA_PDA) {
+        try {
+          console.log(`[CameraStatus] Trying legacy Jetson health endpoint`);
+          const legacyResponse = await this.fetchWithTimeout(`${apiUrl}/health`, {}, 5000);
+          
+          if (legacyResponse.ok) {
+            console.log(`[CameraStatus] Legacy Jetson health check succeeded`);
             this.recordSuccessfulOperation();
-          } catch (e) {
-            console.log(`[CameraStatus] Failed to parse direct camera response as JSON`);
+            
+            const newStatus = {
+              isLive: true,
+              isStreaming: false,
+              owner: ''
+            };
+
+            if (this.hasStatusChanged(newStatus)) {
+              this.currentStatus = newStatus;
+              this.notifyCallbacks();
+              this.saveStatus();
+            }
+
+            this.retryCount = 0;
+            return; // Successfully used legacy endpoint
           }
-          
-          const newStatus = {
-            isLive: true,
-            isStreaming: false, // We don't know for sure, default to false
-            owner: cameraData?.owner || ''
-          };
-          
-          if (this.hasStatusChanged(newStatus)) {
-            this.logDebug('Status changed from direct camera check, updating');
-            this.currentStatus = newStatus;
-            this.notifyCallbacks();
-            this.saveStatus();
-          }
-          
-          this.retryCount = 0;
-          return; // Successfully used direct camera API
-        } else {
-          console.log(`[CameraStatus] Direct camera API check failed with status: ${directCameraResponse.status}`);
+        } catch (legacyError) {
+          console.log(`[CameraStatus] Legacy health check also failed:`, legacyError);
         }
-      } catch (directError) {
-        console.log(`[CameraStatus] Direct camera API check failed:`, directError);
       }
       
-      // If we get here, both middleware and direct camera checks failed
+      // If we get here, the camera check failed
       throw error; // Re-throw to let the main checkStatus method handle retries
     }
   }

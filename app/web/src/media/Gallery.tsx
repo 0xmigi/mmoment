@@ -22,48 +22,7 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
 
   // Add click handler for media items
   const handleMediaClick = (media: IPFSMedia) => {
-    // Debug logging for transaction IDs
     console.log("Viewing media with transaction ID:", media.transactionId || "none");
-    
-    // Access recent timeline events to find matching transaction ID if not in media
-    if (!media.transactionId) {
-      try {
-        // First check our transaction storage
-        const mediaTransactionsKey = `mediaTransactions_${media.walletAddress}`;
-        const storedTransactions = localStorage.getItem(mediaTransactionsKey);
-        
-        if (storedTransactions) {
-          const transactions = JSON.parse(storedTransactions);
-          if (transactions[media.id]) {
-            console.log("Found transaction ID in storage:", transactions[media.id].transactionId);
-            media.transactionId = transactions[media.id].transactionId;
-            media.cameraId = transactions[media.id].cameraId;
-          }
-        }
-        
-        // If still no transaction, check timeline events
-        if (!media.transactionId) {
-          const storedEvents = localStorage.getItem('timelineEvents');
-          if (storedEvents) {
-            const events = JSON.parse(storedEvents);
-            // Try to find a matching event by looking at the media URL or ID
-            const matchingEvent = events.find((event: any) => 
-              (event.mediaUrl && event.mediaUrl.includes(media.id)) ||
-              (media.url && event.mediaUrl && media.url.includes(event.mediaUrl))
-            );
-            
-            if (matchingEvent && matchingEvent.transactionId) {
-              console.log("Found matching transaction ID from timeline:", matchingEvent.transactionId);
-              media.transactionId = matchingEvent.transactionId;
-              media.cameraId = matchingEvent.cameraId;
-            }
-          }
-        }
-      } catch (e) {
-        console.error("Error looking up transaction ID:", e);
-      }
-    }
-    
     setSelectedMedia(media);
     setIsViewerOpen(true);
   };
@@ -119,7 +78,8 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
         if (mode === 'recent') {
           filteredMedia = cameraFilteredMedia.slice(0, maxRecentItems);
         } else {
-          filteredMedia = cameraFilteredMedia.slice(maxRecentItems);
+          // Archive mode should show ALL media, not skip the first maxRecentItems
+          filteredMedia = cameraFilteredMedia;
         }
 
         setMedia(filteredMedia);
@@ -222,7 +182,6 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
                   <video
                     src={item.url}
                     className="w-full h-full object-cover"
-                    controls
                   />
                 ) : (
                   <img

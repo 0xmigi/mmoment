@@ -9,6 +9,7 @@ import { isSolanaWallet } from '@dynamic-labs/solana';
 import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import { IDL } from '../../anchor/idl';
 import { timelineService } from '../../timeline/timeline-service';
+import { unifiedCameraService } from '../../camera/unified-camera-service';
 
 interface TransactionModalProps {
   isOpen: boolean;
@@ -165,6 +166,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setCheckInSuccess(true);
       timelineService.refreshEvents();
       
+      // Automatically execute the camera action after successful check-in
+      if (transactionData.type) {
+        setTimeout(() => {
+          handleCameraAction(signature);
+        }, 500);
+      }
+      
     } catch (error) {
       console.error('Check-in error:', error);
       
@@ -190,6 +198,53 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       }
     } finally {
       setIsCheckingIn(false);
+    }
+  };
+
+  // New function to handle camera actions after check-in
+  const handleCameraAction = async (checkInSignature: string) => {
+    if (!transactionData?.type || !primaryWallet?.address) return;
+    
+    setStatus(`Performing ${transactionData.type} action...`);
+    setLoading(true);
+    
+    try {
+      let response;
+      
+      // Use the existing signature for the action
+      switch (transactionData.type) {
+        case 'photo':
+          response = await unifiedCameraService.takePhoto(transactionData.cameraAccount);
+          break;
+        case 'video':
+          response = await unifiedCameraService.startVideoRecording(transactionData.cameraAccount);
+          break;
+        case 'stream':
+          response = await unifiedCameraService.startStream(transactionData.cameraAccount);
+          break;
+        default:
+          throw new Error(`Unknown action type: ${transactionData.type}`);
+      }
+      
+      if (response.success) {
+        setStatus(`${transactionData.type} action completed successfully`);
+        
+        // Pass back the transaction signature and camera ID
+        onSuccess?.({
+          transactionId: checkInSignature,
+          cameraId: transactionData.cameraAccount
+        });
+        
+        // Close modal after success
+        setTimeout(() => onClose(), 1000);
+      } else {
+        setError(`Failed to perform ${transactionData.type} action: ${response.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error(`Error performing ${transactionData.type} action:`, err);
+      setError(err instanceof Error ? err.message : 'Action failed');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -263,12 +318,19 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       
       setStatus('Transaction confirmed');
       
-      // Pass back the transaction signature and camera ID
-      onSuccess?.({
-        transactionId: signature,
-        cameraId: transactionData.cameraAccount
-      });
-      onClose();
+      // Automatically execute the camera action
+      if (transactionData.type) {
+        setTimeout(() => {
+          handleCameraAction(signature);
+        }, 500);
+      } else {
+        // If no camera action needed, just pass success
+        onSuccess?.({
+          transactionId: signature,
+          cameraId: transactionData.cameraAccount
+        });
+        onClose();
+      }
     } catch (err) {
       console.error('Transaction error:', err);
       setError(err instanceof Error ? err.message : 'Transaction failed');
@@ -324,7 +386,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     <div className="flex-1">
                       <p className="text-sm text-yellow-800 mb-1 font-medium">Camera Check-in Required</p>
                       <p className="text-xs text-yellow-700">
-                        You need to check in to the camera before performing any actions. This allows the camera to identify you and associate your actions.
+                        Please check in to continue with your {transactionData?.type || 'camera'} action.
                       </p>
                     </div>
                   </div>
@@ -333,7 +395,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 {checkInSuccess && (
                   <div className="bg-green-50 text-green-700 px-3 py-2 rounded-lg text-sm flex items-center">
                     <CheckCircle className="w-4 h-4 mr-2" />
-                    Check-in successful! You can now proceed with your action.
+                    Starting {transactionData?.type || 'camera'} action...
                   </div>
                 )}
                 
@@ -346,11 +408,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 <div className="flex gap-2 pt-2">
                   {checkInSuccess ? (
                     <button
-                      onClick={handleConfirmTransaction}
-                      disabled={loading}
-                      className="flex-1 bg-blue-600 text-white py-2 px-3 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                      disabled={true}
+                      className="flex-1 bg-blue-400 text-white py-2 px-3 rounded-lg text-sm font-medium transition-colors"
                     >
-                      Continue with {formatActionType(transactionData?.type || '')}
+                      Processing...
                     </button>
                   ) : (
                     <>
@@ -359,7 +420,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                         disabled={isCheckingIn}
                         className="flex-1 bg-blue-600 text-white py-2 px-3 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {isCheckingIn ? 'Checking in...' : 'Check In'}
+                        {isCheckingIn ? 'Checking in...' : 'Check In & Continue'}
                       </button>
                       <button
                         onClick={onClose}

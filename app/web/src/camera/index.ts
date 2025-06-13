@@ -9,10 +9,10 @@ export * from './CameraModal';
 export * from './ActivateCamera';
 
 // Services
-export * from './camera-service';
+export * from './unified-camera-service';
+export * from './camera-registry';
 
 // Hooks
-export * from './useCameraRegistry';
 export * from './useCameraStatus';
 
 // Types

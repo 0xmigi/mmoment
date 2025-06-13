@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
+import React, { useState, useEffect } from 'react';
 import { Dialog } from '@headlessui/react';
-import { X, ExternalLink, Camera, User } from 'lucide-react';
+import { X, ExternalLink, Camera, User, Wifi } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { useState, useEffect } from 'react';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
 import { Program, AnchorProvider } from '@coral-xyz/anchor';
@@ -10,6 +10,8 @@ import { IDL } from '../anchor/idl';
 import { CAMERA_ACTIVATION_PROGRAM_ID } from '../anchor/setup';
 import { isSolanaWallet } from '@dynamic-labs/solana';
 import { timelineService } from '../timeline/timeline-service';
+import { unifiedCameraService } from './unified-camera-service';
+import { CONFIG } from '../core/config';
 
 interface CameraModalProps {
   isOpen: boolean;
@@ -38,9 +40,23 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
   const [isCheckedIn, setIsCheckedIn] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [connectionTest, setConnectionTest] = useState<{
+    testing: boolean;
+    result: string | null;
+    success: boolean;
+  }>({ testing: false, result: null, success: false });
+
+  // Configuration states for Jetson camera features
+  const [gestureVisualization, setGestureVisualization] = useState(false);
+  const [faceVisualization, setFaceVisualization] = useState(false);
+  const [gestureControls, setGestureControls] = useState(false);
+  const [configLoading, setConfigLoading] = useState(false);
 
   // Check if current user is the owner
   const isOwner = primaryWallet?.address === camera.owner;
+
+  // Check if this is a Jetson camera (has advanced features)
+  const isJetsonCamera = camera.id === CONFIG.JETSON_CAMERA_PDA || camera.model === 'jetson';
 
   // Add more frequent status updates to the parent component
   useEffect(() => {
@@ -68,6 +84,27 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       clearInterval(intervalId);
     };
   }, [isOpen, camera.id, primaryWallet]);
+
+  // Clear errors and load configuration when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setError(null);
+      
+      // Load current configuration for Jetson cameras
+      if (isJetsonCamera) {
+        // Note: We could add API calls here to get current state
+        // For now, we'll start with default states
+        setGestureVisualization(false);
+        setFaceVisualization(false);
+        
+        // Load gesture controls state from localStorage
+        // TODO: Fix this to use unified service properly
+        // const gestureControlsEnabled = await unifiedCameraService.getGestureControlsStatus(camera.id);
+        // setGestureControls(gestureControlsEnabled);
+        setGestureControls(false); // Default for now
+      }
+    }
+  }, [isOpen, isJetsonCamera]);
 
   const checkSessionStatus = async () => {
     if (!camera.id || !primaryWallet?.address || !connection) return;
@@ -183,6 +220,121 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         transactionId: transactionId,
         cameraId: camera.id
       });
+    }
+  };
+
+  // Test connection to Jetson camera
+  const testJetsonConnection = async () => {
+    setConnectionTest({ testing: true, result: null, success: false });
+    
+    try {
+      const result = await unifiedCameraService.testConnection(camera.id);
+      setConnectionTest({
+        testing: false,
+        result: result.success ? result.data?.message || 'Connection successful' : result.error || 'Connection failed',
+        success: result.success
+      });
+    } catch (error) {
+      setConnectionTest({
+        testing: false,
+        result: error instanceof Error ? error.message : 'Connection test failed',
+        success: false
+      });
+    }
+  };
+
+  // Handle gesture visualization toggle
+  const handleGestureVisualizationToggle = async () => {
+    setConfigLoading(true);
+    try {
+      const newState = !gestureVisualization;
+      const result = await unifiedCameraService.toggleFaceVisualization(camera.id, newState);
+      
+      if (result.success) {
+        setGestureVisualization(newState);
+      } else {
+        setError(result.error || 'Failed to toggle gesture visualization');
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to toggle gesture visualization');
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
+  // Handle face visualization toggle
+  const handleFaceVisualizationToggle = async () => {
+    setConfigLoading(true);
+    try {
+      const newState = !faceVisualization;
+      const result = await unifiedCameraService.toggleFaceVisualization(camera.id, newState);
+      
+      if (result.success) {
+        setFaceVisualization(newState);
+      } else {
+        setError(result.error || 'Failed to toggle face visualization');
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to toggle face visualization');
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
+  // Handle gesture controls toggle
+  const handleGestureControlsToggle = async () => {
+    setConfigLoading(true);
+    try {
+      const newState = !gestureControls;
+      const result = await unifiedCameraService.toggleGestureControls(camera.id, newState);
+      
+      if (result.success) {
+        setGestureControls(newState);
+      } else {
+        setError(result.error || 'Failed to toggle gesture controls');
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to toggle gesture controls');
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
+  // Handle Livepeer stream start
+  const handleStartLivepeerStream = async () => {
+    setConfigLoading(true);
+    try {
+      // TODO: Add startLivepeerStream method to unified service
+      const result = await unifiedCameraService.startStream(camera.id);
+      
+      if (result.success) {
+        setError(null);
+      } else {
+        setError(result.error || 'Failed to start Livepeer stream');
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to start Livepeer stream');
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
+  // Handle Livepeer stream stop
+  const handleStopLivepeerStream = async () => {
+    setConfigLoading(true);
+    try {
+      // TODO: Add stopLivepeerStream method to unified service  
+      const result = await unifiedCameraService.stopStream(camera.id);
+      
+      if (result.success) {
+        setError(null);
+      } else {
+        setError(result.error || 'Failed to stop Livepeer stream');
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to stop Livepeer stream');
+    } finally {
+      setConfigLoading(false);
     }
   };
 
@@ -460,16 +612,58 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
               <div className="space-y-4">
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3">
                   <h3 className="text-sm font-medium text-yellow-800 mb-1">Development Mode</h3>
-                  <p className="text-xs text-yellow-700 mb-2">
-                    No camera is currently connected. Connect to the physical camera below:
+                  <p className="text-xs text-yellow-700 mb-3">
+                    No camera is currently connected. Connect to a physical camera below:
                   </p>
-                  <button
-                    onClick={handleDevCameraClick}
-                    className="text-xs bg-yellow-100 hover:bg-yellow-200 text-yellow-800 px-3 py-1.5 rounded flex items-center justify-center w-full transition-colors"
-                  >
-                    Connect to Camera <ExternalLink className="h-3 w-3 ml-1" />
-                  </button>
+                  <div className="space-y-2">
+                    <button
+                      onClick={handleDevCameraClick}
+                      className="text-xs bg-yellow-100 hover:bg-yellow-200 text-yellow-800 px-3 py-1.5 rounded flex items-center justify-center w-full transition-colors"
+                    >
+                      Connect to Pi5 <ExternalLink className="h-3 w-3 ml-1" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        const baseUrl = window.location.origin;
+                        window.location.href = `${baseUrl}/app/camera/WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD`;
+                      }}
+                      className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 px-3 py-1.5 rounded flex items-center justify-center w-full transition-colors"
+                    >
+                      Connect to Orin Nano <ExternalLink className="h-3 w-3 ml-1" />
+                    </button>
+                    <button
+                      onClick={testJetsonConnection}
+                      disabled={connectionTest.testing}
+                      className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-1.5 rounded flex items-center justify-center w-full transition-colors"
+                    >
+                      {connectionTest.testing ? 'Testing...' : 'Test Jetson Connection'} <Wifi className="h-3 w-3 ml-1" />
+                    </button>
+                  </div>
                 </div>
+                
+                {/* Connection Test Results */}
+                {connectionTest.result && (
+                  <div className={`border rounded-lg p-3 mb-3 ${
+                    connectionTest.success 
+                      ? 'bg-green-50 border-green-200' 
+                      : 'bg-red-50 border-red-200'
+                  }`}>
+                    <h3 className={`text-sm font-medium mb-1 ${
+                      connectionTest.success ? 'text-green-800' : 'text-red-800'
+                    }`}>
+                      Connection Test {connectionTest.success ? 'Passed' : 'Failed'}
+                    </h3>
+                    <p className={`text-xs ${
+                      connectionTest.success ? 'text-green-700' : 'text-red-700'
+                    }`}>
+                      {connectionTest.result}
+                    </p>
+                    <p className="text-xs text-gray-600 mt-1">
+                      URL: {CONFIG.JETSON_CAMERA_URL}
+                    </p>
+                  </div>
+                )}
+                
                 <div className="mb-4">
                   <div className="text-sm text-gray-700">Camera PDA</div>
                   <div className="flex items-center">
@@ -576,14 +770,8 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
               </>
             )}
           </div>
-          <div className="text-xs text-gray-500 mt-3 text-center px-4">
-            {isCheckedIn ? 
-              "You're currently checked in to this camera. Click the button above to check out." :
-              "Check in to interact with this camera and record events on the timeline."}
-            {error && <div className="mt-1 text-xs text-red-600">Try using a different wallet if you continue to see errors.</div>}
-          </div>
         </Dialog.Panel>
       </div>
     </Dialog>
   );
-} 
+}

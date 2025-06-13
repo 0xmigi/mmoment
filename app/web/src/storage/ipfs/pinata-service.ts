@@ -130,27 +130,45 @@ export class PinataService implements IPFSProvider {
     }
   }
 
-  async uploadFile(blob: Blob, walletAddress: string, type: 'image' | 'video'): Promise<string> {
+  async uploadFile(blob: Blob, walletAddress: string, type: 'image' | 'video', metadata?: { transactionId?: string; cameraId?: string }): Promise<string> {
     console.log(`📤 Uploading ${type} to Pinata for wallet ${walletAddress.slice(0, 8)}...`);
     this.refreshCredentials();
     
     try {
       const formData = new FormData();
       const timestamp = Date.now();
-      const filename = `${walletAddress}_${timestamp}.${type === 'video' ? 'mp4' : 'jpg'}`;
+      
+      // Determine file extension based on blob type for videos
+      let fileExtension = 'jpg';
+      let mimeType = 'image/jpeg';
+      
+      if (type === 'video') {
+        // Check the actual MIME type of the blob to determine extension
+        if (blob.type.includes('quicktime') || blob.type.includes('mov')) {
+          fileExtension = 'mov';
+          mimeType = 'video/quicktime';
+        } else {
+          fileExtension = 'mp4';
+          mimeType = 'video/mp4';
+        }
+      }
+      
+      const filename = `${walletAddress}_${timestamp}.${fileExtension}`;
       formData.append('file', blob, filename);
 
-      const metadata: IPFSMetadata = {
+      const pinataMetadata: IPFSMetadata = {
         name: filename,
         keyvalues: {
           walletAddress: walletAddress,
           timestamp: timestamp.toString(),
           isDeleted: 'false',
           type: type,
-          mimeType: type === 'video' ? 'video/mp4' : 'image/jpeg'
+          mimeType: mimeType,
+          transactionId: metadata?.transactionId,
+          cameraId: metadata?.cameraId
         }
       };
-      formData.append('pinataMetadata', JSON.stringify(metadata));
+      formData.append('pinataMetadata', JSON.stringify(pinataMetadata));
       
       // First try with JWT authentication
       try {
@@ -220,6 +238,8 @@ export class PinataService implements IPFSProvider {
             },
             params: {
               status: 'pinned',
+              pageLimit: 1000, // Get up to 1000 items (max allowed by Pinata)
+              pageOffset: 0,   // Start from the beginning
               metadata: JSON.stringify({
                 keyvalues: {
                   walletAddress: { value: walletAddress === 'all' ? undefined : walletAddress, op: 'eq' },
@@ -249,6 +269,8 @@ export class PinataService implements IPFSProvider {
             },
             params: {
               status: 'pinned',
+              pageLimit: 1000, // Get up to 1000 items (max allowed by Pinata)
+              pageOffset: 0,   // Start from the beginning
               metadata: JSON.stringify({
                 keyvalues: {
                   walletAddress: { value: walletAddress === 'all' ? undefined : walletAddress, op: 'eq' },
@@ -480,7 +502,9 @@ export class PinataService implements IPFSProvider {
           `https://cloudflare-ipfs.com/ipfs/${pin.ipfs_pin_hash}`,
           `https://gateway.ipfs.io/ipfs/${pin.ipfs_pin_hash}`
         ],
-        provider: this.name
+        provider: this.name,
+        transactionId: pin.metadata.keyvalues.transactionId,
+        cameraId: pin.metadata.keyvalues.cameraId
       }));
   }
 }

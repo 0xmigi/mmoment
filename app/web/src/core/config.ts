@@ -100,6 +100,26 @@ const getCameraHardwareUrl = () => {
   return centralCameraUrl;
 };
 
+// Function to get the Jetson Orin Nano camera URL
+const getJetsonCameraUrl = () => {
+  // Override Jetson URL if specified in environment
+  const overrideUrl = import.meta.env.VITE_JETSON_CAMERA_URL;
+  if (overrideUrl) {
+    return overrideUrl;
+  }
+
+  // For local development, check if we should use localhost
+  const forceLocal = import.meta.env.VITE_FORCE_LOCAL === 'true';
+  if (forceLocal && window.location.hostname === 'localhost') {
+    console.log('Using local Jetson camera API (forced by VITE_FORCE_LOCAL)');
+    return "http://localhost:5002";
+  }
+
+  // Default to the Jetson camera service URL (remote)
+  // Note: This should match whatever URL the Jetson is actually accessible from
+  return "https://jetson.mmoment.xyz";
+};
+
 // Get WebSocket URL for timeline updates from Railway backend
 const getTimelineWebSocketUrl = () => {
   // In development, try to connect to the local server first
@@ -128,6 +148,8 @@ export const CONFIG = {
   // Camera API is your Pi5 device with the Python/Flask server
   CAMERA_API_URL: getCameraApiUrl(),
   CAMERA_HARDWARE_URL: getCameraHardwareUrl(),
+  // Jetson Orin Nano camera service
+  JETSON_CAMERA_URL: getJetsonCameraUrl(),
   // Timeline backend is your Railway service
   BACKEND_URL: isProduction 
     ? "https://mmoment-production.up.railway.app"
@@ -138,6 +160,8 @@ export const CONFIG = {
   LIVEPEER_PLAYBACK_ID: process.env.REACT_APP_LIVEPEER_PLAYBACK_ID || '',
   TIMELINE_WS_URL: getTimelineWebSocketUrl(),
   CAMERA_PDA: import.meta.env.VITE_CAMERA_PDA || 'EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA',
+  // Jetson camera PDA
+  JETSON_CAMERA_PDA: 'WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD',
   isUsingDifferentLocalPorts: isUsingDifferentLocalPorts()
 };
 

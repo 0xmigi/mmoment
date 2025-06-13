@@ -40,7 +40,10 @@ Below is the current status of all endpoints:
 |----------|--------|-------|
 | `/health` | ✅ Working | Returns API status information |
 | `/connect` | ✅ Working | Successfully creates sessions |
-| `/stream` | ✅ Working | Returns MJPEG stream from camera |
+| `/stream` | ✅ Working | Returns MJPEG stream from camera (legacy) |
+| `/api/stream/livepeer/start` | ✅ Working | Start Livepeer streaming |
+| `/api/stream/livepeer/stop` | ✅ Working | Stop Livepeer streaming |
+| `/api/stream/livepeer/status` | ✅ Working | Get Livepeer stream status |
 | `/current_gesture` | ✅ Working | Returns current detected gesture |
 | `/test-stream` | ✅ Working | HTML test page for stream |
 | `/toggle_face_detection` | ✅ Working | Toggles face detection visualization |
@@ -131,6 +134,65 @@ Returns a live MJPEG stream from the camera. This endpoint should be embedded di
 ```html
 <img src="https://jetson.mmoment.xyz/stream" alt="Camera Stream">
 ```
+
+#### `POST /api/stream/livepeer/start`
+Starts Livepeer streaming for the camera (simplified - no session required).
+
+**Request Body:**
+```json
+{}
+```
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "status": "streaming",
+  "stream_key": "24583tdeg6syfcqi",
+  "playback_id": "24583tdeg6syfcqi",
+  "playback_url": "https://lvpr.tv/?v=24583tdeg6syfcqi",
+  "hls_url": "https://livepeercdn.studio/hls/24583tdeg6syfcqi/index.m3u8",
+  "message": "Livepeer stream started successfully"
+}
+```
+
+#### `POST /api/stream/livepeer/stop`
+Stops Livepeer streaming for the camera (simplified - no session required).
+
+**Request Body:**
+```json
+{}
+```
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "status": "stopped",
+  "message": "Livepeer stream stopped successfully"
+}
+```
+
+#### `GET /api/stream/livepeer/status`
+Gets the current Livepeer stream status.
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "status": "streaming",
+  "stream_key": "24583tdeg6syfcqi",
+  "playback_id": "24583tdeg6syfcqi",
+  "playback_url": "https://lvpr.tv/?v=24583tdeg6syfcqi",
+  "hls_url": "https://livepeercdn.studio/hls/24583tdeg6syfcqi/index.m3u8"
+}
+```
+
+**Important Notes:**
+- Livepeer streams may take 30-60 seconds to become available after starting
+- The stream is always available at: `https://lvpr.tv/?v=24583tdeg6syfcqi`
+- FFmpeg processes frames continuously when the stream is active
+- If Livepeer shows "Invalid source", wait 30-60 seconds for processing to complete
 
 ### Session Management Endpoints
 

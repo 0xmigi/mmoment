@@ -176,6 +176,15 @@ export default function MediaViewer({ isOpen, onClose, media, event, onDelete }:
                   src={media.url}
                   alt="Media preview"
                   className="w-full max-h-[60vh] object-contain"
+                  onError={(e) => {
+                    const img = e.target as HTMLImageElement;
+                    if (media.backupUrls?.length) {
+                      const currentIndex = media.backupUrls.indexOf(img.src);
+                      if (currentIndex < media.backupUrls.length - 1) {
+                        img.src = media.backupUrls[currentIndex + 1];
+                      }
+                    }
+                  }}
                 />
               )}
             </div>

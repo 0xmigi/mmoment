@@ -6,13 +6,15 @@ export interface IPFSMetadata {
     isDeleted: string;
     type: string;  // 'image' or 'video'
     mimeType: string;
+    transactionId?: string;
+    cameraId?: string;
   };
 }
 
 export interface IPFSProvider {
   name: string;
   gateway: string;
-  uploadFile(blob: Blob, walletAddress: string, type: 'image' | 'video'): Promise<string>;
+  uploadFile(blob: Blob, walletAddress: string, type: 'image' | 'video', metadata?: { transactionId?: string; cameraId?: string }): Promise<string>;
   getMediaForWallet(walletAddress: string): Promise<Array<IPFSMedia>>;
   deleteMedia(ipfsHash: string, walletAddress: string): Promise<boolean>;
   checkPinStatus(ipfsHash: string): Promise<boolean>;
@@ -49,7 +51,7 @@ export class IPFSService {
     blob: Blob, 
     walletAddress: string, 
     type: 'image' | 'video', 
-    options?: { directUrl?: string }
+    options?: { directUrl?: string; transactionId?: string; cameraId?: string }
   ): Promise<IPFSMedia[]> {
     if (!this.primaryProvider) {
       throw new Error('No primary provider configured');
@@ -57,7 +59,10 @@ export class IPFSService {
 
     try {
       // Try primary provider first
-      const url = await this.primaryProvider.uploadFile(blob, walletAddress, type);
+      const url = await this.primaryProvider.uploadFile(blob, walletAddress, type, {
+        transactionId: options?.transactionId,
+        cameraId: options?.cameraId
+      });
       const ipfsHash = url.split('/').pop()!;
       
       // Get backup URLs
@@ -79,7 +84,9 @@ export class IPFSService {
         timestamp: new Date().toISOString(),
         backupUrls,
         provider: this.primaryProvider.name,
-        directUrl: options?.directUrl
+        directUrl: options?.directUrl,
+        transactionId: options?.transactionId,
+        cameraId: options?.cameraId
       }];
     } catch (error) {
       console.error(`Failed to upload to primary provider:`, error);
@@ -87,7 +94,10 @@ export class IPFSService {
       // If primary fails and we have a backup, try that
       if (this.backupProvider) {
         try {
-          const url = await this.backupProvider.uploadFile(blob, walletAddress, type);
+          const url = await this.backupProvider.uploadFile(blob, walletAddress, type, {
+            transactionId: options?.transactionId,
+            cameraId: options?.cameraId
+          });
           const ipfsHash = url.split('/').pop()!;
           
           // Get backup URLs
@@ -109,7 +119,9 @@ export class IPFSService {
             timestamp: new Date().toISOString(),
             backupUrls,
             provider: this.backupProvider.name,
-            directUrl: options?.directUrl
+            directUrl: options?.directUrl,
+            transactionId: options?.transactionId,
+            cameraId: options?.cameraId
           }];
         } catch (backupError) {
           console.error(`Failed to upload to backup provider:`, backupError);
