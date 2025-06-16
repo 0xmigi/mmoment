@@ -23,7 +23,6 @@ export class JetsonCamera implements ICamera {
   
   private debugMode = true;
   private currentSession: CameraSession | null = null;
-  private isStreamingLocally = false; // Track streaming state locally
 
   constructor(cameraId: string, apiUrl: string) {
     this.cameraId = cameraId;
@@ -578,7 +577,6 @@ export class JetsonCamera implements ICamera {
         
         if (data.success) {
           this.log('Livepeer stream started successfully');
-          this.isStreamingLocally = true; // Update local state
           
           return {
             success: true,
@@ -605,7 +603,6 @@ export class JetsonCamera implements ICamera {
         // Even if the API returns an error, the stream might actually start
         // So we'll optimistically set the local state and let the user check
         this.log('API failed but stream might have started anyway, setting optimistic state');
-        this.isStreamingLocally = true;
         
         return {
           success: true, // Return success despite API error
@@ -624,8 +621,6 @@ export class JetsonCamera implements ICamera {
       
       // Even if there's an exception, the stream might work
       // Set optimistic state
-      this.isStreamingLocally = true;
-      
       return {
         success: true, // Return success despite error
         data: {
@@ -643,9 +638,6 @@ export class JetsonCamera implements ICamera {
   async stopStream(): Promise<CameraActionResponse<CameraStreamInfo>> {
     try {
       this.log('Stopping Livepeer stream');
-      
-      // Always reset local state when stopping
-      this.isStreamingLocally = false;
       
       // Livepeer endpoints don't require session data
       const response = await this.makeApiCall('/api/stream/livepeer/stop', 'POST');
@@ -687,7 +679,6 @@ export class JetsonCamera implements ICamera {
       }
     } catch (error) {
       this.log('Stop stream error:', error);
-      // Local state already reset above
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to stop stream'
@@ -697,37 +688,37 @@ export class JetsonCamera implements ICamera {
 
   async getStreamInfo(): Promise<CameraActionResponse<CameraStreamInfo>> {
     try {
-      this.log('Getting Livepeer stream info');
+      this.log('Getting Jetson stream info');
       
-      // Return stream info based on whether user has started streaming
-      // The playback ID is always available, but isActive depends on user action
+      // Query actual hardware state instead of using local state
+      const statusResponse = await this.getStatus();
+      const isStreamingFromHardware = statusResponse.success ? statusResponse.data?.isStreaming || false : false;
+      
+      // The Jetson has a static Livepeer playback ID that's always available
+      // The playback ID is always available, but isActive depends on hardware state
       const streamInfo = {
-        isActive: this.isStreamingLocally, // Only active when user starts it
+        isActive: isStreamingFromHardware, // Use actual hardware state
         streamUrl: 'https://lvpr.tv/?v=24583tdeg6syfcqi',
         playbackId: '24583tdeg6syfcqi', // The working playback ID from Livepeer dashboard
-        streamKey: '2458-aycn-mgfp-2dze',
-        hlsUrl: 'https://livepeercdn.studio/hls/24583tdeg6syfcqi/index.m3u8',
         format: 'livepeer' as const
       };
       
-      this.log('📤 Returning Jetson stream info - isActive:', this.isStreamingLocally);
+      this.log('📤 Returning Jetson stream info - isActive:', streamInfo.isActive, '(from hardware)');
       
       return {
         success: true,
         data: streamInfo
       };
     } catch (error) {
-      this.log('Stream info error:', error);
-      // On error, return based on local state
+      this.log('Get stream info error:', error);
       return {
-        success: true,
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get stream info',
         data: {
-          isActive: this.isStreamingLocally,
+          isActive: false,
           streamUrl: 'https://lvpr.tv/?v=24583tdeg6syfcqi',
           playbackId: '24583tdeg6syfcqi',
-          streamKey: '2458-aycn-mgfp-2dze',
-          hlsUrl: 'https://livepeercdn.studio/hls/24583tdeg6syfcqi/index.m3u8',
-          format: 'livepeer'
+          format: 'livepeer' as const
         }
       };
     }

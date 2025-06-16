@@ -77,17 +77,26 @@ const StreamPlayer = memo(() => {
     lastFetchTime.current = now;
 
     try {
-      console.log('[StreamPlayer] Fetching fresh stream info for camera:', currentCameraId);
+      console.log('[StreamPlayer] Fetching comprehensive state for camera:', currentCameraId);
       
-      // Use unified camera service to get stream info
-      const response = await unifiedCameraService.getStreamInfo(currentCameraId);
+      // Use comprehensive state for better state reconciliation
+      const comprehensiveState = await unifiedCameraService.getComprehensiveState(currentCameraId);
       
-      if (response.success && response.data) {
-        const data = response.data;
+      if (comprehensiveState.streamInfo.success && comprehensiveState.streamInfo.data) {
+        const data = comprehensiveState.streamInfo.data;
+        
+        // Log state inconsistencies for debugging
+        if (!comprehensiveState.isConsistent) {
+          console.warn('[StreamPlayer] ⚠️ Hardware/UI state inconsistency detected:', {
+            hardwareStreaming: comprehensiveState.status.data?.isStreaming,
+            streamActive: data.isActive,
+            cameraId: currentCameraId.slice(0, 8)
+          });
+        }
         
         const newStreamInfo = {
           playbackId: data.playbackId || '',
-          isActive: data.isActive,
+          isActive: data.isActive, // This now comes from actual hardware state
           streamType: data.format,
           streamUrl: data.streamUrl || await unifiedCameraService.getStreamUrl(currentCameraId) || ''
         };
@@ -96,19 +105,24 @@ const StreamPlayer = memo(() => {
         streamInfoCache.data = newStreamInfo;
         streamInfoCache.timestamp = now;
         
-        // Update state only if different
+        // Update state only if different (prevent unnecessary re-renders)
         setStreamInfo(prev => {
           if (prev?.playbackId === newStreamInfo.playbackId && 
               prev?.isActive === newStreamInfo.isActive && 
               prev?.streamType === newStreamInfo.streamType) {
             return prev;
           }
+          console.log('[StreamPlayer] 🔄 Stream state changed:', {
+            wasActive: prev?.isActive,
+            nowActive: newStreamInfo.isActive,
+            playbackId: newStreamInfo.playbackId
+          });
           return newStreamInfo;
         });
         setError(null);
         setLoadingRetry(0); // Reset retry counter on success
       } else {
-        throw new Error(response.error || 'Failed to get stream info');
+        throw new Error(comprehensiveState.streamInfo.error || 'Failed to get comprehensive state');
       }
     } catch (err) {
       console.error('Failed to get stream info:', err);
@@ -190,11 +204,11 @@ const StreamPlayer = memo(() => {
     );
   }
 
-  if (error || !streamInfo?.isActive) {
+  if (error) {
     return (
       <div className="aspect-video w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
         <div className="text-center">
-          <p className="text-gray-400">Stream is offline</p>
+          <p className="text-gray-400">Failed to load stream</p>
           {isMobile && error && (
             <button 
               className="mt-2 px-3 py-1 text-xs bg-blue-500 text-white rounded"
@@ -212,22 +226,10 @@ const StreamPlayer = memo(() => {
     );
   }
 
-  // Handle MJPEG streams (legacy - keeping for fallback)
-  if (streamInfo.streamType === 'mjpeg' && streamInfo.streamUrl) {
-    return (
-      <div className="aspect-video bg-black rounded-lg overflow-hidden">
-        <img 
-          src={streamInfo.streamUrl}
-          alt="Camera Stream"
-          className="w-full h-full object-contain"
-          style={{ imageRendering: 'auto' }}
-        />
-      </div>
-    );
-  }
-
   // Handle Livepeer streams (Pi5 cameras and Jetson cameras)
-  if (streamInfo.playbackId) {
+  // Show Livepeer streams if playbackId exists, regardless of isActive status
+  // because Jetson streams are always available
+  if (streamInfo?.playbackId) {
     return (
       <div className="aspect-video bg-black rounded-lg overflow-hidden relative">
         <Player 
@@ -253,9 +255,34 @@ const StreamPlayer = memo(() => {
           return currentCameraId && unifiedCameraService.cameraSupports(currentCameraId, 'hasLivepeerStreaming');
         })() && (
           <div className="absolute top-2 left-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">
-            Livepeer stream may take 30-60 seconds to load
+            {streamInfo.isActive ? 'Live Stream Active' : 'Stream Available (Click Start to go Live)'}
           </div>
         )}
+      </div>
+    );
+  }
+
+  // Handle MJPEG streams (legacy - keeping for fallback)
+  if (streamInfo?.streamType === 'mjpeg' && streamInfo.streamUrl) {
+    return (
+      <div className="aspect-video bg-black rounded-lg overflow-hidden">
+        <img 
+          src={streamInfo.streamUrl}
+          alt="Camera Stream"
+          className="w-full h-full object-contain"
+          style={{ imageRendering: 'auto' }}
+        />
+      </div>
+    );
+  }
+
+  // Only show "Stream is offline" if we have no playback ID and no stream URL
+  if (!streamInfo?.isActive && !streamInfo?.playbackId && !streamInfo?.streamUrl) {
+    return (
+      <div className="aspect-video w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-400">Stream is offline</p>
+        </div>
       </div>
     );
   }

@@ -45,7 +45,29 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
 
       try {
         setError(null);
+        
+        // Get IPFS media
         const allMedia = await unifiedIpfsService.getMediaForWallet(primaryWallet.address);
+        
+        // Get Jetson videos from localStorage
+        const jetsonVideos = JSON.parse(localStorage.getItem('jetson-videos') || '[]');
+        
+        // Convert Jetson videos to IPFSMedia format for compatibility
+        const jetsonMediaFormatted = jetsonVideos.map((video: any) => ({
+          id: video.id,
+          url: video.url,
+          type: 'video' as const,
+          mimeType: video.mimeType || 'video/mp4',
+          walletAddress: primaryWallet.address,
+          timestamp: new Date(video.timestamp).toISOString(),
+          backupUrls: [], // No backup URLs for direct Jetson videos
+          provider: 'jetson',
+          transactionId: video.transactionId,
+          cameraId: video.cameraId
+        }));
+        
+        // Combine IPFS and Jetson media
+        const combinedMedia = [...jetsonMediaFormatted, ...allMedia];
 
         if (!isSubscribed) return;
 
@@ -53,7 +75,7 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
         retryCount = 0;
 
         // Sort by timestamp, newest first
-        const sortedMedia = allMedia.sort((a, b) =>
+        const sortedMedia = combinedMedia.sort((a, b) =>
           new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
         );
 
@@ -121,7 +143,28 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
       setDeleting(mediaId);
       setError(null);
 
-      const success = await unifiedIpfsService.deleteMedia(mediaId, primaryWallet.address);
+      // Find the media item to determine if it's IPFS or Jetson
+      const mediaItem = media.find(m => m.id === mediaId);
+      
+      if (!mediaItem) {
+        setError('Media not found');
+        return;
+      }
+
+      let success = false;
+
+      if (mediaItem.provider === 'jetson') {
+        // Handle Jetson video deletion from localStorage
+        const jetsonVideos = JSON.parse(localStorage.getItem('jetson-videos') || '[]');
+        const filteredVideos = jetsonVideos.filter((video: any) => video.id !== mediaId);
+        localStorage.setItem('jetson-videos', JSON.stringify(filteredVideos));
+        success = true;
+        console.log('Deleted Jetson video from localStorage:', mediaId);
+      } else {
+        // Handle IPFS media deletion
+        success = await unifiedIpfsService.deleteMedia(mediaId, primaryWallet.address);
+        console.log('Deleted IPFS media:', mediaId, 'success:', success);
+      }
 
       if (success) {
         setMedia(current => current.filter(m => m.id !== mediaId));
@@ -182,6 +225,35 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
                   <video
                     src={item.url}
                     className="w-full h-full object-cover"
+                    onError={(e) => {
+                      console.error('Video playback error:', {
+                        mediaId: item.id,
+                        url: item.url,
+                        mimeType: item.mimeType,
+                        provider: item.provider,
+                        error: e.currentTarget.error
+                      });
+                      
+                      // For Jetson videos, the direct URL should work
+                      if (item.provider === 'jetson') {
+                        console.error('Direct Jetson video failed to load:', item.url);
+                      }
+                    }}
+                    onLoadStart={(e) => {
+                      console.log('Video load started:', {
+                        mediaId: item.id,
+                        url: item.url,
+                        mimeType: item.mimeType
+                      });
+                    }}
+                    onCanPlay={(e) => {
+                      console.log('Video can play:', {
+                        mediaId: item.id,
+                        duration: e.currentTarget.duration,
+                        videoWidth: e.currentTarget.videoWidth,
+                        videoHeight: e.currentTarget.videoHeight
+                      });
+                    }}
                   />
                 ) : (
                   <img

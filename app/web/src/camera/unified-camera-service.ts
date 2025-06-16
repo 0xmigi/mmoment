@@ -884,119 +884,88 @@ export class UnifiedCameraService {
     }
   }
 
-  // Debug function to test direct Jetson recording (bypass session complexity)
-  async debugDirectJetsonRecording(): Promise<void> {
-    console.log('🎬 Testing direct Jetson recording API...');
-    
+  /**
+   * Get comprehensive camera state (status + stream info)
+   * This is used for state reconciliation to ensure UI matches hardware reality
+   */
+  public async getComprehensiveState(cameraId: string): Promise<{
+    status: CameraActionResponse<CameraStatus>;
+    streamInfo: CameraActionResponse<CameraStreamInfo>;
+    isConsistent: boolean;
+  }> {
     try {
-      const jetsonUrl = 'https://jetson.mmoment.xyz';
+      this.log(`Getting comprehensive state for camera: ${cameraId}`);
       
-      // Test 1: Check if we can reach the API
-      console.log('1️⃣ Testing API connectivity...');
-      const healthResponse = await fetch(`${jetsonUrl}/api/health`);
-      console.log('Health check status:', healthResponse.status);
-      
-      if (healthResponse.ok) {
-        const healthData = await healthResponse.json();
-        console.log('✅ API is reachable:', healthData);
-      }
-      
-      // Test 2: Try to connect/create session
-      console.log('2️⃣ Testing session creation...');
-      const connectResponse = await fetch(`${jetsonUrl}/api/session/connect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          wallet_address: '9gERcKdpaTNLfFNNYANzs1P73iMHJpVqhvKMKLa6Xvo'
-        })
-      });
-      
-      console.log('Connect response status:', connectResponse.status);
-      
-      if (connectResponse.ok) {
-        const connectData = await connectResponse.json();
-        console.log('✅ Session created:', connectData);
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        const errorResponse = {
+          success: false,
+          error: `Camera not found: ${cameraId}`,
+          data: {
+            isOnline: false,
+            isStreaming: false,
+            isRecording: false,
+            lastSeen: Date.now()
+          }
+        };
         
-        // Test 3: Try to start recording
-        console.log('3️⃣ Testing recording start...');
-        const recordResponse = await fetch(`${jetsonUrl}/api/record`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            wallet_address: '9gERcKdpaTNLfFNNYANzs1P73iMHJpVqhvKMKLa6Xvo',
-            session_id: connectData.session_id,
-            duration: 5  // 5 seconds for testing
-          })
+        return {
+          status: errorResponse,
+          streamInfo: {
+            success: false,
+            error: `Camera not found: ${cameraId}`,
+            data: { isActive: false, streamUrl: '', playbackId: '', format: 'mjpeg' as const }
+          },
+          isConsistent: false
+        };
+      }
+
+      // Get both status and stream info in parallel
+      const [statusResponse, streamResponse] = await Promise.all([
+        camera.getStatus(),
+        camera.getStreamInfo()
+      ]);
+
+      // Check consistency between status and stream info
+      const statusStreaming = statusResponse.success ? statusResponse.data?.isStreaming || false : false;
+      const streamActive = streamResponse.success ? streamResponse.data?.isActive || false : false;
+      const isConsistent = statusStreaming === streamActive;
+
+      if (!isConsistent) {
+        this.log(`⚠️ State inconsistency detected for ${cameraId}:`, {
+          statusStreaming,
+          streamActive
         });
-        
-        console.log('Recording response status:', recordResponse.status);
-        
-        if (recordResponse.ok) {
-          const recordData = await recordResponse.json();
-          console.log('✅ Recording started:', recordData);
-          
-          // Test 4: Auto-stop after 7 seconds
-          setTimeout(async () => {
-            console.log('4️⃣ Testing recording stop...');
-            const stopResponse = await fetch(`${jetsonUrl}/api/record`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                action: 'stop',
-                wallet_address: '9gERcKdpaTNLfFNNYANzs1P73iMHJpVqhvKMKLa6Xvo',
-                session_id: connectData.session_id
-              })
-            });
-            
-            console.log('Stop response status:', stopResponse.status);
-            
-            if (stopResponse.ok) {
-              const stopData = await stopResponse.json();
-              console.log('✅ Recording stopped:', stopData);
-              
-              if (stopData.filename) {
-                console.log('5️⃣ Testing video download...');
-                const videoUrl = `${jetsonUrl}/api/videos/${stopData.filename}`;
-                console.log('📥 Video URL:', videoUrl);
-                
-                // Try to download
-                const videoResponse = await fetch(videoUrl);
-                if (videoResponse.ok) {
-                  const videoBlob = await videoResponse.blob();
-                  console.log('✅ Video downloaded:', videoBlob.size, 'bytes');
-                  
-                  // Trigger browser download
-                  const url = URL.createObjectURL(videoBlob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = stopData.filename;
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  URL.revokeObjectURL(url);
-                  
-                  console.log('🎉 Direct Jetson recording test SUCCESSFUL!');
-                } else {
-                  console.log('❌ Failed to download video:', videoResponse.status);
-                }
-              }
-            } else {
-              const stopError = await stopResponse.text();
-              console.log('❌ Failed to stop recording:', stopError);
-            }
-          }, 7000);
-          
-        } else {
-          const recordError = await recordResponse.text();
-          console.log('❌ Failed to start recording:', recordError);
-        }
-      } else {
-        const connectError = await connectResponse.text();
-        console.log('❌ Failed to connect:', connectError);
       }
-      
+
+      return {
+        status: statusResponse,
+        streamInfo: streamResponse,
+        isConsistent
+      };
     } catch (error) {
-      console.error('❌ Direct Jetson test failed:', error);
+      this.log(`Error getting comprehensive state for ${cameraId}:`, error);
+      
+      const errorResponse = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get comprehensive state',
+        data: {
+          isOnline: false,
+          isStreaming: false,
+          isRecording: false,
+          lastSeen: Date.now()
+        }
+      };
+
+      return {
+        status: errorResponse,
+        streamInfo: {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to get stream info',
+          data: { isActive: false, streamUrl: '', playbackId: '', format: 'mjpeg' as const }
+        },
+        isConsistent: false
+      };
     }
   }
 }
@@ -1009,6 +978,5 @@ if (typeof window !== 'undefined') {
   (window as any).debugStreamDisplayFix = () => unifiedCameraService.debugStreamDisplayFix();
   (window as any).debugTimedVideoRecording = (duration?: number) => unifiedCameraService.debugTimedVideoRecording(undefined, duration);
   (window as any).debugCameraRegistry = () => unifiedCameraService.debugCameraRegistry();
-  (window as any).debugDirectJetsonRecording = () => unifiedCameraService.debugDirectJetsonRecording();
   (window as any).unifiedCameraService = unifiedCameraService;
 } 

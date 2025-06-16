@@ -75,11 +75,25 @@ export class IPFSService {
         }
       }
       
+      // Determine MIME type more accurately for videos
+      let mimeType = 'image/jpeg';
+      if (type === 'video') {
+        // Check the actual blob type first
+        if (blob.type && blob.type.includes('video')) {
+          mimeType = blob.type;
+        } else if (blob.type && blob.type.includes('quicktime')) {
+          mimeType = 'video/quicktime';
+        } else {
+          // Default to mp4 for unknown video types
+          mimeType = 'video/mp4';
+        }
+      }
+      
       return [{
         id: ipfsHash,
         url,
         type,
-        mimeType: type === 'video' ? 'video/quicktime' : 'image/jpeg',
+        mimeType,
         walletAddress,
         timestamp: new Date().toISOString(),
         backupUrls,
@@ -110,11 +124,25 @@ export class IPFSService {
             }
           }
           
+          // Determine MIME type more accurately for videos
+          let mimeType = 'image/jpeg';
+          if (type === 'video') {
+            // Check the actual blob type first
+            if (blob.type && blob.type.includes('video')) {
+              mimeType = blob.type;
+            } else if (blob.type && blob.type.includes('quicktime')) {
+              mimeType = 'video/quicktime';
+            } else {
+              // Default to mp4 for unknown video types
+              mimeType = 'video/mp4';
+            }
+          }
+          
           return [{
             id: ipfsHash,
             url,
             type,
-            mimeType: type === 'video' ? 'video/quicktime' : 'image/jpeg',
+            mimeType,
             walletAddress,
             timestamp: new Date().toISOString(),
             backupUrls,

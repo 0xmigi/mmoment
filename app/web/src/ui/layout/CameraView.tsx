@@ -456,8 +456,12 @@ export function CameraView() {
         return 'video_recorded';
       case 'stream':
         return isStreaming ? 'stream_ended' : 'stream_started';
+      case 'stream_start':
+        return 'stream_started';
+      case 'stream_stop':
+        return 'stream_ended';
       default:
-        return 'photo_captured';
+        return 'initialization'; // Changed from 'photo_captured' to avoid fake photo entries
     }
   };
 
@@ -1187,7 +1191,7 @@ export function CameraView() {
       }
       
       setRecordingTransactionSignature(signature);
-      updateToast('info', 'Starting video recording (5 seconds)...');
+      updateToast('info', 'Starting video recording (30 seconds) - will auto-stop and upload');
       
       try {
         const jetsonUrl = 'https://jetson.mmoment.xyz';
@@ -1213,8 +1217,8 @@ export function CameraView() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             wallet_address: walletAddress,
-            session_id: connectData.session_id,
-            duration: 5  // 5 seconds - let Jetson use default .mov format
+            session_id: connectData.session_id
+            // Remove duration - let it record indefinitely until we stop it
           })
         });
         
@@ -1224,9 +1228,10 @@ export function CameraView() {
         
         const recordData = await recordResponse.json();
         console.log('Recording started:', recordData);
+        console.log('⏱️ 30-second timer started, will stop at:', new Date(Date.now() + 30000).toLocaleTimeString());
         
         setIsRecording(true);
-        updateToast('success', 'Video recording started (5 seconds) - will auto-stop and upload');
+        updateToast('success', 'Video recording started (30 seconds) - will auto-stop and upload');
         
         // Add timeline event
         addTimelineEvent('video_recorded', signature);
@@ -1234,10 +1239,18 @@ export function CameraView() {
           timelineRef.current?.refreshEvents();
         }
         
-        // Step 3: Auto-stop after 7 seconds
+        // Add periodic logging to show recording is active
+        const progressInterval = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - Date.now()) / 1000);
+          console.log(`📹 Recording in progress...`);
+        }, 5000);
+        
+        // Step 3: Stop after exactly 30 seconds
         setTimeout(async () => {
+          clearInterval(progressInterval);
           try {
-            console.log('Auto-stopping recording...');
+            console.log('⏹️ 30 seconds completed at:', new Date().toLocaleTimeString(), '- stopping recording...');
+            updateToast('info', 'Recording completed, processing video...');
             
             const stopResponse = await fetch(`${jetsonUrl}/api/record`, {
               method: 'POST',
@@ -1254,62 +1267,94 @@ export function CameraView() {
               console.log('Recording stopped:', stopData);
               
               if (stopData.filename) {
-                // Step 4: Upload the .mov video to IPFS (explicitly request .mov format)
-                const baseFilename = stopData.filename.replace(/\.(mov|mp4)$/, ''); // Remove any extension
-                const movFilename = `${baseFilename}.mov`; // Ensure .mov extension
-                const videoUrl = `${jetsonUrl}/api/videos/${movFilename}`;
-                const videoResponse = await fetch(videoUrl);
+                // Wait longer for video encoding since it's a 30-second video
+                console.log('Waiting for video encoding to complete...');
+                updateToast('info', 'Video processing - please wait (this may take 10-15 seconds)...');
                 
-                if (videoResponse.ok) {
-                  const videoBlob = await videoResponse.blob();
-                  
-                  // Upload to IPFS instead of downloading
-                  updateToast('info', 'Video recording completed, uploading to IPFS...');
-                  
+                // Wait for encoding to complete
+                setTimeout(async () => {
                   try {
-                    // Upload to IPFS
-                    const { unifiedIpfsService } = await import('../../storage/ipfs/unified-ipfs-service');
-                    const results = await unifiedIpfsService.uploadFile(
-                      videoBlob,
-                      walletAddress,
-                      'video',
-                      {
-                        transactionId: signature,
-                        cameraId: currentCameraId
+                    // Download the video file - REQUEST THE .MP4 VERSION!
+                    const mp4Filename = stopData.filename.replace('.mov', '.mp4');
+                    const videoUrl = `${jetsonUrl}/api/videos/${mp4Filename}`;
+                    console.log('Downloading MP4 video from:', videoUrl);
+                    const videoResponse = await fetch(videoUrl, {
+                      headers: {
+                        'Accept': 'video/mp4,video/quicktime,video/*'
                       }
-                    );
+                    });
                     
-                    if (results.length > 0) {
-                      updateToast('success', 'Video recorded and uploaded to IPFS successfully!');
+                    if (videoResponse.ok) {
+                      const videoBlob = await videoResponse.blob();
+                      console.log('MP4 video downloaded:', videoBlob.size, 'bytes', 'type:', videoBlob.type);
+                      
+                      // Use the direct Jetson MP4 URL
+                      const directVideoUrl = `${jetsonUrl}/api/videos/${mp4Filename}`;
+                      console.log('Using direct MP4 video URL:', directVideoUrl);
+                      
+                      // Store the video record directly with the Jetson MP4 URL
+                      updateToast('info', 'Video processed successfully, saving...');
+                      
+                      try {
+                        // Create a simple media record with the direct MP4 URL
+                        const mediaRecord = {
+                          id: `jetson-${Date.now()}`,
+                          url: directVideoUrl,
+                          mimeType: 'video/mp4',
+                          provider: 'jetson',
+                          backupUrls: [], // No backup URLs needed
+                          transactionId: signature,
+                          cameraId: currentCameraId,
+                          timestamp: Date.now(),
+                          filename: mp4Filename
+                        };
+                        
+                        // Store in localStorage for the gallery to display
+                        const existingMedia = JSON.parse(localStorage.getItem('jetson-videos') || '[]');
+                        existingMedia.unshift(mediaRecord); // Add to beginning
+                        localStorage.setItem('jetson-videos', JSON.stringify(existingMedia));
+                        
+                        console.log('MP4 video record created and stored:', mediaRecord);
+                        
+                        updateToast('success', 'Video recorded and saved successfully!');
+                      } catch (saveError) {
+                        console.error('Video save error:', saveError);
+                        updateToast('success', 'Video recorded but save failed');
+                      }
                     } else {
-                      updateToast('success', 'Video recorded (upload to IPFS failed)');
+                      updateToast('error', 'Failed to download MP4 video from camera');
                     }
-                  } catch (uploadError) {
-                    console.error('Error uploading to IPFS:', uploadError);
-                    updateToast('success', 'Video recorded (upload to IPFS failed)');
+                  } catch (downloadError) {
+                    console.error('Video download error:', downloadError);
+                    updateToast('error', 'Failed to process recorded video');
+                  } finally {
+                    setIsRecording(false);
+                    setRecordingTransactionSignature(null);
+                    
+                    // Refresh timeline
+                    if (timelineRef.current?.refreshEvents) {
+                      timelineRef.current?.refreshEvents();
+                    }
                   }
-                } else {
-                  updateToast('error', 'Failed to download video');
-                }
+                }, 10000); // Wait 10s for encoding
+                
+              } else {
+                updateToast('error', 'Recording completed but no video file was created');
+                setIsRecording(false);
+                setRecordingTransactionSignature(null);
               }
             } else {
               updateToast('error', 'Failed to stop recording');
+              setIsRecording(false);
+              setRecordingTransactionSignature(null);
             }
-            
+          } catch (error) {
+            console.error('Recording stop error:', error);
+            updateToast('error', 'Error stopping recording');
             setIsRecording(false);
             setRecordingTransactionSignature(null);
-            
-            // Refresh timeline
-            if (timelineRef.current?.refreshEvents) {
-              timelineRef.current?.refreshEvents();
-            }
-            
-          } catch (error) {
-            console.error('Error in auto-stop:', error);
-            setIsRecording(false);
-            updateToast('error', 'Error processing video recording');
           }
-        }, 7000); // 7 seconds
+        }, 30000); // Record for 30s
         
       } catch (error) {
         console.error('Error in video recording:', error);
@@ -1366,11 +1411,10 @@ export function CameraView() {
         if (response.success) {
           setIsStreaming(false);
           updateToast('success', 'Stream stopped');
-          addTimelineEvent('stream_ended', signature);
+          // Timeline event already created by sendSimpleTransaction
         } else {
           updateToast('error', `Failed to stop stream: ${response.error || 'Unknown error'}`);
-          // Still add timeline event for the transaction
-          addTimelineEvent('stream_ended', signature);
+          // Timeline event already created by sendSimpleTransaction
         }
       } else {
         // Start streaming
@@ -1394,11 +1438,10 @@ export function CameraView() {
         if (response.success) {
           setIsStreaming(true);
           updateToast('success', 'Stream started');
-          addTimelineEvent('stream_started', signature);
+          // Timeline event already created by sendSimpleTransaction
         } else {
           updateToast('error', `Failed to start stream: ${response.error || 'Unknown error'}`);
-          // Still add timeline event for the transaction
-          addTimelineEvent('stream_started', signature);
+          // Timeline event already created by sendSimpleTransaction
         }
       }
       

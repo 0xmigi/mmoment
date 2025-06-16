@@ -95,12 +95,25 @@ export default function MediaViewer({ isOpen, onClose, media, event, onDelete }:
 
   // Function to handle media deletion
   const handleDelete = async (mediaId: string) => {
-    if (!primaryWallet?.address) return;
+    if (!primaryWallet?.address || !media) return;
     
     try {
       setDeleting(true);
       
-      const success = await unifiedIpfsService.deleteMedia(mediaId, primaryWallet.address);
+      let success = false;
+
+      if (media.provider === 'jetson') {
+        // Handle Jetson video deletion from localStorage
+        const jetsonVideos = JSON.parse(localStorage.getItem('jetson-videos') || '[]');
+        const filteredVideos = jetsonVideos.filter((video: any) => video.id !== mediaId);
+        localStorage.setItem('jetson-videos', JSON.stringify(filteredVideos));
+        success = true;
+        console.log('Deleted Jetson video from localStorage:', mediaId);
+      } else {
+        // Handle IPFS media deletion
+        success = await unifiedIpfsService.deleteMedia(mediaId, primaryWallet.address);
+        console.log('Deleted IPFS media:', mediaId, 'success:', success);
+      }
       
       if (success) {
         if (onDelete) {
