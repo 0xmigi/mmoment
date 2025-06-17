@@ -1384,21 +1384,9 @@ export function CameraView() {
   };
 
   const handleDirectStream = async () => {
-    // Check if there's a camera connected first
-    if (!cameraAccount && !selectedCamera) {
-      updateToast('error', 'No camera connected. Please connect to a camera first.');
-      return;
-    }
-
-    const currentCameraId = cameraAccount || selectedCamera?.publicKey;
+    const currentCameraId = cameraAccount || selectedCamera?.publicKey || CONFIG.JETSON_CAMERA_PDA;
     if (!currentCameraId) {
-      updateToast('error', 'No camera ID available.');
-      return;
-    }
-
-    // Check if camera exists in registry
-    if (!unifiedCameraService.hasCamera(currentCameraId)) {
-      updateToast('error', 'Camera not found in registry. Please reconnect.');
+      updateToast('error', 'No camera selected');
       return;
     }
 
@@ -1409,9 +1397,12 @@ export function CameraView() {
     }
 
     try {
+      console.log(`🔄 [STREAM DEBUG] Current hardware state:`, hardwareState);
+      
       if (hardwareState.isStreaming) {
         // Stop streaming
         updateToast('info', 'Stopping stream...');
+        console.log(`🛑 [STREAM DEBUG] Attempting to stop stream...`);
         
         // First create the blockchain transaction
         const signature = await sendSimpleTransaction('stream_stop');
@@ -1421,9 +1412,11 @@ export function CameraView() {
         }
         
         const response = await unifiedCameraService.stopStream(currentCameraId);
+        console.log(`🛑 [STREAM DEBUG] Stop stream response:`, response);
         
         if (response.success) {
-          // Hardware state will be updated by polling
+          // Force immediate hardware state poll
+          setTimeout(() => pollHardwareState(), 500);
           updateToast('success', 'Stream stopped');
           // Timeline event already created by sendSimpleTransaction
         } else {
@@ -1433,6 +1426,7 @@ export function CameraView() {
       } else {
         // Start streaming
         updateToast('info', 'Starting stream...');
+        console.log(`▶️ [STREAM DEBUG] Attempting to start stream...`);
         
         // First create the blockchain transaction
         const signature = await sendSimpleTransaction('stream_start');
@@ -1448,9 +1442,11 @@ export function CameraView() {
         }
         
         const response = await unifiedCameraService.startStream(currentCameraId);
+        console.log(`▶️ [STREAM DEBUG] Start stream response:`, response);
         
         if (response.success) {
-          // Hardware state will be updated by polling
+          // Force immediate hardware state poll
+          setTimeout(() => pollHardwareState(), 500);
           updateToast('success', 'Stream started');
           // Timeline event already created by sendSimpleTransaction
         } else {
@@ -1459,12 +1455,16 @@ export function CameraView() {
         }
       }
       
+      // Force additional polls at 2s and 5s intervals to catch delayed state changes
+      setTimeout(() => pollHardwareState(), 2000);
+      setTimeout(() => pollHardwareState(), 5000);
+      
       // Refresh the timeline
       if (timelineRef.current?.refreshEvents) {
         timelineRef.current?.refreshEvents();
       }
     } catch (error) {
-      console.error('Error handling stream:', error);
+      console.error('🚨 [STREAM DEBUG] Error handling stream:', error);
       updateToast('error', `Error handling stream: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };

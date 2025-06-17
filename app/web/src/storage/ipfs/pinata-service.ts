@@ -228,6 +228,25 @@ export class PinataService implements IPFSProvider {
     this.refreshCredentials();
 
     try {
+      // Fix: Don't use undefined for 'all' case - use different query approach
+      const queryParams: any = {
+        status: 'pinned',
+        pageLimit: 1000,
+        pageOffset: 0
+      };
+      
+      // Only add metadata filter if we have a specific wallet address
+      if (walletAddress !== 'all') {
+        queryParams.metadata = JSON.stringify({
+          keyvalues: {
+            walletAddress: { value: walletAddress, op: 'eq' },
+            isDeleted: { value: 'false', op: 'eq' }
+          }
+        });
+      }
+      
+      console.log(`📊 Query params:`, queryParams);
+
       // Try with JWT first
       try {
         const response = await axios.get<PinataResponse>(
@@ -236,26 +255,18 @@ export class PinataService implements IPFSProvider {
             headers: {
               'Authorization': `Bearer ${PINATA_JWT}`
             },
-            params: {
-              status: 'pinned',
-              pageLimit: 1000, // Get up to 1000 items (max allowed by Pinata)
-              pageOffset: 0,   // Start from the beginning
-              metadata: JSON.stringify({
-                keyvalues: {
-                  walletAddress: { value: walletAddress === 'all' ? undefined : walletAddress, op: 'eq' },
-                  isDeleted: { value: 'false', op: 'eq' }
-                }
-              })
-            }
+            params: queryParams
           }
         );
         
         if (response.data && response.data.rows) {
-          console.log(`Successfully fetched ${response.data.rows.length} media items with JWT`);
-          return this.processMediaResponse(response.data, walletAddress);
+          console.log(`✅ Successfully fetched ${response.data.rows.length} total items with JWT`);
+          const processedMedia = this.processMediaResponse(response.data, walletAddress);
+          console.log(`📄 Processed to ${processedMedia.length} media items for wallet`);
+          return processedMedia;
         }
       } catch (jwtError) {
-        console.warn('JWT media fetch failed, trying with API key:', jwtError);
+        console.warn('🚨 JWT media fetch failed, trying with API key:', jwtError);
       }
       
       // If JWT fails, try with API key
@@ -267,28 +278,26 @@ export class PinataService implements IPFSProvider {
               'pinata_api_key': PINATA_API_KEY,
               'pinata_secret_api_key': PINATA_API_SECRET
             },
-            params: {
-              status: 'pinned',
-              pageLimit: 1000, // Get up to 1000 items (max allowed by Pinata)
-              pageOffset: 0,   // Start from the beginning
-              metadata: JSON.stringify({
-                keyvalues: {
-                  walletAddress: { value: walletAddress === 'all' ? undefined : walletAddress, op: 'eq' },
-                  isDeleted: { value: 'false', op: 'eq' }
-                }
-              })
-            }
+            params: queryParams
           }
         );
         
-        return this.processMediaResponse(response.data, walletAddress);
+        if (response.data && response.data.rows) {
+          console.log(`✅ Successfully fetched ${response.data.rows.length} total items with API key`);
+          const processedMedia = this.processMediaResponse(response.data, walletAddress);
+          console.log(`📄 Processed to ${processedMedia.length} media items for wallet`);
+          return processedMedia;
+        }
       } catch (apiKeyError) {
-        console.error('API key media fetch failed:', apiKeyError);
+        console.error('🚨 API key media fetch failed:', apiKeyError);
         throw apiKeyError;
       }
+      
+      console.warn('🚨 No media data returned from either authentication method');
+      return [];
     } catch (error) {
-      console.error('Failed to fetch media:', error);
-      throw error;
+      console.error('🚨 Failed to fetch media for wallet:', error);
+      return [];
     }
   }
 
