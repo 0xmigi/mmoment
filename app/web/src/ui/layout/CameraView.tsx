@@ -12,6 +12,7 @@ import { useCamera, CameraData, fetchCameraByPublicKey } from '../../camera/Came
 import { PublicKey, Connection, Transaction, TransactionInstruction } from '@solana/web3.js';
 import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from '../../anchor/setup';
 import { unifiedCameraService } from '../../camera/unified-camera-service';
+import { unifiedIpfsService } from '../../storage/ipfs/unified-ipfs-service';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { TransactionModal } from '../../auth/components/TransactionModal';
 import { StopCircle, Play, Camera, Video, Loader, Link2, CheckCircle } from 'lucide-react';
@@ -1107,7 +1108,6 @@ export function CameraView() {
           
           try {
             // Upload to IPFS
-            const { unifiedIpfsService } = await import('../../storage/ipfs/unified-ipfs-service');
             console.log('[PHOTO DEBUG] Starting IPFS upload...');
             
             const results = await unifiedIpfsService.uploadFile(
@@ -1306,34 +1306,33 @@ export function CameraView() {
                       const directVideoUrl = `${jetsonUrl}/api/videos/${mp4Filename}`;
                       console.log('Using direct MP4 video URL:', directVideoUrl);
                       
-                      // Store the video record directly with the Jetson MP4 URL
-                      updateToast('info', 'Video processed successfully, saving...');
+                      // Upload video to IPFS properly - NO localStorage shortcuts!
+                      updateToast('info', 'Video processed successfully, uploading to IPFS...');
                       
                       try {
-                        // Create a simple media record with the direct MP4 URL
-                        const mediaRecord = {
-                          id: `jetson-${Date.now()}`,
-                          url: directVideoUrl,
-                          mimeType: 'video/mp4',
-                          provider: 'jetson',
-                          backupUrls: [], // No backup URLs needed
-                          transactionId: signature,
-                          cameraId: currentCameraId,
-                          timestamp: Date.now(),
-                          filename: mp4Filename
-                        };
+                        console.log('📤 Uploading video to IPFS:', videoBlob.size, 'bytes');
                         
-                        // Store in localStorage for the gallery to display
-                        const existingMedia = JSON.parse(localStorage.getItem('jetson-videos') || '[]');
-                        existingMedia.unshift(mediaRecord); // Add to beginning
-                        localStorage.setItem('jetson-videos', JSON.stringify(existingMedia));
+                        // Upload to IPFS with proper metadata
+                        const ipfsResult = await unifiedIpfsService.uploadFile(
+                          videoBlob, 
+                          primaryWallet?.address || '', 
+                          'video',
+                          {
+                            transactionId: signature,
+                            cameraId: currentCameraId
+                          }
+                        );
                         
-                        console.log('MP4 video record created and stored:', mediaRecord);
-                        
-                        updateToast('success', 'Video recorded and saved successfully!');
-                      } catch (saveError) {
-                        console.error('Video save error:', saveError);
-                        updateToast('success', 'Video recorded but save failed');
+                        if (ipfsResult && ipfsResult.length > 0) {
+                          console.log('✅ Video uploaded to IPFS successfully:', ipfsResult[0]);
+                          updateToast('success', 'Video recorded and uploaded to IPFS successfully!');
+                        } else {
+                          console.error('❌ IPFS upload failed - no result returned');
+                          updateToast('error', 'Video recorded but IPFS upload failed');
+                        }
+                      } catch (ipfsError) {
+                        console.error('❌ IPFS upload error:', ipfsError);
+                        updateToast('error', 'Video recorded but IPFS upload failed');
                       }
                     } else {
                       updateToast('error', 'Failed to download MP4 video from camera');
