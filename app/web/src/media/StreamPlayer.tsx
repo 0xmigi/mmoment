@@ -162,8 +162,8 @@ const StreamPlayer = memo(() => {
   useEffect(() => {
     // Fetch stream info for all cameras using standardized API
     fetchStreamInfo();
-    // Use different polling intervals for mobile vs desktop
-    const pollingInterval = isMobile ? 30000 : 15000;
+    // Use much faster polling intervals for responsive UI
+    const pollingInterval = isMobile ? 10000 : 5000; // 5s desktop, 10s mobile
     pollInterval.current = setInterval(() => fetchStreamInfo(), pollingInterval);
     
     return () => {

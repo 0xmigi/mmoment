@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, @typescript-eslint/no-non-null-assertion */
 import { useDynamicContext, useEmbeddedWallet } from '@dynamic-labs/sdk-react-core';
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { Timeline } from '../../timeline/Timeline';
 import MediaGallery from '../../media/Gallery';
@@ -232,6 +232,20 @@ export function CameraView() {
     type: 'photo' | 'video' | 'stream' | 'initialize';
     cameraAccount: string;
   } | null>(null);
+  
+  // Remove local isStreaming state - query hardware instead
+  const [hardwareState, setHardwareState] = useState<{
+    isStreaming: boolean;
+    isRecording: boolean;
+    lastUpdated: number;
+  }>({
+    isStreaming: false,
+    isRecording: false,
+    lastUpdated: 0
+  });
+  
+  // Polling interval for hardware state
+  const hardwareStateInterval = useRef<NodeJS.Timeout>();
 
   // Add a function to create timeline events with Farcaster profile info
   const addTimelineEvent = (eventType: TimelineEventType, transactionId?: string, mediaUrl?: string) => {
@@ -1395,7 +1409,7 @@ export function CameraView() {
     }
 
     try {
-      if (isStreaming) {
+      if (hardwareState.isStreaming) {
         // Stop streaming
         updateToast('info', 'Stopping stream...');
         
@@ -1409,7 +1423,7 @@ export function CameraView() {
         const response = await unifiedCameraService.stopStream(currentCameraId);
         
         if (response.success) {
-          setIsStreaming(false);
+          // Hardware state will be updated by polling
           updateToast('success', 'Stream stopped');
           // Timeline event already created by sendSimpleTransaction
         } else {
@@ -1436,7 +1450,7 @@ export function CameraView() {
         const response = await unifiedCameraService.startStream(currentCameraId);
         
         if (response.success) {
-          setIsStreaming(true);
+          // Hardware state will be updated by polling
           updateToast('success', 'Stream started');
           // Timeline event already created by sendSimpleTransaction
         } else {
@@ -1458,10 +1472,10 @@ export function CameraView() {
   // Add a useEffect to handle stream state changes
   useEffect(() => {
     // When streaming starts, clear any lingering "Starting stream..." toast
-    if (isStreaming && currentToast?.message?.includes('Starting stream')) {
+    if (hardwareState.isStreaming && currentToast?.message?.includes('Starting stream')) {
       dismissToast();
     }
-  }, [isStreaming, currentToast]);
+  }, [hardwareState.isStreaming, currentToast]);
 
   // Helper function to handle stream errors more gracefully
 
@@ -1551,6 +1565,55 @@ export function CameraView() {
     }
   }, [cameraAccount, selectedCamera]);
 
+  // Function to poll actual hardware state
+  const pollHardwareState = useCallback(async () => {
+    const currentCameraId = cameraAccount || selectedCamera?.publicKey || localStorage.getItem('directCameraId');
+    if (!currentCameraId) return;
+
+    try {
+      const comprehensiveState = await unifiedCameraService.getComprehensiveState(currentCameraId);
+      
+      if (comprehensiveState.status.success && comprehensiveState.streamInfo.success) {
+        const newState = {
+          isStreaming: comprehensiveState.streamInfo.data?.isActive || false,
+          isRecording: comprehensiveState.status.data?.isRecording || false,
+          lastUpdated: Date.now()
+        };
+        
+        // Only update if state actually changed
+        setHardwareState(prev => {
+          if (prev.isStreaming !== newState.isStreaming || prev.isRecording !== newState.isRecording) {
+            console.log('[CameraView] 🔄 Hardware state changed:', {
+              wasStreaming: prev.isStreaming,
+              nowStreaming: newState.isStreaming,
+              wasRecording: prev.isRecording,
+              nowRecording: newState.isRecording
+            });
+            return newState;
+          }
+          return { ...prev, lastUpdated: newState.lastUpdated };
+        });
+      }
+    } catch (error) {
+      console.error('[CameraView] Failed to poll hardware state:', error);
+    }
+  }, [cameraAccount, selectedCamera?.publicKey]);
+
+  // Set up hardware state polling
+  useEffect(() => {
+    // Poll immediately
+    pollHardwareState();
+    
+    // Then poll every 3 seconds for responsive UI
+    hardwareStateInterval.current = setInterval(pollHardwareState, 3000);
+    
+    return () => {
+      if (hardwareStateInterval.current) {
+        clearInterval(hardwareStateInterval.current);
+      }
+    };
+  }, [pollHardwareState]);
+
   return (
     <>
       <div className="h-full overflow-y-auto pb-40">
@@ -1577,10 +1640,7 @@ export function CameraView() {
                   // Show success message and toggle stream state if needed
                   updateToast('success', `${transactionData.type.charAt(0).toUpperCase() + transactionData.type.slice(1)} action recorded successfully`);
 
-                  // Toggle stream state if it's a stream action
-                  if (transactionData.type === 'stream') {
-                    setIsStreaming(!isStreaming);
-                  }
+                  // Hardware state will be updated by polling automatically
 
                   // Refresh timeline to show latest events
                   if (timelineRef.current?.refreshTimeline) {
@@ -1613,7 +1673,7 @@ export function CameraView() {
                       onClick={handleDirectStream}
                       disabled={loading}
                       className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-black transition-colors rounded-xl"
-                      aria-label={isStreaming ? "Stop Stream" : "Start Stream"}
+                      aria-label={hardwareState.isStreaming ? "Stop Stream" : "Start Stream"}
                     >
                       {loading ? (
                         <Loader className="w-5 h-5 animate-spin" />
@@ -1624,7 +1684,7 @@ export function CameraView() {
                       )}
                     </button>
                     <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-2 bg-black/75 text-white text-sm rounded opacity-0 group-hover:opacity-100 whitespace-nowrap transition-opacity">
-                      {loading ? 'Processing...' : isStreaming ? 'Stop Stream' : 'Start Stream'}
+                      {loading ? 'Processing...' : hardwareState.isStreaming ? 'Stop Stream' : 'Start Stream'}
                     </span>
                   </div>
 
