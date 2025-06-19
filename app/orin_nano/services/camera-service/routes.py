@@ -236,6 +236,238 @@ def register_routes(app):
         """Standardized face enrollment endpoint"""
         return enroll_face()
     
+    @app.route('/api/face/enroll/prepare-transaction', methods=['POST'])
+    @require_session
+    def api_face_enroll_prepare_transaction():
+        """Prepare face enrollment transaction data for frontend wallet signing"""
+        wallet_address = request.json.get('wallet_address')
+        session_id = request.json.get('session_id')
+        
+        logger.info(f"[ENROLL-PREP] Preparing transaction for face enrollment for wallet: {wallet_address}")
+        
+        # Verify the session is valid
+        session_service = get_services()['session']
+        if not session_service.validate_session(session_id, wallet_address):
+            logger.warning(f"[ENROLL-PREP] Invalid session for wallet: {wallet_address}")
+            return jsonify({
+                'success': False,
+                'error': 'You must be connected to enroll your face'
+            }), 403
+        
+        try:
+            # Step 1: Process face data (same as regular enrollment)
+            buffer_service = get_services()['buffer']
+            face_service = get_services()['face']
+            
+            logger.info(f"[ENROLL-PREP] Processing face data for wallet: {wallet_address}")
+            
+            # Enable face detection and boxes for enrollment
+            face_service.enable_detection(True)
+            face_service.enable_boxes(True)
+            
+            # Get multiple frames to find the best one with a face
+            face_detected = False
+            best_frame = None
+            num_tries = 20
+            
+            for i in range(num_tries):
+                frame, timestamp = buffer_service.get_frame()
+                if frame is None:
+                    time.sleep(0.1)
+                    continue
+                
+                face_service._detect_faces(frame)
+                faces_info = face_service.get_faces()
+                
+                if faces_info['detected_count'] > 0:
+                    face_detected = True
+                    best_frame = frame
+                    logger.info(f"[ENROLL-PREP] Found face on frame {i+1}/{num_tries} for wallet: {wallet_address}")
+                    break
+                
+                time.sleep(0.1)
+            
+            if not face_detected or best_frame is None:
+                logger.warning(f"[ENROLL-PREP] No face detected for wallet: {wallet_address}")
+                return jsonify({
+                    'success': False,
+                    'error': 'No face was detected. Please make sure your face is clearly visible in the camera view.'
+                }), 400
+            
+            # Check for multiple faces
+            faces_info = face_service.get_faces()
+            if faces_info['detected_count'] > 1:
+                logger.warning(f"[ENROLL-PREP] Multiple faces detected for wallet: {wallet_address}")
+                return jsonify({
+                    'success': False,
+                    'error': 'Multiple faces detected. Please ensure only your face is visible.'
+                }), 400
+            
+            # Step 2: Process facial embedding through biometric service
+            logger.info(f"[ENROLL-PREP] Creating facial embedding for wallet: {wallet_address}")
+            
+            # Get facial embedding from face service
+            result = face_service.enroll_face(best_frame, wallet_address)
+            if not result['success']:
+                logger.warning(f"[ENROLL-PREP] Face processing failed: {result.get('error')} for wallet: {wallet_address}")
+                return jsonify({
+                    'success': False,
+                    'error': result.get('error', 'Failed to process face data')
+                }), 400
+            
+            # Step 3: Call Solana Middleware to prepare transaction data
+            logger.info(f"[ENROLL-PREP] Preparing blockchain transaction for wallet: {wallet_address}")
+            
+            try:
+                import requests
+                
+                # Call internal Solana Middleware to prepare NFT transaction
+                solana_middleware_url = "http://localhost:5001/api/blockchain/prepare-facial-nft"
+                
+                payload = {
+                    "wallet_address": wallet_address,
+                    "session_id": session_id,
+                    "facial_data_hash": result.get('facial_hash', 'temp_hash'),  # From face service
+                    "prepare_only": True  # Don't execute, just prepare
+                }
+                
+                response = requests.post(solana_middleware_url, json=payload, timeout=10)
+                
+                if response.status_code != 200:
+                    logger.error(f"[ENROLL-PREP] Solana middleware error: {response.status_code} for wallet: {wallet_address}")
+                    return jsonify({
+                        'success': False,
+                        'error': 'Failed to prepare blockchain transaction'
+                    }), 500
+                
+                transaction_data = response.json()
+                
+                if not transaction_data.get('success'):
+                    logger.error(f"[ENROLL-PREP] Transaction preparation failed: {transaction_data.get('error')} for wallet: {wallet_address}")
+                    return jsonify({
+                        'success': False,
+                        'error': transaction_data.get('error', 'Failed to prepare transaction')
+                    }), 500
+                
+                # Step 4: Return transaction data for frontend to handle
+                logger.info(f"[ENROLL-PREP] Transaction prepared successfully for wallet: {wallet_address}")
+                
+                # Create processed frame for UX
+                processed_frame = face_service.get_processed_frame(best_frame)
+                _, jpeg_data = cv2.imencode('.jpg', processed_frame)
+                image_base64 = base64.b64encode(jpeg_data).decode('utf-8')
+                
+                return jsonify({
+                    'success': True,
+                    'wallet_address': wallet_address,
+                    'face_processed': True,
+                    'image': image_base64,
+                    'transaction_data': {
+                        'serialized_transaction': transaction_data.get('serialized_transaction'),
+                        'transaction_message': transaction_data.get('transaction_message'),
+                        'required_signers': transaction_data.get('required_signers', [wallet_address]),
+                        'estimated_fee': transaction_data.get('estimated_fee', 0),
+                        'nft_mint_address': transaction_data.get('nft_mint_address'),
+                        'program_id': transaction_data.get('program_id')
+                    },
+                    'instructions': {
+                        'step1': 'Face data processed successfully',
+                        'step2': 'Transaction prepared - please sign with your wallet',
+                        'step3': 'After signing, call /api/face/enroll/confirm to complete'
+                    }
+                })
+                
+            except requests.exceptions.RequestException as e:
+                logger.error(f"[ENROLL-PREP] Network error calling Solana middleware: {str(e)} for wallet: {wallet_address}")
+                return jsonify({
+                    'success': False,
+                    'error': 'Network error preparing transaction. Please try again.'
+                }), 500
+            
+        except Exception as e:
+            logger.error(f"[ENROLL-PREP] Error preparing transaction: {str(e)} for wallet: {wallet_address}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return jsonify({
+                'success': False,
+                'error': f"Failed to prepare transaction: {str(e)}"
+            }), 500
+    
+    @app.route('/api/face/enroll/confirm', methods=['POST'])
+    @require_session
+    def api_face_enroll_confirm():
+        """Confirm face enrollment after user has signed the transaction"""
+        wallet_address = request.json.get('wallet_address')
+        session_id = request.json.get('session_id')
+        signed_transaction = request.json.get('signed_transaction')
+        transaction_signature = request.json.get('transaction_signature')
+        
+        logger.info(f"[ENROLL-CONFIRM] Confirming face enrollment for wallet: {wallet_address}")
+        
+        # Verify the session is valid
+        session_service = get_services()['session']
+        if not session_service.validate_session(session_id, wallet_address):
+            logger.warning(f"[ENROLL-CONFIRM] Invalid session for wallet: {wallet_address}")
+            return jsonify({
+                'success': False,
+                'error': 'Invalid session'
+            }), 403
+        
+        try:
+            # Call Solana Middleware to submit the signed transaction
+            import requests
+            
+            solana_middleware_url = "http://localhost:5001/api/blockchain/submit-facial-nft"
+            
+            payload = {
+                "wallet_address": wallet_address,
+                "session_id": session_id,
+                "signed_transaction": signed_transaction,
+                "transaction_signature": transaction_signature
+            }
+            
+            response = requests.post(solana_middleware_url, json=payload, timeout=30)
+            
+            if response.status_code != 200:
+                logger.error(f"[ENROLL-CONFIRM] Solana middleware error: {response.status_code} for wallet: {wallet_address}")
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to submit transaction to blockchain'
+                }), 500
+            
+            result = response.json()
+            
+            if not result.get('success'):
+                logger.error(f"[ENROLL-CONFIRM] Transaction submission failed: {result.get('error')} for wallet: {wallet_address}")
+                return jsonify({
+                    'success': False,
+                    'error': result.get('error', 'Transaction failed')
+                }), 500
+            
+            logger.info(f"[ENROLL-CONFIRM] Face enrollment completed successfully for wallet: {wallet_address}")
+            
+            return jsonify({
+                'success': True,
+                'wallet_address': wallet_address,
+                'transaction_signature': result.get('transaction_signature'),
+                'nft_mint_address': result.get('nft_mint_address'),
+                'block_height': result.get('block_height'),
+                'message': 'Face enrollment completed successfully! NFT minted to your wallet.'
+            })
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[ENROLL-CONFIRM] Network error: {str(e)} for wallet: {wallet_address}")
+            return jsonify({
+                'success': False,
+                'error': 'Network error submitting transaction. Please try again.'
+            }), 500
+        except Exception as e:
+            logger.error(f"[ENROLL-CONFIRM] Error confirming enrollment: {str(e)} for wallet: {wallet_address}")
+            return jsonify({
+                'success': False,
+                'error': f"Failed to confirm enrollment: {str(e)}"
+            }), 500
+    
     @app.route('/api/face/recognize', methods=['POST'])
     def api_face_recognize():
         """Standardized face recognition endpoint"""
