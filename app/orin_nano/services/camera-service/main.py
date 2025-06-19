@@ -116,6 +116,21 @@ def init_services():
     logger.info("Initializing Livepeer service...")
     livepeer_service.set_buffer_service(buffer_service)
     
+    # Inject all services into Livepeer service for visual effects
+    temp_services = {
+        'gesture': gesture_service,
+        'face': gpu_face_service
+    }
+    livepeer_service.set_services(temp_services)
+    logger.info("Injected visual services into Livepeer service for overlay support")
+    
+    # Initialize Blockchain Session Sync Service
+    from services.blockchain_session_sync import get_blockchain_session_sync
+    blockchain_sync = get_blockchain_session_sync()
+    blockchain_sync.set_services(session_service, gpu_face_service)
+    blockchain_sync.start()
+    logger.info("🔗 Blockchain session sync initialized - camera will auto-enable for on-chain check-ins")
+    
     # Inject services into the buffer service for processing
     logger.info("Injecting services into buffer service...")
     buffer_service.inject_services(

@@ -487,51 +487,58 @@ class GPUFaceService:
             logger.error(f"Error in face recognition: {e}")
 
     def get_processed_frame(self, frame: np.ndarray) -> np.ndarray:
-        """Get frame with face detection/recognition overlays"""
-        if not self._visualization_enabled:
+        """
+        Apply face detection and recognition overlays to a copy of the frame.
+        This does NOT modify the original frame from the buffer.
+        """
+        if frame is None or not self._visualization_enabled or not self._boxes_enabled:
             return frame
-        
-        processed_frame = frame.copy()
-        
-        try:
-            with self._results_lock:
-                faces = self._detected_faces.copy()
-                recognized = self._recognized_faces.copy()
             
-            # Draw detection boxes
-            if self._boxes_enabled:
-                for face in faces:
-                    box = face['box']
-                    confidence = face['confidence']
-                    x1, y1, x2, y2 = box
-                    
-                    # Check if this face is recognized
-                    recognized_name = face.get('recognized_name')
-                    similarity = face.get('similarity', 0)
-                    
-                    if recognized_name and similarity > self._similarity_threshold:
-                        # Green box for recognized faces
-                        color = (0, 255, 0)
-                        label = f"{self._face_names.get(recognized_name, recognized_name[:8])}: {similarity:.2f}"
-                    else:
-                        # Red box for unrecognized faces
-                        color = (0, 0, 255)
-                        label = f"Unknown: {confidence:.2f}"
-                    
-                    # Draw bounding box
-                    cv2.rectangle(processed_frame, (x1, y1), (x2, y2), color, 2)
-                    
-                    # Draw label
-                    label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
-                    cv2.rectangle(processed_frame, (x1, y1 - label_size[1] - 10), 
-                                (x1 + label_size[0], y1), color, -1)
-                    cv2.putText(processed_frame, label, (x1, y1 - 5), 
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+        # Make a copy to avoid modifying the original
+        output = frame.copy()
         
-        except Exception as e:
-            logger.error(f"Error processing frame overlay: {e}")
+        with self._results_lock:
+            if self._detected_faces:
+                for face_data in self._detected_faces:
+                    # Extract face location from the face data dictionary
+                    if isinstance(face_data, dict) and 'box' in face_data:
+                        # face_data['box'] is (x1, y1, x2, y2), convert to (top, right, bottom, left)
+                        x1, y1, x2, y2 = face_data['box']
+                        face_location = (y1, x2, y2, x1)  # (top, right, bottom, left)
+                        
+                        # Check if this face has been recognized
+                        identity_info = None
+                        if face_data.get('recognized_name') and face_data.get('similarity', 0) > self._similarity_threshold:
+                            identity_info = {
+                                'name': self._face_names.get(face_data['recognized_name'], face_data['recognized_name'][:8]),
+                                'confidence': face_data.get('similarity', 0) * 100,
+                                'wallet_address': face_data['recognized_name']
+                            }
+                        
+                        # Draw face box with wallet address tagging
+                        self._draw_face_box(
+                            output, 
+                            face_location, 
+                            identity_info=identity_info
+                        )
         
-        return processed_frame
+        return output
+    
+    def _is_same_face_location(self, location1, location2, threshold=50):
+        """
+        Check if two face locations are roughly the same (within threshold pixels).
+        """
+        if not location1 or not location2:
+            return False
+        
+        # Calculate center points
+        center1 = ((location1[1] + location1[3]) // 2, (location1[0] + location1[2]) // 2)
+        center2 = ((location2[1] + location2[3]) // 2, (location2[0] + location2[2]) // 2)
+        
+        # Calculate distance
+        distance = ((center1[0] - center2[0]) ** 2 + (center1[1] - center2[1]) ** 2) ** 0.5
+        
+        return distance < threshold
 
     def get_status(self) -> Dict:
         """Get service status"""
@@ -613,6 +620,39 @@ class GPUFaceService:
         except Exception as e:
             logger.error(f"Error clearing enrolled faces: {e}")
             return False
+
+    def _draw_face_box(self, frame, face_location, identity_info=None):
+        """
+        Draw a face detection box on the frame with proper color coding and labels.
+        
+        Args:
+            frame: The frame to draw on
+            face_location: (top, right, bottom, left) coordinates
+            identity_info: Optional identity information for recognized faces
+        """
+        top, right, bottom, left = face_location
+        
+        # Determine box color and label based on recognition status
+        if identity_info and identity_info.get('name'):
+            # Recognized face - GREEN box
+            box_color = (0, 255, 0)  # Green
+            name = identity_info['name']
+            confidence = identity_info.get('confidence', 0)
+            label = f"{name} ({confidence:.1f}%)"
+        else:
+            # Unrecognized face - RED box
+            box_color = (0, 0, 255)  # Red
+            label = "Not Recognized"
+        
+        # Draw the face box
+        cv2.rectangle(frame, (left, top), (right, bottom), box_color, 2)
+        
+        # Draw label background
+        label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+        cv2.rectangle(frame, (left, top - 30), (left + label_size[0] + 10, top), box_color, -1)
+        
+        # Draw label text (white text for better visibility)
+        cv2.putText(frame, label, (left + 5, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
 # Global service instance
 _gpu_face_service = None

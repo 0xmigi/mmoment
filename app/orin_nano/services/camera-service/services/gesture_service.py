@@ -141,82 +141,114 @@ class GestureService:
     
     def _processing_loop(self) -> None:
         """
-        Main processing loop that runs gesture detection.
-        Optimized for Jetson performance and rich buffer design.
+        Main processing loop that continuously processes frames from the buffer service.
         """
         logger.info("Gesture processing loop started")
+        frame_count = 0
         
-        try:
-            while not self._stop_event.is_set():
-                # Get the latest frame from the buffer
+        while self._processing_enabled:
+            try:
+                if self._buffer_service is None:
+                    logger.warning("Buffer service not available for gesture processing")
+                    time.sleep(1)
+                    continue
+                    
+                # Get frame from buffer service
                 frame, timestamp = self._buffer_service.get_frame()
                 
-                if frame is None:
-                    time.sleep(0.1)  # Longer sleep if no frame available
-                    continue
-                
-                current_time = time.time()
-                
-                # Run gesture detection at regular intervals
-                if current_time - self._last_detection_time >= self._detection_interval:
+                if frame is not None:
+                    frame_count += 1
+                    # Log every 100 frames to avoid spam
+                    if frame_count % 100 == 0:
+                        logger.info(f"Gesture service processed {frame_count} frames")
+                    
+                    # Process gestures
                     self._detect_gestures(frame)
-                    self._last_detection_time = current_time
-                
-                # Sleep to avoid consuming too much CPU - let the buffer control the rate
-                time.sleep(0.3)  # Reduced frequency for gesture detection (3.3Hz)
-                
-        except Exception as e:
-            logger.error(f"Error in gesture processing loop: {e}")
-        finally:
-            logger.info("Gesture processing loop stopped")
-            with self._lock:
-                self._processing_enabled = False
+                else:
+                    # No frame available, wait a bit
+                    time.sleep(0.01)
+                    
+            except Exception as e:
+                logger.error(f"Error in gesture processing loop: {e}")
+                time.sleep(0.1)
+        
+        logger.info("Gesture processing loop stopped")
     
     def _detect_gestures(self, frame: np.ndarray) -> None:
         """
-        Detect gestures in the given frame using MediaPipe.
-        Updates self._current_gesture with the results.
+        Detect gestures in the provided frame using MediaPipe.
         """
-        if not MEDIAPIPE_AVAILABLE or self._hands is None:
+        if frame is None:
+            logger.warning("Gesture detection received None frame")
             return
             
         try:
-            # Convert to RGB for MediaPipe
+            # Debug frame info
+            detection_count = getattr(self, '_detection_count', 0) + 1
+            setattr(self, '_detection_count', detection_count)
+            
+            if detection_count % 100 == 0:
+                logger.info(f"Gesture detection #{detection_count}: Frame shape: {frame.shape}, dtype: {frame.dtype}")
+            
+            # Convert BGR to RGB for MediaPipe
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
-            # Process frame with MediaPipe
+            # Process the frame with MediaPipe
             results = self._hands.process(rgb_frame)
             
-            # Default to no gesture
-            gesture = GestureType.NONE
-            confidence = 0.0
-            
-            # Check if hands are detected
-            if results.multi_hand_landmarks:
-                for idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
-                    # Determine if this is left or right hand
-                    handedness = results.multi_handedness[idx].classification[0].label if results.multi_handedness else "Unknown"
-                    
-                    # Analyze gesture from landmarks
-                    detected_gesture, detected_confidence = self._analyze_gesture(hand_landmarks, handedness)
-                    
-                    # Only update if confidence is higher than previous gestures
-                    if detected_confidence > confidence:
-                        gesture = detected_gesture
-                        confidence = detected_confidence
-            
-            # Update gesture info
-            with self._results_lock:
-                self._current_gesture = gesture
-                self._gesture_confidence = confidence
-                self._hand_landmarks = results.multi_hand_landmarks
+            # Debug logging every 50 detections to avoid spam
+            if detection_count % 50 == 0:
+                hands_found = len(results.multi_hand_landmarks) if results.multi_hand_landmarks else 0
+                logger.info(f"Gesture detection #{detection_count}: {hands_found} hands found")
                 
-        except Exception as e:
-            logger.error(f"Error detecting gestures: {e}")
+                # Extra debug when no hands found
+                if hands_found == 0:
+                    logger.info(f"MediaPipe processed frame {rgb_frame.shape} but found no hands")
+            
             with self._results_lock:
+                if results.multi_hand_landmarks and results.multi_handedness:
+                    self._hand_landmarks = results.multi_hand_landmarks
+                    logger.info(f"HAND DETECTED! Processing {len(results.multi_hand_landmarks)} hands")
+                    
+                    # Process each detected hand
+                    for idx, (hand_landmarks, handedness) in enumerate(zip(results.multi_hand_landmarks, results.multi_handedness)):
+                        # Convert landmarks to numpy array
+                        landmarks = []
+                        for landmark in hand_landmarks.landmark:
+                            landmarks.append([landmark.x, landmark.y])
+                        landmarks = np.array(landmarks)
+                        
+                        # Get hand label (Left/Right)
+                        hand_label = handedness.classification[0].label
+                        
+                        # Analyze gesture
+                        gesture, confidence = self._analyze_gesture(landmarks, hand_label)
+                        
+                        # Update current gesture if confidence is high enough
+                        if confidence > self._confidence_threshold:
+                            self._current_gesture = gesture
+                            self._gesture_confidence = confidence
+                            
+                            # Log gesture detection
+                            if gesture != GestureType.NONE:
+                                logger.info(f"🎉 GESTURE DETECTED: {gesture.value} (confidence: {confidence:.2f})")
+                        
+                        break  # Process only the first hand for now
+                else:
+                    # No hands detected - only log occasionally to avoid spam
+                    if detection_count % 200 == 0:
+                        logger.info(f"No hands detected in frame #{detection_count}")
+                    
+                    self._hand_landmarks = None
+                    self._current_gesture = GestureType.NONE
+                    self._gesture_confidence = 0.0
+                    
+        except Exception as e:
+            logger.error(f"Error in gesture detection: {e}")
+            with self._results_lock:
+                self._hand_landmarks = None
                 self._current_gesture = GestureType.NONE
                 self._gesture_confidence = 0.0
-                self._hand_landmarks = None
     
     def _analyze_gesture(self, landmarks, handedness: str) -> Tuple[GestureType, float]:
         """

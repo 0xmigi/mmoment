@@ -287,6 +287,16 @@ class SessionService:
         with self._sessions_lock:
             return [session.to_dict() for session in self._sessions.values()]
     
+    def get_active_session_count(self) -> int:
+        """
+        Get the count of active sessions.
+        
+        Returns:
+            Number of active sessions
+        """
+        with self._sessions_lock:
+            return len(self._sessions)
+    
     def _cleanup_expired_sessions(self) -> int:
         """
         Clean up expired sessions.
