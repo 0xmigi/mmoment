@@ -1,29 +1,17 @@
-import { useState, useEffect } from 'react';
 import { Play, StopCircle, Loader } from 'lucide-react';
 import { useCamera } from '../camera/CameraProvider';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { cameraStatus } from '../camera/camera-status';
 
 interface StreamControlsProps {
     timelineRef?: React.MutableRefObject<any>;
     onStreamToggle?: () => void;
+    isStreaming?: boolean;  // Add streaming state as prop
+    isLoading?: boolean;    // Add loading state as prop
 }
 
-export const StreamControls = ({ onStreamToggle }: StreamControlsProps) => {
-    const [isStreaming, setIsStreaming] = useState(false);
-    const [isLoading] = useState(false);
+export const StreamControls = ({ onStreamToggle, isStreaming = false, isLoading = false }: StreamControlsProps) => {
     const { isInitialized, loading: initLoading } = useCamera();
     useDynamicContext();
-
-    useEffect(() => {
-        const unsubscribe = cameraStatus.subscribe(({ isStreaming: streaming }) => {
-            setIsStreaming(streaming);
-        });
-
-        return () => {
-            unsubscribe();
-        };
-    }, []);
 
     // Handle the button click directly
     const handleStreamClick = () => {

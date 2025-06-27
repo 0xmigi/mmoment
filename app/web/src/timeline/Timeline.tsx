@@ -41,6 +41,8 @@ const getEventText = (type: TimelineEventType): string => {
       return 'checked in to the camera';
     case 'check_out':
       return 'checked out from the camera';
+    case 'face_enrolled':
+      return 'enrolled their face';
   }
 };
 
@@ -296,6 +298,8 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
         return <User className="w-4 h-4 text-green-500" />;
       case 'check_out':
         return <User className="w-4 h-4 text-gray-400" />;
+      case 'face_enrolled':
+        return <User className="w-4 h-4 text-blue-500" />;
       default:
         return <User className="w-4 h-4" />;
     }

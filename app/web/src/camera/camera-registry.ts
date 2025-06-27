@@ -6,7 +6,7 @@
  * completely camera-agnostic.
  */
 
-import { ICamera, CameraConfig, CameraRegistryEntry, CameraActionResponse } from './camera-interface';
+import { ICamera, CameraConfig, CameraRegistryEntry } from './camera-interface';
 import { JetsonCamera } from './implementations/jetson-camera';
 import { Pi5Camera } from './implementations/pi5-camera';
 import { CONFIG } from '../core/config';

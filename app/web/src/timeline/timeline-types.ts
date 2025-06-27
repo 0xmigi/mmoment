@@ -7,7 +7,8 @@ export type TimelineEventType =
   | 'stream_started'
   | 'stream_ended'
   | 'check_in'
-  | 'check_out';
+  | 'check_out'
+  | 'face_enrolled';
 
 export interface TimelineUser {
   address: string;

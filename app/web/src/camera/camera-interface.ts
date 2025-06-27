@@ -104,6 +104,7 @@ export interface ICamera {
   getCurrentGesture?(): Promise<CameraActionResponse<CameraGestureResponse>>;
   toggleGestureControls?(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>>;
   toggleFaceVisualization?(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>>;
+  toggleGestureVisualization?(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>>;
   checkForGestureTrigger?(): Promise<{
     shouldCapture: boolean;
     gestureType: 'photo' | 'video' | null;
@@ -111,6 +112,13 @@ export interface ICamera {
     confidence?: number;
   }>;
   getGestureControlsStatus?(): boolean;
+  
+  // Face enrollment (Jetson-specific)
+  enrollFace?(walletAddress: string): Promise<CameraActionResponse<{ enrolled: boolean; faceId: string }>>;
+  
+  // Face enrollment transaction flow (two-phase for user wallet payment)
+  prepareFaceEnrollmentTransaction?(walletAddress: string): Promise<CameraActionResponse<{ transactionBuffer: string; faceId: string; metadata?: any }>>;
+  confirmFaceEnrollmentTransaction?(walletAddress: string, confirmationData: { signedTransaction: string; faceId: string; biometricSessionId?: string }): Promise<CameraActionResponse<{ enrolled: boolean; faceId: string; transactionId?: string }>>;
   
   // Session management
   getCurrentSession(): CameraSession | null;

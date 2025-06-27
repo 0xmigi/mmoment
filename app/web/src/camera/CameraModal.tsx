@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog } from '@headlessui/react';
 import { X, ExternalLink, Camera, User, Wifi } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
@@ -51,6 +51,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
   const [faceVisualization, setFaceVisualization] = useState(false);
   const [gestureControls, setGestureControls] = useState(false);
   const [configLoading, setConfigLoading] = useState(false);
+  const [currentGesture, setCurrentGesture] = useState<{ gesture: string; confidence: number } | null>(null);
 
   // Check if current user is the owner
   const isOwner = primaryWallet?.address === camera.owner;
@@ -87,24 +88,95 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
 
   // Clear errors and load configuration when modal opens
   useEffect(() => {
-    if (isOpen) {
-      setError(null);
-      
-      // Load current configuration for Jetson cameras
-      if (isJetsonCamera) {
-        // Note: We could add API calls here to get current state
-        // For now, we'll start with default states
-        setGestureVisualization(false);
-        setFaceVisualization(false);
+    const loadConfiguration = async () => {
+      if (isOpen) {
+        setError(null);
         
-        // Load gesture controls state from localStorage
-        // TODO: Fix this to use unified service properly
-        // const gestureControlsEnabled = await unifiedCameraService.getGestureControlsStatus(camera.id);
-        // setGestureControls(gestureControlsEnabled);
-        setGestureControls(false); // Default for now
+        // Load current configuration for Jetson cameras
+        if (isJetsonCamera && camera.id) {
+          try {
+            console.log('[CameraModal] Loading current computer vision state...');
+            
+            // Load gesture controls state from unified service
+            const gestureControlsEnabled = await unifiedCameraService.getGestureControlsStatus(camera.id);
+            setGestureControls(gestureControlsEnabled);
+            console.log('[CameraModal] Gesture controls state:', gestureControlsEnabled);
+            
+            // Load visualization states from localStorage (persist across modal opens)
+            const storedGestureViz = localStorage.getItem(`jetson_gesture_viz_${camera.id}`) === 'true';
+            const storedFaceViz = localStorage.getItem(`jetson_face_viz_${camera.id}`) === 'true';
+            
+            setGestureVisualization(storedGestureViz);
+            setFaceVisualization(storedFaceViz);
+            
+            console.log('[CameraModal] Loaded visualization states - Gesture:', storedGestureViz, 'Face:', storedFaceViz);
+            
+            console.log('[CameraModal] Computer vision configuration loaded successfully');
+          } catch (error) {
+            console.error('Error loading computer vision configuration:', error);
+            // Set defaults on error
+            setGestureVisualization(false);
+            setFaceVisualization(false);
+            setGestureControls(false);
+          }
+        } else {
+          // Reset states for non-Jetson cameras
+          setGestureVisualization(false);
+          setFaceVisualization(false);
+          setGestureControls(false);
+        }
       }
+    };
+
+    loadConfiguration();
+  }, [isOpen, isJetsonCamera, camera.id]);
+
+  // Expose test function to window for debugging
+  useEffect(() => {
+    if (isJetsonCamera && camera.id) {
+      (window as any).testVisualizationEndpoints = testVisualizationEndpoints;
     }
-  }, [isOpen, isJetsonCamera]);
+    
+    return () => {
+      delete (window as any).testVisualizationEndpoints;
+    };
+  }, [isJetsonCamera, camera.id]);
+
+  // Poll current gesture when modal is open and gesture visualization is enabled
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+    
+    if (isOpen && isJetsonCamera && camera.id && (gestureVisualization || gestureControls)) {
+      const pollGesture = async () => {
+        try {
+          const result = await unifiedCameraService.getCurrentGesture(camera.id);
+          if (result.success && result.data) {
+            setCurrentGesture({
+              gesture: result.data.gesture || 'none',
+              confidence: result.data.confidence || 0
+            });
+          } else {
+            setCurrentGesture(null);
+          }
+        } catch (error) {
+          console.error('Error polling gesture:', error);
+          setCurrentGesture(null);
+        }
+      };
+
+      // Poll immediately and then every 2 seconds
+      pollGesture();
+      intervalId = setInterval(pollGesture, 2000);
+    } else {
+      setCurrentGesture(null);
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [isOpen, isJetsonCamera, camera.id, gestureVisualization, gestureControls]);
 
   const checkSessionStatus = async () => {
     if (!camera.id || !primaryWallet?.address || !connection) return;
@@ -243,19 +315,77 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   };
 
+  // Test visualization endpoints directly
+  const testVisualizationEndpoints = async () => {
+    if (!isJetsonCamera || !camera.id) return;
+    
+    console.log('[CameraModal] Testing visualization endpoints...');
+    
+    try {
+      // Test both visualization endpoints
+      const baseUrl = 'https://jetson.mmoment.xyz';
+      
+      console.log('Testing face visualization endpoint...');
+      const faceResponse = await fetch(`${baseUrl}/api/visualization/face`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: true })
+      });
+      
+      console.log('Face viz response status:', faceResponse.status);
+      const faceData = await faceResponse.json();
+      console.log('Face viz response data:', faceData);
+      
+      console.log('Testing gesture visualization endpoint...');
+      const gestureResponse = await fetch(`${baseUrl}/api/visualization/gesture`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: true })
+      });
+      
+      console.log('Gesture viz response status:', gestureResponse.status);
+      const gestureData = await gestureResponse.json();
+      console.log('Gesture viz response data:', gestureData);
+      
+
+      
+    } catch (error) {
+      console.error('Error testing visualization endpoints:', error);
+    }
+  };
+
   // Handle gesture visualization toggle
   const handleGestureVisualizationToggle = async () => {
     setConfigLoading(true);
     try {
       const newState = !gestureVisualization;
-      const result = await unifiedCameraService.toggleFaceVisualization(camera.id, newState);
+      console.log('[CameraModal] Toggling gesture visualization to:', newState);
+      
+      const result = await unifiedCameraService.toggleGestureVisualization(camera.id, newState);
       
       if (result.success) {
         setGestureVisualization(newState);
+        // Persist state to localStorage
+        localStorage.setItem(`jetson_gesture_viz_${camera.id}`, newState.toString());
+        console.log('[CameraModal] Gesture visualization toggled successfully to:', newState);
+        
+        // Force refresh the stream to show changes immediately
+        const streamElements = document.querySelectorAll('img[src*="/stream"], video');
+        streamElements.forEach(element => {
+          if (element instanceof HTMLImageElement && element.src.includes('/stream')) {
+            const currentSrc = element.src;
+            element.src = '';
+            setTimeout(() => {
+              element.src = currentSrc + (currentSrc.includes('?') ? '&' : '?') + 't=' + Date.now();
+            }, 100);
+          }
+        });
       } else {
+        console.error('[CameraModal] Failed to toggle gesture visualization:', result.error);
         setError(result.error || 'Failed to toggle gesture visualization');
       }
     } catch (error) {
+      console.error('[CameraModal] Error toggling gesture visualization:', error);
       setError(error instanceof Error ? error.message : 'Failed to toggle gesture visualization');
     } finally {
       setConfigLoading(false);
@@ -267,14 +397,33 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     setConfigLoading(true);
     try {
       const newState = !faceVisualization;
+      console.log('[CameraModal] Toggling face visualization to:', newState);
+      
       const result = await unifiedCameraService.toggleFaceVisualization(camera.id, newState);
       
       if (result.success) {
         setFaceVisualization(newState);
+        // Persist state to localStorage
+        localStorage.setItem(`jetson_face_viz_${camera.id}`, newState.toString());
+        console.log('[CameraModal] Face visualization toggled successfully to:', newState);
+        
+        // Force refresh the stream to show changes immediately
+        const streamElements = document.querySelectorAll('img[src*="/stream"], video');
+        streamElements.forEach(element => {
+          if (element instanceof HTMLImageElement && element.src.includes('/stream')) {
+            const currentSrc = element.src;
+            element.src = '';
+            setTimeout(() => {
+              element.src = currentSrc + (currentSrc.includes('?') ? '&' : '?') + 't=' + Date.now();
+            }, 100);
+          }
+        });
       } else {
+        console.error('[CameraModal] Failed to toggle face visualization:', result.error);
         setError(result.error || 'Failed to toggle face visualization');
       }
     } catch (error) {
+      console.error('[CameraModal] Error toggling face visualization:', error);
       setError(error instanceof Error ? error.message : 'Failed to toggle face visualization');
     } finally {
       setConfigLoading(false);
@@ -740,6 +889,105 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                   <div className="text-sm text-gray-700">Activity</div>
                   <div className="text-sm font-medium">{camera.activityCounter || 0} total interactions</div>
                 </div>
+
+                {/* Computer Vision Controls - Only for Jetson cameras */}
+                {isJetsonCamera && (
+                  <div className="mb-4 pt-4 border-t border-gray-200">
+                    <div className="space-y-2">
+                      {/* Face Visualization Toggle */}
+                      <div className="flex items-center justify-between py-1">
+                        <div className="flex-1">
+                          <div className="text-sm font-medium">Face Detection Overlay</div>
+                          <div className="text-xs text-gray-500">Shows face detection boxes</div>
+                        </div>
+                        <button
+                          onClick={handleFaceVisualizationToggle}
+                          disabled={configLoading}
+                          className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                            faceVisualization 
+                              ? 'bg-blue-600 hover:bg-blue-700' 
+                              : 'bg-gray-200 hover:bg-gray-300'
+                          } ${configLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          <span
+                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                              faceVisualization ? 'translate-x-5' : 'translate-x-0.5'
+                            }`}
+                          />
+                        </button>
+                      </div>
+
+                      {/* Gesture Visualization Toggle */}
+                      <div className="flex items-center justify-between py-1">
+                        <div className="flex-1">
+                          <div className="text-sm font-medium">Gesture Detection Overlay</div>
+                          <div className="text-xs text-gray-500">Shows hand gesture tracking</div>
+                        </div>
+                        <button
+                          onClick={handleGestureVisualizationToggle}
+                          disabled={configLoading}
+                          className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                            gestureVisualization 
+                              ? 'bg-blue-600 hover:bg-blue-700' 
+                              : 'bg-gray-200 hover:bg-gray-300'
+                          } ${configLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          <span
+                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                              gestureVisualization ? 'translate-x-5' : 'translate-x-0.5'
+                            }`}
+                          />
+                        </button>
+                      </div>
+
+                      {/* Gesture Controls Toggle */}
+                      <div className="flex items-center justify-between py-1">
+                        <div className="flex-1">
+                          <div className="text-sm font-medium">Gesture Photo/Video Capture</div>
+                          <div className="text-xs text-gray-500">Peace sign = photo, thumbs up = video</div>
+                        </div>
+                        <button
+                          onClick={handleGestureControlsToggle}
+                          disabled={configLoading}
+                          className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                            gestureControls 
+                              ? 'bg-green-600 hover:bg-green-700' 
+                              : 'bg-gray-200 hover:bg-gray-300'
+                          } ${configLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          <span
+                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                              gestureControls ? 'translate-x-5' : 'translate-x-0.5'
+                            }`}
+                          />
+                        </button>
+                      </div>
+
+                      {/* Current Gesture Status - Only when gesture features are enabled */}
+                      {(gestureVisualization || gestureControls) && (
+                        <div className="mt-3 pt-3 border-t border-gray-100">
+                          <div className="text-xs text-gray-500 mb-1">Current Gesture Detected</div>
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm font-medium">
+                              {currentGesture ? (
+                                <span className="capitalize">
+                                  {currentGesture.gesture === 'none' ? 'No gesture detected' : currentGesture.gesture.replace('_', ' ')}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">Loading...</span>
+                              )}
+                            </div>
+                            {currentGesture && currentGesture.gesture !== 'none' && (
+                              <div className="text-xs text-gray-500">
+                                {Math.round(currentGesture.confidence * 100)}% confidence
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Error Message */}
                 {error && (

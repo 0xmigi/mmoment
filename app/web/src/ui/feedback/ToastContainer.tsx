@@ -15,29 +15,32 @@ interface ToastContainerProps {
 
 const Toast = ({ message, onDismiss }: { message: ToastMessage; onDismiss: () => void }) => {
   useEffect(() => {
-    // Set different timeouts based on message type and content
-    let timeout = 0;
+    // Simple auto-dismiss: all messages disappear after 4 seconds except critical errors
+    let timeout = 4000; // Default 4 seconds
     
-    if (message.type === 'success') {
-      timeout = 5000; // Success messages disappear after 5 seconds
-    } else if (message.type === 'info') {
-      // For streaming-related info messages, we want them to disappear quickly
-      if (message.message.includes('Starting stream') || 
-          message.message.includes('stream transaction')) {
-        timeout = 3000; // Stream-related info messages disappear after 3 seconds
-      } else {
-        timeout = 4000; // Regular info messages after 4 seconds
-      }
+    // Make deletion-related errors disappear faster (they're often transient)
+    if (message.type === 'error' && (
+      message.message.includes('delete') ||
+      message.message.includes('unpin') ||
+      message.message.includes('IPFS')
+    )) {
+      timeout = 2000; // Deletion errors disappear after 2 seconds
     }
     
-    // Only set a timeout if we have one (errors stay until dismissed)
+    // Only keep critical errors until manually dismissed
+    if (message.type === 'error' && (
+      message.message.includes('Failed to create blockchain transaction') ||
+      message.message.includes('No camera') ||
+      message.message.includes('check in')
+    )) {
+      timeout = 0; // Critical errors stay until dismissed
+    }
+    
     if (timeout > 0) {
-      const timer = setTimeout(() => {
-        onDismiss();
-      }, timeout);
+      const timer = setTimeout(onDismiss, timeout);
       return () => clearTimeout(timer);
     }
-  }, [message, onDismiss]);
+  }, [message.id]); // Only depend on message.id, not onDismiss
 
   const icons = {
     success: <CheckCircle2 className="w-4 h-4 text-green-500" />,

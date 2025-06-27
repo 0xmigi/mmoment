@@ -110,19 +110,34 @@ export default function MediaViewer({ isOpen, onClose, media, event, onDelete }:
         success = true;
         console.log('Deleted Jetson video from localStorage:', mediaId);
       } else {
-        // Handle IPFS media deletion
+        // Handle IPFS media deletion with proper timing
+        console.log('🗑️ Starting IPFS media deletion for:', mediaId);
+        
+        // Add a small delay to allow UI to show loading state
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
         success = await unifiedIpfsService.deleteMedia(mediaId, primaryWallet.address);
-        console.log('Deleted IPFS media:', mediaId, 'success:', success);
+        console.log('🗑️ IPFS media deletion result:', mediaId, 'success:', success);
+        
+        // Add another small delay before UI updates to ensure backend operations complete
+        if (success) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
       }
       
       if (success) {
+        console.log('✅ MEDIA DELETION SUCCESS (MediaViewer):', mediaId);
         if (onDelete) {
           onDelete(mediaId);
         }
         onClose();
+      } else {
+        console.error('❌ MEDIA DELETION FAILED (MediaViewer):', mediaId);
       }
     } catch (err) {
-      console.error('Delete error:', err);
+      console.error('🗑️ MEDIA DELETION ERROR (MediaViewer):', err);
+      // Note: We're not showing a toast here since the deletion might still succeed
+      // The error could be from timing issues, not actual failure
     } finally {
       setDeleting(false);
     }

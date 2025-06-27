@@ -23,6 +23,20 @@ export class JetsonCamera implements ICamera {
   
   private debugMode = true;
   private currentSession: CameraSession | null = null;
+  private lastStreamingStatus: boolean | undefined;
+  private lastStreamInfo: CameraStreamInfo | null = null;
+
+  // CURRENT LIVEPEER ACCOUNT (1000 minutes remaining)
+  private static readonly CURRENT_PLAYBACK_ID = '6315myh7iojrn5uk';
+  private static readonly CURRENT_STREAM_KEY = '6315-9m3d-yfzn-xhf6';
+  private static readonly CURRENT_STREAM_URL = 'https://lvpr.tv/?v=6315myh7iojrn5uk';
+  private static readonly CURRENT_HLS_URL = 'https://livepeercdn.studio/hls/6315myh7iojrn5uk/index.m3u8';
+  
+  // BACKUP LIVEPEER ACCOUNT (for when current runs out)
+  // private static readonly BACKUP_PLAYBACK_ID = '24583tdeg6syfcqi';
+  // private static readonly BACKUP_STREAM_KEY = '2458-aycn-mgfp-2dze';
+  // private static readonly BACKUP_STREAM_URL = 'https://lvpr.tv/?v=24583tdeg6syfcqi';
+  // private static readonly BACKUP_HLS_URL = 'https://livepeercdn.studio/hls/24583tdeg6syfcqi/index.m3u8';
 
   constructor(cameraId: string, apiUrl: string) {
     this.cameraId = cameraId;
@@ -198,12 +212,49 @@ export class JetsonCamera implements ICamera {
       
       if (response.ok) {
         const data = await response.json();
+        
+        // Debug logging (reduced to prevent console spam)
+        this.log('🔍 Raw API response from /api/status:', data);
+        
+        // Check if the response has an unusual structure
+        let streamingStatus = false;
+        
+        // Try multiple possible locations for the streaming status
+        if (data.isStreaming !== undefined) {
+          streamingStatus = data.isStreaming;
+        } else if (data.streaming !== undefined) {
+          streamingStatus = data.streaming;
+        } else if (data.data?.isStreaming !== undefined) {
+          streamingStatus = data.data.isStreaming;
+        } else if (data.data?.streaming !== undefined) {
+          streamingStatus = data.data.streaming;
+        } else {
+          // Check if there's a weird nested structure
+          for (const key of Object.keys(data)) {
+            if (typeof data[key] === 'object' && data[key] !== null) {
+              if (data[key].isStreaming !== undefined) {
+                streamingStatus = data[key].isStreaming;
+                break;
+              } else if (data[key].streaming !== undefined) {
+                streamingStatus = data[key].streaming;
+                break;
+              }
+            }
+          }
+        }
+        
+        // Only log when status actually changes
+        if (this.lastStreamingStatus !== streamingStatus) {
+          this.log('🎯 Streaming status changed:', this.lastStreamingStatus, '→', streamingStatus);
+          this.lastStreamingStatus = streamingStatus;
+        }
+        
         return {
           success: true,
           data: {
             isOnline: true,
-            isStreaming: data.streaming || false,
-            isRecording: data.recording || false,
+            isStreaming: streamingStatus,
+            isRecording: data.recording || data.data?.recording || false,
             lastSeen: Date.now(),
             owner: this.currentSession?.walletAddress
           }
@@ -212,6 +263,7 @@ export class JetsonCamera implements ICamera {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
     } catch (error) {
+      this.log('❌ getStatus error:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to get status',
@@ -582,10 +634,10 @@ export class JetsonCamera implements ICamera {
             success: true,
             data: {
               isActive: true,
-              streamUrl: data.playback_url || 'https://lvpr.tv/?v=24583tdeg6syfcqi',
-              playbackId: '24583tdeg6syfcqi', // Use the correct playback ID from Livepeer dashboard
-              streamKey: data.stream_key || '2458-aycn-mgfp-2dze',
-              hlsUrl: data.hls_url || 'https://livepeercdn.studio/hls/24583tdeg6syfcqi/index.m3u8',
+              streamUrl: data.playback_url || JetsonCamera.CURRENT_STREAM_URL,
+              playbackId: JetsonCamera.CURRENT_PLAYBACK_ID,
+              streamKey: data.stream_key || JetsonCamera.CURRENT_STREAM_KEY,
+              hlsUrl: data.hls_url || JetsonCamera.CURRENT_HLS_URL,
               format: 'livepeer'
             }
           };
@@ -608,10 +660,10 @@ export class JetsonCamera implements ICamera {
           success: true, // Return success despite API error
           data: {
             isActive: true,
-            streamUrl: 'https://lvpr.tv/?v=24583tdeg6syfcqi',
-            playbackId: '24583tdeg6syfcqi', // Correct playback ID from dashboard
-            streamKey: '2458-aycn-mgfp-2dze', // Correct stream key from dashboard
-            hlsUrl: 'https://livepeercdn.studio/hls/24583tdeg6syfcqi/index.m3u8',
+            streamUrl: JetsonCamera.CURRENT_STREAM_URL,
+            playbackId: JetsonCamera.CURRENT_PLAYBACK_ID,
+            streamKey: JetsonCamera.CURRENT_STREAM_KEY,
+            hlsUrl: JetsonCamera.CURRENT_HLS_URL,
             format: 'livepeer'
           }
         };
@@ -625,10 +677,10 @@ export class JetsonCamera implements ICamera {
         success: true, // Return success despite error
         data: {
           isActive: true,
-          streamUrl: 'https://lvpr.tv/?v=24583tdeg6syfcqi',
-          playbackId: '24583tdeg6syfcqi', // Correct playback ID from dashboard
-          streamKey: '2458-aycn-mgfp-2dze', // Correct stream key from dashboard
-          hlsUrl: 'https://livepeercdn.studio/hls/24583tdeg6syfcqi/index.m3u8',
+          streamUrl: JetsonCamera.CURRENT_STREAM_URL,
+          playbackId: JetsonCamera.CURRENT_PLAYBACK_ID,
+          streamKey: JetsonCamera.CURRENT_STREAM_KEY,
+          hlsUrl: JetsonCamera.CURRENT_HLS_URL,
           format: 'livepeer'
         }
       };
@@ -698,12 +750,16 @@ export class JetsonCamera implements ICamera {
       // The playback ID is always available, but isActive depends on hardware state
       const streamInfo = {
         isActive: isStreamingFromHardware, // Use actual hardware state
-        streamUrl: 'https://lvpr.tv/?v=24583tdeg6syfcqi',
-        playbackId: '24583tdeg6syfcqi', // The working playback ID from Livepeer dashboard
+        streamUrl: JetsonCamera.CURRENT_STREAM_URL,
+        playbackId: JetsonCamera.CURRENT_PLAYBACK_ID,
         format: 'livepeer' as const
       };
       
-      this.log('📤 Returning Jetson stream info - isActive:', streamInfo.isActive, '(from hardware)');
+      // Only log when stream state actually changes
+      if (this.lastStreamInfo?.isActive !== streamInfo.isActive) {
+        this.log('📤 Stream state changed - isActive:', this.lastStreamInfo?.isActive, '→', streamInfo.isActive);
+        this.lastStreamInfo = streamInfo;
+      }
       
       return {
         success: true,
@@ -716,8 +772,8 @@ export class JetsonCamera implements ICamera {
         error: error instanceof Error ? error.message : 'Failed to get stream info',
         data: {
           isActive: false,
-          streamUrl: 'https://lvpr.tv/?v=24583tdeg6syfcqi',
-          playbackId: '24583tdeg6syfcqi',
+          streamUrl: JetsonCamera.CURRENT_STREAM_URL,
+          playbackId: JetsonCamera.CURRENT_PLAYBACK_ID,
           format: 'livepeer' as const
         }
       };
@@ -725,7 +781,7 @@ export class JetsonCamera implements ICamera {
   }
 
   getStreamUrl(): string {
-    return 'https://lvpr.tv/?v=24583tdeg6syfcqi';
+    return JetsonCamera.CURRENT_STREAM_URL;
   }
 
   async getCurrentGesture(): Promise<CameraActionResponse<CameraGestureResponse>> {
@@ -762,26 +818,15 @@ export class JetsonCamera implements ICamera {
     try {
       this.log(`Toggling gesture controls: ${enabled}`);
       
-      // Use the same endpoint as the old implementation
-      const response = await this.makeApiCall('/api/visualization/gesture', 'POST', {
-        enabled
-      });
-
-      const data = await response.json();
+      // Gesture controls are client-side only - just store in localStorage
+      localStorage.setItem('jetson_gesture_controls_enabled', enabled.toString());
       
-      if (response.ok && data.success) {
-        this.log('Gesture controls toggled successfully:', data.enabled);
-        
-        // Store the gesture controls state locally for frontend use
-        localStorage.setItem('jetson_gesture_controls_enabled', enabled.toString());
-        
-        return { 
-          success: true,
-          data: { enabled: data.enabled }
-        };
-      } else {
-        throw new Error(data.error || 'Failed to toggle gesture controls');
-      }
+      this.log('Gesture controls toggled successfully:', enabled);
+      
+      return { 
+        success: true,
+        data: { enabled }
+      };
     } catch (error) {
       this.log('Gesture controls toggle error:', error);
       return {
@@ -791,15 +836,51 @@ export class JetsonCamera implements ICamera {
     }
   }
 
+  async toggleGestureVisualization(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
+    try {
+      this.log(`Toggling gesture visualization: ${enabled}`);
+      this.log(`Making API call to: ${this.apiUrl}/api/visualization/gesture`);
+      
+      // Use the standardized API endpoint for gesture visualization
+      const response = await this.makeApiCall('/api/visualization/gesture', 'POST', {
+        enabled
+      });
+
+      this.log(`Response status: ${response.status} ${response.statusText}`);
+      const data = await response.json();
+      this.log(`Response data:`, data);
+      
+      if (response.ok && data.success) {
+        this.log('Gesture visualization toggled successfully:', data.enabled);
+        
+        return { 
+          success: true,
+          data: { enabled: data.enabled }
+        };
+      } else {
+        throw new Error(data.error || 'Failed to toggle gesture visualization');
+      }
+    } catch (error) {
+      this.log('Gesture visualization toggle error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to toggle gesture visualization'
+      };
+    }
+  }
+
   async toggleFaceVisualization(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
     try {
       this.log(`Toggling face visualization: ${enabled}`);
+      this.log(`Making API call to: ${this.apiUrl}/api/visualization/face`);
       
       const response = await this.makeApiCall('/api/visualization/face', 'POST', {
         enabled
       });
 
+      this.log(`Response status: ${response.status} ${response.statusText}`);
       const data = await response.json();
+      this.log(`Response data:`, data);
       
       if (response.ok && data.success) {
         this.log('Face visualization toggled successfully:', data.enabled);
@@ -894,6 +975,147 @@ export class JetsonCamera implements ICamera {
     } catch (error) {
       this.log('Error checking recording status:', error);
       return false;
+    }
+  }
+
+  async enrollFace(walletAddress: string): Promise<CameraActionResponse<{ enrolled: boolean; faceId: string }>> {
+    try {
+      this.log(`[DEPRECATED] enrollFace called - redirecting to new transaction-based flow`);
+      this.log(`Enrolling face for wallet: ${walletAddress}`);
+      
+      // Use the new session-less approach - call prepare transaction endpoint directly
+      const response = await this.makeApiCall('/api/face/enroll/prepare-transaction', 'POST', {
+        wallet_address: walletAddress
+      });
+      
+      const data = await response.json();
+      console.log('[JetsonCamera] Face enrollment response (session-less):', data);
+      
+      if (response.ok && data.success) {
+        this.log('Face enrollment prepared successfully (session-less):', data);
+        
+        // For the old interface, we just return that enrollment was "prepared"
+        // The actual transaction signing and confirmation would need to be handled separately
+        return {
+          success: true,
+          data: {
+            enrolled: false, // Not fully enrolled yet - just prepared
+            faceId: data.face_id || data.faceId || 'prepared-' + Date.now()
+          }
+        };
+      } else {
+        console.error('[JetsonCamera] Face enrollment preparation failed (session-less):', {
+          status: response.status,
+          statusText: response.statusText,
+          responseData: data
+        });
+        throw new Error(data.error || `HTTP ${response.status}: Failed to prepare face enrollment`);
+      }
+    } catch (error) {
+      this.log('Face enrollment error (session-less):', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to enroll face'
+      };
+    }
+  }
+
+  async prepareFaceEnrollmentTransaction(walletAddress: string): Promise<CameraActionResponse<{ transactionBuffer: string; faceId: string; metadata?: any }>> {
+    try {
+      this.log(`Preparing face enrollment transaction for wallet: ${walletAddress}`);
+      
+      // Call the prepare transaction endpoint with only wallet address
+      const response = await this.makeApiCall('/api/face/enroll/prepare-transaction', 'POST', {
+        wallet_address: walletAddress
+      });
+      
+      const data = await response.json();
+      console.log('[JetsonCamera] Face enrollment transaction preparation response:', data);
+      console.log('[JetsonCamera] Response status:', response.status, response.statusText);
+      
+      if (response.ok && data.success) {
+        this.log('Face enrollment transaction prepared successfully:', data);
+        
+        // Log the specific fields we're extracting
+        console.log('[JetsonCamera] Extracted fields:', {
+          transactionBuffer: data.transaction_buffer || data.transactionBuffer,
+          faceId: data.face_id || data.faceId,
+          metadata: data.metadata
+        });
+        
+        return {
+          success: true,
+          data: {
+            transactionBuffer: data.transaction_buffer || data.transactionBuffer,
+            faceId: data.face_id || data.faceId,
+            metadata: data.metadata
+          }
+        };
+      } else {
+        console.error('[JetsonCamera] Face enrollment preparation failed:', {
+          status: response.status,
+          statusText: response.statusText,
+          responseData: data
+        });
+        throw new Error(data.error || `HTTP ${response.status}: Failed to prepare face enrollment transaction`);
+      }
+    } catch (error) {
+      this.log('Face enrollment transaction preparation error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to prepare face enrollment transaction'
+      };
+    }
+  }
+
+  async confirmFaceEnrollmentTransaction(walletAddress: string, confirmationData: { signedTransaction: string; faceId: string; biometricSessionId?: string }): Promise<CameraActionResponse<{ enrolled: boolean; faceId: string; transactionId?: string }>> {
+    try {
+      this.log(`Confirming face enrollment transaction for wallet: ${walletAddress}`);
+      
+      // Call the new confirm transaction endpoint
+      const response = await this.makeApiCall('/api/face/enroll/confirm', 'POST', {
+        wallet_address: walletAddress,
+        signed_transaction: confirmationData.signedTransaction,
+        face_id: confirmationData.faceId,
+        biometric_session_id: confirmationData.biometricSessionId
+      });
+      
+      const data = await response.json();
+      console.log('[JetsonCamera] Face enrollment transaction confirmation response:', data);
+      console.log('[JetsonCamera] Confirmation response status:', response.status, response.statusText);
+      
+      if (response.ok && data.success) {
+        this.log('Face enrollment transaction confirmed successfully:', data);
+        
+        // Log the specific fields we're extracting
+        console.log('[JetsonCamera] Confirmation extracted fields:', {
+          enrolled: true,
+          faceId: data.face_id || data.faceId || confirmationData.faceId,
+          transactionId: data.transaction_id || data.transactionId
+        });
+        
+        return {
+          success: true,
+          data: {
+            enrolled: true,
+            faceId: data.face_id || data.faceId || confirmationData.faceId,
+            transactionId: data.transaction_id || data.transactionId
+          }
+        };
+      } else {
+        console.error('[JetsonCamera] Face enrollment confirmation failed:', {
+          status: response.status,
+          statusText: response.statusText,
+          responseData: data
+        });
+        throw new Error(data.error || `HTTP ${response.status}: Failed to confirm face enrollment transaction`);
+      }
+    } catch (error) {
+      this.log('Face enrollment transaction confirmation error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to confirm face enrollment transaction'
+      };
     }
   }
 

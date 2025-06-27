@@ -524,6 +524,126 @@ export class UnifiedCameraService {
   }
 
   /**
+   * Toggle gesture visualization (if supported)
+   */
+  public async toggleGestureVisualization(cameraId: string, enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.toggleGestureVisualization) {
+        return {
+          success: false,
+          error: 'Gesture visualization not supported by this camera'
+        };
+      }
+
+      return await camera.toggleGestureVisualization(enabled);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to toggle gesture visualization'
+      };
+    }
+  }
+
+  /**
+   * Enroll face for recognition (if supported)
+   */
+  public async enrollFace(cameraId: string, walletAddress: string): Promise<CameraActionResponse<{ enrolled: boolean; faceId: string }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.enrollFace) {
+        return {
+          success: false,
+          error: 'Face enrollment not supported by this camera'
+        };
+      }
+
+      return await camera.enrollFace(walletAddress);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to enroll face'
+      };
+    }
+  }
+
+  /**
+   * Prepare face enrollment transaction (Phase 1 of two-phase flow)
+   */
+  public async prepareFaceEnrollmentTransaction(cameraId: string, walletAddress: string): Promise<CameraActionResponse<{ transactionBuffer: string; faceId: string; metadata?: any }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.prepareFaceEnrollmentTransaction) {
+        return {
+          success: false,
+          error: 'Face enrollment transaction preparation not supported by this camera'
+        };
+      }
+
+      return await camera.prepareFaceEnrollmentTransaction(walletAddress);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to prepare face enrollment transaction'
+      };
+    }
+  }
+
+  /**
+   * Confirm face enrollment transaction (Phase 2 of two-phase flow)
+   */
+  public async confirmFaceEnrollmentTransaction(
+    cameraId: string, 
+    walletAddress: string, 
+    confirmationData: { signedTransaction: string; faceId: string; biometricSessionId?: string }
+  ): Promise<CameraActionResponse<{ enrolled: boolean; faceId: string; transactionId?: string }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.confirmFaceEnrollmentTransaction) {
+        return {
+          success: false,
+          error: 'Face enrollment transaction confirmation not supported by this camera'
+        };
+      }
+
+      return await camera.confirmFaceEnrollmentTransaction(walletAddress, confirmationData);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to confirm face enrollment transaction'
+      };
+    }
+  }
+
+  /**
    * Get current session
    */
   public async getCurrentSession(cameraId: string): Promise<CameraSession | null> {

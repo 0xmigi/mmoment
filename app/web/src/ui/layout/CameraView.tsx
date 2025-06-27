@@ -8,7 +8,7 @@ import { CameraControls } from './MobileControls';
 import { ToastMessage } from '../../core/types/toast';
 import { ToastContainer } from '../feedback/ToastContainer';
 import { StreamPlayer } from '../../media/StreamPlayer';
-import { useCamera, CameraData, fetchCameraByPublicKey } from '../../camera/CameraProvider';
+import { useCamera, CameraData } from '../../camera/CameraProvider';
 import { PublicKey, Connection, Transaction, TransactionInstruction } from '@solana/web3.js';
 import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from '../../anchor/setup';
 import { unifiedCameraService } from '../../camera/unified-camera-service';
@@ -22,13 +22,16 @@ import { cameraStatus } from '../../camera/camera-status';
 import { CONFIG } from '../../core/config';
 import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import { IDL } from '../../anchor/idl';
+import { FaceEnrollmentButton } from '../../camera/FaceEnrollmentButton';
+import { CameraActionResponse } from '../../camera/camera-interface';
 
 type TimelineEventType =
   | 'photo_captured'
   | 'video_recorded'
   | 'stream_started'
   | 'stream_ended'
-  | 'initialization';
+  | 'initialization'
+  | 'face_enrolled';
 
 interface TimelineEvent {
   type: TimelineEventType;
@@ -204,8 +207,6 @@ export function CameraView() {
     refreshEvents?: () => void;
   }>(null);
   const [cameraAccount, setCameraAccount] = useState<string | null>(null);
-  const [isLive, setIsLive] = useState(false);
-  const [isStreaming, setIsStreaming] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [currentToast, setCurrentToast] = useState<ToastMessage | null>(null);
   const [loading] = useState(false);
@@ -247,6 +248,10 @@ export function CameraView() {
   
   // Polling interval for hardware state
   const hardwareStateInterval = useRef<NodeJS.Timeout>();
+
+  // Add camera-specific status hook to the main CameraView function
+  const currentCameraId = cameraAccount || selectedCamera?.publicKey || cameraId || '';
+  const currentCameraStatus = useCameraStatus(currentCameraId);
 
   // Add a function to create timeline events with Farcaster profile info
   const addTimelineEvent = (eventType: TimelineEventType, transactionId?: string, mediaUrl?: string) => {
@@ -420,7 +425,6 @@ export function CameraView() {
         const statusResponse = await unifiedCameraService.getStatus(cameraAccount);
         if (statusResponse.success && statusResponse.data) {
           console.log(`[CameraView] Camera status:`, statusResponse.data);
-          setIsLive(statusResponse.data.isOnline);
           setIsRecording(statusResponse.data.isRecording);
         }
 
@@ -428,7 +432,6 @@ export function CameraView() {
         const streamResponse = await unifiedCameraService.getStreamInfo(cameraAccount);
         if (streamResponse.success && streamResponse.data) {
           console.log(`[CameraView] Stream status:`, streamResponse.data);
-          setIsStreaming(streamResponse.data.isActive);
         }
       } catch (error) {
         console.error(`[CameraView] Error syncing camera state:`, error);
@@ -470,160 +473,50 @@ export function CameraView() {
       case 'video':
         return 'video_recorded';
       case 'stream':
-        return isStreaming ? 'stream_ended' : 'stream_started';
+        return currentCameraStatus.isStreaming ? 'stream_ended' : 'stream_started';
       case 'stream_start':
         return 'stream_started';
       case 'stream_stop':
         return 'stream_ended';
+      case 'face_enrollment':
+        return 'face_enrolled';
       default:
         return 'initialization'; // Changed from 'photo_captured' to avoid fake photo entries
     }
   };
 
-  useEffect(() => {
-    const unsubscribe = cameraStatus.subscribe((status) => {
-      setIsLive(status.isLive);
-      setIsStreaming(status.isStreaming);
-    });
+  // Polling function to get hardware state directly from the camera
+  const pollHardwareState = useCallback(async () => {
+    if (!cameraAccount) return;
 
+    try {
+      const response = await unifiedCameraService.getComprehensiveState(cameraAccount);
+      if (response.status.success && response.status.data) {
+        setHardwareState({
+          isStreaming: response.streamInfo.data?.isActive || false,
+          isRecording: response.status.data.isRecording || false,
+          lastUpdated: Date.now()
+        });
+      }
+    } catch (error) {
+      console.error('[CameraView] Error polling hardware state:', error);
+    }
+  }, [cameraAccount]);
+
+  // Set up hardware state polling
+  useEffect(() => {
+    // Poll immediately
+    pollHardwareState();
+    
+    // Then poll every 3 seconds for responsive UI
+    hardwareStateInterval.current = setInterval(pollHardwareState, 3000);
+    
     return () => {
-      unsubscribe();
-    };
-  }, []);
-
-  // Force camera status check when we detect Jetson camera
-  // useEffect(() => {
-  //   if (cameraAccount && isJetsonCamera(cameraAccount)) {
-  //     console.log('[CameraView] Detected Jetson camera, forcing status check');
-  //     // Force a status check for Jetson camera
-  //     cameraStatus.forceCheck();
-  //     
-  //     // Also test the Jetson camera connection directly
-  //     jetsonCameraService.testConnection().then(result => {
-  //       console.log('[CameraView] Jetson camera test result:', result);
-  //       if (result.success) {
-  //         // If the test succeeds, manually set the camera as online
-  //         cameraStatus.setOnline(false);
-  //       }
-  //     }).catch(err => {
-  //       console.warn('[CameraView] Jetson camera test failed:', err);
-  //     });
-  //   }
-  // }, [cameraAccount]);
-
-  // Check localStorage for direct camera ID (set by MainContent)
-  useEffect(() => {
-    const directCameraId = localStorage.getItem('directCameraId');
-    const isDefaultRoute = window.location.pathname === '/app' || window.location.pathname === '/app/';
-
-    // Only load the camera ID from localStorage if explicitly on a camera route
-    // or if we're already connected (cameraAccount exists)
-    if (directCameraId && !cameraAccount && window.location.pathname.includes('/camera/')) {
-      console.log(`[CameraView] Found direct camera ID in localStorage: ${directCameraId}`);
-      setCameraAccount(directCameraId);
-    } else if (isDefaultRoute) {
-      // If we're on the default /app route with no specific camera, always ensure storage is cleared
-      console.log('[CameraView] On default route - clearing any stored camera ID');
-      localStorage.removeItem('directCameraId');
-
-      // Force reset of camera state variables
-      if (cameraAccount) setCameraAccount(null);
-      if (selectedCamera) setSelectedCamera(null);
-    }
-  }, [cameraAccount, selectedCamera, setSelectedCamera]);
-
-  // Debug logging for camera route with fix for paths
-  useEffect(() => {
-    const isDefaultRoute = window.location.pathname === '/app' || window.location.pathname === '/app/';
-
-    console.log('CameraView Debug:', {
-      cameraIdParam: cameraId,
-      cameraAccount: cameraAccount,
-      selectedCamera: selectedCamera?.publicKey || null,
-      localStorageCamera: localStorage.getItem('directCameraId'),
-      route: window.location.pathname,
-      isDefaultRoute
-    });
-
-    // Only update localStorage if we have a valid camera ID and are on a camera route
-    if (cameraId) {
-      localStorage.setItem('directCameraId', cameraId);
-    } else if (selectedCamera?.publicKey && window.location.pathname.includes('/camera/')) {
-      localStorage.setItem('directCameraId', selectedCamera.publicKey);
-    } else if (cameraAccount && window.location.pathname.includes('/camera/')) {
-      localStorage.setItem('directCameraId', cameraAccount);
-    } else if (isDefaultRoute) {
-      // Always clear on the default route
-      localStorage.removeItem('directCameraId');
-
-      // Force reset of all camera state if we're still seeing a camera connection
-      if (cameraAccount || selectedCamera) {
-        console.log('[CameraView] Forcing disconnect on default route');
-        setCameraAccount(null);
-        if (setSelectedCamera) setSelectedCamera(null);
-      }
-    }
-  }, [cameraId, cameraAccount, selectedCamera, setSelectedCamera]);
-
-  // Debug logging
-  useEffect(() => {
-    console.log('Debug - selectedCamera:', selectedCamera ? selectedCamera.publicKey : 'null');
-    console.log('Debug - cameraAccount state:', cameraAccount);
-    console.log('Debug - cameraId param:', cameraId);
-  }, [selectedCamera, cameraAccount, cameraId]);
-
-  // Add a special direct loading function that doesn't rely on the useProgram hook
-  // to avoid potential circular dependencies or timing issues
-  useEffect(() => {
-    if (!cameraId) return;
-
-    const loadCameraDirectly = async () => {
-      try {
-        console.log(`[CameraView] DIRECT LOADING camera for URL param: cameraId="${cameraId}"`);
-
-        // Always decode the cameraId from the URL
-        const decodedCameraId = decodeURIComponent(cameraId);
-        console.log(`[CameraView] DIRECT LOADING Decoded cameraId="${decodedCameraId}"`);
-
-        // Store in localStorage for persistence
-        localStorage.setItem('directCameraId', decodedCameraId);
-
-        // Set the camera account in state
-        setCameraAccount(decodedCameraId);
-
-        // Try to load the camera data using the direct method if connection available
-        if (connection) {
-          console.log(`[CameraView] Loading camera directly using wallet-adapter connection`);
-          const camera = await fetchCameraByPublicKey(decodedCameraId, connection);
-
-          if (camera) {
-            console.log(`[CameraView] Successfully loaded camera data directly:`, camera);
-            setSelectedCamera(camera);
-            // No need for connection notification - the UI already shows connection status via the ID and link icon
-            return;
-          } else {
-            console.log(`[CameraView] Failed to load camera data directly`);
-          }
-        }
-
-        // Fall back to using the camera provider's method if direct loading fails
-        if (fetchCameraById) {
-          const camera = await fetchCameraById(decodedCameraId);
-          if (camera) {
-            console.log(`[CameraView] Successfully loaded camera with provider:`, camera);
-            setSelectedCamera(camera);
-            // Don't show a second success notification to avoid duplicates
-          } else {
-            console.log(`[CameraView] Camera could not be loaded with provider, showing ID only`);
-          }
-        }
-      } catch (error) {
-        console.error('[CameraView] DIRECT LOADING Error:', error);
+      if (hardwareStateInterval.current) {
+        clearInterval(hardwareStateInterval.current);
       }
     };
-
-    loadCameraDirectly();
-  }, [cameraId, connection, fetchCameraById, setSelectedCamera]);
+  }, [pollHardwareState]);
 
   // Button handlers
 
@@ -1194,7 +1087,7 @@ export function CameraView() {
         return;
       }
 
-      // Start timed recording using direct Jetson API
+      // Start timed recording using direct Jetson API (working version)
       updateToast('info', 'Initiating video recording...');
       
       // First create the blockchain transaction
@@ -1205,7 +1098,7 @@ export function CameraView() {
       }
       
       setRecordingTransactionSignature(signature);
-      updateToast('info', 'Starting video recording (30 seconds) - will auto-stop and upload');
+      updateToast('info', 'Starting video recording (30 seconds)...');
       
       try {
         const jetsonUrl = 'https://jetson.mmoment.xyz';
@@ -1232,7 +1125,6 @@ export function CameraView() {
           body: JSON.stringify({
             wallet_address: walletAddress,
             session_id: connectData.session_id
-            // Remove duration - let it record indefinitely until we stop it
           })
         });
         
@@ -1242,10 +1134,9 @@ export function CameraView() {
         
         const recordData = await recordResponse.json();
         console.log('Recording started:', recordData);
-        console.log('⏱️ 30-second timer started, will stop at:', new Date(Date.now() + 30000).toLocaleTimeString());
         
         setIsRecording(true);
-        updateToast('success', 'Video recording started (30 seconds) - will auto-stop and upload');
+        updateToast('success', 'Video recording started (30 seconds)');
         
         // Add timeline event
         addTimelineEvent('video_recorded', signature);
@@ -1253,17 +1144,10 @@ export function CameraView() {
           timelineRef.current?.refreshEvents();
         }
         
-        // Add periodic logging to show recording is active
-        const progressInterval = setInterval(() => {
-          const elapsed = Math.floor((Date.now() - Date.now()) / 1000);
-          console.log(`📹 Recording in progress...`);
-        }, 5000);
-        
         // Step 3: Stop after exactly 30 seconds
         setTimeout(async () => {
-          clearInterval(progressInterval);
           try {
-            console.log('⏹️ 30 seconds completed at:', new Date().toLocaleTimeString(), '- stopping recording...');
+            console.log('⏹️ 30 seconds completed - stopping recording...');
             updateToast('info', 'Recording completed, processing video...');
             
             const stopResponse = await fetch(`${jetsonUrl}/api/record`, {
@@ -1281,40 +1165,60 @@ export function CameraView() {
               console.log('Recording stopped:', stopData);
               
               if (stopData.filename) {
-                // Wait longer for video encoding since it's a 30-second video
+                // Wait longer for video encoding to complete (30-second videos need more time)
                 console.log('Waiting for video encoding to complete...');
-                updateToast('info', 'Video processing - please wait (this may take 10-15 seconds)...');
+                updateToast('info', 'Video processing - please wait (this may take 15-20 seconds)...');
                 
-                // Wait for encoding to complete
+                // Show progress during the wait
+                let progressCount = 0;
+                const progressInterval = setInterval(() => {
+                  progressCount++;
+                  updateToast('info', `Video processing - please wait (${progressCount * 3}s / ~15s)...`);
+                }, 3000);
+                
                 setTimeout(async () => {
+                  clearInterval(progressInterval);
                   try {
                     // Download the video file - REQUEST THE .MP4 VERSION!
                     const mp4Filename = stopData.filename.replace('.mov', '.mp4');
                     const videoUrl = `${jetsonUrl}/api/videos/${mp4Filename}`;
                     console.log('Downloading MP4 video from:', videoUrl);
+                    
+                    // Add timeout for video download using AbortController
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+                    
                     const videoResponse = await fetch(videoUrl, {
-                      headers: {
-                        'Accept': 'video/mp4,video/quicktime,video/*'
-                      }
+                      signal: controller.signal
                     });
+                    
+                    clearTimeout(timeoutId);
                     
                     if (videoResponse.ok) {
                       const videoBlob = await videoResponse.blob();
                       console.log('MP4 video downloaded:', videoBlob.size, 'bytes', 'type:', videoBlob.type);
                       
-                      // Use the direct Jetson MP4 URL
-                      const directVideoUrl = `${jetsonUrl}/api/videos/${mp4Filename}`;
-                      console.log('Using direct MP4 video URL:', directVideoUrl);
+                      // Validate video blob size (should be at least 100KB for a 30-second video)
+                      if (videoBlob.size < 100000) {
+                        console.error('❌ Video blob too small, likely corrupted:', videoBlob.size, 'bytes');
+                        updateToast('error', 'Video file appears to be corrupted (too small). Try recording again.');
+                        setIsRecording(false);
+                        setRecordingTransactionSignature(null);
+                        return;
+                      }
                       
-                      // Upload video to IPFS properly - NO localStorage shortcuts!
-                      updateToast('info', 'Video processed successfully, uploading to IPFS...');
+                      // Ensure the blob has the correct MIME type for MP4
+                      const mp4Blob = new Blob([videoBlob], { type: 'video/mp4' });
+                      console.log('MP4 blob created with correct MIME type:', mp4Blob.type, 'size:', mp4Blob.size);
+                      
+                      // Upload video to IPFS
+                      updateToast('info', 'Video processed, uploading to IPFS...');
                       
                       try {
-                        console.log('📤 Uploading video to IPFS:', videoBlob.size, 'bytes');
+                        console.log('📤 Uploading MP4 video to IPFS:', mp4Blob.size, 'bytes, type:', mp4Blob.type);
                         
-                        // Upload to IPFS with proper metadata
                         const ipfsResult = await unifiedIpfsService.uploadFile(
-                          videoBlob, 
+                          mp4Blob, 
                           primaryWallet?.address || '', 
                           'video',
                           {
@@ -1325,7 +1229,20 @@ export function CameraView() {
                         
                         if (ipfsResult && ipfsResult.length > 0) {
                           console.log('✅ Video uploaded to IPFS successfully:', ipfsResult[0]);
-                          updateToast('success', 'Video recorded and uploaded to IPFS successfully!');
+                          console.log('✅ IPFS URL:', ipfsResult[0].url);
+                          
+                          // Give IPFS network time to propagate before showing success
+                          updateToast('info', 'Video uploaded to IPFS, waiting for network propagation...');
+                          
+                          setTimeout(() => {
+                            updateToast('success', 'Video recorded and uploaded to IPFS successfully!');
+                            
+                            // Refresh timeline after IPFS propagation
+                            if (timelineRef.current?.refreshEvents) {
+                              timelineRef.current?.refreshEvents();
+                            }
+                          }, 8000); // Wait 8s for IPFS propagation (videos need more time)
+                          
                         } else {
                           console.error('❌ IPFS upload failed - no result returned');
                           updateToast('error', 'Video recorded but IPFS upload failed');
@@ -1335,7 +1252,7 @@ export function CameraView() {
                         updateToast('error', 'Video recorded but IPFS upload failed');
                       }
                     } else {
-                      updateToast('error', 'Failed to download MP4 video from camera');
+                      updateToast('error', 'Failed to download video from camera');
                     }
                   } catch (downloadError) {
                     console.error('Video download error:', downloadError);
@@ -1349,7 +1266,7 @@ export function CameraView() {
                       timelineRef.current?.refreshEvents();
                     }
                   }
-                }, 10000); // Wait 10s for encoding
+                }, 15000); // Wait 15s for encoding (30-second videos need more time)
                 
               } else {
                 updateToast('error', 'Recording completed but no video file was created');
@@ -1369,16 +1286,18 @@ export function CameraView() {
           }
         }, 30000); // Record for 30s
         
-      } catch (error) {
-        console.error('Error in video recording:', error);
-        updateToast('error', `Recording failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      } catch (apiError) {
+        console.error('Video recording API error:', apiError);
+        updateToast('error', `Recording failed: ${apiError instanceof Error ? apiError.message : 'Unknown error'}`);
         setIsRecording(false);
         setRecordingTransactionSignature(null);
       }
-      
+        
     } catch (error) {
       console.error('Error in video recording:', error);
-      updateToast('error', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      updateToast('error', `Recording failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setIsRecording(false);
+      setRecordingTransactionSignature(null);
     }
   };
 
@@ -1396,9 +1315,14 @@ export function CameraView() {
     }
 
     try {
-      console.log(`🔄 [STREAM DEBUG] Current hardware state:`, hardwareState);
+      // Get fresh hardware state before making decisions
+      await pollHardwareState();
       
-      if (hardwareState.isStreaming) {
+      // Use the camera status hook for more reliable state
+      const isCurrentlyStreaming = currentCameraStatus.isStreaming;
+      console.log(`🔄 [STREAM DEBUG] Current streaming state:`, isCurrentlyStreaming);
+      
+      if (isCurrentlyStreaming) {
         // Stop streaming
         updateToast('info', 'Stopping stream...');
         console.log(`🛑 [STREAM DEBUG] Attempting to stop stream...`);
@@ -1414,13 +1338,20 @@ export function CameraView() {
         console.log(`🛑 [STREAM DEBUG] Stop stream response:`, response);
         
         if (response.success) {
-          // Force immediate hardware state poll
-          setTimeout(() => pollHardwareState(), 500);
-          updateToast('success', 'Stream stopped');
-          // Timeline event already created by sendSimpleTransaction
+          // Clear the "stopping" toast immediately
+          dismissToast();
+          
+          // Wait a bit longer for hardware to update, then check status
+          setTimeout(async () => {
+            await pollHardwareState();
+            // Only show success if we can confirm the stream actually stopped
+            const updatedState = await unifiedCameraService.getComprehensiveState(currentCameraId);
+            if (updatedState.streamInfo.success && !updatedState.streamInfo.data?.isActive) {
+              updateToast('success', 'Stream stopped');
+            }
+          }, 2000);
         } else {
           updateToast('error', `Failed to stop stream: ${response.error || 'Unknown error'}`);
-          // Timeline event already created by sendSimpleTransaction
         }
       } else {
         // Start streaming
@@ -1444,13 +1375,20 @@ export function CameraView() {
         console.log(`▶️ [STREAM DEBUG] Start stream response:`, response);
         
         if (response.success) {
-          // Force immediate hardware state poll
-          setTimeout(() => pollHardwareState(), 500);
-          updateToast('success', 'Stream started');
-          // Timeline event already created by sendSimpleTransaction
+          // Clear the "starting" toast immediately
+          dismissToast();
+          
+          // Wait a bit longer for hardware to update, then check status
+          setTimeout(async () => {
+            await pollHardwareState();
+            // Only show success if we can confirm the stream actually started
+            const updatedState = await unifiedCameraService.getComprehensiveState(currentCameraId);
+            if (updatedState.streamInfo.success && updatedState.streamInfo.data?.isActive) {
+              updateToast('success', 'Stream started');
+            }
+          }, 2000);
         } else {
           updateToast('error', `Failed to start stream: ${response.error || 'Unknown error'}`);
-          // Timeline event already created by sendSimpleTransaction
         }
       }
       
@@ -1558,60 +1496,89 @@ export function CameraView() {
         console.log('- debugCameraConfig() - Check camera configuration and URLs');
         console.log('- testUnifiedService() - Test unified camera service directly');
         console.log('- debugAllFunctions() - Test all functions comprehensively');
+        console.log('- testJetsonAPI() - Test Jetson API endpoints directly');
+        console.log('- debugFieldMapping() - Debug API field mapping issues');
+
+        // Add direct API testing functions
+        (window as any).testJetsonAPI = async () => {
+          console.log('🚀 === TESTING JETSON API DIRECTLY ===');
+          const jetsonUrl = 'https://jetson.mmoment.xyz';
+          
+          try {
+            // Test health endpoint
+            console.log('1. Testing /api/health...');
+            const healthResponse = await fetch(`${jetsonUrl}/api/health`);
+            if (healthResponse.ok) {
+              const healthData = await healthResponse.json();
+              console.log('✅ Health response:', healthData);
+            } else {
+              console.log('❌ Health failed:', healthResponse.status, healthResponse.statusText);
+            }
+
+            // Test status endpoint  
+            console.log('2. Testing /api/status...');
+            const statusResponse = await fetch(`${jetsonUrl}/api/status`);
+            if (statusResponse.ok) {
+              const statusData = await statusResponse.json();
+              console.log('✅ Status response:', statusData);
+              console.log('📊 STREAMING STATUS from /api/status:', statusData.streaming);
+              console.log('📊 IS_STREAMING from /api/status:', statusData.isStreaming);
+              console.log('📊 FULL RESPONSE STRUCTURE:', JSON.stringify(statusData, null, 2));
+            } else {
+              console.log('❌ Status failed:', statusResponse.status, statusResponse.statusText);
+            }
+
+            // Test livepeer status endpoint
+            console.log('3. Testing /api/stream/livepeer/status...');
+            const livepeerResponse = await fetch(`${jetsonUrl}/api/stream/livepeer/status`);
+            if (livepeerResponse.ok) {
+              const livepeerData = await livepeerResponse.json();
+              console.log('✅ Livepeer status response:', livepeerData);
+              console.log('📊 LIVEPEER STATUS:', livepeerData.status);
+            } else {
+              console.log('❌ Livepeer status failed:', livepeerResponse.status, livepeerResponse.statusText);
+            }
+
+          } catch (error) {
+            console.error('❌ Direct API test failed:', error);
+          }
+          console.log('=================================');
+        };
+
+        // Add a function to test the exact field mapping issue
+        (window as any).debugFieldMapping = async () => {
+          console.log('🔍 === DEBUGGING FIELD MAPPING ===');
+          const jetsonUrl = 'https://jetson.mmoment.xyz';
+          
+          try {
+            const response = await fetch(`${jetsonUrl}/api/status`);
+            const data = await response.json();
+            
+            console.log('Raw response:', data);
+            console.log('Type of response:', typeof data);
+            console.log('Keys in response:', Object.keys(data));
+            
+            // Check all possible field locations
+            console.log('data.streaming:', data.streaming);
+            console.log('data.isStreaming:', data.isStreaming);
+            console.log('data.data?.streaming:', data.data?.streaming);
+            console.log('data.data?.isStreaming:', data.data?.isStreaming);
+            console.log('data.streamInfo?.isActive:', data.streamInfo?.isActive);
+            
+            // Show the current mapping result
+            const currentMapping = data.isStreaming || data.streaming || false;
+            console.log('Current mapping result:', currentMapping);
+            
+          } catch (error) {
+            console.error('Field mapping debug failed:', error);
+          }
+          console.log('=================================');
+        };
       } else {
         console.log('🔧 Camera instance not found for debug functions');
       }
     }
   }, [cameraAccount, selectedCamera]);
-
-  // Function to poll actual hardware state
-  const pollHardwareState = useCallback(async () => {
-    const currentCameraId = cameraAccount || selectedCamera?.publicKey || localStorage.getItem('directCameraId');
-    if (!currentCameraId) return;
-
-    try {
-      const comprehensiveState = await unifiedCameraService.getComprehensiveState(currentCameraId);
-      
-      if (comprehensiveState.status.success && comprehensiveState.streamInfo.success) {
-        const newState = {
-          isStreaming: comprehensiveState.streamInfo.data?.isActive || false,
-          isRecording: comprehensiveState.status.data?.isRecording || false,
-          lastUpdated: Date.now()
-        };
-        
-        // Only update if state actually changed
-        setHardwareState(prev => {
-          if (prev.isStreaming !== newState.isStreaming || prev.isRecording !== newState.isRecording) {
-            console.log('[CameraView] 🔄 Hardware state changed:', {
-              wasStreaming: prev.isStreaming,
-              nowStreaming: newState.isStreaming,
-              wasRecording: prev.isRecording,
-              nowRecording: newState.isRecording
-            });
-            return newState;
-          }
-          return { ...prev, lastUpdated: newState.lastUpdated };
-        });
-      }
-    } catch (error) {
-      console.error('[CameraView] Failed to poll hardware state:', error);
-    }
-  }, [cameraAccount, selectedCamera?.publicKey]);
-
-  // Set up hardware state polling
-  useEffect(() => {
-    // Poll immediately
-    pollHardwareState();
-    
-    // Then poll every 3 seconds for responsive UI
-    hardwareStateInterval.current = setInterval(pollHardwareState, 3000);
-    
-    return () => {
-      if (hardwareStateInterval.current) {
-        clearInterval(hardwareStateInterval.current);
-      }
-    };
-  }, [pollHardwareState]);
 
   return (
     <>
@@ -1663,6 +1630,35 @@ export function CameraView() {
           <div className="px-2">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="md:col-span-3 relative">
+                {/* Face Enrollment Button - positioned next to stream */}
+                {currentCameraId && unifiedCameraService.hasCamera(currentCameraId) && (
+                  <div className="absolute top-2 right-2 z-50">
+                    <FaceEnrollmentButton 
+                      cameraId={currentCameraId}
+                      walletAddress={primaryWallet?.address}
+                      onEnrollmentComplete={(result: CameraActionResponse<{ enrolled: boolean; faceId: string; transactionId?: string }>) => {
+                        if (result.success) {
+                          const message = result.data?.transactionId 
+                            ? `Face enrolled & NFT minted! Face ID: ${result.data?.faceId}, TX: ${result.data.transactionId.slice(0, 8)}...`
+                            : `Face enrolled successfully! Face ID: ${result.data?.faceId}`;
+                          updateToast('success', message);
+                          
+                          // Add timeline event if we have a transaction ID
+                          if (result.data?.transactionId) {
+                            addTimelineEvent('face_enrolled', result.data.transactionId);
+                            
+                            // Refresh timeline to show the new event
+                            if (timelineRef.current?.refreshEvents) {
+                              timelineRef.current?.refreshEvents();
+                            }
+                          }
+                        } else {
+                          updateToast('error', `Face enrollment failed: ${result.error}`);
+                        }
+                      }}
+                    />
+                  </div>
+                )}
                 <StreamPlayer />
 
                 <div className="hidden sm:flex absolute -right-14 top-0 flex-col h-full z-[45]">
@@ -1672,18 +1668,18 @@ export function CameraView() {
                       onClick={handleDirectStream}
                       disabled={loading}
                       className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-black transition-colors rounded-xl"
-                      aria-label={hardwareState.isStreaming ? "Stop Stream" : "Start Stream"}
+                      aria-label={currentCameraStatus.isStreaming ? "Stop Stream" : "Start Stream"}
                     >
                       {loading ? (
                         <Loader className="w-5 h-5 animate-spin" />
-                      ) : isStreaming ? (
+                      ) : currentCameraStatus.isStreaming ? (
                         <StopCircle className="w-5 h-5" />
                       ) : (
                         <Play className="w-5 h-5" />
                       )}
                     </button>
                     <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-2 bg-black/75 text-white text-sm rounded opacity-0 group-hover:opacity-100 whitespace-nowrap transition-opacity">
-                      {loading ? 'Processing...' : hardwareState.isStreaming ? 'Stop Stream' : 'Start Stream'}
+                      {loading ? 'Processing...' : currentCameraStatus.isStreaming ? 'Stop Stream' : 'Start Stream'}
                     </span>
                   </div>
 
@@ -1730,7 +1726,7 @@ export function CameraView() {
               onRecordVideo={handleDirectVideo}
               onToggleStream={handleDirectStream}
               isLoading={loading}
-              isStreaming={isStreaming}
+              isStreaming={currentCameraStatus.isStreaming}
             />
           </div>
           <div className="max-w-3xl mt-6 mx-auto flex flex-col justify-top relative">
@@ -1748,14 +1744,14 @@ export function CameraView() {
                     </span>
                     <span className="text-gray-500 font-medium">Disconnected</span>
                   </div>
-                ) : !isLive ? (
+                ) : !currentCameraStatus.isLive ? (
                   <div className="flex items-center gap-2">
                     <span className="relative flex h-3 w-3 -ml-1">
                       <span className="relative inline-flex rounded-full h-3 w-3 bg-gray-400"></span>
                     </span>
                     <span className="text-gray-500 font-medium">Offline</span>
                   </div>
-                ) : isStreaming ? (
+                ) : currentCameraStatus.isStreaming ? (
                   <div className="flex items-center gap-2">
                     <span className="relative flex h-3 w-3 -ml-1">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>

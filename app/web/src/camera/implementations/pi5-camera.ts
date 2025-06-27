@@ -700,14 +700,23 @@ export class Pi5Camera implements ICamera {
     };
   }
 
-  async toggleGestureControls(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
+  async toggleGestureControls(_enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
     return {
       success: false,
       error: 'Gesture controls not supported on Pi5 cameras'
     };
   }
 
-  async toggleFaceVisualization(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
+  async toggleGestureVisualization(_enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
+    return {
+      success: false,
+      error: 'Gesture visualization not supported on Pi5 cameras'
+    };
+  }
+
+
+
+  async toggleFaceVisualization(_enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
     return {
       success: false,
       error: 'Face visualization not supported on Pi5 cameras'

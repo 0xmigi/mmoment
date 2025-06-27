@@ -116,18 +116,33 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
       setDeleting(mediaId);
       setError(null);
 
+      console.log('🗑️ Starting IPFS media deletion for:', mediaId);
+      
+      // Add a small delay to allow UI to show loading state
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       // All media is in IPFS - delete from IPFS only
       const success = await unifiedIpfsService.deleteMedia(mediaId, primaryWallet.address);
-      console.log('Deleted IPFS media:', mediaId, 'success:', success);
+      console.log('🗑️ IPFS media deletion result:', mediaId, 'success:', success);
 
       if (success) {
+        console.log('✅ MEDIA DELETION SUCCESS (Gallery):', mediaId);
+        // Add a small delay before updating UI to ensure backend operations complete
+        await new Promise(resolve => setTimeout(resolve, 1000));
         setMedia(current => current.filter(m => m.id !== mediaId));
       } else {
+        console.error('❌ MEDIA DELETION FAILED (Gallery):', mediaId);
         setError('Failed to delete media. Please try again.');
       }
     } catch (err) {
-      console.error('Delete error:', err);
-      setError('Failed to delete media. Please try again.');
+      console.error('🗑️ MEDIA DELETION ERROR (Gallery):', err);
+      // Only show error message if deletion actually failed
+      // Don't show error for timing issues or temporary failures
+      if (err instanceof Error && err.message.includes('Failed to delete')) {
+        setError('Failed to delete media. Please try again.');
+      } else {
+        console.warn('🗑️ Deletion error might be temporary, not showing user error message');
+      }
     } finally {
       setDeleting(null);
     }

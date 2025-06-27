@@ -109,14 +109,20 @@ const StreamPlayer = memo(() => {
         setStreamInfo(prev => {
           if (prev?.playbackId === newStreamInfo.playbackId && 
               prev?.isActive === newStreamInfo.isActive && 
-              prev?.streamType === newStreamInfo.streamType) {
+              prev?.streamType === newStreamInfo.streamType &&
+              prev?.streamUrl === newStreamInfo.streamUrl) {
+            // No change - return previous state to prevent re-render
             return prev;
           }
-          console.log('[StreamPlayer] 🔄 Stream state changed:', {
-            wasActive: prev?.isActive,
-            nowActive: newStreamInfo.isActive,
-            playbackId: newStreamInfo.playbackId
-          });
+          
+          // Only log significant changes to reduce console noise
+          if (prev?.isActive !== newStreamInfo.isActive) {
+            console.log('[StreamPlayer] 🔄 Stream status changed:', {
+              wasActive: prev?.isActive,
+              nowActive: newStreamInfo.isActive,
+              playbackId: newStreamInfo.playbackId
+            });
+          }
           return newStreamInfo;
         });
         setError(null);
@@ -162,8 +168,8 @@ const StreamPlayer = memo(() => {
   useEffect(() => {
     // Fetch stream info for all cameras using standardized API
     fetchStreamInfo();
-    // Use much faster polling intervals for responsive UI
-    const pollingInterval = isMobile ? 10000 : 5000; // 5s desktop, 10s mobile
+    // Reduce polling frequency to prevent blinking - now that status works correctly, we don't need aggressive polling
+    const pollingInterval = isMobile ? 15000 : 10000; // 10s desktop, 15s mobile
     pollInterval.current = setInterval(() => fetchStreamInfo(), pollingInterval);
     
     return () => {
@@ -249,15 +255,19 @@ const StreamPlayer = memo(() => {
           showLoadingSpinner={true}
           lowLatency
         />
-        {/* Show helpful message for Jetson cameras */}
+        {/* Show helpful message for Jetson cameras - memoized to prevent re-renders */}
         {(() => {
           const currentCameraId = cameraId || selectedCamera?.publicKey || localStorage.getItem('directCameraId');
-          return currentCameraId && unifiedCameraService.cameraSupports(currentCameraId, 'hasLivepeerStreaming');
-        })() && (
-          <div className="absolute top-2 left-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">
-            {streamInfo.isActive ? 'Live Stream Active' : 'Stream Available (Click Start to go Live)'}
-          </div>
-        )}
+          const supportsLivepeer = currentCameraId && unifiedCameraService.cameraSupports(currentCameraId, 'hasLivepeerStreaming');
+          
+          if (!supportsLivepeer) return null;
+          
+          return (
+            <div className="absolute top-2 left-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">
+              {streamInfo.isActive ? 'Live Stream Active' : 'Stream Available (Click Start to go Live)'}
+            </div>
+          );
+        })()}
       </div>
     );
   }
