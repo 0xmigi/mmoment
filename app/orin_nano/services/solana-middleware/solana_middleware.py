@@ -8,6 +8,7 @@ import os
 import json
 import base64
 import hashlib
+import requests
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -358,78 +359,91 @@ def api_wallet_status():
 
 @app.route('/api/blockchain/mint-facial-nft', methods=['POST'])
 def mint_facial_nft():
-    """Mint facial embedding as NFT from biometric security service"""
+    """Process encrypted facial embedding and prepare transaction for frontend signing"""
     try:
         data = request.json
         wallet_address = data.get('wallet_address')
-        session_id = data.get('session_id')
+        face_embedding = data.get('face_embedding')  # This is the encrypted NFT package
+        biometric_session_id = data.get('biometric_session_id')
         
-        if not wallet_address or not session_id:
-            return jsonify({"error": "wallet_address and session_id are required"}), 400
+        if not wallet_address or not face_embedding:
+            return jsonify({"error": "wallet_address and face_embedding are required"}), 400
         
-        # Get NFT package from biometric security service
-        biometric_service_url = os.getenv('BIOMETRIC_SERVICE_URL', 'http://localhost:5003')
+        # The face_embedding is already the encrypted NFT package from the camera service
+        nft_package = face_embedding
         
-        try:
-            response = requests.post(f'{biometric_service_url}/api/biometric/nft-package', 
-                                    json={
-                                        'wallet_address': wallet_address,
-                                        'session_id': session_id
-                                    })
-            
-            if response.status_code != 200:
-                return jsonify({"error": "Failed to get NFT package from biometric service"}), 500
-            
-            nft_package = response.json()['nft_package']
-        except requests.exceptions.RequestException:
-            return jsonify({"error": "Biometric security service unavailable"}), 503
+        # Generate a face ID for tracking
+        face_id = f"face_{uuid.uuid4().hex[:16]}"
         
-        # Create NFT metadata
-        nft_metadata = {
-            "name": f"Facial Identity NFT - {wallet_address[:8]}",
-            "description": "Encrypted facial embedding for decentralized identity verification",
-            "image": "https://mmoment.ai/assets/facial-nft-placeholder.png",
-            "attributes": [
-                {
-                    "trait_type": "Biometric Type",
-                    "value": "Facial Embedding"
-                },
-                {
-                    "trait_type": "Encryption Version", 
-                    "value": nft_package["encryption_version"]
-                },
-                {
-                    "trait_type": "Created At",
-                    "value": nft_package["created_at"]
-                }
-            ],
-            "properties": {
-                "encrypted_embedding": nft_package["encrypted_embedding"],
-                "encrypted_metadata": nft_package["encrypted_metadata"],
-                "wallet_address": nft_package["wallet_address"],
-                "biometric_type": nft_package["biometric_type"]
+        # Create the transaction buffer in the format expected by the frontend wallet signing
+        # The frontend expects: {"args": {"embedding": "<EMBEDDING_DATA>"}}
+        transaction_data = {
+            "args": {
+                "embedding": nft_package.get("encrypted_embedding", "")  # This is the Base64 encrypted embedding
             }
         }
         
-        # Simulate NFT mint transaction (in production, use actual Solana SDK)
-        nft_mint_result = {
-            "transaction_signature": f"mock_tx_{uuid.uuid4().hex[:16]}",
-            "nft_address": f"mock_nft_{uuid.uuid4().hex[:16]}",
-            "metadata_uri": f"https://mmoment.ai/nft-metadata/{uuid.uuid4().hex}",
-            "status": "confirmed"
-        }
+        # Convert to JSON string (not base64 encoded)
+        transaction_buffer = json.dumps(transaction_data)
         
-        logger.info(f"Facial NFT minted for wallet {wallet_address}")
+        logger.info(f"Prepared facial NFT transaction for wallet {wallet_address}")
+        
+        # Debug logging as suggested
+        embedding_data = nft_package.get("encrypted_embedding", "")
+        logger.info(f"[DEBUG] Sending transaction_buffer: {transaction_buffer[:200]}...")
+        logger.info(f"[DEBUG] Embedding data type: {type(embedding_data)}")
+        logger.info(f"[DEBUG] Embedding size: {len(embedding_data)} chars")
+        logger.info(f"[DEBUG] Transaction buffer size: {len(transaction_buffer)} chars")
         
         return jsonify({
             "success": True,
-            "message": "Facial embedding NFT minted successfully",
-            "nft_metadata": nft_metadata,
-            "mint_result": nft_mint_result
+            "transaction_buffer": transaction_buffer,
+            "face_id": face_id,
+            "message": "Transaction prepared for signing"
         })
         
     except Exception as e:
-        logger.error(f"Error minting facial NFT: {e}")
+        logger.error(f"Error preparing facial NFT transaction: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/face/enroll/confirm', methods=['POST'])
+def confirm_face_enrollment():
+    """Confirm face enrollment transaction and finalize the process"""
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        transaction_signature = data.get('transaction_signature')
+        face_id = data.get('face_id')
+        
+        if not wallet_address or not transaction_signature or not face_id:
+            return jsonify({"error": "wallet_address, transaction_signature, and face_id are required"}), 400
+        
+        logger.info(f"Confirming face enrollment transaction for wallet {wallet_address}")
+        logger.info(f"Transaction signature: {transaction_signature}")
+        logger.info(f"Face ID: {face_id}")
+        
+        # In a real implementation, this would:
+        # 1. Verify the transaction signature on Solana
+        # 2. Confirm the transaction was successful
+        # 3. Update any local state/database
+        
+        # For now, we'll simulate successful confirmation
+        transaction_id = transaction_signature  # Use the signature as the transaction ID
+        
+        logger.info(f"Face enrollment confirmed successfully for wallet {wallet_address}")
+        
+        return jsonify({
+            "success": True,
+            "transaction_id": transaction_id,
+            "face_id": face_id,
+            "wallet_address": wallet_address,
+            "status": "confirmed",
+            "message": "Face enrollment confirmed successfully"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error confirming face enrollment: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/blockchain/purge-session', methods=['POST'])

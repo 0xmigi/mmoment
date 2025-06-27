@@ -1,242 +1,264 @@
-# Mmoment Camera Service Architecture
+# Mmoment Jetson Camera System Architecture
 
 ## Overview
-The Mmoment camera service is built with a layered architecture that separates concerns and allows for modular development. The system processes camera frames through multiple parallel pipelines while maintaining efficient resource usage.
+The Mmoment camera system is a **three-container Docker application** running on NVIDIA Jetson that provides AI-powered camera functionality with blockchain integration. The system is designed for real-time computer vision processing with Livepeer streaming and Solana blockchain integration.
 
-## System Layers
+## Container Architecture
 
-### Layer 1: Core Camera Buffer Service
-**File**: `services/buffer_service.py`
-
-The foundation of the entire system - handles direct camera interaction and frame management.
+The system consists of three Docker containers that communicate via localhost:
 
 ```
-┌─────────────────────────────────────┐
-│           Buffer Service            │
-│  ┌─────────────────────────────────┐ │
-│  │     Physical Camera Device      │ │
-│  │     (USB/CSI/IP Camera)         │ │
-│  └─────────────────────────────────┘ │
-│  ┌─────────────────────────────────┐ │
-│  │      Frame Buffering            │ │
-│  │   • Ring buffer management      │ │
-│  │   • Frame rate optimization     │ │
-│  │   • Memory efficient storage    │ │
-│  └─────────────────────────────────┘ │
-└─────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                        JETSON HOST SYSTEM                          │
+│                                                                     │
+│  ┌─────────────────┬─────────────────┬─────────────────────────────┐ │
+│  │   CAMERA        │   BIOMETRIC     │      SOLANA                 │ │
+│  │   SERVICE       │   SECURITY      │   MIDDLEWARE                │ │
+│  │   (Port 5002)   │   (Port 5003)   │   (Port 5001)               │ │
+│  │                 │                 │                             │ │
+│  │ • Main API      │ • Encryption    │ • Blockchain API            │ │
+│  │ • Computer Vision│ • NFT Packaging │ • Wallet Sessions           │ │
+│  │ • Livepeer RTMP │ • Secure Storage│ • Transaction Building      │ │
+│  │ • GPU Processing│ • Data Purging  │ • Face NFT Minting          │ │
+│  └─────────────────┴─────────────────┴─────────────────────────────┘ │
+│                                                                     │
+│  External Access: Cloudflare Tunnel → jetson.mmoment.xyz → :5002   │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Key Responsibilities:**
-- Camera device initialization and management
-- Continuous frame capture and buffering
-- Frame rate optimization and resource management
-- Provides clean frame interface to upper layers
+## Camera Service Container (Port 5002)
+**Primary container** - Handles camera operations and serves as the main API gateway.
 
-### Layer 2: Computer Vision Processing Services
-**Files**: `services/face_service.py`, `services/gesture_service.py`, `services/capture_service.py`
-
-Three parallel processing pipelines that consume frames from the buffer service:
+### Core Services Architecture
+The camera service uses a **service-oriented architecture** with the following components:
 
 ```
-                    ┌─────────────────┐
-                    │  Buffer Service │
-                    └─────────┬───────┘
-                              │
-            ┌─────────────────┼─────────────────┐
-            │                 │                 │
-            ▼                 ▼                 ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│  Face Service   │ │ Gesture Service │ │ Capture Service │
-│                 │ │                 │ │                 │
-│ • Face Detection│ │ • Hand Tracking │ │ • Photo Capture │
-│ • Face Recogn.  │ │ • Gesture Recog │ │ • Video Record  │
-│ • Face Boxes    │ │ • Gesture Tags  │ │ • Media Storage │
-│ • NFT Integration│ │ • Gesture Boxes │ │ • File Management│
-└─────────────────┘ └─────────────────┘ └─────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                      CAMERA SERVICE                                 │
+├─────────────────┬─────────────────┬─────────────────┬───────────────┤
+│ Buffer Service  │ GPU Face Service│ Gesture Service │ Capture Service│
+│                 │                 │                 │               │
+│ • Camera I/O    │ • YOLOv8 Detect │ • MediaPipe     │ • Photo/Video │
+│ • Frame Buffer  │ • InsightFace   │ • Hand Tracking │ • File Storage│
+│ • Ring Buffer   │ • Face Recogn.  │ • Gesture Recog │ • Metadata    │
+│ • GPU Memory    │ • Visual Overlay│ • Visual Overlay│ • Timestamps  │
+├─────────────────┼─────────────────┼─────────────────┼───────────────┤
+│ Session Service │ Livepeer Service│ Routes/API      │ Blockchain    │
+│                 │                 │                 │ Session Sync  │
+│ • User Sessions │ • RTMP Streaming│ • /api/* routes │ • Auto Check-in│
+│ • Access Control│ • Hardware Accel│ • Legacy routes │ • Visual Enable│
+│ • Validation    │ • Stream Status │ • CORS handling │ • HTTP API Only│
+│ • Timeouts      │ • Auto Recovery │ • Error handling│ • No Direct BC│
+└─────────────────┴─────────────────┴─────────────────┴───────────────┘
 ```
 
-#### Face Service Pipeline
-- **Face Detection**: MTCNN/OpenCV face detection
-- **Face Recognition**: FaceNet-based embedding comparison
-- **NFT Integration**: Encrypted facial embeddings stored on Solana
-- **Visual Overlays**: Face boxes and recognition results
+### Key Features
+- **GPU-Accelerated AI**: YOLOv8 for face detection, InsightFace for recognition
+- **Real-time Streaming**: Hardware-accelerated RTMP to Livepeer network
+- **Visual Effects**: Face boxes and gesture overlays in both stream and local MJPEG
+- **Session Management**: User authentication and access control
+- **Blockchain Session Sync**: Automatically enables face visualization when users check in on-chain
+- **Media Capture**: Photos and videos with metadata
 
-#### Gesture Service Pipeline  
-- **Hand Detection**: MediaPipe hand tracking
-- **Gesture Recognition**: Custom gesture classification
-- **Visual Overlays**: Hand landmarks and gesture labels
+### Hardware Access
+- Direct GPU access via NVIDIA runtime
+- Camera device access (`/dev/video0`, `/dev/video1`, `/dev/video2`)
+- Hardware video encoding for streaming
+- Model caching on fast storage (`/mnt/nvme/jetson_cache/`)
 
-#### Capture Service Pipeline
-- **Media Capture**: Photo and video recording
-- **File Management**: Organized storage and retrieval
-- **Metadata**: Timestamp and session information
+## Biometric Security Container (Port 5003)
+**Security-focused container** - Handles encryption and secure biometric data operations.
 
-### Layer 3: Integration and Streaming Services
-**Files**: `services/livepeer_stream_service.py`, `services/session_service.py`, `solana_middleware/solana_middleware.py`
+### Responsibilities
+- **Facial Embedding Encryption**: AES-256 encryption of facial embeddings
+- **NFT Package Generation**: Solana-compatible metadata creation
+- **Secure Data Purging**: Cryptographic deletion of sensitive data
+- **Session-based Security**: Temporary encrypted storage only
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                Integration Layer                        │
-├─────────────────┬─────────────────┬─────────────────────┤
-│ Livepeer Stream │ Session Service │ Solana Middleware   │
-│                 │                 │                     │
-│ • RTMP Streaming│ • User Sessions │ • Wallet Connection │
-│ • Hardware Accel│ • Session Valid │ • NFT Verification  │
-│ • Stream Status │ • Access Control│ • Face Encryption   │
-│ • Auto Recovery │ • User Tracking │ • Blockchain Calls  │
-└─────────────────┴─────────────────┴─────────────────────┘
-```
+### Security Features
+- No persistent storage of raw biometric data
+- Encrypted temporary storage with automatic cleanup
+- Audit logging for all operations
+- Secure inter-container communication
 
-### Layer 4: API and Frontend Bridge
-**File**: `routes.py`
+## Solana Middleware Container (Port 5001)
+**Blockchain integration container** - Handles all Solana network interactions.
 
-Standardized REST API that bridges all services to external applications:
+### Configuration
+- **Program ID**: `Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S` (hardcoded)
+- **Camera PDA**: `WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD` (hardcoded)
+- **Network**: Solana Devnet (`https://api.devnet.solana.com`)
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                  API Layer (routes.py)                 │
-├─────────────────┬─────────────────┬─────────────────────┤
-│ Standardized    │ Legacy Support  │ Real-time Endpoints │
-│ Endpoints       │ Endpoints       │                     │
-│                 │                 │                     │
-│ /api/health     │ /health         │ /mjpeg-stream       │
-│ /api/capture    │ /connect        │ /api/stream/status  │
-│ /api/face/enroll│ /enroll_face    │ /test-page          │
-│ /api/session/*  │ /recognize_face │ /local-test         │
-└─────────────────┴─────────────────┴─────────────────────┘
-```
-
-### Layer 5: External Connectivity
-**Infrastructure**: Cloudflare Tunnel, Livepeer Network, Solana Blockchain
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                External Connectivity                    │
-├─────────────────┬─────────────────┬─────────────────────┤
-│ Cloudflare      │ Livepeer        │ Solana Blockchain   │
-│ Tunnel          │ Network         │                     │
-│                 │                 │                     │
-│ • Public APIs   │ • Live Streaming│ • Camera Registry   │
-│ • Web UI Access │ • Global CDN    │ • User Sessions     │
-│ • SSL/Security  │ • Transcoding   │ • Face NFTs         │
-│ • Load Balancing│ • Playback URLs │ • Access Control    │
-└─────────────────┴─────────────────┴─────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────┐
-│              Camera's Solana PDA Account               │
-│                                                         │
-│ • Camera Registration & Metadata                       │
-│ • User Check-in/Check-out Records                      │
-│ • Access Control & Permissions                         │
-│ • Activity Logging & Analytics                         │
-│ • NFT-based Authentication Gateway                     │
-└─────────────────────────────────────────────────────────┘
-```
+### Features
+- **Wallet Session Management**: User authentication via wallet connection
+- **Face NFT Minting**: Encrypted facial embeddings as blockchain NFTs
+- **Transaction Building**: Frontend-ready transaction serialization
+- **PDA Management**: Program Derived Address calculations
 
 ## Data Flow Architecture
 
-### Frame Processing Flow
+### 1. Camera Frame Processing
 ```
-Camera → Buffer → [Face, Gesture, Capture] → Visual Overlay → Stream/API
-```
-
-### User Authentication Flow
-```
-Frontend → Cloudflare → API → Session Service → Solana Middleware → Blockchain
-```
-
-### Face Recognition Flow
-```
-Camera Frame → Face Detection → Face Recognition → NFT Verification → Access Grant
-```
-
-### Streaming Flow
-```
-Buffer → Livepeer Service → RTMP → Livepeer Network → Global CDN → Frontend
+Physical Camera → Buffer Service → [GPU Face, Gesture, Capture] Services
+                                                    ↓
+                                          Visual Overlay Processing
+                                                    ↓
+                                    ┌─────────────────────────────┐
+                                    │                             │
+                                    ▼                             ▼
+                            Livepeer RTMP Stream          Local MJPEG Stream
+                                    │                      (/stream endpoint)
+                                    ▼
+                            Livepeer Network CDN
 ```
 
-## Service Dependencies
-
-```mermaid
-graph TD
-    A[Buffer Service] --> B[Face Service]
-    A --> C[Gesture Service] 
-    A --> D[Capture Service]
-    A --> E[Livepeer Service]
-    
-    F[Session Service] --> B
-    F --> C
-    F --> D
-    
-    G[Solana Middleware] --> F
-    G --> B
-    
-    H[Routes/API] --> A
-    H --> B
-    H --> C
-    H --> D
-    H --> E
-    H --> F
-    H --> G
-    
-    I[Solana Blockchain] --> G
-    J[Cloudflare Tunnel] --> H
-    K[Livepeer Network] --> E
+### 2. User Authentication & Session Flow
+```
+Frontend → Cloudflare Tunnel → Camera Service (:5002)
+                                      ↓
+                               Session Service
+                                      ↓
+                               Solana Middleware (:5001)
+                                      ↓
+                               Solana Blockchain
 ```
 
-## Key Design Principles
+### 3. Face Recognition & NFT Flow
+```
+Camera Frame → Buffer Service → GPU Face Service → Face Detection/Recognition
+                                                           ↓
+                                               Biometric Security (:5003)
+                                                           ↓
+                                                  Encryption & NFT Package
+                                                           ↓
+                                               Solana Middleware (:5001)
+                                                           ↓
+                                                 Face NFT on Blockchain
+```
 
-### 1. Modular Architecture
-- Each service is independent and can be started/stopped individually
-- Clear interfaces between layers
-- Minimal coupling between services
+### 4. Blockchain Session Sync Flow
+```
+Solana Blockchain → Solana Middleware (:5001) → Camera Service (:5002)
+                                                        ↓
+                                                Blockchain Session Sync
+                                                        ↓
+                                           Auto-enable Face Visualization
+                                                        ↓
+                                              User sees face boxes/identity
+```
 
-### 2. Resource Efficiency
-- Single camera buffer shared across all services
-- Efficient frame processing with configurable intervals
-- Hardware acceleration where available
+### 5. Inter-Container Communication
+All containers communicate via localhost HTTP APIs:
+- Camera Service ↔ Biometric Security (encryption requests)
+- Camera Service ↔ Solana Middleware (session validation, NFT operations)
+- Biometric Security ↔ Solana Middleware (secure data transfer)
 
-### 3. Blockchain Integration
-- NFT-based user authentication
-- Encrypted facial embeddings
-- Decentralized access control
+**Important**: Camera service does NOT handle blockchain operations directly. It only:
+- Makes HTTP API calls to other containers
+- Syncs blockchain state for visual effects automation
+- Never duplicates blockchain functionality
 
-### 4. Scalability
-- Standardized APIs for easy frontend integration
-- Cloudflare tunnel for global accessibility
-- Livepeer network for scalable streaming
+## API Architecture
 
-### 5. Privacy & Security
-- Local processing of biometric data
-- Encrypted storage of facial embeddings
-- User-owned identity via NFTs
+### Public API (Port 5002)
+**Accessible via `jetson.mmoment.xyz/api/`**
 
-## Configuration Files
+The camera service exposes a comprehensive REST API with:
+- **System Status**: `/api/health`, `/api/status`
+- **Camera Control**: `/api/capture`, `/api/record`
+- **Computer Vision**: `/api/face/*`, `/api/gesture/current`
+- **Session Management**: `/api/session/*`
+- **Streaming**: `/api/stream/*`, `/stream` (MJPEG)
+- **Media Access**: `/api/photos`, `/api/videos`
 
-- **`main.py`**: Service initialization and coordination
-- **`routes.py`**: API endpoint definitions
-- **`config/`**: Service-specific configurations
-- **`systemd/`**: Service management scripts
+### Internal APIs
+- **Biometric Security (5003)**: `/api/biometric/*`
+- **Solana Middleware (5001)**: `/api/blockchain/*`, `/api/session/*`
 
-## Testing & Development
+## Service Initialization Process
 
-- **`templates/local_test.html`**: Local development interface
-- **Port Forwarding**: Direct MJPEG stream testing
-- **API Testing**: Standardized endpoint testing
-- **Integration Testing**: End-to-end workflow validation
+Based on `main.py`, the system starts up as follows:
 
-## Future Architecture Extensions
+1. **Directory Creation**: Ensures required directories exist
+2. **Service Initialization**: 
+   - Buffer Service (camera I/O)
+   - GPU Face Service (YOLOv8 + InsightFace)
+   - Gesture Service (MediaPipe)
+   - Capture Service (media storage)
+   - Session Service (user management)
+   - Livepeer Service (streaming)
+   - Blockchain Session Sync (auto check-in)
 
-### Computer Vision App Store
-The current architecture is designed to support a future "CV App Store" where:
-- Apps can register as processing plugins
-- NFT-based access control per app
-- Standardized CV pipeline interfaces
-- Revenue sharing via blockchain transactions
+3. **Service Injection**: Services are injected into each other for communication
+4. **Flask App Creation**: Routes are registered and CORS is configured
+5. **Health Monitoring**: Each container has health checks
 
-### Multi-Camera Networks
-- Camera discovery and networking
-- Distributed processing capabilities
-- Cross-camera user recognition
-- Network-wide analytics and insights 
+## Key Configuration
+
+### Docker Compose
+- **Network Mode**: `host` (required for Jetson kernel limitations)
+- **GPU Access**: NVIDIA runtime for camera service
+- **Volume Mounts**: Persistent storage for photos, videos, logs, model cache
+- **Health Checks**: Automatic restart on failure
+- **Dependencies**: Camera service depends on biometric and Solana containers
+
+### Environment Variables
+- **Camera Device**: `/dev/video1` (configurable)
+- **Livepeer Config**: API keys, stream keys, playback IDs
+- **Service URLs**: Inter-container communication endpoints
+- **Solana Config**: RPC URL, camera name, owner wallet
+
+## Hardware Requirements
+
+### NVIDIA Jetson Specifications
+- **GPU**: CUDA-capable NVIDIA GPU
+- **Memory**: 8GB+ RAM recommended
+- **Storage**: 32GB+ with fast model cache storage
+- **Camera**: USB/CSI camera support
+- **Network**: Stable internet for blockchain and streaming
+
+### Performance Optimizations
+- **Model Caching**: Persistent AI model storage
+- **Hardware Encoding**: GPU-accelerated video encoding
+- **Efficient Buffering**: Ring buffer for frame management
+- **Service Singletons**: Shared service instances across the application
+
+## Security Architecture
+
+### Container Isolation
+- Each service runs in isolated Docker container
+- Inter-container communication via localhost only
+- No direct external access to biometric or Solana containers
+
+### Data Protection
+- Biometric data never stored in plain text
+- Encrypted temporary storage with automatic cleanup
+- Secure key derivation for encryption
+- Audit logging for all sensitive operations
+
+### Network Security
+- Cloudflare tunnel for secure external access
+- HTTPS/TLS for all external communication
+- CORS configuration for frontend integration
+- Health check endpoints for monitoring
+
+## External Integrations
+
+### Livepeer Network
+- **RTMP Streaming**: Hardware-accelerated stream to Livepeer
+- **Global CDN**: Worldwide stream distribution
+- **Playback URLs**: Frontend-accessible stream URLs
+
+### Solana Blockchain
+- **Devnet Integration**: Real blockchain transactions
+- **Face NFTs**: Encrypted biometric data as NFTs
+- **Camera Registry**: On-chain camera and user management
+- **Session Validation**: Blockchain-based authentication
+
+### Cloudflare Tunnel
+- **Public Access**: `jetson.mmoment.xyz` domain
+- **SSL Termination**: Secure HTTPS access
+- **Load Balancing**: Traffic distribution
+- **DDoS Protection**: Network security
+
+This architecture provides a robust, scalable foundation for AI-powered camera applications with blockchain integration while maintaining security and performance on edge devices. 

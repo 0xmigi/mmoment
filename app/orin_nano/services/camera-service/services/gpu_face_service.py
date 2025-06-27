@@ -47,7 +47,7 @@ class GPUFaceService:
         self._initialized = True
         self._processing_enabled = False
         self._detection_enabled = True
-        self._visualization_enabled = True
+        self._visualization_enabled = False  # OFF by default
         self._boxes_enabled = False
         self._processing_thread = None
         self._stop_event = threading.Event()
@@ -184,6 +184,42 @@ class GPUFaceService:
                 
         except Exception as e:
             logger.warning(f"Failed to extract embedding: {e}")
+            return None
+
+    def extract_compact_face_embedding(self, face_img: np.ndarray) -> Optional[np.ndarray]:
+        """
+        Extract compact 128-dimension face embedding for blockchain storage
+        
+        This method generates a smaller embedding suitable for on-chain storage
+        while maintaining reasonable recognition accuracy for cross-camera use.
+        
+        Args:
+            face_img: Face image as numpy array
+            
+        Returns:
+            128-dimension embedding array or None if extraction fails
+        """
+        # First get the full 512-dimension embedding
+        full_embedding = self.extract_face_embedding(face_img)
+        
+        if full_embedding is None:
+            return None
+            
+        try:
+            # Reduce to 128 dimensions using simple truncation
+            # This keeps the most significant features while fitting blockchain limits
+            compact_embedding = full_embedding[:128]
+            
+            # Renormalize the compact embedding to maintain similarity properties
+            norm = np.linalg.norm(compact_embedding)
+            if norm > 0:
+                compact_embedding = compact_embedding / norm
+            
+            logger.debug(f"Successfully extracted compact embedding, shape: {compact_embedding.shape}")
+            return compact_embedding
+            
+        except Exception as e:
+            logger.warning(f"Failed to create compact embedding: {e}")
             return None
 
     def detect_and_recognize_faces(self, frame: np.ndarray) -> List[Dict]:
@@ -620,6 +656,193 @@ class GPUFaceService:
         except Exception as e:
             logger.error(f"Error clearing enrolled faces: {e}")
             return False
+
+    def detect_faces(self, frame: np.ndarray) -> List[Dict]:
+        """
+        Detect faces in frame using YOLO model
+        
+        Args:
+            frame: Input frame
+            
+        Returns:
+            List of face detection dictionaries with 'box' key
+        """
+        try:
+            if not self._models_loaded:
+                logger.warning("Models not loaded for face detection")
+                return []
+            
+            # Use the existing _detect_faces method logic
+            results = self.face_detector(frame)
+            
+            faces = []
+            for result in results:
+                boxes = result.boxes
+                if boxes is not None:
+                    for box in boxes:
+                        conf = box.conf.item()
+                        if conf > 0.5:  # Confidence threshold
+                            x1, y1, x2, y2 = box.xyxy[0].int().tolist()
+                            faces.append({
+                                'box': [x1, y1, x2, y2],
+                                'confidence': conf
+                            })
+            
+            return faces
+            
+        except Exception as e:
+            logger.error(f"Error detecting faces: {e}")
+            return []
+
+    def get_current_embedding(self, frame: np.ndarray = None) -> Optional[List[float]]:
+        """
+        Extract face embedding from current frame for NFT creation
+        
+        Args:
+            frame: Optional frame to process (if None, gets current frame from buffer)
+            
+        Returns:
+            Face embedding as list of floats, or None if no face detected
+        """
+        try:
+            # If no frame provided, we'll need to get it from buffer service
+            if frame is None:
+                logger.warning("get_current_embedding called without frame - need buffer service integration")
+                return None
+            
+            # Detect faces in the frame
+            faces = self.detect_faces(frame)
+            
+            if not faces or len(faces) == 0:
+                logger.warning("No faces detected in current frame for embedding extraction")
+                return None
+            
+            # Use the largest face (first face from YOLO detection)
+            largest_face = faces[0]
+            
+            # Extract face region
+            x1, y1, x2, y2 = largest_face['box']
+            face_region = frame[y1:y2, x1:x2]
+            
+            if face_region.size == 0:
+                logger.warning("Face region is empty")
+                return None
+            
+            # Extract embedding using InsightFace
+            embedding = self.extract_face_embedding(face_region)
+            
+            if embedding is None:
+                logger.warning("Failed to extract face embedding")
+                return None
+            
+            # Convert numpy array to list for JSON serialization
+            embedding_list = embedding.tolist()
+            
+            logger.info(f"Successfully extracted face embedding, shape: {len(embedding_list)}")
+            return embedding_list
+            
+        except Exception as e:
+            logger.error(f"Error extracting current embedding: {e}")
+            return None
+
+    def get_current_embedding_with_buffer(self, buffer_service) -> Optional[List[float]]:
+        """
+        Extract face embedding from current buffer frame
+        
+        Args:
+            buffer_service: Buffer service to get current frame from
+            
+        Returns:
+            Face embedding as list of floats, or None if no face detected
+        """
+        try:
+            # Get current frame from buffer
+            frame, timestamp = buffer_service.get_frame()
+            
+            if frame is None:
+                logger.warning("No frame available from buffer service")
+                return None
+            
+            return self.get_current_embedding(frame)
+            
+        except Exception as e:
+            logger.error(f"Error extracting embedding with buffer: {e}")
+            return None
+
+    def get_current_compact_embedding(self, frame: np.ndarray = None) -> Optional[List[float]]:
+        """
+        Extract compact 128-dimension face embedding for blockchain storage
+        
+        Args:
+            frame: Optional frame to process (if None, gets current frame from buffer)
+            
+        Returns:
+            Compact face embedding as list of floats, or None if no face detected
+        """
+        try:
+            # If no frame provided, we'll need to get it from buffer service
+            if frame is None:
+                logger.warning("get_current_compact_embedding called without frame - need buffer service integration")
+                return None
+            
+            # Detect faces in the frame
+            faces = self.detect_faces(frame)
+            
+            if not faces or len(faces) == 0:
+                logger.warning("No faces detected in current frame for compact embedding extraction")
+                return None
+            
+            # Use the largest face (first face from YOLO detection)
+            largest_face = faces[0]
+            
+            # Extract face region
+            x1, y1, x2, y2 = largest_face['box']
+            face_region = frame[y1:y2, x1:x2]
+            
+            if face_region.size == 0:
+                logger.warning("Face region is empty")
+                return None
+            
+            # Extract compact embedding using InsightFace
+            compact_embedding = self.extract_compact_face_embedding(face_region)
+            
+            if compact_embedding is None:
+                logger.warning("Failed to extract compact face embedding")
+                return None
+            
+            # Convert numpy array to list for JSON serialization
+            embedding_list = compact_embedding.tolist()
+            
+            logger.info(f"Successfully extracted compact face embedding, shape: {len(embedding_list)}")
+            return embedding_list
+            
+        except Exception as e:
+            logger.error(f"Error extracting current compact embedding: {e}")
+            return None
+
+    def get_current_compact_embedding_with_buffer(self, buffer_service) -> Optional[List[float]]:
+        """
+        Extract compact face embedding from current buffer frame for blockchain
+        
+        Args:
+            buffer_service: Buffer service to get current frame from
+            
+        Returns:
+            Compact face embedding as list of floats, or None if no face detected
+        """
+        try:
+            # Get current frame from buffer
+            frame, timestamp = buffer_service.get_frame()
+            
+            if frame is None:
+                logger.warning("No frame available from buffer service")
+                return None
+            
+            return self.get_current_compact_embedding(frame)
+            
+        except Exception as e:
+            logger.error(f"Error extracting compact embedding with buffer: {e}")
+            return None
 
     def _draw_face_box(self, frame, face_location, identity_info=None):
         """

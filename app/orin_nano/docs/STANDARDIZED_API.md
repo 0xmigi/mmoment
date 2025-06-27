@@ -33,6 +33,10 @@ All these endpoints are accessible to your frontend application and are the **ON
 - `POST /api/visualization/face` - Toggle face visualization
 - `POST /api/visualization/gesture` - Toggle gesture visualization
 
+### Facial NFT Endpoints (Jetson-specific)
+- `POST /api/face/enroll/prepare-transaction` - Prepare facial NFT transaction (requires session)
+- `POST /api/face/enroll/confirm` - Confirm facial NFT transaction (requires session)
+
 ### Streaming (Jetson-specific - Livepeer)
 - `POST /api/stream/livepeer/start` - Start Livepeer streaming
 - `POST /api/stream/livepeer/stop` - Stop Livepeer streaming

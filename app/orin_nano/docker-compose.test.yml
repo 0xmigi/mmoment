@@ -12,11 +12,17 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - PYTHONUNBUFFERED=1
       - CAMERA_DEVICE=/dev/video1
-      # Livepeer streaming configuration
-      - LIVEPEER_API_KEY=522d8091-867f-42b3-8f62-5eeeab60f000
-      - LIVEPEER_STREAM_KEY=2458-aycn-mgfp-2dze
+      # Livepeer streaming configuration - Multi-Account Support
+      # Livepeer Configuration (Current Active Account)
+      - LIVEPEER_API_KEY=eea9bcf2-ac98-4454-a3ab-b0e610a27f05
+      - LIVEPEER_STREAM_KEY=6315-9m3d-yfzn-xhf6
       - LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
-      - LIVEPEER_PLAYBACK_ID=24583deg6syfcql
+      - LIVEPEER_PLAYBACK_ID=6315myh7iojrn5uk
+      # Previous Account (Commented Out)
+      # - LIVEPEER_API_KEY=522d8091-867f-42b3-8f62-5eeeab60f000
+      # - LIVEPEER_STREAM_KEY=2458-aycn-mgfp-2dze
+      # - LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
+      # - LIVEPEER_PLAYBACK_ID=24583deg6syfcql
     privileged: true
     runtime: nvidia
     devices:

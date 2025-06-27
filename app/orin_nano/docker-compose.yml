@@ -10,126 +10,87 @@ services:
     build:
       context: ./services/camera-service
       dockerfile: Dockerfile
-    network_mode: host
+    ports:
+      - "5002:5002"
+    volumes:
+      - ./data/images:/app/photos
+      - ./data/videos:/app/videos  
+      - ./data/face_embeddings:/app/face_embeddings
+      - ./data/faces:/app/faces
+      - ./data/recordings:/app/recordings
+      - ./data/config:/app/config
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /dev:/dev
     environment:
       - DISPLAY=${DISPLAY}
-      - CUDA_VISIBLE_DEVICES=0
       - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - PYTHONUNBUFFERED=1
-      - CAMERA_DEVICE=/dev/video1
-      # Service URLs - using localhost due to Jetson kernel limitations
-      - BIOMETRIC_SERVICE_URL=http://localhost:5003
-      - SOLANA_SERVICE_URL=http://localhost:5001
-      # Livepeer streaming configuration
-      - LIVEPEER_API_KEY=522d8091-867f-42b3-8f62-5eeeab60f000
-      - LIVEPEER_STREAM_KEY=2458-aycn-mgfp-2dze
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,display
+      - BIOMETRIC_SECURITY_URL=http://biometric-security:5003
+      - SOLANA_MIDDLEWARE_URL=http://solana-middleware:5001
+      # Livepeer Configuration (Current Active Account)
+      - LIVEPEER_API_KEY=eea9bcf2-ac98-4454-a3ab-b0e610a27f05
+      - LIVEPEER_STREAM_KEY=6315-9m3d-yfzn-xhf6
       - LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
-      - LIVEPEER_PLAYBACK_ID=24583deg6syfcql
-    privileged: true
+      - LIVEPEER_PLAYBACK_ID=6315myh7iojrn5uk
+      # Previous Account (Commented Out)
+      # - LIVEPEER_API_KEY=522d8091-867f-42b3-8f62-5eeeab60f000
+      # - LIVEPEER_STREAM_KEY=2458-aycn-mgfp-2dze
+      # - LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
+      # - LIVEPEER_PLAYBACK_ID=24583deg6syfcql
+    networks:
+      - mmoment-network
     runtime: nvidia
-    devices:
-      - /dev/video0:/dev/video0
-      - /dev/video1:/dev/video1
-      - /dev/video2:/dev/video2
-    volumes:
-      - /dev:/dev
-      - /tmp/.X11-unix:/tmp/.X11-unix
-      # GPU model cache
-      - /mnt/nvme/jetson_cache/insightface:/root/.insightface
-      - /mnt/nvme/jetson_cache/ultralytics:/root/.config/Ultralytics
-      # Persistent data
-      - camera_photos:/workspace/photos
-      - camera_videos:/workspace/videos
-      - camera_logs:/workspace/logs
-    depends_on:
-      - biometric-security
-      - solana-middleware
+    privileged: true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5002/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+    depends_on:
+      - biometric-security
+      - solana-middleware
 
   # ========================================
   # BIOMETRIC SECURITY SERVICE (Port 5003)
   # Encryption, NFT packaging, secure purging
-  # CPU-only container
+  # CPU-only container - PRIVATE NETWORK ONLY
   # ========================================
   biometric-security:
     build:
       context: ./services/biometric-security
       dockerfile: Dockerfile
-    network_mode: host
+    networks:
+      - mmoment-network
     environment:
-      - PYTHONUNBUFFERED=1
-      # Service URLs - using localhost due to Jetson kernel limitations
-      - CAMERA_SERVICE_URL=http://localhost:5002
-      - SOLANA_SERVICE_URL=http://localhost:5001
-    volumes:
-      - biometric_secure_data:/app/secure_data
-      - biometric_temp_data:/app/temp_embeddings
-      - biometric_logs:/app/logs
+      - SOLANA_MIDDLEWARE_URL=http://solana-middleware:5001
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5003/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
 
   # ========================================
   # SOLANA MIDDLEWARE (Port 5001)
-  # Blockchain operations, NFT minting
+  # Blockchain operations, NFT minting - PRIVATE NETWORK ONLY
   # ========================================
   solana-middleware:
     build:
       context: ./services/solana-middleware
       dockerfile: Dockerfile
-    network_mode: host
+    networks:
+      - mmoment-network
     environment:
-      - PYTHONUNBUFFERED=1
-      # Service URLs - using localhost due to Jetson kernel limitations
-      - CAMERA_SERVICE_URL=http://localhost:5002
-      - BIOMETRIC_SERVICE_URL=http://localhost:5003
-      # Solana configuration
-      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.devnet.solana.com}
-      - SOLANA_NETWORK=${SOLANA_NETWORK:-devnet}
-    volumes:
-      - solana_logs:/app/logs
-      - solana_data:/app/data
+      - SOLANA_NETWORK=devnet
+      - CAMERA_NETWORK_PROGRAM_ID=Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
 
-# ========================================
-# VOLUMES
-# ========================================
-volumes:
-  # Camera service volumes
-  camera_photos:
-    driver: local
-  camera_videos:
-    driver: local
-  camera_logs:
-    driver: local
-  
-  # Biometric security volumes
-  biometric_secure_data:
-    driver: local
-  biometric_temp_data:
-    driver: local
-  biometric_logs:
-    driver: local
-  
-  # Solana middleware volumes
-  solana_logs:
-    driver: local
-  solana_data:
-    driver: local 
+networks:
+  mmoment-network:
+    driver: bridge 
