@@ -11,6 +11,9 @@ COPY . .
 
 RUN mkdir -p logs data
 
+# Make startup script executable
+RUN chmod +x start.sh
+
 EXPOSE 5001
 
-CMD ["python", "solana_middleware.py"]
+CMD ["./start.sh"]

@@ -70,14 +70,8 @@ def init_services():
     except ImportError:
         logger.warning("DeepFace GPU service not available")
     
-    # Try to import Solana integration
-    solana_integration_service = None
-    try:
-        from services.solana_integration import get_solana_integration_service
-        solana_integration_service = get_solana_integration_service()
-        logger.info("Solana integration service initialized")
-    except ImportError:
-        logger.warning("Solana integration service not available")
+    # Solana integration is handled by the dedicated solana-middleware container
+    # Camera service only communicates with it via HTTP API calls
     
     logger.info("Initializing services...")
     
@@ -125,7 +119,8 @@ def init_services():
     logger.info("Injected visual services into Livepeer service for overlay support")
     
     # Initialize Blockchain Session Sync Service
-    from services.blockchain_session_sync import get_blockchain_session_sync
+    from services.blockchain_session_sync import get_blockchain_session_sync, reset_blockchain_session_sync
+    reset_blockchain_session_sync()  # Ensure fresh instance with current environment variables
     blockchain_sync = get_blockchain_session_sync()
     blockchain_sync.set_services(session_service, gpu_face_service)
     blockchain_sync.start()
@@ -161,11 +156,8 @@ def init_services():
         deepface_status = deepface_service.get_status()
         logger.info(f"DeepFace service status: Available={deepface_status['available']}, GPU={deepface_status['gpu_enabled']}, Model={deepface_status['current_model']}")
     
-    # Add Solana integration if available
-    if solana_integration_service:
-        services['solana'] = solana_integration_service
-        solana_status = solana_integration_service.get_health_status()
-        logger.info(f"Solana middleware status: {solana_status['status']}, Camera PDA: {solana_status['camera_pda']}")
+    # Solana integration is handled by the dedicated solana-middleware container
+    # Camera service communicates with it via HTTP API calls when needed
     
     return services
 

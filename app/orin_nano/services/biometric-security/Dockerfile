@@ -10,6 +10,7 @@ RUN groupadd -r biouser && useradd -r -g biouser biouser
 # Install system dependencies for secure operations
 RUN apt-get update && apt-get install -y \
     secure-delete \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

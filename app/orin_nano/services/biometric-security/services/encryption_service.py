@@ -10,6 +10,7 @@ import os
 import json
 import base64
 import logging
+import time
 import numpy as np
 from typing import Dict, List, Optional, Any
 from cryptography.fernet import Fernet
@@ -75,7 +76,7 @@ class BiometricEncryptionService:
             metadata: Optional metadata to include
             
         Returns:
-            NFT-ready package with encrypted embedding
+            NFT-ready package with encrypted embedding (raw bytes, no Base64)
         """
         try:
             # Convert embedding to numpy array if needed
@@ -117,10 +118,10 @@ class BiometricEncryptionService:
             metadata_json = json.dumps(full_metadata).encode()
             encrypted_metadata = cipher.encrypt(metadata_json)
             
-            # Create NFT-ready package
+            # Create NFT-ready package with Base64 encoding (efficient for JSON)
             nft_package = {
-                'encrypted_embedding': base64.b64encode(encrypted_embedding).decode(),
-                'encrypted_metadata': base64.b64encode(encrypted_metadata).decode(),
+                'encrypted_embedding': base64.b64encode(encrypted_embedding).decode('utf-8'),
+                'encrypted_metadata': base64.b64encode(encrypted_metadata).decode('utf-8'),
                 'wallet_address': wallet_address,
                 'created_at': full_metadata['timestamp'],
                 'biometric_type': 'facial_embedding_insightface',
@@ -129,7 +130,7 @@ class BiometricEncryptionService:
                 'service_version': 'mmoment-biometric-security-v1.0'
             }
             
-            logger.info(f"Successfully encrypted embedding for wallet: {wallet_address[:8]}...")
+            logger.info(f"Successfully encrypted embedding for wallet: {wallet_address[:8]}... (Base64, {len(nft_package['encrypted_embedding'])} chars)")
             return nft_package
             
         except Exception as e:
@@ -155,6 +156,7 @@ class BiometricEncryptionService:
             
             # Decrypt metadata first to validate
             encrypted_metadata = base64.b64decode(nft_package['encrypted_metadata'])
+            
             metadata_json = cipher.decrypt(encrypted_metadata)
             metadata = json.loads(metadata_json.decode())
             
@@ -168,6 +170,7 @@ class BiometricEncryptionService:
             
             # Decrypt embedding data
             encrypted_embedding = base64.b64decode(nft_package['encrypted_embedding'])
+            
             embedding_bytes = cipher.decrypt(encrypted_embedding)
             
             # Reconstruct numpy array with original shape and dtype
