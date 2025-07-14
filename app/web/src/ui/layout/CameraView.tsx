@@ -214,7 +214,7 @@ export function CameraView() {
   const [isCheckedIn, setIsCheckedIn] = useState(false);
   
   // Add state to store video recording transaction signature
-  const [recordingTransactionSignature, setRecordingTransactionSignature] = useState<string | null>(null);
+  const [_recordingTransactionSignature, setRecordingTransactionSignature] = useState<string | null>(null);
 
   // Add state for gesture monitoring
   const [gestureMonitoring, setGestureMonitoring] = useState(false);
@@ -256,8 +256,6 @@ export function CameraView() {
   // Add a function to create timeline events with Farcaster profile info
   const addTimelineEvent = (eventType: TimelineEventType, transactionId?: string, mediaUrl?: string) => {
     if (primaryWallet && user) {
-      // Create a unique key for this event to prevent duplicates
-      const eventKey = `${eventType}_${transactionId}_${Date.now()}`;
       const recentEventsKey = 'recentTimelineEvents';
       
       try {

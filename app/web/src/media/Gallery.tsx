@@ -212,7 +212,7 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
                         }
                       }
                     }}
-                    onLoadStart={(e) => {
+                    onLoadStart={(_e) => {
                       console.log('Video load started:', {
                         mediaId: item.id,
                         url: item.url,

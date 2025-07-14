@@ -4,34 +4,7 @@ import { IPFSMedia } from '../storage/ipfs/ipfs-service';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useState } from 'react';
 import { unifiedIpfsService } from '../storage/ipfs/unified-ipfs-service';
-
-// Copy the necessary types
-type TimelineEventType =
-  | 'initialization'
-  | 'user_connected'
-  | 'photo_captured'
-  | 'video_recorded'
-  | 'stream_started'
-  | 'stream_ended'
-  | 'check_in'
-  | 'check_out';
-
-interface TimelineUser {
-  address: string;
-  username?: string;
-  displayName?: string;
-  pfpUrl?: string;
-}
-
-interface TimelineEvent {
-  id: string;
-  type: TimelineEventType;
-  user: TimelineUser;
-  timestamp: number;
-  transactionId?: string;
-  mediaUrl?: string;
-  cameraId?: string;
-}
+import { TimelineEvent } from '../timeline/timeline-types';
 
 interface MediaViewerProps {
   isOpen: boolean;

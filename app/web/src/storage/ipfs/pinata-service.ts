@@ -307,12 +307,9 @@ export class PinataService implements IPFSProvider {
 
     // Wrap the entire deletion process to catch and suppress transient errors
     try {
-      // Get pin info (suppress intermediate errors completely)
-      let pin = null;
-      
       // Try JWT first, then API key, but don't log intermediate failures
       try {
-        const response = await axios.get<PinataResponse>(
+        await axios.get<PinataResponse>(
           'https://api.pinata.cloud/data/pinList',
           {
             headers: {
@@ -324,11 +321,11 @@ export class PinataService implements IPFSProvider {
             }
           }
         );
-        pin = response.data.rows[0];
+        // Pin info retrieved but not used - skipping wallet verification
       } catch {
         // Silent fallback to API key
         try {
-          const response = await axios.get<PinataResponse>(
+          await axios.get<PinataResponse>(
             'https://api.pinata.cloud/data/pinList',
             {
               headers: {
@@ -341,7 +338,7 @@ export class PinataService implements IPFSProvider {
               }
             }
           );
-          pin = response.data.rows[0];
+          // Pin info retrieved but not used - skipping wallet verification
         } catch {
           // Continue anyway - try to delete even if we can't verify
         }

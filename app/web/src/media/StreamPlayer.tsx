@@ -1,11 +1,9 @@
 import { Player } from "@livepeer/react";
 import { useState, useEffect, useCallback, useRef, memo } from "react";
-import { CONFIG } from "../core/config";
 import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from '../anchor/setup';
 import { useCamera } from '../camera/CameraProvider';
 import { useParams } from 'react-router-dom';
 import { unifiedCameraService } from '../camera/unified-camera-service';
-import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 
 // Simple cache for stream info to reduce API calls
 const streamInfoCache = { 
@@ -16,10 +14,6 @@ const streamInfoCache = {
 // Longer cache for mobile to reduce API calls
 const STREAM_CACHE_TTL = 10000; // 10 seconds
 const MOBILE_CACHE_TTL = 30000; // 30 seconds for mobile
-
-// Fetch timeout to avoid hanging
-const FETCH_TIMEOUT = 8000; // 8 seconds
-const MOBILE_FETCH_TIMEOUT = 10000; // 10 seconds for mobile
 
 interface StreamInfo {
   playbackId: string;
@@ -41,7 +35,6 @@ const StreamPlayer = memo(() => {
   const { program } = useProgram();
   const { selectedCamera } = useCamera();
   const { cameraId } = useParams<{ cameraId: string }>();
-  const { primaryWallet } = useDynamicContext();
 
   const fetchStreamInfo = useCallback(async (forceRefresh = false) => {
     // Skip fetching during camera operations

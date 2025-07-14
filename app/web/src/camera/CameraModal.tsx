@@ -475,44 +475,6 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   };
 
-  // Handle Livepeer stream start
-  const handleStartLivepeerStream = async () => {
-    setConfigLoading(true);
-    try {
-      // TODO: Add startLivepeerStream method to unified service
-      const result = await unifiedCameraService.startStream(camera.id);
-      
-      if (result.success) {
-        setError(null);
-      } else {
-        setError(result.error || 'Failed to start Livepeer stream');
-      }
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to start Livepeer stream');
-    } finally {
-      setConfigLoading(false);
-    }
-  };
-
-  // Handle Livepeer stream stop
-  const handleStopLivepeerStream = async () => {
-    setConfigLoading(true);
-    try {
-      // TODO: Add stopLivepeerStream method to unified service  
-      const result = await unifiedCameraService.stopStream(camera.id);
-      
-      if (result.success) {
-        setError(null);
-      } else {
-        setError(result.error || 'Failed to stop Livepeer stream');
-      }
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to stop Livepeer stream');
-    } finally {
-      setConfigLoading(false);
-    }
-  };
-
   // Handle check-in
   const handleCheckIn = async () => {
     if (!camera.id || !primaryWallet?.address) {
