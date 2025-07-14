@@ -20,11 +20,12 @@ class Session:
     """
     Represents a user session with the camera.
     """
-    def __init__(self, wallet_address: str, session_id: str = None):
+    def __init__(self, wallet_address: str, session_id: str = None, user_profile: Dict = None):
         self.wallet_address = wallet_address
         self.session_id = session_id or uuid.uuid4().hex[:16]
         self.created_at = time.time()
         self.last_active = time.time()
+        self.user_profile = user_profile or {}
         self.permissions = {
             "can_capture": True,
             "can_record": True,
@@ -48,7 +49,8 @@ class Session:
             "created_at": int(self.created_at * 1000),
             "last_active": int(self.last_active * 1000),
             "age_seconds": int(time.time() - self.created_at),
-            "permissions": self.permissions
+            "permissions": self.permissions,
+            "user_profile": self.user_profile
         }
 
 class SessionService:
@@ -92,13 +94,14 @@ class SessionService:
         
         logger.info("SessionService initialized")
     
-    def create_session(self, wallet_address: str) -> Dict:
+    def create_session(self, wallet_address: str, user_profile: Dict = None) -> Dict:
         """
         Create a new session for the specified wallet address.
         If a session already exists for this wallet, it will be replaced.
         
         Args:
             wallet_address: The wallet address to create a session for
+            user_profile: Optional user profile information (display_name, username, etc.)
             
         Returns:
             Dict with session information
@@ -134,13 +137,14 @@ class SessionService:
                         del self._wallet_sessions[oldest_session.wallet_address]
             
             # Create a new session
-            session = Session(wallet_address)
+            session = Session(wallet_address, user_profile=user_profile)
             
             # Store the session
             self._sessions[session.session_id] = session
             self._wallet_sessions[wallet_address] = session.session_id
             
-            logger.info(f"Created new session {session.session_id} for wallet {wallet_address}")
+            display_name = user_profile.get('display_name') if user_profile else None
+            logger.info(f"Created new session {session.session_id} for wallet {wallet_address} ({display_name or 'no display name'})")
             
             return {
                 "success": True,

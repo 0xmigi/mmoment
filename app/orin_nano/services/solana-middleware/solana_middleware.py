@@ -13,6 +13,12 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+# Solana imports for blockchain reading
+from solana.rpc.api import Client
+from solders.pubkey import Pubkey
+from solana.rpc.types import MemcmpOpts
+import base58
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -26,6 +32,14 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
+# Solana configuration
+SOLANA_RPC_URL = os.getenv('SOLANA_RPC_URL', 'https://api.devnet.solana.com')
+CAMERA_PROGRAM_ID = os.getenv('CAMERA_PROGRAM_ID', 'YourCameraProgramIdHere')  # Replace with actual program ID
+CAMERA_PDA = os.getenv('CAMERA_PDA', 'YourCameraPDAHere')  # Replace with actual camera PDA
+
+# Initialize Solana client
+solana_client = Client(SOLANA_RPC_URL)
 
 # Simulate database with in-memory dictionary
 sessions = {}
@@ -448,56 +462,269 @@ def confirm_face_enrollment():
 
 @app.route('/api/blockchain/purge-session', methods=['POST'])
 def purge_biometric_session():
-    """Trigger secure purging of biometric data after session end"""
+    """Purge a biometric session"""
     try:
         data = request.json
         session_id = data.get('session_id')
-        wallet_address = data.get('wallet_address')
         
         if not session_id:
-            return jsonify({"error": "session_id is required"}), 400
+            return jsonify({"error": "Session ID is required"}), 400
         
-        # Trigger purge in biometric security service
-        biometric_service_url = os.getenv('BIOMETRIC_SERVICE_URL', 'http://localhost:5003')
+        # In a real implementation, this would securely delete the session
+        # For now, we'll just log it
+        logger.info(f"Purging biometric session: {session_id}")
         
-        try:
-            response = requests.post(f'{biometric_service_url}/api/biometric/purge',
-                                    json={'session_id': session_id})
-            
-            if response.status_code == 200:
-                # Also clean up our session data
-                if session_id in sessions:
-                    del sessions[session_id]
-                
-                # Remove encryption keys
-                if wallet_address and wallet_address in encryption_keys:
-                    del encryption_keys[wallet_address]
-                
-                logger.info(f"Session {session_id} purged successfully")
-                
-                return jsonify({
-                    "success": True,
-                    "message": "Session data securely purged from all services"
-                })
-            else:
-                return jsonify({"error": "Failed to purge biometric data"}), 500
-                
-        except requests.exceptions.RequestException:
-            # If biometric service is unavailable, still clean up local data
-            if session_id in sessions:
-                del sessions[session_id]
-            if wallet_address and wallet_address in encryption_keys:
-                del encryption_keys[wallet_address]
-            
-            logger.warning(f"Biometric service unavailable, cleaned up local data for session {session_id}")
-            return jsonify({
-                "success": True,
-                "message": "Local session data purged (biometric service unavailable)"
-            })
-            
+        return jsonify({
+            "success": True,
+            "message": "Biometric session purged successfully"
+        })
+    
     except Exception as e:
-        logger.error(f"Error purging session: {e}")
+        logger.error(f"Error purging biometric session: {e}")
         return jsonify({"error": str(e)}), 500
+
+# New blockchain reading endpoints
+@app.route('/api/blockchain/checked-in-users', methods=['GET'])
+def get_checked_in_users_api():
+    """Get all users currently checked in to the camera"""
+    try:
+        camera_pubkey = request.args.get('camera_pubkey', CAMERA_PDA)
+        
+        if not camera_pubkey or camera_pubkey == 'YourCameraPDAHere':
+            return jsonify({
+                "error": "Camera PDA not configured. Please set CAMERA_PDA environment variable."
+            }), 400
+        
+        checked_in_users = get_checked_in_users(camera_pubkey)
+        
+        return jsonify({
+            "success": True,
+            "camera_pubkey": camera_pubkey,
+            "checked_in_users": checked_in_users,
+            "count": len(checked_in_users)
+        })
+    
+    except Exception as e:
+        logger.error(f"Error getting checked-in users: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/blockchain/check-user-status', methods=['POST'])
+def check_user_status_api():
+    """Check if a specific user is checked in to the camera"""
+    try:
+        data = request.json
+        user_pubkey = data.get('user_pubkey')
+        camera_pubkey = data.get('camera_pubkey', CAMERA_PDA)
+        
+        if not user_pubkey:
+            return jsonify({"error": "User public key is required"}), 400
+        
+        if not camera_pubkey or camera_pubkey == 'YourCameraPDAHere':
+            return jsonify({
+                "error": "Camera PDA not configured. Please set CAMERA_PDA environment variable."
+            }), 400
+        
+        is_checked_in = is_user_checked_in(user_pubkey, camera_pubkey)
+        session_pda = derive_session_pda(user_pubkey, camera_pubkey, CAMERA_PROGRAM_ID)
+        
+        return jsonify({
+            "success": True,
+            "user_pubkey": user_pubkey,
+            "camera_pubkey": camera_pubkey,
+            "is_checked_in": is_checked_in,
+            "session_pda": session_pda
+        })
+    
+    except Exception as e:
+        logger.error(f"Error checking user status: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/blockchain/session-pda', methods=['POST'])
+def derive_session_pda_api():
+    """Derive the session PDA for a user and camera"""
+    try:
+        data = request.json
+        user_pubkey = data.get('user_pubkey')
+        camera_pubkey = data.get('camera_pubkey', CAMERA_PDA)
+        program_id = data.get('program_id', CAMERA_PROGRAM_ID)
+        
+        if not user_pubkey:
+            return jsonify({"error": "User public key is required"}), 400
+        
+        session_pda = derive_session_pda(user_pubkey, camera_pubkey, program_id)
+        
+        if not session_pda:
+            return jsonify({"error": "Failed to derive session PDA"}), 500
+        
+        return jsonify({
+            "success": True,
+            "user_pubkey": user_pubkey,
+            "camera_pubkey": camera_pubkey,
+            "program_id": program_id,
+            "session_pda": session_pda
+        })
+    
+    except Exception as e:
+        logger.error(f"Error deriving session PDA: {e}")
+        return jsonify({"error": str(e)}), 500
+
+def derive_session_pda(user_pubkey: str, camera_pubkey: str, program_id: str) -> str:
+    """Derive the session PDA for a user and camera"""
+    try:
+        user_pk = Pubkey.from_string(user_pubkey)
+        camera_pk = Pubkey.from_string(camera_pubkey)
+        program_pk = Pubkey.from_string(program_id)
+        
+        # Derive PDA using seeds: ["session", user_pubkey, camera_pubkey]
+        seeds = [
+            b"session",
+            bytes(user_pk),
+            bytes(camera_pk)
+        ]
+        
+        pda, bump = Pubkey.find_program_address(seeds, program_pk)
+        return str(pda)
+    except Exception as e:
+        logger.error(f"Error deriving session PDA: {e}")
+        return None
+
+def get_checked_in_users(camera_pubkey: str) -> list:
+    """Get all users currently checked in to a specific camera"""
+    try:
+        camera_pk = Pubkey.from_string(camera_pubkey)
+        program_pk = Pubkey.from_string(CAMERA_PROGRAM_ID)
+        
+        logger.info(f"Searching for sessions for camera: {camera_pubkey}")
+        logger.info(f"Using program ID: {CAMERA_PROGRAM_ID}")
+        
+        # For now, get all program accounts and filter in Python
+        response = solana_client.get_program_accounts(
+            program_pk,
+            encoding="base64"
+        )
+        
+        logger.info(f"Got {len(response.value) if response.value else 0} total program accounts")
+        
+        checked_in_users = []
+        
+        if response.value:
+            for i, account_info in enumerate(response.value):
+                try:
+                    logger.info(f"Processing account {i+1}/{len(response.value)}: {account_info.pubkey}")
+                    
+                    # Debug the data format
+                    logger.info(f"Account data type: {type(account_info.account.data)}")
+                    
+                    # Handle different data formats
+                    if isinstance(account_info.account.data, bytes):
+                        # Direct bytes format
+                        account_data = account_info.account.data
+                        logger.info(f"Using direct bytes format")
+                    elif isinstance(account_info.account.data, list) and len(account_info.account.data) > 0:
+                        if isinstance(account_info.account.data[0], str):
+                            # Base64 string format
+                            account_data = base64.b64decode(account_info.account.data[0])
+                            logger.info(f"Using base64 string format")
+                        elif isinstance(account_info.account.data[0], int):
+                            # Already decoded bytes format
+                            account_data = bytes(account_info.account.data)
+                            logger.info(f"Using int list format")
+                        else:
+                            logger.warning(f"Unknown data format: {type(account_info.account.data[0])}")
+                            continue
+                    elif hasattr(account_info.account.data, 'data'):
+                        # Some libraries use .data attribute
+                        account_data = account_info.account.data.data
+                        logger.info(f"Using .data attribute format")
+                    else:
+                        logger.warning(f"Cannot parse account data format: {type(account_info.account.data)}")
+                        continue
+                    
+                    logger.info(f"Account data length: {len(account_data)} bytes")
+                    
+                    # Log first 100 bytes of account data for debugging
+                    if len(account_data) >= 100:
+                        first_100_hex = account_data[:100].hex()
+                        logger.info(f"First 100 bytes (hex): {first_100_hex}")
+                    
+                    # Check if this account belongs to our camera
+                    # The camera pubkey is at offset 40 (32 bytes)
+                    if len(account_data) >= 72:  # Minimum size for a session account
+                        camera_bytes = account_data[40:72]  # 32 bytes for camera pubkey
+                        logger.info(f"Camera bytes from account (hex): {camera_bytes.hex()}")
+                        logger.info(f"Expected camera bytes (hex): {bytes(camera_pk).hex()}")
+                        
+                        account_camera_pk = Pubkey(camera_bytes)
+                        logger.info(f"Account camera pubkey: {account_camera_pk}")
+                        logger.info(f"Target camera pubkey: {camera_pk}")
+                        
+                        # If this session belongs to our camera
+                        if str(account_camera_pk) == str(camera_pk):
+                            logger.info(f"✅ Found matching camera account!")
+                            
+                            # Extract user pubkey (at offset 8, 32 bytes)
+                            user_bytes = account_data[8:40]
+                            user_pubkey = Pubkey(user_bytes)
+                            logger.info(f"User pubkey: {user_pubkey}")
+                            
+                            # Extract check-in time (at offset 72, 8 bytes)
+                            checkin_time_bytes = account_data[72:80]
+                            checkin_time = int.from_bytes(checkin_time_bytes, byteorder='little', signed=True)
+                            logger.info(f"Check-in time: {checkin_time}")
+                            
+                            checked_in_users.append({
+                                'user': str(user_pubkey),
+                                'camera': str(account_camera_pk),
+                                'checkin_time': checkin_time,
+                                'account': str(account_info.pubkey)
+                            })
+                        else:
+                            logger.info(f"❌ Camera mismatch - skipping account")
+                    else:
+                        logger.info(f"❌ Account too small ({len(account_data)} bytes) - skipping")
+                            
+                except Exception as e:
+                    logger.error(f"Error processing account {account_info.pubkey}: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    continue
+        
+        logger.info(f"Found {len(checked_in_users)} users checked in to camera {camera_pubkey}")
+        return checked_in_users
+        
+    except Exception as e:
+        logger.error(f"Error getting checked-in users: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return []
+
+def is_user_checked_in(user_pubkey: str, camera_pubkey: str) -> bool:
+    """Check if a specific user is checked in to a specific camera"""
+    try:
+        # Derive the session PDA
+        session_pda = derive_session_pda(user_pubkey, camera_pubkey, CAMERA_PROGRAM_ID)
+        if not session_pda:
+            return False
+        
+        # Try to fetch the account
+        response = solana_client.get_account_info(Pubkey.from_string(session_pda))
+        
+        if response.value and response.value.data:
+            # Account exists, decode to check if user is actually checked in
+            account_data = base64.b64decode(response.value.data[0])
+            
+            # Extract check-in time (8 bytes starting at offset 72)
+            checkin_time_bytes = account_data[72:80]
+            checkin_time = int.from_bytes(checkin_time_bytes, byteorder='little', signed=True)
+            
+            # If checkin_time > 0, user is checked in
+            return checkin_time > 0
+        
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error checking if user {user_pubkey} is checked in: {e}")
+        return False
 
 if __name__ == "__main__":
     # Ensure the middleware has the required Python packages

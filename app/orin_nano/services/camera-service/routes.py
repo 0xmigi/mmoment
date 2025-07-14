@@ -40,9 +40,9 @@ def get_blockchain_session_sync():
     from services.blockchain_session_sync import get_blockchain_session_sync
     return get_blockchain_session_sync()
 
-# Session validation decorator
+# Session validation decorator - OPTIMISTIC MODE
 def require_session(f):
-    """Decorator to require a valid session"""
+    """Decorator to require a valid session - uses optimistic validation"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         logger.info(f"🔍 require_session decorator called for endpoint: {f.__name__}")
@@ -56,13 +56,22 @@ def require_session(f):
             logger.warning(f"🔍 Missing session data for {f.__name__}")
             return jsonify({'success': False, 'error': 'Invalid session'}), 403
         
-        # Validate session
-        session_service = get_services()['session']
-        if not session_service.validate_session(session_id, wallet_address):
-            logger.warning(f"🔍 Session validation failed for {f.__name__}")
-            return jsonify({'success': False, 'error': 'Invalid session'}), 403
+        # OPTIMISTIC VALIDATION: Check blockchain session sync first (cached)
+        blockchain_sync = get_blockchain_session_sync()
+        if blockchain_sync.is_wallet_checked_in(wallet_address):
+            logger.info(f"✅ Optimistic validation: {wallet_address} is checked in on-chain")
+            return f(*args, **kwargs)
         
-        return f(*args, **kwargs)
+        # Fallback to local session validation (much faster)
+        session_service = get_services()['session']
+        if session_service.validate_session(session_id, wallet_address):
+            logger.info(f"✅ Local session validation passed for {wallet_address}")
+            return f(*args, **kwargs)
+        
+        # Only fail if both checks fail
+        logger.warning(f"❌ Session validation failed for {f.__name__} - wallet {wallet_address}")
+        return jsonify({'success': False, 'error': 'Invalid session - please check in first'}), 403
+        
     return decorated_function
 
 # Register all routes
@@ -593,6 +602,172 @@ def register_routes(app):
     def api_visualization_gesture():
         """Standardized gesture visualization toggle"""
         return toggle_gesture_visualization()
+    
+    # User Profile Management - Enhanced for Scalable Architecture
+    @app.route('/api/user/profile', methods=['POST'])
+    def api_update_user_profile():
+        """Update user profile for display name resolution - Enhanced for PDA subdomain architecture"""
+        data = request.json or {}
+        wallet_address = data.get('wallet_address')
+        display_name = data.get('display_name')
+        username = data.get('username')
+        transaction_signature = data.get('transaction_signature')  # Optional: for verification
+        
+        if not wallet_address:
+            return jsonify({
+                'success': False,
+                'error': 'Wallet address is required'
+            }), 400
+        
+        # Get camera PDA for logging
+        camera_pda = os.environ.get('CAMERA_PDA', 'unknown')
+        
+        # Create enhanced user profile with metadata
+        user_profile = {
+            'wallet_address': wallet_address,
+            'display_name': display_name,
+            'username': username,
+            'camera_pda': camera_pda,
+            'updated_at': int(time.time()),
+            'transaction_signature': transaction_signature
+        }
+        
+        # Store profile in both face services
+        services = get_services()
+        
+        # Update simple face service
+        face_service = services['face']
+        face_service.store_user_profile(wallet_address, user_profile)
+        
+        # Update GPU face service if available
+        if 'gpu_face' in services:
+            gpu_face_service = services['gpu_face']
+            gpu_face_service.store_user_profile(wallet_address, user_profile)
+        
+        # Resolve display name with fallback hierarchy
+        resolved_display_name = display_name or username or wallet_address[:8]
+        
+        logger.info(f"[PROFILE-UPDATE] Camera {camera_pda[:8]}... updated profile for {wallet_address}: {resolved_display_name}")
+        
+        return jsonify({
+            'success': True,
+            'wallet_address': wallet_address,
+            'display_name': resolved_display_name,
+            'camera_pda': camera_pda,
+            'camera_url': f"https://{camera_pda.lower()}.mmoment.xyz/api",
+            'updated_at': user_profile['updated_at'],
+            'message': 'User profile updated successfully'
+        })
+    
+    @app.route('/api/user/profile/<wallet_address>', methods=['GET'])
+    def api_get_user_profile(wallet_address):
+        """Get user profile by wallet address"""
+        if not wallet_address:
+            return jsonify({
+                'success': False,
+                'error': 'Wallet address is required'
+            }), 400
+        
+        # Get profile from face service
+        services = get_services()
+        face_service = services['face']
+        
+        # Try to get profile from face service
+        try:
+            profile = face_service.get_user_profile(wallet_address)
+            if profile:
+                resolved_display_name = profile.get('display_name') or profile.get('username') or wallet_address[:8]
+                return jsonify({
+                    'success': True,
+                    'profile': {
+                        'wallet_address': wallet_address,
+                        'display_name': resolved_display_name,
+                        'username': profile.get('username'),
+                        'camera_pda': profile.get('camera_pda'),
+                        'updated_at': profile.get('updated_at')
+                    }
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Profile not found'
+                }), 404
+                
+        except Exception as e:
+            logger.error(f"Error getting user profile for {wallet_address}: {e}")
+            return jsonify({
+                'success': False,
+                'error': 'Failed to retrieve profile'
+            }), 500
+    
+    @app.route('/api/user/profile/<wallet_address>', methods=['DELETE'])
+    def api_delete_user_profile(wallet_address):
+        """Delete user profile (for session cleanup)"""
+        if not wallet_address:
+            return jsonify({
+                'success': False,
+                'error': 'Wallet address is required'
+            }), 400
+        
+        # Remove profile from both face services
+        services = get_services()
+        
+        # Remove from simple face service
+        face_service = services['face']
+        face_service.remove_user_profile(wallet_address)
+        
+        # Remove from GPU face service if available
+        if 'gpu_face' in services:
+            gpu_face_service = services['gpu_face']
+            gpu_face_service.remove_user_profile(wallet_address)
+        
+        camera_pda = os.environ.get('CAMERA_PDA', 'unknown')
+        logger.info(f"[PROFILE-DELETE] Camera {camera_pda[:8]}... removed profile for {wallet_address}")
+        
+        return jsonify({
+            'success': True,
+            'wallet_address': wallet_address,
+            'message': 'User profile deleted successfully'
+        })
+    
+    @app.route('/api/camera/info', methods=['GET'])
+    def api_camera_info():
+        """Get camera information for frontend discovery"""
+        camera_pda = os.environ.get('CAMERA_PDA', 'unknown')
+        camera_program_id = os.environ.get('CAMERA_PROGRAM_ID', 'unknown')
+        
+        # Get current session count
+        services = get_services()
+        session_service = services['session']
+        active_sessions = len(session_service.get_all_sessions())
+        
+        # Get buffer status
+        buffer_service = services['buffer']
+        buffer_status = buffer_service.get_status()
+        
+        return jsonify({
+            'success': True,
+            'camera_info': {
+                'pda': camera_pda,
+                'program_id': camera_program_id,
+                'api_url': f"https://{camera_pda.lower()}.mmoment.xyz/api",
+                'legacy_url': "https://jetson.mmoment.xyz/api",
+                'active_sessions': active_sessions,
+                'camera_status': {
+                    'online': buffer_status['running'],
+                    'fps': buffer_status['fps'],
+                    'resolution': f"{buffer_service._width}x{buffer_service._height}",
+                    'device': buffer_service._preferred_device
+                },
+                'capabilities': {
+                    'face_recognition': True,
+                    'gesture_detection': True,
+                    'livepeer_streaming': True,
+                    'media_capture': True,
+                    'blockchain_integration': True
+                }
+            }
+        })
 
     # ========================================
     # LEGACY ROUTES (For backward compatibility)
@@ -769,6 +944,8 @@ def register_routes(app):
         """
         data = request.json or {}
         wallet_address = data.get('wallet_address')
+        display_name = data.get('display_name')  # Optional display name from frontend
+        username = data.get('username')  # Optional username from frontend
         
         if not wallet_address:
             return jsonify({
@@ -776,14 +953,30 @@ def register_routes(app):
                 'error': 'Wallet address is required'
             }), 400
         
-        # Create a session
-        session_service = get_services()['session']
-        session_info = session_service.create_session(wallet_address)
+        # Create user profile metadata
+        user_profile = {
+            'wallet_address': wallet_address,
+            'display_name': display_name,
+            'username': username
+        }
+        
+        # Create a session with user profile
+        services = get_services()
+        session_service = services['session']
+        session_info = session_service.create_session(wallet_address, user_profile)
+        
+        # Store user profile in both face services for labeling
+        face_service = services['face']
+        face_service.store_user_profile(wallet_address, user_profile)
+        
+        # Update GPU face service if available
+        if 'gpu_face' in services:
+            gpu_face_service = services['gpu_face']
+            gpu_face_service.store_user_profile(wallet_address, user_profile)
         
         # Enable face boxes for all connected users
-        face_service = get_services()['face']
         face_service.enable_boxes(True)
-        logger.info(f"Face boxes enabled for connected user: {wallet_address}")
+        logger.info(f"Face boxes enabled for connected user: {display_name or username or wallet_address}")
         
         return jsonify(session_info)
 
@@ -999,11 +1192,11 @@ def register_routes(app):
             faces_info = face_service.get_faces()
             logger.info(f"[RECOGNIZE] Detected {faces_info['detected_count']} faces")
         
-            # If faces are detected, force a recognition run
+            # If faces are detected, process the frame for recognition
             if faces_info['detected_count'] > 0:
                 logger.info(f"[RECOGNIZE] Running face recognition on {faces_info['detected_count']} faces")
-                # Use our simplified face recognition
-                face_service._recognize_faces(frame)
+                # Use proper public API for face recognition
+                face_service.process_frame_for_recognition(frame)
             
             # Get updated recognition info
             faces_info = face_service.get_faces()

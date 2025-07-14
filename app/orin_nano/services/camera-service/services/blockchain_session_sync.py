@@ -26,7 +26,7 @@ class BlockchainSessionSync:
         logger.info(f"🔧 BlockchainSessionSync initialized with URL: {self.solana_middleware_url}")
         self.is_running = False
         self.sync_thread = None
-        self.sync_interval = 10  # Check blockchain state every 10 seconds
+        self.sync_interval = 60  # Check blockchain state every 60 seconds (much less aggressive)
         self.stop_event = threading.Event()
         
         # Track current state
@@ -117,22 +117,48 @@ class BlockchainSessionSync:
     def _get_checked_in_wallets(self) -> Optional[Set[str]]:
         """Get list of currently checked-in wallets from blockchain"""
         try:
-            # For now, since you confirmed you ARE checked in on-chain,
-            # let's return your wallet address so the system works
-            # TODO: Replace with actual blockchain query once we have the proper setup
+            # Query the Solana middleware for checked-in users
+            response = requests.get(
+                f"{self.solana_middleware_url}/api/blockchain/checked-in-users",
+                timeout=10
+            )
             
-            # Your wallet address that's checked in (from the screenshot)
-            checked_in_wallets = set()
-            checked_in_wallets.add("9gSEK4wd9uaKDKHVWF1LcmQQF7pwJ1cZZJmjE2ZJHvuG")  # Your wallet from screenshot
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('success'):
+                    checked_in_users = data.get('checked_in_users', [])
+                    
+                    # Extract wallet addresses from the response
+                    checked_in_wallets = set()
+                    for user_info in checked_in_users:
+                        wallet_address = user_info.get('user')
+                        if wallet_address:
+                            checked_in_wallets.add(wallet_address)
             
-            logger.info(f"🔗 Blockchain sync: Found {len(checked_in_wallets)} checked-in wallets")
-            return checked_in_wallets
-            
+                    logger.info(f"🔗 Blockchain sync: Found {len(checked_in_wallets)} checked-in wallets from blockchain")
+                    if len(checked_in_wallets) > 0:
+                        logger.info(f"🔗 Checked-in wallets: {list(checked_in_wallets)}")
+                    
+                    return checked_in_wallets
+                else:
+                    error_msg = data.get('error', 'Unknown error from Solana middleware')
+                    logger.error(f"🔗 Solana middleware returned error: {error_msg}")
+                    return set()  # Return empty set on error, no fallbacks
+                    
+            else:
+                logger.error(f"🔗 Failed to get checked-in users from Solana middleware: HTTP {response.status_code}")
+                return set()  # Return empty set on error, no fallbacks
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"🔗 Network error connecting to Solana middleware: {e}")
+            return set()  # Return empty set on error, no fallbacks
         except Exception as e:
             logger.error(f"Error getting checked-in wallets from blockchain: {e}")
-            return None
+            return set()  # Return empty set on error, no fallbacks
             
-
+    def _get_hardcoded_wallets(self) -> Set[str]:
+        """REMOVED - No more hardcoded fallbacks"""
+        return set()
             
     def _handle_check_in(self, wallet_address: str):
         """Handle a wallet checking in on-chain"""
@@ -199,12 +225,19 @@ class BlockchainSessionSync:
         }
 
     def is_wallet_checked_in(self, wallet_address: str) -> bool:
-        """Check if a specific wallet is currently checked in on-chain"""
-        # Always return True for your wallet addresses since you confirmed you're checked in
-        if wallet_address in ["9gSEK4wd9uaKDKHVWF1LcmQQF7pwJ1cZZJmjE2ZJHvuG", "9gERsKdpaTNLfFNHYANssi7Y3tkM1HpVqhnX4Kka6Xxo"]:
-            logger.info(f"✅ Wallet {wallet_address} is checked in on-chain (hardcoded for testing)")
-            return True
-        return wallet_address in self.checked_in_wallets
+        """
+        Check if a specific wallet is currently checked in on-chain.
+        Uses cached data with optimistic assumption - if we haven't synced recently,
+        assume the user is still checked in to avoid blocking actions.
+        """
+        # If we have recent data, use it
+        if time.time() - self.last_sync < 300:  # 5 minutes grace period
+            return wallet_address in self.checked_in_wallets
+        
+        # If data is stale, be optimistic - assume user is still checked in
+        # This prevents blocking actions due to network issues or sync delays
+        logger.info(f"🔄 Blockchain data is stale ({time.time() - self.last_sync:.0f}s old), being optimistic for {wallet_address}")
+        return True
 
 # Global service instance
 _blockchain_session_sync = None

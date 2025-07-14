@@ -76,6 +76,7 @@ class GPUFaceService:
         self._face_embeddings = {}  # wallet_address -> embedding
         self._face_names = {}       # wallet_address -> display_name
         self._face_metadata = {}    # wallet_address -> metadata
+        self._user_profiles = {}    # wallet_address -> user_profile (display_name, username)
         
         # Detection results
         self._results_lock = threading.Lock()
@@ -329,9 +330,17 @@ class GPUFaceService:
             
             # Store embedding and metadata
             with self._faces_lock:
-                self._face_embeddings[wallet_address] = embedding
-                self._face_names[wallet_address] = metadata.get('name', wallet_address[:8]) if metadata else wallet_address[:8]
-                self._face_metadata[wallet_address] = metadata or {}
+                            self._face_embeddings[wallet_address] = embedding
+            
+            # Use display name from user profile if available, otherwise use metadata or fallback
+            if wallet_address in self._user_profiles:
+                profile = self._user_profiles[wallet_address]
+                display_name = profile.get('display_name') or profile.get('username') or wallet_address[:8]
+            else:
+                display_name = metadata.get('name', wallet_address[:8]) if metadata else wallet_address[:8]
+            
+            self._face_names[wallet_address] = display_name
+            self._face_metadata[wallet_address] = metadata or {}
             
             # Save to disk
             self.save_face_embedding(wallet_address, embedding, metadata)
@@ -391,9 +400,17 @@ class GPUFaceService:
                         metadata = json.load(f)
                 
                 with self._faces_lock:
-                    self._face_embeddings[wallet_address] = embedding
-                    self._face_names[wallet_address] = metadata.get('name', wallet_address[:8])
-                    self._face_metadata[wallet_address] = metadata
+                                    self._face_embeddings[wallet_address] = embedding
+                
+                # Use display name from user profile if available, otherwise use metadata or fallback
+                if wallet_address in self._user_profiles:
+                    profile = self._user_profiles[wallet_address]
+                    display_name = profile.get('display_name') or profile.get('username') or wallet_address[:8]
+                else:
+                    display_name = metadata.get('name', wallet_address[:8])
+                
+                self._face_names[wallet_address] = display_name
+                self._face_metadata[wallet_address] = metadata
                 
                 logger.info(f"Loaded face embedding: {wallet_address}")
                 
@@ -509,7 +526,7 @@ class GPUFaceService:
                     recognized[wallet_address] = {
                         'box': box,
                         'similarity': similarity,
-                        'name': self._face_names.get(wallet_address, wallet_address[:8]),
+                        'name': self.get_user_display_name(wallet_address),
                         'last_seen': time.time()
                     }
                     
@@ -534,28 +551,47 @@ class GPUFaceService:
         output = frame.copy()
         
         with self._results_lock:
-            if self._detected_faces:
-                for face_data in self._detected_faces:
-                    # Extract face location from the face data dictionary
-                    if isinstance(face_data, dict) and 'box' in face_data:
-                        # face_data['box'] is (x1, y1, x2, y2), convert to (top, right, bottom, left)
+            # Draw recognized faces first (green boxes with names)
+            for wallet_address, face_data in self._recognized_faces.items():
+                if 'box' in face_data:
+                    # face_data['box'] is (x1, y1, x2, y2), convert to (top, right, bottom, left)
+                    x1, y1, x2, y2 = face_data['box']
+                    face_location = (y1, x2, y2, x1)  # (top, right, bottom, left)
+                    
+                    # Use the stored display name from recognition results
+                    identity_info = {
+                        'name': face_data['name'],  # This already contains the display name
+                        'confidence': face_data.get('similarity', 0) * 100,
+                        'wallet_address': wallet_address
+                    }
+                    
+                    # Draw face box with proper display name
+                    self._draw_face_box(
+                        output, 
+                        face_location, 
+                        identity_info=identity_info
+                    )
+            
+            # Draw unrecognized detected faces (red boxes)
+            for face_data in self._detected_faces:
+                if isinstance(face_data, dict) and 'box' in face_data:
+                    # Check if this face was already drawn as recognized
+                    is_recognized = False
+                    if face_data.get('recognized_name'):
+                        wallet_address = face_data['recognized_name']
+                        if wallet_address in self._recognized_faces:
+                            is_recognized = True
+                    
+                    # Only draw if not already recognized
+                    if not is_recognized:
                         x1, y1, x2, y2 = face_data['box']
                         face_location = (y1, x2, y2, x1)  # (top, right, bottom, left)
                         
-                        # Check if this face has been recognized
-                        identity_info = None
-                        if face_data.get('recognized_name') and face_data.get('similarity', 0) > self._similarity_threshold:
-                            identity_info = {
-                                'name': self._face_names.get(face_data['recognized_name'], face_data['recognized_name'][:8]),
-                                'confidence': face_data.get('similarity', 0) * 100,
-                                'wallet_address': face_data['recognized_name']
-                            }
-                        
-                        # Draw face box with wallet address tagging
+                        # Draw unrecognized face box
                         self._draw_face_box(
                             output, 
                             face_location, 
-                            identity_info=identity_info
+                            identity_info=None
                         )
         
         return output
@@ -631,10 +667,61 @@ class GPUFaceService:
             for wallet_address, metadata in self._face_metadata.items():
                 faces.append({
                     'wallet_address': wallet_address,
-                    'name': self._face_names.get(wallet_address, wallet_address[:8]),
+                    'name': self.get_user_display_name(wallet_address),
                     'metadata': metadata
                 })
             return faces
+
+    def store_user_profile(self, wallet_address: str, user_profile: Dict) -> None:
+        """Store user profile for display name resolution"""
+        with self._faces_lock:
+            self._user_profiles[wallet_address] = user_profile
+            
+            # Update face name with display name if available
+            display_name = user_profile.get('display_name')
+            username = user_profile.get('username')
+            
+            if display_name:
+                self._face_names[wallet_address] = display_name
+            elif username:
+                self._face_names[wallet_address] = username
+            else:
+                self._face_names[wallet_address] = wallet_address[:8]
+                
+            logger.info(f"Stored user profile for {wallet_address}: {display_name or username or wallet_address[:8]}")
+
+    def get_user_profile(self, wallet_address: str) -> Optional[Dict]:
+        """Get user profile by wallet address"""
+        with self._faces_lock:
+            return self._user_profiles.get(wallet_address)
+
+    def remove_user_profile(self, wallet_address: str) -> bool:
+        """Remove user profile (for session cleanup)"""
+        with self._faces_lock:
+            profile_removed = wallet_address in self._user_profiles
+            if profile_removed:
+                self._user_profiles.pop(wallet_address, None)
+                self._face_names.pop(wallet_address, None)
+                logger.info(f"[GPU-FACE] Removed user profile for {wallet_address}")
+            return profile_removed
+
+    def get_user_display_name(self, wallet_address: str) -> str:
+        """Get the best display name for a wallet address"""
+        with self._faces_lock:
+            # First check if we have a stored user profile
+            if wallet_address in self._user_profiles:
+                profile = self._user_profiles[wallet_address]
+                if profile.get('display_name'):
+                    return profile['display_name']
+                elif profile.get('username'):
+                    return profile['username']
+            
+            # Fallback to stored face names
+            if wallet_address in self._face_names:
+                return self._face_names[wallet_address]
+            
+            # Final fallback to shortened wallet address
+            return wallet_address[:8]
 
     def clear_enrolled_faces(self) -> bool:
         """Clear all enrolled faces"""
@@ -643,6 +730,7 @@ class GPUFaceService:
                 self._face_embeddings.clear()
                 self._face_names.clear()
                 self._face_metadata.clear()
+                self._user_profiles.clear()
             
             # Clear database files
             for file_path in Path(self._faces_dir).glob("*.npy"):
@@ -656,6 +744,50 @@ class GPUFaceService:
         except Exception as e:
             logger.error(f"Error clearing enrolled faces: {e}")
             return False
+
+    def get_faces(self) -> Dict:
+        """
+        Get current face detection and recognition results.
+        This method provides compatibility with the recognize_face route.
+        """
+        with self._results_lock:
+            detected_faces = self._detected_faces.copy()
+            recognized_faces = self._recognized_faces.copy()
+        
+        # Convert to expected format
+        detected_count = len(detected_faces)
+        recognized_count = len(recognized_faces)
+        
+        # Format recognized faces for compatibility
+        recognized_faces_formatted = {}
+        for wallet_address, face_data in recognized_faces.items():
+            # Format: [top, right, bottom, left, confidence]
+            box = face_data['box']  # (x1, y1, x2, y2)
+            x1, y1, x2, y2 = box
+            # Convert to (top, right, bottom, left) format
+            top, right, bottom, left = y1, x2, y2, x1
+            confidence = face_data.get('similarity', 0.0)
+            recognized_faces_formatted[wallet_address] = [top, right, bottom, left, confidence]
+        
+        return {
+            'detected_count': detected_count,
+            'recognized_count': recognized_count,
+            'detected_faces': detected_faces,
+            'recognized_faces': recognized_faces_formatted
+        }
+
+    def process_frame_for_recognition(self, frame: np.ndarray) -> None:
+        """
+        Process a frame for face detection and recognition.
+        This is the proper public API for on-demand face processing.
+        """
+        try:
+            # First detect faces if needed
+            self._detect_faces(frame)
+            # Then recognize them
+            self._recognize_faces(frame)
+        except Exception as e:
+            logger.error(f"Error processing frame for recognition: {e}")
 
     def detect_faces(self, frame: np.ndarray) -> List[Dict]:
         """

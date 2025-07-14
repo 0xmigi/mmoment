@@ -27,6 +27,10 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,display
       - BIOMETRIC_SECURITY_URL=http://biometric-security:5003
       - SOLANA_MIDDLEWARE_URL=http://solana-middleware:5001
+      # Blockchain Configuration
+      - CAMERA_PROGRAM_ID=Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S
+      - CAMERA_PDA=WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD
+      - SOLANA_RPC_URL=https://api.devnet.solana.com
       # Livepeer Configuration (Current Active Account)
       - LIVEPEER_API_KEY=eea9bcf2-ac98-4454-a3ab-b0e610a27f05
       - LIVEPEER_STREAM_KEY=6315-9m3d-yfzn-xhf6
@@ -83,7 +87,10 @@ services:
       - mmoment-network
     environment:
       - SOLANA_NETWORK=devnet
+      - SOLANA_RPC_URL=https://api.devnet.solana.com
       - CAMERA_NETWORK_PROGRAM_ID=Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S
+      - CAMERA_PROGRAM_ID=Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S
+      - CAMERA_PDA=WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/api/health"]
