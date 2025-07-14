@@ -10,6 +10,7 @@ import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import { IDL } from '../../anchor/idl';
 import { timelineService } from '../../timeline/timeline-service';
 import { unifiedCameraService } from '../../camera/unified-camera-service';
+import { useSocialProfile } from '../social/useSocialProfile';
 
 interface TransactionModalProps {
   isOpen: boolean;
@@ -30,6 +31,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const { primaryWallet } = useDynamicContext();
   const { connection } = useConnection();
   const { program } = useProgram();
+  const { primaryProfile } = useSocialProfile();
   const [status, setStatus] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -149,12 +151,28 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       const signature = await connection.sendRawTransaction(signedTx.serialize());
       await connection.confirmTransaction(signature, 'confirmed');
       
+      // Send user profile to camera for display name labeling
+      if (primaryProfile?.displayName || primaryProfile?.username) {
+        try {
+          await unifiedCameraService.sendUserProfile(transactionData.cameraAccount, {
+            wallet_address: primaryWallet.address,
+            display_name: primaryProfile.displayName,
+            username: primaryProfile.username
+          });
+        } catch (err) {
+          console.warn('Failed to send display name to camera:', err);
+          // Don't fail the check-in if this fails
+        }
+      }
+      
       // Add to timeline
       if (primaryWallet?.address) {
         timelineService.emitEvent({
           type: 'check_in',
           user: {
-            address: primaryWallet.address
+            address: primaryWallet.address,
+            displayName: primaryProfile?.displayName,
+            username: primaryProfile?.username
           },
           timestamp: Date.now(),
           transactionId: signature,

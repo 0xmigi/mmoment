@@ -657,6 +657,181 @@ export class UnifiedCameraService {
   }
 
   /**
+   * Send user profile to camera for display name labeling using new PDA-based API
+   */
+  public async sendUserProfile(cameraId: string, profile: {
+    wallet_address: string;
+    display_name?: string;
+    username?: string;
+  }): Promise<CameraActionResponse> {
+    try {
+      this.log(`[DEBUG] Sending user profile to camera: ${cameraId}`, profile);
+      
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        this.log(`[ERROR] Camera not found: ${cameraId}`);
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const apiUrl = (camera as any).apiUrl;
+      this.log(`[DEBUG] Camera API URL: ${apiUrl}`);
+
+      // Use the new /api/user/profile endpoint for sending profile data
+      const url = `${apiUrl}/api/user/profile`;
+      this.log(`[DEBUG] Making request to: ${url}`);
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        credentials: 'omit',
+        body: JSON.stringify(profile)
+      });
+
+      this.log(`[DEBUG] Response status: ${response.status}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.log(`[ERROR] HTTP error response: ${errorText}`);
+        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      this.log(`[SUCCESS] Profile sent successfully to ${cameraId}`, result);
+      
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      this.log(`[ERROR] Error sending profile to ${cameraId}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to send profile'
+      };
+    }
+  }
+
+  /**
+   * Get user profile from camera
+   */
+  public async getUserProfile(cameraId: string, walletAddress: string): Promise<CameraActionResponse<{
+    wallet_address: string;
+    display_name?: string;
+    username?: string;
+  }>> {
+    try {
+      this.log(`[DEBUG] Getting user profile from camera: ${cameraId} for wallet: ${walletAddress}`);
+      
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        this.log(`[ERROR] Camera not found: ${cameraId}`);
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const apiUrl = (camera as any).apiUrl;
+      
+      // Use the new /api/user/profile/<wallet_address> endpoint
+      const url = `${apiUrl}/api/user/profile/${walletAddress}`;
+      this.log(`[DEBUG] Making request to: ${url}`);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        credentials: 'omit'
+      });
+
+      this.log(`[DEBUG] Response status: ${response.status}`);
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          return {
+            success: false,
+            error: 'User profile not found'
+          };
+        }
+        const errorText = await response.text();
+        this.log(`[ERROR] HTTP error response: ${errorText}`);
+        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      this.log(`[SUCCESS] Profile retrieved successfully from ${cameraId}`, result);
+      
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      this.log(`[ERROR] Error getting profile from ${cameraId}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get profile'
+      };
+    }
+  }
+
+  /**
+   * Remove user profile from camera
+   */
+  public async removeUserProfile(cameraId: string, walletAddress: string): Promise<CameraActionResponse> {
+    try {
+      this.log(`[DEBUG] Removing user profile from camera: ${cameraId} for wallet: ${walletAddress}`);
+      
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        this.log(`[ERROR] Camera not found: ${cameraId}`);
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const apiUrl = (camera as any).apiUrl;
+      
+      // Use the new /api/user/profile/<wallet_address> endpoint with DELETE method
+      const url = `${apiUrl}/api/user/profile/${walletAddress}`;
+      this.log(`[DEBUG] Making DELETE request to: ${url}`);
+      
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        credentials: 'omit'
+      });
+
+      this.log(`[DEBUG] Response status: ${response.status}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.log(`[ERROR] HTTP error response: ${errorText}`);
+        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      this.log(`[SUCCESS] Profile removed successfully from ${cameraId}`, result);
+      
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      this.log(`[ERROR] Error removing profile from ${cameraId}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to remove profile'
+      };
+    }
+  }
+
+  /**
    * Check if currently recording
    */
   public async isCurrentlyRecording(cameraId: string): Promise<boolean> {

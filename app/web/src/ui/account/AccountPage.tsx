@@ -157,9 +157,9 @@ export function AccountPage() {
           </div>
         )}
 
-        {/* Digital Identity Section */}
+        {/* Identity Section */}
         <div className="bg-gray-50 rounded-xl p-4 sm:p-6 mb-6">
-          <h2 className="text-lg font-medium mb-6 sm:mb-8">Digital Identity</h2>
+          <h2 className="text-lg font-medium mb-6 sm:mb-8">Identity</h2>
           
           {/* Profile Picture & Identity Tree - RIGHT ALIGNED, mobile responsive */}
           <div className="relative mb-10">

@@ -55,6 +55,73 @@ const getNextEndpoint = () => {
 // Set RPC endpoint based on the cluster
 const rpcEndpoint = cluster === 'localnet' ? 'http://localhost:8899' : devnetEndpoints[0];
 
+/**
+ * Generate camera API URL based on PDA subdomain system
+ * @param cameraPda - The camera's PDA address
+ * @returns The API URL for the specific camera
+ */
+const getCameraApiUrlByPda = (cameraPda: string): string => {
+  // For local development
+  const forceLocal = import.meta.env.VITE_FORCE_LOCAL === 'true';
+  if (forceLocal && window.location.hostname === 'localhost') {
+    console.log(`Using local camera API for PDA: ${cameraPda}`);
+    return "http://localhost:5002";
+  }
+
+  // Convert PDA to lowercase for subdomain
+  const pdaSubdomain = cameraPda.toLowerCase();
+  
+  // Use PDA-based subdomain system
+  const pdaUrl = `https://${pdaSubdomain}.mmoment.xyz`;
+  
+  console.log(`Generated PDA-based URL for ${cameraPda}: ${pdaUrl}`);
+  return pdaUrl;
+};
+
+/**
+ * Utility function to convert PDA to subdomain format
+ * Handles edge cases and validation
+ */
+const pdaToSubdomain = (pda: string): string => {
+  if (!pda || typeof pda !== 'string') {
+    throw new Error('Invalid PDA: must be a non-empty string');
+  }
+  
+  // Convert to lowercase for subdomain compatibility
+  const subdomain = pda.toLowerCase();
+  
+  // Validate subdomain format (basic check)
+  if (subdomain.length < 4 || subdomain.length > 63) {
+    throw new Error('Invalid PDA length for subdomain');
+  }
+  
+  // Check for invalid characters (subdomains can only contain alphanumeric and hyphens)
+  if (!/^[a-z0-9]+$/.test(subdomain)) {
+    console.warn(`PDA ${pda} contains characters that may not be valid for subdomains`);
+  }
+  
+  return subdomain;
+};
+
+/**
+ * Get camera URL with fallback support
+ * @param cameraPda - The camera's PDA address
+ * @param fallbackUrl - Optional fallback URL if PDA-based URL fails
+ * @returns The API URL for the camera
+ */
+const getCameraUrlWithFallback = (cameraPda: string, fallbackUrl?: string): string => {
+  try {
+    return getCameraApiUrlByPda(cameraPda);
+  } catch (error) {
+    console.warn(`Failed to generate PDA-based URL for ${cameraPda}:`, error);
+    if (fallbackUrl) {
+      console.log(`Using fallback URL: ${fallbackUrl}`);
+      return fallbackUrl;
+    }
+    throw error;
+  }
+};
+
 // Get the appropriate API URL based on environment with fallbacks
 const getCameraApiUrl = () => {
   // Centralized middleware URL for all cameras
@@ -100,7 +167,7 @@ const getCameraHardwareUrl = () => {
   return centralCameraUrl;
 };
 
-// Function to get the Jetson Orin Nano camera URL
+// Function to get the Jetson Orin Nano camera URL (legacy - now uses PDA-based URLs)
 const getJetsonCameraUrl = () => {
   // Override Jetson URL if specified in environment
   const overrideUrl = import.meta.env.VITE_JETSON_CAMERA_URL;
@@ -115,8 +182,8 @@ const getJetsonCameraUrl = () => {
     return "http://localhost:5002";
   }
 
-  // Default to the Jetson camera service URL (remote)
-  // Note: This should match whatever URL the Jetson is actually accessible from
+  // Default to the Jetson camera service URL (legacy)
+  // This maintains backward compatibility
   return "https://jetson.mmoment.xyz";
 };
 
@@ -148,8 +215,12 @@ export const CONFIG = {
   // Camera API is your Pi5 device with the Python/Flask server
   CAMERA_API_URL: getCameraApiUrl(),
   CAMERA_HARDWARE_URL: getCameraHardwareUrl(),
-  // Jetson Orin Nano camera service
+  // Jetson Orin Nano camera service (legacy)
   JETSON_CAMERA_URL: getJetsonCameraUrl(),
+  // New PDA-based URL generation functions
+  getCameraApiUrlByPda,
+  pdaToSubdomain,
+  getCameraUrlWithFallback,
   // Timeline backend is your Railway service
   BACKEND_URL: isProduction 
     ? "https://mmoment-production.up.railway.app"
@@ -157,12 +228,31 @@ export const CONFIG = {
   isProduction,
   isCloudflareProxy: isCloudflareProxy(),
   isMobileBrowser: isMobileBrowser(),
-  LIVEPEER_PLAYBACK_ID: process.env.REACT_APP_LIVEPEER_PLAYBACK_ID || '',
+  LIVEPEER_PLAYBOOK_ID: process.env.REACT_APP_LIVEPEER_PLAYBOOK_ID || '',
   TIMELINE_WS_URL: getTimelineWebSocketUrl(),
   CAMERA_PDA: import.meta.env.VITE_CAMERA_PDA || 'EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA',
   // Jetson camera PDA
   JETSON_CAMERA_PDA: 'WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD',
-  isUsingDifferentLocalPorts: isUsingDifferentLocalPorts()
+  isUsingDifferentLocalPorts: isUsingDifferentLocalPorts(),
+  
+  // Known camera configurations with PDA-based URLs
+  KNOWN_CAMERAS: {
+    // Jetson Orin Nano
+    'WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD': {
+      type: 'jetson',
+      name: 'Jetson Orin Nano Camera',
+      description: 'NVIDIA Jetson Orin Nano with advanced computer vision',
+      // Legacy URL for backward compatibility
+      legacyUrl: 'https://jetson.mmoment.xyz'
+    },
+    // Pi5 Camera
+    'EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA': {
+      type: 'pi5',
+      name: 'Raspberry Pi 5 Camera',
+      description: 'Raspberry Pi 5 with camera module',
+      legacyUrl: 'https://pi5-middleware.mmoment.xyz'
+    }
+  }
 };
 
 // Socket.IO configuration for timeline (Railway backend)

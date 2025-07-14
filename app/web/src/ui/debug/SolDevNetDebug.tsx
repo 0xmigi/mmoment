@@ -152,6 +152,10 @@ export function SolDevNetDebug() {
 
   // Add state for user sessions
   const [userSessions, setUserSessions] = useState<{[key: string]: boolean}>({});
+  
+  // Add state for active users per camera analytics
+  const [activeUsersPerCamera, setActiveUsersPerCamera] = useState<{[key: string]: number}>({});
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
 
   // --- Face Enrollment State ---
   const [jetsonStreamUrl] = useState<string>(''); // TODO: Set this to your Jetson stream URL - Removed unused setter
@@ -643,6 +647,9 @@ export function SolDevNetDebug() {
 
       // Refresh cameras to see updated activity count
       await fetchRegisteredCameras();
+      
+      // Refresh active users analytics
+      await fetchActiveUsersPerCamera();
       } catch (txErr) {
         console.error('Transaction error:', txErr);
         throw txErr;
@@ -775,6 +782,9 @@ export function SolDevNetDebug() {
 
       // Refresh cameras to see updated session count
       await fetchRegisteredCameras();
+      
+      // Refresh active users analytics
+      await fetchActiveUsersPerCamera();
       } catch (txErr) {
         console.error('Transaction error:', txErr);
         throw txErr;
@@ -799,6 +809,49 @@ export function SolDevNetDebug() {
       setStatusType('error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Function to fetch and count active users per camera
+  const fetchActiveUsersPerCamera = async () => {
+    if (!program || !connection) {
+      console.log('Program or connection not available for user session analytics');
+      return;
+    }
+
+    try {
+      setLoadingAnalytics(true);
+      console.log('Fetching user sessions for analytics...');
+      
+      // Fetch all user sessions
+      const userSessionAccounts = await program.account.userSession.all();
+      console.log('Found user session accounts:', userSessionAccounts.length);
+      
+      // Count active users per camera
+      const activeUsersCount: {[key: string]: number} = {};
+      
+      for (const sessionInfo of userSessionAccounts) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const session = sessionInfo.account as any;
+          const cameraKey = session.camera.toString();
+          
+          // Increment count for this camera
+          activeUsersCount[cameraKey] = (activeUsersCount[cameraKey] || 0) + 1;
+          
+          console.log(`Found active session for camera ${cameraKey}`);
+        } catch (error) {
+          console.error('Error parsing user session:', error);
+        }
+      }
+      
+      setActiveUsersPerCamera(activeUsersCount);
+      console.log('Active users per camera:', activeUsersCount);
+    } catch (error) {
+      console.error('Error fetching user sessions for analytics:', error);
+      // Don't reset the analytics on error - keep showing last known state
+    } finally {
+      setLoadingAnalytics(false);
     }
   };
 
@@ -994,6 +1047,9 @@ export function SolDevNetDebug() {
       setRegisteredCameras(cameras);
       setStatusMessage(`Found ${cameras.length} registered cameras`);
       setStatusType('success');
+      
+      // Fetch active users analytics after loading cameras
+      await fetchActiveUsersPerCamera();
     } catch (err) {
       console.error('Error fetching cameras:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch cameras');
@@ -1362,6 +1418,76 @@ export function SolDevNetDebug() {
   };
 
   // Render the camera list
+  // Test PDA-based URL system
+  const testPdaUrls = async () => {
+    setLoading(true);
+    setStatusMessage('Testing PDA-based URL system...');
+    setStatusType('info');
+    
+    try {
+      const { CONFIG } = await import('../../core/config');
+      const { unifiedCameraService } = await import('../../camera/unified-camera-service');
+      
+      // Test known cameras
+      const knownCameras = [
+        { pda: CONFIG.JETSON_CAMERA_PDA, name: 'Jetson Orin Nano' },
+        { pda: CONFIG.CAMERA_PDA, name: 'Raspberry Pi 5' }
+      ];
+      
+      const results = [];
+      
+      for (const camera of knownCameras) {
+        const pdaUrl = CONFIG.getCameraApiUrlByPda(camera.pda);
+        console.log(`Testing ${camera.name} at ${pdaUrl}`);
+        
+        try {
+          // Test connection
+          const connectionResult = await unifiedCameraService.testConnection(camera.pda);
+          
+          // Test camera info endpoint
+          const response = await fetch(`${pdaUrl}/api/camera/info`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' },
+            mode: 'cors',
+            credentials: 'omit'
+          });
+          
+          const infoResult = response.ok ? await response.json() : null;
+          
+          results.push({
+            camera: camera.name,
+            pda: camera.pda,
+            url: pdaUrl,
+            connectionTest: connectionResult.success,
+            infoEndpoint: response.ok,
+            info: infoResult
+          });
+          
+        } catch (error) {
+          results.push({
+            camera: camera.name,
+            pda: camera.pda,
+            url: pdaUrl,
+            connectionTest: false,
+            infoEndpoint: false,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+        }
+      }
+      
+      console.log('PDA URL Test Results:', results);
+      setStatusMessage(`PDA URL testing completed. Check console for details.`);
+      setStatusType('success');
+      
+    } catch (error) {
+      console.error('Error testing PDA URLs:', error);
+      setStatusMessage(`PDA URL testing failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setStatusType('error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const renderCameraList = () => {
     const noCamera = registeredCameras.length === 0;
 
@@ -1437,6 +1563,25 @@ export function SolDevNetDebug() {
                       Total Sessions: <span className="font-medium">{camera.totalSessions}</span>
                     </p>
                   )}
+
+                  {/* Analytics: Active Users Currently Checked In */}
+                  <div className="bg-gray-50 rounded-md p-2 mt-2">
+                    <p className="text-sm text-gray-700 font-medium">
+                      <span className="inline-flex items-center">
+                        <span className={`w-2 h-2 rounded-full mr-2 ${
+                          (activeUsersPerCamera[camera.publicKey] || 0) > 0 ? 'bg-green-500' : 'bg-gray-400'
+                        }`}></span>
+                        Active Users: <span className={`font-bold ml-1 ${
+                          (activeUsersPerCamera[camera.publicKey] || 0) > 0 ? 'text-green-600' : 'text-gray-500'
+                        }`}>
+                          {activeUsersPerCamera[camera.publicKey] || 0}
+                        </span>
+                        <span className="text-xs text-gray-500 ml-1">
+                          {(activeUsersPerCamera[camera.publicKey] || 0) === 1 ? 'user' : 'users'} checked in
+                        </span>
+                      </span>
+                    </p>
+                  </div>
 
                   <p className="text-sm text-gray-600">
                     Owner: <span className="font-mono text-xs">{camera.owner.substring(0, 8)}...</span>
@@ -1612,14 +1757,51 @@ export function SolDevNetDebug() {
             <div className="bg-green-100 text-green-800 p-2 rounded mb-4">
               Found {registeredCameras.length} registered cameras
             </div>
+            
+            {/* Analytics Summary */}
+            <div className="bg-blue-50 p-3 rounded mb-4">
+              <h3 className="font-semibold text-blue-800 mb-2 flex items-center">
+                Live Analytics
+                {loadingAnalytics && (
+                  <div className="ml-2 w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                )}
+              </h3>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <span className="text-blue-600 font-medium">Total Active Users:</span>{' '}
+                  <span className="font-bold text-blue-800">
+                    {Object.values(activeUsersPerCamera).reduce((sum, count) => sum + count, 0)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-blue-600 font-medium">Cameras with Users:</span>{' '}
+                  <span className="font-bold text-blue-800">
+                    {Object.values(activeUsersPerCamera).filter(count => count > 0).length} / {registeredCameras.length}
+                  </span>
+                </div>
+              </div>
+            </div>
 
-            <button
-              onClick={fetchRegisteredCameras}
-              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 mb-4"
-              disabled={loading || !initialized}
-            >
-              {loadingCameras ? 'Loading...' : 'Refresh camera list'}
-            </button>
+            <div className="flex space-x-2 mb-4">
+              <button
+                onClick={async () => {
+                  await fetchRegisteredCameras();
+                  await fetchActiveUsersPerCamera();
+                }}
+                className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                disabled={loading || loadingAnalytics || !initialized}
+              >
+                {(loadingCameras || loadingAnalytics) ? 'Loading...' : 'Refresh cameras & analytics'}
+              </button>
+              
+              <button
+                onClick={testPdaUrls}
+                disabled={loading}
+                className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded disabled:opacity-50"
+              >
+                Test PDA URLs
+              </button>
+            </div>
           </div>
         </div>
       </div>

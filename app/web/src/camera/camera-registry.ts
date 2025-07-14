@@ -35,15 +35,15 @@ export class CameraRegistry {
   }
 
   /**
-   * Initialize known cameras from configuration
+   * Initialize known cameras from configuration using PDA-based URLs
    */
   private initializeKnownCameras() {
-    // Register known cameras from config
+    // Register known cameras using PDA-based URL system
     const knownCameras: CameraConfig[] = [
       {
         cameraId: CONFIG.JETSON_CAMERA_PDA,
         cameraType: 'jetson',
-        apiUrl: CONFIG.JETSON_CAMERA_URL,
+        apiUrl: CONFIG.getCameraApiUrlByPda(CONFIG.JETSON_CAMERA_PDA),
         name: 'Jetson Orin Nano Camera',
         description: 'NVIDIA Jetson Orin Nano with advanced computer vision',
         capabilities: {
@@ -54,12 +54,16 @@ export class CameraRegistry {
           canRecognizeFaces: true,
           hasLivepeerStreaming: true,
           supportedStreamFormats: ['livepeer', 'mjpeg']
+        },
+        // Store legacy URL for fallback
+        config: {
+          legacyUrl: (CONFIG.KNOWN_CAMERAS as any)[CONFIG.JETSON_CAMERA_PDA]?.legacyUrl
         }
       },
       {
         cameraId: CONFIG.CAMERA_PDA,
         cameraType: 'pi5',
-        apiUrl: CONFIG.CAMERA_API_URL,
+        apiUrl: CONFIG.getCameraApiUrlByPda(CONFIG.CAMERA_PDA),
         name: 'Raspberry Pi 5 Camera',
         description: 'Raspberry Pi 5 with camera module',
         capabilities: {
@@ -70,6 +74,9 @@ export class CameraRegistry {
           canRecognizeFaces: false,
           hasLivepeerStreaming: false,
           supportedStreamFormats: ['mjpeg']
+        },
+        config: {
+          legacyUrl: (CONFIG.KNOWN_CAMERAS as any)[CONFIG.CAMERA_PDA]?.legacyUrl
         }
       }
     ];
@@ -78,7 +85,7 @@ export class CameraRegistry {
       this.registerCamera(config);
     }
 
-    this.log(`Registered ${knownCameras.length} known cameras`);
+    this.log(`Registered ${knownCameras.length} known cameras with PDA-based URLs`);
   }
 
   /**
@@ -93,14 +100,80 @@ export class CameraRegistry {
     };
 
     this.cameras.set(config.cameraId, entry);
-    this.log(`Registered camera: ${config.cameraId} (${config.cameraType})`);
+    this.log(`Registered camera: ${config.cameraId} (${config.cameraType}) at ${config.apiUrl}`);
+  }
+
+  /**
+   * Discover and register a camera by PDA
+   * This method attempts to connect to a camera using its PDA-based URL
+   */
+  public async discoverCameraByPda(cameraPda: string): Promise<CameraConfig | null> {
+    try {
+      this.log(`Attempting to discover camera: ${cameraPda}`);
+      
+      // Generate PDA-based URL
+      const apiUrl = CONFIG.getCameraApiUrlByPda(cameraPda);
+      
+      // Try to get camera info from the /api/camera/info endpoint
+      const response = await fetch(`${apiUrl}/api/camera/info`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        credentials: 'omit'
+      });
+
+      if (!response.ok) {
+        this.log(`Failed to discover camera ${cameraPda}: HTTP ${response.status}`);
+        return null;
+      }
+
+      const cameraInfo = await response.json();
+      
+      // Create camera configuration from discovered info
+      const config: CameraConfig = {
+        cameraId: cameraPda,
+        cameraType: cameraInfo.type || 'unknown',
+        apiUrl: apiUrl,
+        name: cameraInfo.name || `Camera ${cameraPda.slice(0, 8)}`,
+        description: cameraInfo.description || 'Discovered camera',
+        capabilities: cameraInfo.capabilities || {
+          canTakePhotos: true,
+          canRecordVideos: true,
+          canStream: true,
+          canDetectGestures: false,
+          canRecognizeFaces: false,
+          hasLivepeerStreaming: false,
+          supportedStreamFormats: ['mjpeg']
+        }
+      };
+
+      // Register the discovered camera
+      this.registerCamera(config);
+      
+      this.log(`Successfully discovered and registered camera: ${cameraPda}`);
+      return config;
+      
+    } catch (error) {
+      this.log(`Error discovering camera ${cameraPda}:`, error);
+      return null;
+    }
   }
 
   /**
    * Get a camera instance by ID
    */
   public async getCamera(cameraId: string): Promise<ICamera | null> {
-    const entry = this.cameras.get(cameraId);
+    let entry = this.cameras.get(cameraId);
+    
+    // If camera not found, try to discover it
+    if (!entry) {
+      this.log(`Camera ${cameraId} not found in registry, attempting discovery...`);
+      const discoveredConfig = await this.discoverCameraByPda(cameraId);
+      if (discoveredConfig) {
+        entry = this.cameras.get(cameraId);
+      }
+    }
+    
     if (!entry) {
       this.log(`Camera not found: ${cameraId}`);
       return null;
@@ -119,18 +192,35 @@ export class CameraRegistry {
   }
 
   /**
-   * Create a camera instance based on its type
+   * Create a camera instance based on its type with fallback support
    */
   private createCameraInstance(entry: CameraRegistryEntry): ICamera | undefined {
     try {
+      // Use PDA-based URL by default, with legacy URL as fallback
+      let apiUrl = entry.apiUrl;
+      const legacyUrl = entry.config?.legacyUrl;
+      
       switch (entry.cameraType.toLowerCase()) {
         case 'jetson':
-          return new JetsonCamera(entry.cameraId, entry.apiUrl);
+          // For Jetson cameras, try PDA-based URL first, then legacy
+          const jetsonCamera = new JetsonCamera(entry.cameraId, apiUrl);
+          
+          // Store legacy URL for potential fallback
+          if (legacyUrl) {
+            (jetsonCamera as any).legacyUrl = legacyUrl;
+          }
+          
+          return jetsonCamera;
+          
         case 'pi5':
-          return new Pi5Camera(entry.cameraId, entry.apiUrl);
+          return new Pi5Camera(entry.cameraId, apiUrl);
+          
         default:
-          this.log(`Unknown camera type: ${entry.cameraType}`);
-          return undefined;
+          // For unknown camera types, try to determine based on PDA or capabilities
+          this.log(`Unknown camera type: ${entry.cameraType}, attempting auto-detection`);
+          
+          // Default to Pi5 for unknown types
+          return new Pi5Camera(entry.cameraId, apiUrl);
       }
     } catch (error) {
       this.log(`Error creating camera instance:`, error);
@@ -198,42 +288,70 @@ export class CameraRegistry {
 
     this.log(`Running health check on ${cameras.length} cameras...`);
 
-    const healthChecks = cameras.map(async (entry) => {
+    // Check all cameras in parallel
+    const promises = cameras.map(async (entry) => {
       try {
-        const camera = await this.getCamera(entry.cameraId);
-        if (!camera) {
-          results.set(entry.cameraId, false);
-          this.updateCameraStatus(entry.cameraId, false);
-          return;
-        }
-
-        const response = await camera.testConnection();
-        const isHealthy = response.success;
+        // Try PDA-based URL first
+        const response = await fetch(`${entry.apiUrl}/api/health`, {
+          method: 'GET',
+          timeout: 5000,
+          mode: 'cors',
+          credentials: 'omit'
+        } as any);
         
+        const isHealthy = response.ok;
         results.set(entry.cameraId, isHealthy);
         this.updateCameraStatus(entry.cameraId, isHealthy);
         
-        this.log(`Health check ${entry.cameraId}: ${isHealthy ? 'PASS' : 'FAIL'}`);
+        // If PDA-based URL fails and we have a legacy URL, try that
+        if (!isHealthy && entry.config?.legacyUrl) {
+          try {
+            const legacyResponse = await fetch(`${entry.config.legacyUrl}/api/health`, {
+              method: 'GET',
+              timeout: 5000,
+              mode: 'cors',
+              credentials: 'omit'
+            } as any);
+            
+            const legacyHealthy = legacyResponse.ok;
+            if (legacyHealthy) {
+              this.log(`Camera ${entry.cameraId} responded to legacy URL, updating API URL`);
+              entry.apiUrl = entry.config.legacyUrl;
+              results.set(entry.cameraId, true);
+              this.updateCameraStatus(entry.cameraId, true);
+            }
+          } catch (legacyError) {
+            this.log(`Both PDA and legacy URLs failed for ${entry.cameraId}`);
+          }
+        }
+        
       } catch (error) {
-        this.log(`Health check error for ${entry.cameraId}:`, error);
+        this.log(`Health check failed for ${entry.cameraId}:`, error);
         results.set(entry.cameraId, false);
         this.updateCameraStatus(entry.cameraId, false);
       }
     });
 
-    await Promise.all(healthChecks);
+    await Promise.all(promises);
+    
+    const onlineCount = Array.from(results.values()).filter(Boolean).length;
+    this.log(`Health check complete: ${onlineCount}/${cameras.length} cameras online`);
+    
     return results;
   }
 
   /**
-   * Auto-discover cameras on the network
-   * This could be extended to scan for cameras automatically
+   * Discover cameras from the network
+   * This method can be extended to discover cameras from various sources
    */
   public async discoverCameras(): Promise<CameraConfig[]> {
-    this.log('Auto-discovery not yet implemented');
-    // TODO: Implement network scanning for cameras
-    // This could scan common ports, check for camera APIs, etc.
-    return [];
+    const discovered: CameraConfig[] = [];
+    
+    // For now, we only discover known cameras, but this can be extended
+    // to discover cameras from blockchain, DNS, or other sources
+    this.log('Camera discovery not yet implemented for network scanning');
+    
+    return discovered;
   }
 
   /**
@@ -241,18 +359,21 @@ export class CameraRegistry {
    */
   public removeCamera(cameraId: string): boolean {
     const entry = this.cameras.get(cameraId);
-    if (entry && entry.instance) {
-      // Disconnect the camera if it's connected
-      entry.instance.disconnect().catch(err => 
-        this.log(`Error disconnecting camera during removal:`, err)
-      );
-    }
-
-    const removed = this.cameras.delete(cameraId);
-    if (removed) {
+    if (entry) {
+      // Disconnect the camera instance if it exists
+      if (entry.instance) {
+        try {
+          entry.instance.disconnect();
+        } catch (error) {
+          this.log(`Error disconnecting camera ${cameraId} during removal:`, error);
+        }
+      }
+      
+      this.cameras.delete(cameraId);
       this.log(`Removed camera: ${cameraId}`);
+      return true;
     }
-    return removed;
+    return false;
   }
 
   /**
@@ -268,9 +389,7 @@ export class CameraRegistry {
    */
   public cameraSupports(cameraId: string, capability: keyof import('./camera-interface').CameraCapabilities): boolean {
     const entry = this.cameras.get(cameraId);
-    if (!entry || !entry.capabilities) return false;
-    
-    return entry.capabilities[capability] === true;
+    return entry && entry.capabilities ? !!entry.capabilities[capability] : false;
   }
 }
 

@@ -19,7 +19,7 @@ import {
 export class JetsonCamera implements ICamera {
   public readonly cameraId: string;
   public readonly cameraType: string = 'jetson';
-  public readonly apiUrl: string;
+  public apiUrl: string;
   
   private debugMode = true;
   private currentSession: CameraSession | null = null;
@@ -73,11 +73,63 @@ export class JetsonCamera implements ICamera {
       
       if (!response.ok) {
         this.log(`HTTP error: ${response.status} ${response.statusText}`);
+        
+        // If PDA-based URL fails and we have a legacy URL, try that
+        const legacyUrl = (this as any).legacyUrl;
+        if (legacyUrl && this.apiUrl !== legacyUrl) {
+          this.log(`Trying legacy URL: ${legacyUrl}`);
+          try {
+            const legacyResponse = await fetch(`${legacyUrl}${endpoint}`, {
+              method,
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              mode: 'cors',
+              credentials: 'omit',
+              body: method !== 'GET' && data ? JSON.stringify(data) : undefined
+            });
+            
+            if (legacyResponse.ok) {
+              this.log(`Legacy URL succeeded, updating API URL`);
+              this.apiUrl = legacyUrl;
+              return legacyResponse;
+            }
+          } catch (legacyError) {
+            this.log(`Legacy URL also failed:`, legacyError);
+          }
+        }
       }
       
       return response;
     } catch (error) {
       this.log('Fetch error:', error);
+      
+      // If PDA-based URL fails with network error and we have a legacy URL, try that
+      const legacyUrl = (this as any).legacyUrl;
+      if (legacyUrl && this.apiUrl !== legacyUrl) {
+        this.log(`Network error with PDA URL, trying legacy URL: ${legacyUrl}`);
+        try {
+          const legacyResponse = await fetch(`${legacyUrl}${endpoint}`, {
+            method,
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            mode: 'cors',
+            credentials: 'omit',
+            body: method !== 'GET' && data ? JSON.stringify(data) : undefined
+          });
+          
+          this.log(`Legacy URL response status: ${legacyResponse.status}`);
+          if (legacyResponse.ok) {
+            this.log(`Legacy URL succeeded, updating API URL`);
+            this.apiUrl = legacyUrl;
+            return legacyResponse;
+          }
+        } catch (legacyError) {
+          this.log(`Legacy URL also failed:`, legacyError);
+        }
+      }
+      
       throw error;
     }
   }

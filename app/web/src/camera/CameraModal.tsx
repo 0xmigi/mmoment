@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useState, useEffect } from 'react';
 import { Dialog } from '@headlessui/react';
-import { X, ExternalLink, Camera, User, Wifi } from 'lucide-react';
+import { X, ExternalLink, Camera, User } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
@@ -11,6 +11,7 @@ import { CAMERA_ACTIVATION_PROGRAM_ID } from '../anchor/setup';
 import { isSolanaWallet } from '@dynamic-labs/solana';
 import { timelineService } from '../timeline/timeline-service';
 import { unifiedCameraService } from './unified-camera-service';
+import { useSocialProfile } from '../auth/social/useSocialProfile';
 import { CONFIG } from '../core/config';
 
 interface CameraModalProps {
@@ -26,7 +27,7 @@ interface CameraModalProps {
     isStreaming: boolean;
     status: 'ok' | 'error' | 'offline';
     lastSeen?: number;
-    activityCounter?: number;
+    // activityCounter?: number; // Replaced with live active users analytics
     model?: string;
     // New properties for development info
     showDevInfo?: boolean;
@@ -37,14 +38,10 @@ interface CameraModalProps {
 export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: CameraModalProps) {
   const { primaryWallet } = useDynamicContext();
   const { connection } = useConnection();
+  const { primaryProfile } = useSocialProfile();
   const [isCheckedIn, setIsCheckedIn] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [connectionTest, setConnectionTest] = useState<{
-    testing: boolean;
-    result: string | null;
-    success: boolean;
-  }>({ testing: false, result: null, success: false });
 
   // Configuration states for Jetson camera features
   const [gestureVisualization, setGestureVisualization] = useState(false);
@@ -52,6 +49,10 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
   const [gestureControls, setGestureControls] = useState(false);
   const [configLoading, setConfigLoading] = useState(false);
   const [currentGesture, setCurrentGesture] = useState<{ gesture: string; confidence: number } | null>(null);
+
+  // State for active users analytics
+  const [activeUsersCount, setActiveUsersCount] = useState<number>(0);
+  const [loadingActiveUsers, setLoadingActiveUsers] = useState(false);
 
   // Check if current user is the owner
   const isOwner = primaryWallet?.address === camera.owner;
@@ -67,21 +68,23 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   }, [isCheckedIn, onCheckStatusChange]);
 
-  // Add a more frequent check for session status
+  // Add a more frequent check for session status and active users
   useEffect(() => {
     if (!isOpen || !camera.id || !primaryWallet?.address) return;
     
-    console.log("[CameraModal] Checking session status on open");
+    console.log("[CameraModal] Checking session status and active users on open");
     checkSessionStatus();
+    fetchActiveUsersForCamera();
     
     // Also set up a periodic check while the modal is open
     const intervalId = setInterval(() => {
-      console.log("[CameraModal] Periodic session status check");
+      console.log("[CameraModal] Periodic session status and active users check");
       checkSessionStatus();
-    }, 2000);
+      fetchActiveUsersForCamera();
+    }, 3000); // Check every 3 seconds
     
     return () => {
-      console.log("[CameraModal] Cleaning up session status check");
+      console.log("[CameraModal] Cleaning up session status and active users check");
       clearInterval(intervalId);
     };
   }, [isOpen, camera.id, primaryWallet]);
@@ -211,6 +214,47 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   };
 
+  // Function to fetch active users count for this specific camera
+  const fetchActiveUsersForCamera = async () => {
+    if (!camera.id || !connection) return;
+    
+    try {
+      setLoadingActiveUsers(true);
+      console.log('[CameraModal] Fetching active users for camera:', camera.id);
+      
+      const program = await initializeProgram();
+      
+      // Fetch all user sessions
+      const userSessionAccounts = await program.account.userSession.all();
+      console.log('[CameraModal] Found total user sessions:', userSessionAccounts.length);
+      
+      // Count sessions for this specific camera
+      let count = 0;
+      for (const sessionInfo of userSessionAccounts) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const session = sessionInfo.account as any;
+          const sessionCameraKey = session.camera.toString();
+          
+          if (sessionCameraKey === camera.id) {
+            count++;
+            console.log('[CameraModal] Found active session for this camera');
+          }
+        } catch (error) {
+          console.error('[CameraModal] Error parsing user session:', error);
+        }
+      }
+      
+      setActiveUsersCount(count);
+      console.log('[CameraModal] Active users count for this camera:', count);
+    } catch (error) {
+      console.error('[CameraModal] Error fetching active users:', error);
+      // Don't reset count on error - keep showing last known state
+    } finally {
+      setLoadingActiveUsers(false);
+    }
+  };
+
   // Initialize program when needed
   const initializeProgram = async () => {
     if (!primaryWallet?.address || !connection) {
@@ -271,7 +315,9 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       timelineService.emitEvent({
         type: 'check_in',
         user: {
-          address: primaryWallet.address
+          address: primaryWallet.address,
+          displayName: primaryProfile?.displayName,
+          username: primaryProfile?.username
         },
         timestamp: Date.now(),
         transactionId: transactionId,
@@ -291,26 +337,6 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         timestamp: Date.now(),
         transactionId: transactionId,
         cameraId: camera.id
-      });
-    }
-  };
-
-  // Test connection to Jetson camera
-  const testJetsonConnection = async () => {
-    setConnectionTest({ testing: true, result: null, success: false });
-    
-    try {
-      const result = await unifiedCameraService.testConnection(camera.id);
-      setConnectionTest({
-        testing: false,
-        result: result.success ? result.data?.message || 'Connection successful' : result.error || 'Connection failed',
-        success: result.success
-      });
-    } catch (error) {
-      setConnectionTest({
-        testing: false,
-        result: error instanceof Error ? error.message : 'Connection test failed',
-        success: false
       });
     }
   };
@@ -567,6 +593,26 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         await connection.confirmTransaction(signature, 'confirmed');
         console.log('Check-in transaction confirmed successfully');
         
+        // Send user profile to camera for display name labeling using new API
+        if (primaryProfile?.displayName || primaryProfile?.username) {
+          try {
+            const profileResult = await unifiedCameraService.sendUserProfile(camera.id, {
+              wallet_address: primaryWallet.address,
+              display_name: primaryProfile.displayName,
+              username: primaryProfile.username
+            });
+            
+            if (profileResult.success) {
+              console.log('[CameraModal] User profile sent successfully to camera');
+            } else {
+              console.warn('[CameraModal] Failed to send user profile to camera:', profileResult.error);
+            }
+          } catch (err) {
+            console.warn('[CameraModal] Failed to send display name to camera:', err);
+            // Don't fail the check-in if this fails
+          }
+        }
+        
         setIsCheckedIn(true);
         
         // Add to timeline
@@ -574,6 +620,9 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         
         // Refresh the timeline
         timelineService.refreshEvents();
+        
+        // Refresh active users count
+        await fetchActiveUsersForCamera();
         
         // Notify parent component
         if (onCheckStatusChange) {
@@ -691,7 +740,20 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         
         console.log('Transaction sent, confirming:', signature);
         await connection.confirmTransaction(signature, 'confirmed');
-        console.log('Transaction confirmed successfully');
+        console.log('Check-out transaction confirmed successfully');
+        
+        // Remove user profile from camera after successful check-out
+        try {
+          const removeResult = await unifiedCameraService.removeUserProfile(camera.id, primaryWallet.address);
+          if (removeResult.success) {
+            console.log('[CameraModal] User profile removed successfully from camera');
+          } else {
+            console.warn('[CameraModal] Failed to remove user profile from camera:', removeResult.error);
+          }
+        } catch (err) {
+          console.warn('[CameraModal] Failed to remove user profile from camera:', err);
+          // Don't fail the check-out if this fails
+        }
         
         setIsCheckedIn(false);
         
@@ -700,6 +762,9 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         
         // Refresh the timeline
         timelineService.refreshEvents();
+        
+        // Refresh active users count
+        await fetchActiveUsersForCamera();
         
         // Notify parent component
         if (onCheckStatusChange) {
@@ -774,44 +839,14 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                     <button
                       onClick={() => {
                         const baseUrl = window.location.origin;
-                        window.location.href = `${baseUrl}/app/camera/WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD`;
+                        window.location.href = `${baseUrl}/app/camera/${CONFIG.JETSON_CAMERA_PDA}`;
                       }}
                       className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 px-3 py-1.5 rounded flex items-center justify-center w-full transition-colors"
                     >
                       Connect to Orin Nano <ExternalLink className="h-3 w-3 ml-1" />
                     </button>
-                    <button
-                      onClick={testJetsonConnection}
-                      disabled={connectionTest.testing}
-                      className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-1.5 rounded flex items-center justify-center w-full transition-colors"
-                    >
-                      {connectionTest.testing ? 'Testing...' : 'Test Jetson Connection'} <Wifi className="h-3 w-3 ml-1" />
-                    </button>
                   </div>
                 </div>
-                
-                {/* Connection Test Results */}
-                {connectionTest.result && (
-                  <div className={`border rounded-lg p-3 mb-3 ${
-                    connectionTest.success 
-                      ? 'bg-green-50 border-green-200' 
-                      : 'bg-red-50 border-red-200'
-                  }`}>
-                    <h3 className={`text-sm font-medium mb-1 ${
-                      connectionTest.success ? 'text-green-800' : 'text-red-800'
-                    }`}>
-                      Connection Test {connectionTest.success ? 'Passed' : 'Failed'}
-                    </h3>
-                    <p className={`text-xs ${
-                      connectionTest.success ? 'text-green-700' : 'text-red-700'
-                    }`}>
-                      {connectionTest.result}
-                    </p>
-                    <p className="text-xs text-gray-600 mt-1">
-                      URL: {CONFIG.JETSON_CAMERA_URL}
-                    </p>
-                  </div>
-                )}
                 
                 <div className="mb-4">
                   <div className="text-sm text-gray-700">Camera PDA</div>
@@ -884,10 +919,24 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                   <div className="text-sm">{camera.model || "pi5"}</div>
                 </div>
 
-                {/* Activity Counter */}
+                {/* Active Users Analytics */}
                 <div className="mb-4">
-                  <div className="text-sm text-gray-700">Activity</div>
-                  <div className="text-sm font-medium">{camera.activityCounter || 0} total interactions</div>
+                  <div className="text-sm text-gray-700 flex items-center">
+                    Users checked in
+                    {loadingActiveUsers && (
+                      <div className="ml-2 w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+                    )}
+                  </div>
+                  <div className="flex items-center mt-1">
+                    <span className={`w-2 h-2 rounded-full mr-2 ${
+                      activeUsersCount > 0 ? 'bg-green-500' : 'bg-gray-400'
+                    }`}></span>
+                    <span className={`text-sm font-medium ${
+                      activeUsersCount > 0 ? 'text-green-600' : 'text-gray-500'
+                    }`}>
+                      {activeUsersCount} {activeUsersCount === 1 ? 'user' : 'users'} currently active
+                    </span>
+                  </div>
                 </div>
 
                 {/* Computer Vision Controls - Only for Jetson cameras */}

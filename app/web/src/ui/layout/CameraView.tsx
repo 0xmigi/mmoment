@@ -184,7 +184,7 @@ const CameraIdDisplay = ({ cameraId, selectedCamera, cameraAccount, timelineRef 
           isLive: cameraStatus.isLive || false,
           isStreaming: cameraStatus.isStreaming || false,
           status: 'ok',
-          activityCounter: selectedCamera?.activityCounter || 226,
+
           // Add development info when no camera is connected
           showDevInfo: !displayId || displayId === 'None',
           defaultDevCamera: defaultDevCameraPda
