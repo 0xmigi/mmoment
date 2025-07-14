@@ -69,10 +69,10 @@ class LivepeerStreamService:
     def _load_config(self):
         """Load configuration from environment variables"""
         # Get from environment variables or use defaults
-        self.api_key = os.environ.get('LIVEPEER_API_KEY', "eea9bcf2-ac98-4454-a3ab-b0e610a27f05")
-        self.stream_key = os.environ.get('LIVEPEER_STREAM_KEY', "6315-9m3d-yfzn-xhf6")
+        self.api_key = os.environ.get('LIVEPEER_API_KEY')
+        self.stream_key = os.environ.get('LIVEPEER_STREAM_KEY')
         self.ingest_url = os.environ.get('LIVEPEER_INGEST_URL', "rtmp://rtmp.livepeer.com/live")
-        self.playback_id = os.environ.get('LIVEPEER_PLAYBACK_ID', "6315myh7iojrn5uk")
+        self.playback_id = os.environ.get('LIVEPEER_PLAYBACK_ID')
         
         logger.info(f"[LIVEPEER-CONFIG] Configuration loaded!")
         logger.info(f"[LIVEPEER-CONFIG] Stream Key: {self.stream_key}")

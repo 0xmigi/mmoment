@@ -32,15 +32,15 @@ services:
       - CAMERA_PDA=WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD
       - SOLANA_RPC_URL=https://api.devnet.solana.com
       # Livepeer Configuration (Current Active Account)
-      - LIVEPEER_API_KEY=eea9bcf2-ac98-4454-a3ab-b0e610a27f05
-      - LIVEPEER_STREAM_KEY=6315-9m3d-yfzn-xhf6
+      - LIVEPEER_API_KEY=${LIVEPEER_API_KEY}
+      - LIVEPEER_STREAM_KEY=${LIVEPEER_STREAM_KEY}
       - LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
-      - LIVEPEER_PLAYBACK_ID=6315myh7iojrn5uk
+      - LIVEPEER_PLAYBACK_ID=${LIVEPEER_PLAYBACK_ID}
       # Previous Account (Commented Out)
-      # - LIVEPEER_API_KEY=522d8091-867f-42b3-8f62-5eeeab60f000
-      # - LIVEPEER_STREAM_KEY=2458-aycn-mgfp-2dze
+      # - LIVEPEER_API_KEY=${LIVEPEER_API_KEY_OLD}
+      # - LIVEPEER_STREAM_KEY=${LIVEPEER_STREAM_KEY_OLD}
       # - LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
-      # - LIVEPEER_PLAYBACK_ID=24583deg6syfcql
+      # - LIVEPEER_PLAYBACK_ID=${LIVEPEER_PLAYBACK_ID_OLD}
     networks:
       - mmoment-network
     runtime: nvidia

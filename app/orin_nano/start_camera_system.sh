@@ -42,10 +42,10 @@ services:
       - PYTHONUNBUFFERED=1
       - CAMERA_DEVICE=/dev/video1
       # Livepeer streaming configuration
-      - LIVEPEER_API_KEY=522d8091-867f-42b3-8f62-5eeeab60f000
-      - LIVEPEER_STREAM_KEY=2458-aycn-mgfp-2dze
+      - LIVEPEER_API_KEY=${LIVEPEER_API_KEY}
+      - LIVEPEER_STREAM_KEY=${LIVEPEER_STREAM_KEY}
       - LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
-      - LIVEPEER_PLAYBACK_ID=24583deg6syfcql
+      - LIVEPEER_PLAYBACK_ID=${LIVEPEER_PLAYBACK_ID}
     privileged: true
     runtime: nvidia
     devices:
