@@ -102,7 +102,7 @@ These endpoints are used for communication between Docker containers and service
     "isRecording": false,
     "lastSeen": 1234567890,
     "streamInfo": {
-      "playbackId": "24583deg6syfcql",
+      "playbackId": "your-playback-id-here",
       "isActive": true,
       "format": "livepeer"
     },

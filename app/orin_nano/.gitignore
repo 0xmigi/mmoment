@@ -50,4 +50,5 @@ data/recordings/*
 
 # Temporary files
 *.tmp
-.DS_Store 
+.DS_Store *.log
+logs/

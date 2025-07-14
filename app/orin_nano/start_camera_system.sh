@@ -92,7 +92,7 @@ if curl -s http://192.168.1.232:5002/api/health > /dev/null; then
     echo ""
     echo "🎬 MMoment Camera System Ready!"
     echo "Dashboard: http://192.168.1.232:5002"
-    echo "Livepeer Playback: https://lvpr.tv/?v=24583deg6syfcql"
+    echo "Livepeer Playback: https://lvpr.tv/?v=\${LIVEPEER_PLAYBACK_ID}"
 else
     echo "⚠️  Service starting... (may take another minute)"
 fi
