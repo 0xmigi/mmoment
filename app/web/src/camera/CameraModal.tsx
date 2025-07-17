@@ -348,30 +348,16 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     console.log('[CameraModal] Testing visualization endpoints...');
     
     try {
-      // Test both visualization endpoints
-      const baseUrl = 'https://jetson.mmoment.xyz';
+      // Test both visualization endpoints through unified camera service
+      const currentCameraId = camera.id;
       
       console.log('Testing face visualization endpoint...');
-      const faceResponse = await fetch(`${baseUrl}/api/visualization/face`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: true })
-      });
-      
-      console.log('Face viz response status:', faceResponse.status);
-      const faceData = await faceResponse.json();
-      console.log('Face viz response data:', faceData);
+      const faceResult = await unifiedCameraService.toggleFaceVisualization?.(currentCameraId, true);
+      console.log('Face viz result:', faceResult);
       
       console.log('Testing gesture visualization endpoint...');
-      const gestureResponse = await fetch(`${baseUrl}/api/visualization/gesture`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: true })
-      });
-      
-      console.log('Gesture viz response status:', gestureResponse.status);
-      const gestureData = await gestureResponse.json();
-      console.log('Gesture viz response data:', gestureData);
+      const gestureResult = await unifiedCameraService.toggleGestureVisualization?.(currentCameraId, true);
+      console.log('Gesture viz result:', gestureResult);
       
 
       

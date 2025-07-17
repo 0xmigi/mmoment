@@ -416,10 +416,9 @@ class TimelineService {
       console.log('Emitting timeline event:', eventWithCamera);
       this.socket.emit('newTimelineEvent', eventWithCamera);
       
-      // Request recent events after emitting to ensure sync
-      setTimeout(() => {
-        this.requestRecentEvents();
-      }, 1000);
+      // Don't automatically request recent events after emitting
+      // The server will broadcast the event back to us, which is sufficient
+      // Automatic refresh was causing potential duplicates
     } else {
       console.warn('Cannot emit event: socket not connected, storing locally');
       

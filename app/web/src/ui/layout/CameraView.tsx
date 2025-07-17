@@ -946,7 +946,6 @@ export function CameraView() {
 
   // Update the button handlers to check for check-in status
   const handleDirectPhoto = async () => {
-    // Check if there's a camera connected first
     if (!cameraAccount && !selectedCamera) {
       updateToast('error', 'No camera connected. Please connect to a camera first.');
       return;
@@ -958,108 +957,79 @@ export function CameraView() {
       return;
     }
 
-    // Check if camera exists in registry
     if (!unifiedCameraService.hasCamera(currentCameraId)) {
       updateToast('error', 'Camera not found in registry. Please reconnect.');
       return;
     }
 
-    // Check if user is checked in first
     const isCheckedIn = await checkUserSession();
     if (!isCheckedIn) {
       return promptForCheckIn('photo');
     }
 
     try {
-      updateToast('info', 'Initiating photo capture...');
+      updateToast('info', 'Taking photo...');
       
-      // First create the blockchain transaction
       const signature = await sendSimpleTransaction('photo');
       if (!signature) {
         updateToast('error', 'Failed to create blockchain transaction');
         return;
       }
       
-      updateToast('info', 'Capturing photo...');
+      const isConnected = await unifiedCameraService.isConnected(currentCameraId);
+      if (!isConnected && primaryWallet?.address) {
+        await unifiedCameraService.connect(currentCameraId, primaryWallet.address);
+      }
       
-      try {
-        // Connect to camera if not already connected
-        const isConnected = await unifiedCameraService.isConnected(currentCameraId);
-        if (!isConnected && primaryWallet?.address) {
-          await unifiedCameraService.connect(currentCameraId, primaryWallet.address);
-        }
+      const response = await unifiedCameraService.takePhoto(currentCameraId);
+      
+      if (response.success && response.data?.blob) {
+        updateToast('info', 'Photo captured, uploading to IPFS...');
         
-        const response = await unifiedCameraService.takePhoto(currentCameraId);
-        
-        console.log('[PHOTO DEBUG] takePhoto response:', response);
-        
-        if (response.success && response.data?.blob) {
-          console.log('[PHOTO DEBUG] Photo capture successful, blob size:', response.data.blob.size);
-          updateToast('info', 'Photo captured, uploading to IPFS...');
-          
-          try {
-            // Upload to IPFS
-            console.log('[PHOTO DEBUG] Starting IPFS upload...');
-            
-            const results = await unifiedIpfsService.uploadFile(
-              response.data.blob,
-              primaryWallet?.address || '',
-              'image',
-              {
-                transactionId: signature,
-                cameraId: currentCameraId
-              }
-            );
-            
-            console.log('[PHOTO DEBUG] IPFS upload results:', results);
-            
-            if (results.length > 0) {
-              updateToast('success', 'Photo captured and uploaded to IPFS');
-              addTimelineEvent('photo_captured', signature);
-              
-              // Set camera status to online
-              cameraStatus.setOnline(false);
-            } else {
-              console.log('[PHOTO DEBUG] IPFS upload returned empty results');
-              updateToast('success', 'Photo captured (upload to IPFS failed)');
-              addTimelineEvent('photo_captured', signature);
+        try {
+          const results = await unifiedIpfsService.uploadFile(
+            response.data.blob,
+            primaryWallet?.address || '',
+            'image',
+            {
+              transactionId: signature,
+              cameraId: currentCameraId
             }
-          } catch (uploadError) {
-            console.error('[PHOTO DEBUG] Error uploading to IPFS:', uploadError);
+          );
+          
+          if (results.length > 0) {
+            updateToast('success', 'Photo captured and uploaded to IPFS');
+            addTimelineEvent('photo_captured', signature);
+            cameraStatus.setOnline(false);
+          } else {
             updateToast('success', 'Photo captured (upload to IPFS failed)');
             addTimelineEvent('photo_captured', signature);
           }
-          
-          // Refresh the timeline
-          if (timelineRef.current?.refreshEvents) {
-            timelineRef.current?.refreshEvents();
-          }
-        } else {
-          console.error('[PHOTO DEBUG] Photo capture failed:', response);
-          updateToast('error', `Failed to capture photo: ${response.error || 'Unknown error'}`);
-          // Still add timeline event for the transaction
+        } catch (uploadError) {
+          updateToast('success', 'Photo captured (upload to IPFS failed)');
           addTimelineEvent('photo_captured', signature);
-          if (timelineRef.current?.refreshEvents) {
-            timelineRef.current?.refreshEvents();
-          }
         }
-      } catch (error) {
-        console.error('Error capturing photo:', error);
-        updateToast('error', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        // Still add timeline event for the transaction
+        
+        if (timelineRef.current?.refreshEvents) {
+          timelineRef.current?.refreshEvents();
+        }
+      } else {
+        updateToast('error', `Failed to capture photo: ${response.error || 'Unknown error'}`);
         addTimelineEvent('photo_captured', signature);
         if (timelineRef.current?.refreshEvents) {
           timelineRef.current?.refreshEvents();
         }
       }
     } catch (error) {
-      console.error('Error in photo capture process:', error);
       updateToast('error', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
   const handleDirectVideo = async () => {
-    // Check if there's a camera connected first
+    if (isRecording) {
+      return;
+    }
+
     if (!cameraAccount && !selectedCamera) {
       updateToast('error', 'No camera connected. Please connect to a camera first.');
       return;
@@ -1071,231 +1041,110 @@ export function CameraView() {
       return;
     }
 
-    // Check if user is checked in first
     const isCheckedIn = await checkUserSession();
     if (!isCheckedIn) {
       return promptForCheckIn('video');
     }
 
-    try {
-      if (isRecording) {
-        // Stop recording (this shouldn't happen with timed recording, but just in case)
-        updateToast('info', 'Stopping video recording...');
-        setIsRecording(false);
-        return;
-      }
+    if (!primaryWallet?.address) {
+      updateToast('error', 'Wallet not connected');
+      return;
+    }
 
-      // Start timed recording using direct Jetson API (working version)
-      updateToast('info', 'Initiating video recording...');
+    let signature: string | undefined;
+
+    try {
+      setIsRecording(true);
+      updateToast('info', 'Starting video recording...');
       
-      // First create the blockchain transaction
-      const signature = await sendSimpleTransaction('video');
+      signature = await sendSimpleTransaction('video');
       if (!signature) {
         updateToast('error', 'Failed to create blockchain transaction');
+        setIsRecording(false);
         return;
       }
       
-      setRecordingTransactionSignature(signature);
-      updateToast('info', 'Starting video recording (30 seconds)...');
-      
-      try {
-        const jetsonUrl = 'https://jetson.mmoment.xyz';
-        const walletAddress = primaryWallet?.address || '9gERcKdpaTNLfFNNYANzs1P73iMHJpVqhvKMKLa6Xvo';
-        
-        // Step 1: Connect/create session
-        const connectResponse = await fetch(`${jetsonUrl}/api/session/connect`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ wallet_address: walletAddress })
-        });
-        
-        if (!connectResponse.ok) {
-          throw new Error(`Failed to connect: ${connectResponse.status}`);
-        }
-        
-        const connectData = await connectResponse.json();
-        console.log('Session created:', connectData);
-        
-        // Step 2: Start recording
-        const recordResponse = await fetch(`${jetsonUrl}/api/record`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            wallet_address: walletAddress,
-            session_id: connectData.session_id
-          })
-        });
-        
-        if (!recordResponse.ok) {
-          throw new Error(`Failed to start recording: ${recordResponse.status}`);
-        }
-        
-        const recordData = await recordResponse.json();
-        console.log('Recording started:', recordData);
-        
-        setIsRecording(true);
-        updateToast('success', 'Video recording started (30 seconds)');
-        
-        // Add timeline event
-        addTimelineEvent('video_recorded', signature);
-        if (timelineRef.current?.refreshEvents) {
-          timelineRef.current?.refreshEvents();
-        }
-        
-        // Step 3: Stop after exactly 30 seconds
-        setTimeout(async () => {
-          try {
-            console.log('⏹️ 30 seconds completed - stopping recording...');
-            updateToast('info', 'Recording completed, processing video...');
-            
-            const stopResponse = await fetch(`${jetsonUrl}/api/record`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                action: 'stop',
-                wallet_address: walletAddress,
-                session_id: connectData.session_id
-              })
-            });
-            
-            if (stopResponse.ok) {
-              const stopData = await stopResponse.json();
-              console.log('Recording stopped:', stopData);
-              
-              if (stopData.filename) {
-                // Wait longer for video encoding to complete (30-second videos need more time)
-                console.log('Waiting for video encoding to complete...');
-                updateToast('info', 'Video processing - please wait (this may take 15-20 seconds)...');
-                
-                // Show progress during the wait
-                let progressCount = 0;
-                const progressInterval = setInterval(() => {
-                  progressCount++;
-                  updateToast('info', `Video processing - please wait (${progressCount * 3}s / ~15s)...`);
-                }, 3000);
-                
-                setTimeout(async () => {
-                  clearInterval(progressInterval);
-                  try {
-                    // Download the video file - REQUEST THE .MP4 VERSION!
-                    const mp4Filename = stopData.filename.replace('.mov', '.mp4');
-                    const videoUrl = `${jetsonUrl}/api/videos/${mp4Filename}`;
-                    console.log('Downloading MP4 video from:', videoUrl);
-                    
-                    // Add timeout for video download using AbortController
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-                    
-                    const videoResponse = await fetch(videoUrl, {
-                      signal: controller.signal
-                    });
-                    
-                    clearTimeout(timeoutId);
-                    
-                    if (videoResponse.ok) {
-                      const videoBlob = await videoResponse.blob();
-                      console.log('MP4 video downloaded:', videoBlob.size, 'bytes', 'type:', videoBlob.type);
-                      
-                      // Validate video blob size (should be at least 100KB for a 30-second video)
-                      if (videoBlob.size < 100000) {
-                        console.error('❌ Video blob too small, likely corrupted:', videoBlob.size, 'bytes');
-                        updateToast('error', 'Video file appears to be corrupted (too small). Try recording again.');
-                        setIsRecording(false);
-                        setRecordingTransactionSignature(null);
-                        return;
-                      }
-                      
-                      // Ensure the blob has the correct MIME type for MP4
-                      const mp4Blob = new Blob([videoBlob], { type: 'video/mp4' });
-                      console.log('MP4 blob created with correct MIME type:', mp4Blob.type, 'size:', mp4Blob.size);
-                      
-                      // Upload video to IPFS
-                      updateToast('info', 'Video processed, uploading to IPFS...');
-                      
-                      try {
-                        console.log('📤 Uploading MP4 video to IPFS:', mp4Blob.size, 'bytes, type:', mp4Blob.type);
-                        
-                        const ipfsResult = await unifiedIpfsService.uploadFile(
-                          mp4Blob, 
-                          primaryWallet?.address || '', 
-                          'video',
-                          {
-                            transactionId: signature,
-                            cameraId: currentCameraId
-                          }
-                        );
-                        
-                        if (ipfsResult && ipfsResult.length > 0) {
-                          console.log('✅ Video uploaded to IPFS successfully:', ipfsResult[0]);
-                          console.log('✅ IPFS URL:', ipfsResult[0].url);
-                          
-                          // Give IPFS network time to propagate before showing success
-                          updateToast('info', 'Video uploaded to IPFS, waiting for network propagation...');
-                          
-                          setTimeout(() => {
-                            updateToast('success', 'Video recorded and uploaded to IPFS successfully!');
-                            
-                            // Refresh timeline after IPFS propagation
-                            if (timelineRef.current?.refreshEvents) {
-                              timelineRef.current?.refreshEvents();
-                            }
-                          }, 8000); // Wait 8s for IPFS propagation (videos need more time)
-                          
-                        } else {
-                          console.error('❌ IPFS upload failed - no result returned');
-                          updateToast('error', 'Video recorded but IPFS upload failed');
-                        }
-                      } catch (ipfsError) {
-                        console.error('❌ IPFS upload error:', ipfsError);
-                        updateToast('error', 'Video recorded but IPFS upload failed');
-                      }
-                    } else {
-                      updateToast('error', 'Failed to download video from camera');
-                    }
-                  } catch (downloadError) {
-                    console.error('Video download error:', downloadError);
-                    updateToast('error', 'Failed to process recorded video');
-                  } finally {
-                    setIsRecording(false);
-                    setRecordingTransactionSignature(null);
-                    
-                    // Refresh timeline
-                    if (timelineRef.current?.refreshEvents) {
-                      timelineRef.current?.refreshEvents();
-                    }
-                  }
-                }, 15000); // Wait 15s for encoding (30-second videos need more time)
-                
-              } else {
-                updateToast('error', 'Recording completed but no video file was created');
-                setIsRecording(false);
-                setRecordingTransactionSignature(null);
-              }
-            } else {
-              updateToast('error', 'Failed to stop recording');
-              setIsRecording(false);
-              setRecordingTransactionSignature(null);
-            }
-          } catch (error) {
-            console.error('Recording stop error:', error);
-            updateToast('error', 'Error stopping recording');
-            setIsRecording(false);
-            setRecordingTransactionSignature(null);
-          }
-        }, 30000); // Record for 30s
-        
-      } catch (apiError) {
-        console.error('Video recording API error:', apiError);
-        updateToast('error', `Recording failed: ${apiError instanceof Error ? apiError.message : 'Unknown error'}`);
-        setIsRecording(false);
-        setRecordingTransactionSignature(null);
+      const isConnected = await unifiedCameraService.isConnected(currentCameraId);
+      if (!isConnected && primaryWallet?.address) {
+        await unifiedCameraService.connect(currentCameraId, primaryWallet.address);
       }
+      
+      const recordResponse = await unifiedCameraService.startVideoRecording(currentCameraId);
+      
+      if (!recordResponse.success) {
+        throw new Error(`Failed to start recording: ${recordResponse.error}`);
+      }
+      
+      updateToast('success', 'Video recording started');
+      
+      // Wait for recording to complete - give it much more time
+      let attempts = 0;
+      const maxAttempts = 40; // 2 minutes max with 3 second intervals
+      
+      const checkRecordingStatus = async (): Promise<void> => {
+        attempts++;
+        
+        if (attempts >= maxAttempts) {
+          updateToast('error', 'Recording timeout - stopping manually');
+          setIsRecording(false);
+          return;
+        }
+        
+        const statusResponse = await unifiedCameraService.getStatus(currentCameraId);
+        if (statusResponse.success && statusResponse.data && !statusResponse.data.isRecording) {
+          updateToast('info', 'Recording completed, waiting for video processing...');
+          
+          // Wait additional time for video processing before trying to fetch
+          await new Promise(resolve => setTimeout(resolve, 8000));
+          
+          // Recording has naturally stopped, so try to get the most recent video instead
+          const stopResponse = await unifiedCameraService.getMostRecentVideo(currentCameraId);
+          
+          if (stopResponse.success && stopResponse.data?.blob) {
+            const videoBlob = stopResponse.data.blob;
+            
+            if (videoBlob.size < 100000) {
+              updateToast('error', 'Video file appears to be corrupted. Try recording again.');
+              setIsRecording(false);
+              return;
+            }
+            
+            updateToast('info', 'Video processed, uploading to IPFS...');
+            
+            try {
+              const ipfsResult = await unifiedIpfsService.uploadFile(
+                videoBlob, 
+                primaryWallet.address, 
+                'video',
+                {
+                  transactionId: signature,
+                  cameraId: currentCameraId
+                }
+              );
+              
+              if (ipfsResult && ipfsResult.length > 0) {
+                updateToast('success', 'Video uploaded to IPFS successfully!');
+              } else {
+                updateToast('error', 'Video recorded but IPFS upload failed');
+              }
+            } catch (ipfsError) {
+              updateToast('error', 'Video recorded but IPFS upload failed');
+            }
+          } else {
+            updateToast('error', 'Recording completed but no video file was created');
+          }
+          setIsRecording(false);
+        } else {
+          setTimeout(checkRecordingStatus, 3000);
+        }
+      };
+      
+      // Wait longer before first check to give camera time to actually start recording
+      setTimeout(checkRecordingStatus, 10000);
         
     } catch (error) {
-      console.error('Error in video recording:', error);
       updateToast('error', `Recording failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setIsRecording(false);
-      setRecordingTransactionSignature(null);
     }
   };
 
@@ -1432,151 +1281,15 @@ export function CameraView() {
     }
   };
 
-  // Expose debug functions to global scope for testing
+  // Cleanup gesture monitoring on unmount
   useEffect(() => {
-    const currentCameraId = cameraAccount || selectedCamera?.publicKey;
-    if (currentCameraId && unifiedCameraService.hasCamera(currentCameraId)) {
-      // Get the camera instance from the unified service
-      const cameraInstance = (unifiedCameraService as any).cameras?.get(currentCameraId);
-      
-      if (cameraInstance) {
-        (window as any).debugPhotoCapture = () => cameraInstance.debugPhotoCapture?.();
-        (window as any).debugVideoRecording = () => cameraInstance.debugVideoRecording?.();
-        (window as any).debugStreaming = () => cameraInstance.debugStreaming?.();
-        (window as any).debugSession = () => cameraInstance.debugSession?.();
-        (window as any).debugStreamDisplay = () => cameraInstance.debugStreamDisplay?.();
-        (window as any).debugAllFunctions = () => cameraInstance.debugAllFunctions?.();
-        
-        // Add debug function to check camera configuration
-        (window as any).debugCameraConfig = () => {
-          console.log('🔧 === CAMERA CONFIGURATION DEBUG ===');
-          console.log('Current Camera ID:', currentCameraId);
-          console.log('Camera Instance:', cameraInstance);
-          console.log('Camera API URL:', cameraInstance.apiUrl);
-          console.log('Camera Type:', cameraInstance.cameraType);
-          console.log('CONFIG.JETSON_CAMERA_URL:', CONFIG.JETSON_CAMERA_URL);
-          console.log('CONFIG.JETSON_CAMERA_PDA:', CONFIG.JETSON_CAMERA_PDA);
-          console.log('All registered cameras:', unifiedCameraService.getAllCameras());
-          console.log('=================================');
-        };
-        
-        // Add simple unified service test
-        (window as any).testUnifiedService = async () => {
-          console.log('🧪 === TESTING UNIFIED SERVICE ===');
-          console.log('Current Camera ID:', currentCameraId);
-          
-          try {
-            console.log('1. Testing hasCamera...');
-            const hasCamera = unifiedCameraService.hasCamera(currentCameraId);
-            console.log('Has camera:', hasCamera);
-            
-            console.log('2. Testing getStreamInfo...');
-            const streamInfo = await unifiedCameraService.getStreamInfo(currentCameraId);
-            console.log('Stream info result:', streamInfo);
-            
-            if (streamInfo.success) {
-              console.log('✅ Stream info SUCCESS:', streamInfo.data);
-            } else {
-              console.log('❌ Stream info FAILED:', streamInfo.error);
-            }
-          } catch (error) {
-            console.error('❌ Test failed:', error);
-          }
-          console.log('=================================');
-        };
-        
-        console.log('🔧 Debug functions available:');
-        console.log('- debugPhotoCapture() - Test photo capture and download');
-        console.log('- debugVideoRecording() - Test video recording start/stop');
-        console.log('- debugStreaming() - Test streaming start/stop');
-        console.log('- debugSession() - Test session connectivity');
-        console.log('- debugStreamDisplay() - Test stream info and display');
-        console.log('- debugCameraConfig() - Check camera configuration and URLs');
-        console.log('- testUnifiedService() - Test unified camera service directly');
-        console.log('- debugAllFunctions() - Test all functions comprehensively');
-        console.log('- testJetsonAPI() - Test Jetson API endpoints directly');
-        console.log('- debugFieldMapping() - Debug API field mapping issues');
-
-        // Add direct API testing functions
-        (window as any).testJetsonAPI = async () => {
-          console.log('🚀 === TESTING JETSON API DIRECTLY ===');
-          const jetsonUrl = 'https://jetson.mmoment.xyz';
-          
-          try {
-            // Test health endpoint
-            console.log('1. Testing /api/health...');
-            const healthResponse = await fetch(`${jetsonUrl}/api/health`);
-            if (healthResponse.ok) {
-              const healthData = await healthResponse.json();
-              console.log('✅ Health response:', healthData);
-            } else {
-              console.log('❌ Health failed:', healthResponse.status, healthResponse.statusText);
-            }
-
-            // Test status endpoint  
-            console.log('2. Testing /api/status...');
-            const statusResponse = await fetch(`${jetsonUrl}/api/status`);
-            if (statusResponse.ok) {
-              const statusData = await statusResponse.json();
-              console.log('✅ Status response:', statusData);
-              console.log('📊 STREAMING STATUS from /api/status:', statusData.streaming);
-              console.log('📊 IS_STREAMING from /api/status:', statusData.isStreaming);
-              console.log('📊 FULL RESPONSE STRUCTURE:', JSON.stringify(statusData, null, 2));
-            } else {
-              console.log('❌ Status failed:', statusResponse.status, statusResponse.statusText);
-            }
-
-            // Test livepeer status endpoint
-            console.log('3. Testing /api/stream/livepeer/status...');
-            const livepeerResponse = await fetch(`${jetsonUrl}/api/stream/livepeer/status`);
-            if (livepeerResponse.ok) {
-              const livepeerData = await livepeerResponse.json();
-              console.log('✅ Livepeer status response:', livepeerData);
-              console.log('📊 LIVEPEER STATUS:', livepeerData.status);
-            } else {
-              console.log('❌ Livepeer status failed:', livepeerResponse.status, livepeerResponse.statusText);
-            }
-
-          } catch (error) {
-            console.error('❌ Direct API test failed:', error);
-          }
-          console.log('=================================');
-        };
-
-        // Add a function to test the exact field mapping issue
-        (window as any).debugFieldMapping = async () => {
-          console.log('🔍 === DEBUGGING FIELD MAPPING ===');
-          const jetsonUrl = 'https://jetson.mmoment.xyz';
-          
-          try {
-            const response = await fetch(`${jetsonUrl}/api/status`);
-            const data = await response.json();
-            
-            console.log('Raw response:', data);
-            console.log('Type of response:', typeof data);
-            console.log('Keys in response:', Object.keys(data));
-            
-            // Check all possible field locations
-            console.log('data.streaming:', data.streaming);
-            console.log('data.isStreaming:', data.isStreaming);
-            console.log('data.data?.streaming:', data.data?.streaming);
-            console.log('data.data?.isStreaming:', data.data?.isStreaming);
-            console.log('data.streamInfo?.isActive:', data.streamInfo?.isActive);
-            
-            // Show the current mapping result
-            const currentMapping = data.isStreaming || data.streaming || false;
-            console.log('Current mapping result:', currentMapping);
-            
-          } catch (error) {
-            console.error('Field mapping debug failed:', error);
-          }
-          console.log('=================================');
-        };
-      } else {
-        console.log('🔧 Camera instance not found for debug functions');
+    return () => {
+      if (gestureCheckIntervalRef.current) {
+        clearInterval(gestureCheckIntervalRef.current);
+        gestureCheckIntervalRef.current = null;
       }
-    }
-  }, [cameraAccount, selectedCamera]);
+    };
+  }, []);
 
   return (
     <>

@@ -73,63 +73,11 @@ export class JetsonCamera implements ICamera {
       
       if (!response.ok) {
         this.log(`HTTP error: ${response.status} ${response.statusText}`);
-        
-        // If PDA-based URL fails and we have a legacy URL, try that
-        const legacyUrl = (this as any).legacyUrl;
-        if (legacyUrl && this.apiUrl !== legacyUrl) {
-          this.log(`Trying legacy URL: ${legacyUrl}`);
-          try {
-            const legacyResponse = await fetch(`${legacyUrl}${endpoint}`, {
-              method,
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              mode: 'cors',
-              credentials: 'omit',
-              body: method !== 'GET' && data ? JSON.stringify(data) : undefined
-            });
-            
-            if (legacyResponse.ok) {
-              this.log(`Legacy URL succeeded, updating API URL`);
-              this.apiUrl = legacyUrl;
-              return legacyResponse;
-            }
-          } catch (legacyError) {
-            this.log(`Legacy URL also failed:`, legacyError);
-          }
-        }
       }
       
       return response;
     } catch (error) {
       this.log('Fetch error:', error);
-      
-      // If PDA-based URL fails with network error and we have a legacy URL, try that
-      const legacyUrl = (this as any).legacyUrl;
-      if (legacyUrl && this.apiUrl !== legacyUrl) {
-        this.log(`Network error with PDA URL, trying legacy URL: ${legacyUrl}`);
-        try {
-          const legacyResponse = await fetch(`${legacyUrl}${endpoint}`, {
-            method,
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            mode: 'cors',
-            credentials: 'omit',
-            body: method !== 'GET' && data ? JSON.stringify(data) : undefined
-          });
-          
-          this.log(`Legacy URL response status: ${legacyResponse.status}`);
-          if (legacyResponse.ok) {
-            this.log(`Legacy URL succeeded, updating API URL`);
-            this.apiUrl = legacyUrl;
-            return legacyResponse;
-          }
-        } catch (legacyError) {
-          this.log(`Legacy URL also failed:`, legacyError);
-        }
-      }
-      
       throw error;
     }
   }
@@ -445,12 +393,25 @@ export class JetsonCamera implements ICamera {
         }
       }
       
+      // Check if already recording and stop if needed
+      const currentlyRecording = await this.isCurrentlyRecording();
+      if (currentlyRecording) {
+        this.log('Camera is already recording, stopping existing recording first...');
+        try {
+          await this.stopVideoRecording();
+          // Wait a moment for the stop to complete
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (stopError) {
+          this.log('Error stopping existing recording:', stopError);
+          // Continue anyway - might be a stuck state
+        }
+      }
+      
       // Use the standardized /api/record endpoint with action parameter
       const response = await this.makeApiCall('/api/record', 'POST', {
         action: 'start',
         wallet_address: this.currentSession.walletAddress,
-        session_id: this.currentSession.sessionId,
-        duration: 0  // 0 means record until stopped
+        session_id: this.currentSession.sessionId
       });
       
       this.log('Start recording API response status:', response.status, response.statusText);
@@ -487,6 +448,15 @@ export class JetsonCamera implements ICamera {
           return {
             success: false,
             error: 'Session expired. Please connect again and try recording.'
+          };
+        }
+        
+        // If it's a 400 "Already recording", return a more helpful error
+        if (response.status === 400 && errorText.includes('Already recording')) {
+          this.log('400 Already recording error - camera is already recording');
+          return {
+            success: false,
+            error: 'Camera is already recording. Please wait for the current recording to finish or stop it manually.'
           };
         }
         
@@ -528,16 +498,43 @@ export class JetsonCamera implements ICamera {
         const data = await response.json();
         this.log('Stop recording API response data:', data);
         
-        if (data.success) {
+        if (data.success && data.filename) {
           this.log('Video recording stopped successfully:', data.filename);
           
-          return {
-            success: true,
-            data: { 
-              filename: data.filename,
-              timestamp: data.timestamp || Date.now()
+          // Now fetch the actual video file from the API with retry logic
+          try {
+            this.log('Fetching video file with retry logic:', data.filename);
+            console.log('API returned filename:', data.filename);
+            console.log('Full API response:', data);
+            
+            const videoResponse = await this.getRecordedVideoWithRetry(data.filename);
+            
+            if (videoResponse.success && videoResponse.data?.blob) {
+              this.log('Video file retrieved successfully:', videoResponse.data.blob.size, 'bytes');
+              
+              return {
+                success: true,
+                data: { 
+                  blob: videoResponse.data.blob,
+                  filename: data.filename,
+                  timestamp: data.timestamp || Date.now(),
+                  size: videoResponse.data.blob.size
+                }
+              };
+            } else {
+              this.log('Failed to retrieve video file:', videoResponse.error);
+              return {
+                success: false,
+                error: `Recording stopped but failed to retrieve video file: ${videoResponse.error}`
+              };
             }
-          };
+          } catch (fetchError) {
+            this.log('Error fetching video file:', fetchError);
+            return {
+              success: false,
+              error: `Recording stopped but failed to fetch video: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}`
+            };
+          }
         } else {
           this.log('Stop recording API returned unsuccessful result:', data);
           return {
@@ -562,26 +559,132 @@ export class JetsonCamera implements ICamera {
     }
   }
 
+  async getRecordedVideoWithRetry(filename: string, maxRetries: number = 8): Promise<CameraActionResponse<CameraMediaResponse>> {
+    let attempt = 0;
+    let lastError: string = '';
+    
+    while (attempt < maxRetries) {
+      try {
+        this.log(`Attempt ${attempt + 1}/${maxRetries} to get video: ${filename}`);
+        
+        const result = await this.getRecordedVideo(filename);
+        
+        if (result.success) {
+          this.log(`✅ Video retrieved successfully on attempt ${attempt + 1}`);
+          return result;
+        }
+        
+        lastError = result.error || 'Unknown error';
+        
+        // If the error indicates the MP4 file is not available, wait and retry
+        if (lastError.includes('MP4 video file not found') || lastError.includes('not available')) {
+          attempt++;
+          
+          if (attempt < maxRetries) {
+            // Longer delays for video processing: 5s, 10s, 15s, 20s, 30s, 45s, 60s, 90s
+            const delay = Math.min(5000 * attempt, 90000); // Start at 5s, cap at 90 seconds
+            this.log(`⏳ Video not ready yet, waiting ${delay}ms before retry ${attempt + 1}/${maxRetries}`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+        } else {
+          // For other errors, fail immediately
+          break;
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : 'Unknown error';
+        break;
+      }
+    }
+    
+    this.log(`❌ Failed to get video after ${maxRetries} attempts: ${lastError}`);
+    return {
+      success: false,
+      error: `Video processing timeout: The camera may still be processing the video file. Please try again in a few moments. (Last error: ${lastError})`
+    };
+  }
+
   async getRecordedVideo(filename: string): Promise<CameraActionResponse<CameraMediaResponse>> {
     try {
       this.log('Getting recorded video:', filename);
+      console.log('Input filename:', filename);
+      console.log('API URL:', this.apiUrl);
       
-      const response = await this.makeApiCall(`/api/videos/${filename}`, 'GET');
+      // First try to get MP4 version if the filename is .mov
+      let videoResponse: Response;
+      let finalFilename = filename;
       
-      if (response.ok) {
-        const videoBlob = await response.blob();
-        this.log('Video retrieved successfully:', videoBlob.size, 'bytes');
+      // Always try to get MP4 version first for web compatibility
+      let mp4Filename: string;
+      if (filename.endsWith('.mov')) {
+        mp4Filename = filename.replace('.mov', '.mp4');
+      } else if (filename.endsWith('.mp4')) {
+        mp4Filename = filename;
+      } else {
+        // If no extension, assume it's a base name and try .mp4
+        mp4Filename = filename + '.mp4';
+      }
+      
+      const mp4Url = `${this.apiUrl}/api/videos/${mp4Filename}`;
+      console.log('Trying MP4 version:', mp4Url);
+      
+      const mp4Response = await this.makeApiCall(`/api/videos/${mp4Filename}`, 'GET');
+      console.log('MP4 response status:', mp4Response.status);
+      
+      if (mp4Response.ok) {
+        console.log('✅ MP4 version found, using it');
+        videoResponse = mp4Response;
+        finalFilename = mp4Filename;
+      } else {
+        console.log('❌ MP4 version not available - this is the issue!');
+        throw new Error(`MP4 video file not found: ${mp4Filename}. The camera may need more time to process the video.`);
+      }
+      
+      if (videoResponse.ok) {
+        const videoBlob = await videoResponse.blob();
+        console.log('Video blob retrieved - size:', videoBlob.size, 'bytes, type:', videoBlob.type);
+        
+        // Validate the video blob
+        if (videoBlob.size === 0) {
+          console.log('❌ Video file is empty!');
+          throw new Error('Video file is empty');
+        }
+        
+        console.log('✅ Video blob size:', videoBlob.size, 'bytes - processing...');
+        
+        // Determine the correct MIME type based on filename
+        let mimeType: string;
+        if (finalFilename.endsWith('.mp4')) {
+          mimeType = 'video/mp4';
+        } else if (finalFilename.endsWith('.mov')) {
+          mimeType = 'video/quicktime';
+        } else {
+          // Use the blob's original type or default to mp4
+          mimeType = videoBlob.type || 'video/mp4';
+        }
+        
+        console.log('Using MIME type:', mimeType, 'for file:', finalFilename);
+        
+        // Create the video file with the correct MIME type
+        const videoFile = new Blob([videoBlob], { type: mimeType });
+        console.log('Final video file - size:', videoFile.size, 'bytes, type:', videoFile.type);
         
         return {
           success: true,
           data: { 
-            blob: videoBlob,
-            filename,
-            size: videoBlob.size
+            blob: videoFile,
+            filename: finalFilename,
+            size: videoFile.size,
+            timestamp: Date.now()
           }
         };
       } else {
-        throw new Error(`Failed to get video: ${response.status}`);
+        const errorText = await videoResponse.text();
+        console.log('❌ Failed to get video:');
+        console.log('- Status:', videoResponse.status, videoResponse.statusText);
+        console.log('- Error text:', errorText);
+        console.log('- Attempted filename:', finalFilename);
+        throw new Error(`Failed to get video: ${videoResponse.status} - ${errorText}`);
       }
     } catch (error) {
       this.log('Get video error:', error);
@@ -632,18 +735,18 @@ export class JetsonCamera implements ICamera {
         throw new Error('No videos available');
       }
       
-      // Filter to only .mov files
-      const movVideos = videos.filter(video => {
+      // Filter to video files (both .mp4 and .mov)
+      const videoFiles = videos.filter(video => {
         const filename = video.filename || video;
-        return filename.endsWith('.mov');
+        return filename.endsWith('.mp4') || filename.endsWith('.mov');
       });
       
-      if (movVideos.length === 0) {
-        throw new Error('No .mov videos available');
+      if (videoFiles.length === 0) {
+        throw new Error('No video files available');
       }
       
-      // Sort .mov videos by timestamp/name to get the most recent
-      const sortedVideos = movVideos.sort((a, b) => {
+      // Sort videos by timestamp/name to get the most recent
+      const sortedVideos = videoFiles.sort((a, b) => {
         // Try to sort by timestamp if available, otherwise by filename
         if (a.timestamp && b.timestamp) {
           return b.timestamp - a.timestamp;
@@ -651,11 +754,16 @@ export class JetsonCamera implements ICamera {
         return b.filename?.localeCompare(a.filename || '') || 0;
       });
       
-      const mostRecentVideo = sortedVideos[0];
-      const filename = mostRecentVideo.filename || mostRecentVideo;
-      this.log('Most recent .mov video:', filename);
+      // Prefer MP4 files over MOV files when available
+      const mostRecentVideo = sortedVideos.find(video => {
+        const filename = video.filename || video;
+        return filename.endsWith('.mp4');
+      }) || sortedVideos[0];
       
-      // Get the actual .mov video file
+      const filename = mostRecentVideo.filename || mostRecentVideo;
+      this.log('Most recent video:', filename);
+      
+      // Get the actual video file (this will handle MP4/MOV preference internally)
       return await this.getRecordedVideo(filename);
     } catch (error) {
       this.log('Get most recent video error:', error);
@@ -1168,206 +1276,6 @@ export class JetsonCamera implements ICamera {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to confirm face enrollment transaction'
       };
-    }
-  }
-
-  // Debug function to test session connectivity
-  async debugSession(): Promise<void> {
-    console.log('🔗 Testing session connectivity...');
-    
-    if (!this.currentSession) {
-      console.log('❌ No current session');
-      return;
-    }
-    
-    console.log('Current session:', this.currentSession);
-    
-    const isConnected = this.isConnected();
-    console.log('Is connected:', isConnected);
-    
-    if (!isConnected) {
-      console.log('🔄 Attempting to reconnect...');
-      const reconnectResult = await this.connect(this.currentSession.walletAddress);
-      console.log('Reconnect result:', reconnectResult);
-    } else {
-      console.log('✅ Session is valid');
-    }
-  }
-
-  // Debug function to test photo capture
-  async debugPhotoCapture(): Promise<void> {
-    console.log('📸 Testing photo capture...');
-    
-    const result = await this.takePhoto();
-    console.log('Photo capture result:', result);
-    
-    if (result.success && result.data) {
-      console.log('✅ Photo captured successfully');
-      
-      // result.data is CameraMediaResponse, which should contain a blob
-      const blob = result.data as Blob; // Cast to Blob since takePhoto returns the blob directly
-      console.log('Photo data type:', typeof blob);
-      console.log('Photo data size:', blob.size, 'bytes');
-      
-      // Create download link for verification
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `debug_photo_${Date.now()}.jpg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      console.log('📥 Photo downloaded for verification');
-    } else {
-      console.log('❌ Photo capture failed:', result.error);
-    }
-  }
-
-  // Debug function to test stream display
-  async debugStreamDisplay(): Promise<void> {
-    console.log('📺 Testing stream display...');
-    
-    try {
-      // Test stream info retrieval
-      console.log('1️⃣ Getting stream info...');
-      const streamInfo = await this.getStreamInfo();
-      console.log('Stream info result:', streamInfo);
-      
-      if (streamInfo.success && streamInfo.data) {
-        console.log('✅ Stream info retrieved successfully');
-        console.log('Stream details:');
-        console.log('- Is Active:', streamInfo.data.isActive);
-        console.log('- Playback ID:', streamInfo.data.playbackId);
-        console.log('- Stream URL:', streamInfo.data.streamUrl);
-        console.log('- HLS URL:', streamInfo.data.hlsUrl);
-        console.log('- Format:', streamInfo.data.format);
-        
-        // Test HLS URL directly
-        if (streamInfo.data.hlsUrl) {
-          console.log('2️⃣ Testing HLS URL directly...');
-          try {
-            const hlsResponse = await fetch(streamInfo.data.hlsUrl, { method: 'HEAD' });
-            console.log('HLS URL status:', hlsResponse.status, hlsResponse.statusText);
-            if (hlsResponse.ok) {
-              console.log('✅ HLS URL is accessible');
-            } else {
-              console.log('❌ HLS URL returned error:', hlsResponse.status);
-            }
-          } catch (hlsError) {
-            console.log('❌ HLS URL fetch failed:', hlsError);
-          }
-        }
-        
-        // Test playback URL
-        if (streamInfo.data.streamUrl) {
-          console.log('3️⃣ Stream playback URL:', streamInfo.data.streamUrl);
-          console.log('💡 You can test this URL directly in a new tab');
-        }
-        
-      } else {
-        console.log('❌ Failed to get stream info:', streamInfo.error);
-      }
-      
-    } catch (error) {
-      console.error('❌ Stream display debug failed:', error);
-    }
-  }
-
-  // Debug function to test all fixed functionality
-  async debugAllFunctions(): Promise<void> {
-    console.log('🔧 === COMPREHENSIVE DEBUG TEST ===');
-    
-    try {
-      // Test session connectivity
-      console.log('1️⃣ Testing session connectivity...');
-      await this.debugSession();
-      
-      // Test photo capture
-      console.log('\n2️⃣ Testing photo capture...');
-      await this.debugPhotoCapture();
-      
-      // Test stream display (new)
-      console.log('\n3️⃣ Testing stream display...');
-      await this.debugStreamDisplay();
-      
-      // Test streaming (with new optimistic approach)
-      console.log('\n4️⃣ Testing streaming (optimistic approach)...');
-      const streamResult = await this.startStream();
-      console.log('Stream result:', streamResult);
-      
-      if (streamResult.success) {
-        console.log('✅ Stream started successfully (or optimistically)');
-        console.log('Stream info:', streamResult.data);
-        
-        // Wait a bit then stop
-        console.log('Waiting 3 seconds before stopping stream...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        
-        const stopResult = await this.stopStream();
-        console.log('Stop stream result:', stopResult);
-      } else {
-        console.log('❌ Stream failed:', streamResult.error);
-      }
-      
-      // Test video recording (with fixed endpoint)
-      console.log('\n5️⃣ Testing video recording (fixed endpoint)...');
-      const recordResult = await this.startVideoRecording();
-      console.log('Record result:', recordResult);
-      
-      if (recordResult.success) {
-        console.log('✅ Recording started successfully');
-        console.log('Recording info:', recordResult.data);
-        
-        // Wait a bit then stop
-        console.log('Waiting 5 seconds before stopping recording...');
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        
-        const stopResult = await this.stopVideoRecording();
-        console.log('Stop recording result:', stopResult);
-      } else {
-        console.log('❌ Recording failed:', recordResult.error);
-      }
-      
-      console.log('\n🎉 === DEBUG TEST COMPLETE ===');
-      
-    } catch (error) {
-      console.error('❌ Debug test failed:', error);
-    }
-  }
-
-  // Debug function to test stream display fix
-  async debugStreamDisplayFix(): Promise<void> {
-    console.log('🔧 Testing stream display fix...');
-    
-    try {
-      // Test the fixed getStreamInfo method
-      console.log('1️⃣ Testing getStreamInfo with fixed status check...');
-      const streamInfo = await this.getStreamInfo();
-      console.log('Stream info result:', streamInfo);
-      
-      if (streamInfo.success && streamInfo.data) {
-        console.log('✅ Stream info retrieved successfully');
-        console.log('Stream details:');
-        console.log('- Is Active:', streamInfo.data.isActive);
-        console.log('- Playback ID:', streamInfo.data.playbackId);
-        console.log('- Stream URL:', streamInfo.data.streamUrl);
-        console.log('- HLS URL:', streamInfo.data.hlsUrl);
-        console.log('- Format:', streamInfo.data.format);
-        
-        if (streamInfo.data.isActive) {
-          console.log('🎉 Stream should now display as ACTIVE!');
-          console.log('💡 The StreamPlayer should show the Livepeer video instead of "Stream is offline"');
-        } else {
-          console.log('⚠️ Stream is not active according to API');
-        }
-        
-      } else {
-        console.log('❌ Failed to get stream info:', streamInfo.error);
-      }
-      
-    } catch (error) {
-      console.error('❌ Stream display fix test failed:', error);
     }
   }
 } 

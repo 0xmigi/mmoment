@@ -5,8 +5,9 @@ type StatusCallback = (status: { isLive: boolean; isStreaming: boolean; owner: s
 // Helper function to get the appropriate camera API URL
 const getCameraApiUrl = (): string => {
   const currentCameraId = localStorage.getItem('directCameraId');
-  if (currentCameraId === CONFIG.JETSON_CAMERA_PDA) {
-    return CONFIG.JETSON_CAMERA_URL;
+  if (currentCameraId) {
+    // Use PDA-based URL for any camera
+    return CONFIG.getCameraApiUrlByPda(currentCameraId);
   }
   return CONFIG.CAMERA_API_URL;
 };
@@ -240,35 +241,32 @@ class CameraStatusService {
     } catch (error) {
       this.logDebug('Status check operation failed:', error);
       
-      // For Jetson cameras, try the legacy health endpoint as fallback
-      const currentCameraId = localStorage.getItem('directCameraId');
-      if (currentCameraId === CONFIG.JETSON_CAMERA_PDA) {
-        try {
-          console.log(`[CameraStatus] Trying legacy Jetson health endpoint`);
-          const legacyResponse = await this.fetchWithTimeout(`${apiUrl}/health`, {}, 5000);
+      // Try alternative health endpoint as fallback
+      try {
+        console.log(`[CameraStatus] Trying alternative health endpoint`);
+        const altResponse = await this.fetchWithTimeout(`${apiUrl}/health`, {}, 5000);
+        
+        if (altResponse.ok) {
+          console.log(`[CameraStatus] Alternative health check succeeded`);
+          this.recordSuccessfulOperation();
           
-          if (legacyResponse.ok) {
-            console.log(`[CameraStatus] Legacy Jetson health check succeeded`);
-            this.recordSuccessfulOperation();
-            
-            const newStatus = {
-              isLive: true,
-              isStreaming: false,
-              owner: ''
-            };
+          const newStatus = {
+            isLive: true,
+            isStreaming: false,
+            owner: ''
+          };
 
-            if (this.hasStatusChanged(newStatus)) {
-              this.currentStatus = newStatus;
-              this.notifyCallbacks();
-              this.saveStatus();
-            }
-
-            this.retryCount = 0;
-            return; // Successfully used legacy endpoint
+          if (this.hasStatusChanged(newStatus)) {
+            this.currentStatus = newStatus;
+            this.notifyCallbacks();
+            this.saveStatus();
           }
-        } catch (legacyError) {
-          console.log(`[CameraStatus] Legacy health check also failed:`, legacyError);
+
+          this.retryCount = 0;
+          return; // Successfully used alternative endpoint
         }
+      } catch (altError) {
+        console.log(`[CameraStatus] Alternative health check also failed:`, altError);
       }
       
       // If we get here, the camera check failed

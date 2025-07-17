@@ -29,7 +29,7 @@ export function CameraControls({ onTakePicture, onRecordVideo, onToggleStream, i
         aria-label="Record Video"
       >
         <Video className="w-4 h-4 text-gray-600 hover:text-stone-800" />
-        <span className="text-sm font-medium text-gray-600 hover:text-stone-800">30s Video</span>
+        <span className="text-sm font-medium text-gray-600 hover:text-stone-800">Video</span>
       </button>
 
       {onToggleStream && (
