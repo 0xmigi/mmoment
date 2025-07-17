@@ -40,36 +40,29 @@ def get_blockchain_session_sync():
     from services.blockchain_session_sync import get_blockchain_session_sync
     return get_blockchain_session_sync()
 
-# Session validation decorator - OPTIMISTIC MODE
+# Session validation decorator - BLOCKCHAIN ONLY
 def require_session(f):
-    """Decorator to require a valid session - uses optimistic validation"""
+    """Decorator to require a valid session - uses ONLY blockchain authentication"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         logger.info(f"🔍 require_session decorator called for endpoint: {f.__name__}")
         
-        session_id = request.json.get('session_id') if request.json else None
         wallet_address = request.json.get('wallet_address') if request.json else None
         
-        logger.info(f"🔍 Session validation - session_id: {session_id}, wallet_address: {wallet_address}")
+        logger.info(f"🔍 Blockchain validation - wallet_address: {wallet_address}")
         
-        if not session_id or not wallet_address:
-            logger.warning(f"🔍 Missing session data for {f.__name__}")
+        if not wallet_address:
+            logger.warning(f"🔍 Missing wallet address for {f.__name__}")
             return jsonify({'success': False, 'error': 'Invalid session'}), 403
         
-        # OPTIMISTIC VALIDATION: Check blockchain session sync first (cached)
+        # BLOCKCHAIN ONLY VALIDATION: Check if wallet is checked in on-chain
         blockchain_sync = get_blockchain_session_sync()
         if blockchain_sync.is_wallet_checked_in(wallet_address):
-            logger.info(f"✅ Optimistic validation: {wallet_address} is checked in on-chain")
+            logger.info(f"✅ Blockchain validation: {wallet_address} is checked in on-chain")
             return f(*args, **kwargs)
         
-        # Fallback to local session validation (much faster)
-        session_service = get_services()['session']
-        if session_service.validate_session(session_id, wallet_address):
-            logger.info(f"✅ Local session validation passed for {wallet_address}")
-            return f(*args, **kwargs)
-        
-        # Only fail if both checks fail
-        logger.warning(f"❌ Session validation failed for {f.__name__} - wallet {wallet_address}")
+        # Blockchain authentication failed
+        logger.warning(f"❌ Blockchain validation failed for {f.__name__} - wallet {wallet_address} not checked in")
         return jsonify({'success': False, 'error': 'Invalid session - please check in first'}), 403
         
     return decorated_function
@@ -101,19 +94,6 @@ def register_routes(app):
                 'gesture_current': '/api/gesture/current',
                 'visualization_face': '/api/visualization/face',
                 'visualization_gesture': '/api/visualization/gesture'
-            },
-            'legacy_endpoints': {
-                'health': '/health',
-                'stream': '/stream',
-                'connect': '/connect',
-                'disconnect': '/disconnect',
-                'enroll_face': '/enroll_face',
-                'recognize_face': '/recognize_face',
-                'detect_gesture': '/detect_gesture',
-                'capture_moment': '/capture_moment',
-                'test_page': '/test-page',
-                'camera_diagnostics': '/camera/diagnostics',
-                'camera_reset': '/camera/reset'
             }
         })
 
@@ -133,10 +113,18 @@ def register_routes(app):
         try:
             services = get_services()
             buffer_service = services['buffer']
+            capture_service = services.get('capture')
             livepeer_service = services.get('livepeer')
             
             # Get buffer/camera status
             buffer_status = buffer_service.get_status()
+            
+            # Get recording status from capture service
+            is_recording = False
+            current_filename = None
+            if capture_service:
+                is_recording = capture_service.is_recording()
+                # Note: capture service doesn't expose current filename, would need to add that
             
             # Get Livepeer streaming status
             is_streaming = False
@@ -162,12 +150,12 @@ def register_routes(app):
                 'data': {
                     'isOnline': buffer_status['running'],
                     'isStreaming': is_streaming,
-                    'isRecording': buffer_status.get('recording', False),
+                    'isRecording': is_recording,
                     'lastSeen': int(time.time()),
                     'streamInfo': stream_info,
                     'recordingInfo': {
-                        'isActive': buffer_status.get('recording', False),
-                        'currentFilename': buffer_status.get('recording_filename')
+                        'isActive': is_recording,
+                        'currentFilename': current_filename
                     }
                 }
             })
@@ -267,8 +255,84 @@ def register_routes(app):
     @app.route('/api/record', methods=['POST'])
     @require_session
     def api_record():
-        """Standardized record endpoint"""
-        return start_recording()
+        """Standardized record endpoint - waits for recording completion"""
+        import time
+        
+        # Start the recording using the same logic as start_recording
+        wallet_address = request.json.get('wallet_address')
+        duration = request.json.get('duration', 30)  # Default to 30 seconds
+        
+        # Enforce maximum duration limit to prevent runaway recordings
+        MAX_DURATION = 300  # 5 minutes maximum
+        if duration <= 0 or duration > MAX_DURATION:
+            duration = 30  # Default to 30 seconds for invalid durations
+        
+        # Get services
+        buffer_service = get_services()['buffer']
+        capture_service = get_services()['capture']
+        
+        # Check if already recording
+        if capture_service.is_recording():
+            return jsonify({
+                'success': False,
+                'error': 'Already recording'
+            }), 400
+        
+        # Start recording
+        recording_info = capture_service.start_recording(buffer_service, wallet_address, duration)
+        
+        # If recording failed to start, return immediately
+        if not recording_info.get('success'):
+            return jsonify(recording_info)
+        
+        # Extract recording info
+        filename = recording_info.get('filename')
+        duration_limit = recording_info.get('duration_limit', 0)
+        
+        # Wait for recording to complete
+        # If duration is specified, wait for that duration + buffer
+        if duration_limit > 0:
+            max_wait_time = duration_limit + 10  # Add 10 second buffer for processing
+        else:
+            max_wait_time = 300  # 5 minutes max for manual recordings
+            
+        start_time = time.time()
+        while capture_service.is_recording() and (time.time() - start_time) < max_wait_time:
+            time.sleep(0.5)  # Check every 500ms
+        
+        # Check if recording completed successfully
+        if capture_service.is_recording():
+            return jsonify({
+                'success': False,
+                'error': 'Recording timeout - recording is still in progress'
+            }), 408
+        
+        # Recording completed, get the video file info
+        videos = capture_service.get_videos(1)  # Get most recent video
+        
+        if not videos:
+            return jsonify({
+                'success': False,
+                'error': 'Recording completed but no video file was created'
+            }), 500
+        
+        latest_video = videos[0]
+        
+        # Verify this is the video we just recorded
+        if filename and latest_video.get('filename') != filename:
+            logger.warning(f"Expected filename {filename} but got {latest_video.get('filename')}")
+        
+        return jsonify({
+            'success': True,
+            'recording': False,
+            'completed': True,
+            'video': latest_video,
+            'filename': latest_video.get('filename'),
+            'path': latest_video.get('path'),
+            'url': latest_video.get('url'),
+            'size': latest_video.get('size'),
+            'timestamp': latest_video.get('timestamp')
+        })
     
     # Media Access
     @app.route('/api/photos')
@@ -1382,52 +1446,39 @@ def register_routes(app):
 
     @app.route('/videos/<filename>')
     def get_video(filename):
-        """
-        Get a specific video by filename
-        Returns the video file with proper headers for browser playback
-        Prefers MP4 versions over MOV for better browser compatibility
-        """
-        capture_service = get_services()['capture']
-        
-        # If requesting a MOV file, try to serve the MP4 version instead
-        if filename.endswith('.mov'):
-            mp4_filename = filename.replace('.mov', '.mp4')
-            mp4_path = capture_service.get_video_path(mp4_filename)
+        """Get a specific video file"""
+        try:
+            services = get_services()
+            if not services:
+                return jsonify({"error": "Services not available"}), 503
             
-            if mp4_path and os.path.exists(mp4_path):
-                # Serve the MP4 version instead
-                video_path = mp4_path
-                mimetype = 'video/mp4'
-                logger.info(f"Serving MP4 version instead of MOV: {mp4_filename}")
-            else:
-                # Fall back to original MOV file
-                video_path = capture_service.get_video_path(filename)
-                mimetype = 'video/quicktime'  # Use proper MOV MIME type
-                logger.info(f"Serving original MOV file: {filename}")
-        else:
-            # Get video path normally
+            capture_service = get_services()['capture']
+            
+            # Get video path directly - serve the exact file requested
             video_path = capture_service.get_video_path(filename)
-            mimetype = 'video/mp4'
-        
-        if not video_path:
-            abort(404, description="Video not found")
-        
-        # Return with headers that force browser playback instead of download
-        response = send_file(
-            video_path, 
-            mimetype=mimetype,
-            as_attachment=False,  # Don't force download
-            download_name=None    # Don't suggest download filename
-        )
-        
-        # Add headers to help with video playback
-        response.headers['Accept-Ranges'] = 'bytes'
-        response.headers['Cache-Control'] = 'no-cache'
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Range'
-        
-        return response
+            
+            # Determine MIME type based on file extension
+            if filename.endswith('.mp4'):
+                mimetype = 'video/mp4'
+            elif filename.endswith('.mov'):
+                mimetype = 'video/quicktime'
+            else:
+                mimetype = 'application/octet-stream'
+            
+            if not video_path:
+                logger.error(f"Video not found: {filename}")
+                return jsonify({"error": "Video not found"}), 404
+            
+            if not os.path.exists(video_path):
+                logger.error(f"Video file does not exist: {video_path}")
+                return jsonify({"error": "Video file not found"}), 404
+            
+            logger.info(f"Serving video: {filename} from {video_path}")
+            return send_file(video_path, mimetype=mimetype)
+            
+        except Exception as e:
+            logger.error(f"Error serving video {filename}: {e}")
+            return jsonify({"error": "Internal server error"}), 500
 
     # Test page routes
     @app.route('/test-page')

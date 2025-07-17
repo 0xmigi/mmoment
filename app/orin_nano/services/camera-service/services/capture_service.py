@@ -50,8 +50,8 @@ class CaptureService:
         self._current_writer = None
         self._current_recording_path = None
         
-        # Storage paths
-        self._base_dir = os.path.expanduser("~/mmoment/app/orin_nano/camera_service")
+        # Storage paths - use Docker volume mount paths
+        self._base_dir = "/app"
         self._photos_dir = os.path.join(self._base_dir, "photos")
         self._videos_dir = os.path.join(self._base_dir, "videos")
         
@@ -300,6 +300,11 @@ class CaptureService:
                     logger.info(f"Recording reached {duration_seconds}s duration limit")
                     break
                 
+                # SAFETY: Force stop any recording that runs longer than 10 minutes
+                if (time.time() - start_time) >= 600:  # 10 minutes
+                    logger.warning(f"Recording force-stopped after 10 minutes for safety")
+                    break
+                
                 # Get frame from buffer
                 frame, timestamp = buffer_service.get_frame()
                 
@@ -337,9 +342,19 @@ class CaptureService:
             avg_fps = frame_count / duration if duration > 0 else 0
             logger.info(f"Recording completed: {frame_count} frames in {duration:.2f}s (avg {avg_fps:.1f} FPS)")
             
+            # Save the recording path before resetting it
+            recording_path_for_conversion = self._current_recording_path
+            
+            # Reset recording state - CRITICAL FIX
+            with self._recording_lock:
+                self._recording_active = False
+                self._current_writer = None
+                self._current_recording_path = None
+            
             # Convert MOV to MP4 for better browser compatibility
-            if self._current_recording_path and os.path.exists(self._current_recording_path):
-                self._convert_to_mp4(self._current_recording_path)
+            if recording_path_for_conversion and os.path.exists(recording_path_for_conversion):
+                logger.info(f"Starting MP4 conversion for: {recording_path_for_conversion}")
+                self._convert_to_mp4(recording_path_for_conversion)
             
             # Run cleanup
             self._cleanup_videos()

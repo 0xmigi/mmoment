@@ -30,7 +30,7 @@ logger = logging.getLogger('CameraService')
 # Create required directories
 def create_directories():
     """Create required directories for the camera service"""
-    base_dir = os.path.expanduser('~/mmoment/app/orin_nano/camera_service')
+    base_dir = '/app'  # Use the Docker volume mount path
     
     dirs = [
         os.path.join(base_dir, 'logs'),
