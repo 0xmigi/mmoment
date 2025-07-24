@@ -887,18 +887,137 @@ def register_routes(app):
     @sign_response
     def api_device_info():
         """Get device-specific information for DePIN registration with cryptographic signature"""
+        # Check if device needs WiFi setup
+        setup_required = not _is_internet_connected()
+        
         return jsonify({
             'success': True,
             'device_pubkey': device_signer.get_public_key(),
             'hardware_id': device_signer._get_hardware_key().decode('utf-8')[:16],  # Truncated for privacy
-            'model': 'NVIDIA Jetson Orin Nano',
+            'model': 'MMOMENT Jetson Orin Nano',  # Updated to include MMOMENT branding
             'version': '1.0.0',
+            'setup_required': setup_required,
             'capabilities': {
                 'signing': True,
                 'blockchain_ready': True,
-                'depin_authentication': True
+                'depin_authentication': True,
+                'local_setup': True
             }
         })
+
+    @app.route('/api/setup/wifi/scan', methods=['GET'])
+    def api_wifi_scan():
+        """Scan for available WiFi networks during device setup"""
+        try:
+            # Use nmcli to scan for WiFi networks on Jetson
+            import subprocess
+            result = subprocess.run(['nmcli', '-t', '-f', 'SSID,SECURITY,SIGNAL', 'dev', 'wifi'], 
+                                  capture_output=True, text=True, timeout=10)
+            
+            networks = []
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    if line and ':' in line:
+                        parts = line.split(':')
+                        if len(parts) >= 3 and parts[0]:  # Skip empty SSIDs
+                            networks.append({
+                                'ssid': parts[0],
+                                'security': parts[1] if parts[1] else 'Open',
+                                'signal': int(parts[2]) if parts[2].isdigit() else 0
+                            })
+            
+            # Sort by signal strength
+            networks.sort(key=lambda x: x['signal'], reverse=True)
+            
+            return jsonify({
+                'success': True,
+                'networks': networks[:20]  # Limit to top 20 networks
+            })
+            
+        except Exception as e:
+            logger.error(f"WiFi scan failed: {e}")
+            return jsonify({
+                'success': False,
+                'error': 'WiFi scan failed',
+                'networks': []
+            })
+
+    @app.route('/api/setup/wifi', methods=['POST'])
+    def api_wifi_setup():
+        """Configure WiFi credentials during device setup"""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'success': False, 'error': 'No data provided'}), 400
+            
+            ssid = data.get('ssid')
+            password = data.get('password')
+            security = data.get('security', 'WPA2')
+            
+            if not ssid:
+                return jsonify({'success': False, 'error': 'SSID required'}), 400
+            
+            logger.info(f"Configuring WiFi for SSID: {ssid}")
+            
+            # Use nmcli to configure WiFi on Jetson
+            import subprocess
+            
+            # First, delete any existing connection with same name
+            subprocess.run(['nmcli', 'connection', 'delete', ssid], 
+                         capture_output=True)
+            
+            # Create new WiFi connection
+            if security.upper() in ['WPA', 'WPA2', 'WPA3'] and password:
+                # WPA/WPA2 connection with password
+                cmd = ['nmcli', 'device', 'wifi', 'connect', ssid, 
+                       'password', password]
+            else:
+                # Open network
+                cmd = ['nmcli', 'device', 'wifi', 'connect', ssid]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                logger.info(f"WiFi configured successfully for {ssid}")
+                
+                # Schedule device restart to apply network changes
+                import threading
+                def restart_device():
+                    import time
+                    time.sleep(5)  # Give time for response
+                    subprocess.run(['sudo', 'reboot'])
+                
+                restart_thread = threading.Thread(target=restart_device)
+                restart_thread.daemon = True
+                restart_thread.start()
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'WiFi configured successfully. Device will restart.',
+                    'ssid': ssid
+                })
+            else:
+                logger.error(f"WiFi configuration failed: {result.stderr}")
+                return jsonify({
+                    'success': False,
+                    'error': f'WiFi configuration failed: {result.stderr}'
+                }), 500
+                
+        except Exception as e:
+            logger.error(f"WiFi setup error: {e}")
+            return jsonify({
+                'success': False,
+                'error': f'WiFi setup failed: {str(e)}'
+            }), 500
+
+    def _is_internet_connected():
+        """Check if device has internet connectivity"""
+        try:
+            import urllib.request
+            urllib.request.urlopen('http://google.com', timeout=5)
+            return True
+        except:
+            return False
 
     # ========================================
     # LEGACY ROUTES (For backward compatibility)

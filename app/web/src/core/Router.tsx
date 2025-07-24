@@ -9,6 +9,7 @@ import { DebugPage } from '../ui/debug/DebugPage';
 import { useCamera, fetchCameraByPublicKey } from '../camera/CameraProvider';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { WalrusExample } from '../ui/debug/WalrusExample';
+import { CameraRegisterPage } from '../ui/pages/CameraRegisterPage';
 
 function Router() {
   const [activeTab, setActiveTab] = useState<'camera' | 'gallery' | 'activities' | 'account'>('camera');
@@ -115,6 +116,7 @@ function Router() {
             </MainLayout>
           }
         />
+        <Route path="/app/register" element={<CameraRegisterPage />} />
         <Route
           path="/app"
           element={

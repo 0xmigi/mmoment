@@ -258,6 +258,78 @@ export function SolDevNetDebug() {
   }, [primaryWallet?.address, connection, program]);
 
   // Initialize registry
+  const initializeRegistry = async () => {
+    if (!primaryWallet?.address || !program) {
+      setStatusMessage('Wallet or program not available');
+      setStatusType('error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      setTxResult(null);
+      setStatusMessage('Initializing camera registry...');
+      setStatusType('info');
+
+      // Check if it's a Solana wallet
+      if (!isSolanaWallet(primaryWallet)) {
+        throw new Error('This is not a Solana wallet');
+      }
+
+      const authorityPublicKey = new PublicKey(primaryWallet.address);
+
+      // Find the registry PDA
+      const [registryPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('camera-registry')],
+        CAMERA_ACTIVATION_PROGRAM_ID
+      );
+      console.log('Registry PDA:', registryPda.toString());
+
+      // Initialize the registry
+      const tx = await program.methods
+        .initialize()
+        .accounts({
+          authority: authorityPublicKey,
+          cameraRegistry: registryPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+      
+      console.log('Registry initialization sent with signature:', tx);
+      
+      // Get the connection
+      const connection = await primaryWallet.getConnection();
+      
+      // Use improved confirmation handling
+      try {
+        await confirmTransactionWithRetry(connection, tx);
+        console.log('Registry initialized successfully, signature:', tx);
+        setTxResult(tx);
+        setStatusMessage(`Registry initialized successfully! Transaction: ${tx}`);
+        setStatusType('success');
+        setInitialized(true);
+      } catch (confirmError) {
+        console.error('Transaction confirmation error:', confirmError);
+        setStatusMessage(`Transaction sent but confirmation timed out. It may still succeed. Check the explorer: ${tx}`);
+        setStatusType('info');
+      }
+
+    } catch (err) {
+      console.error('Error initializing registry:', err);
+
+      let errorMessage = 'Failed to initialize registry';
+      if (err instanceof Error) {
+        errorMessage += ': ' + err.message;
+      }
+
+      setError(errorMessage);
+      setStatusMessage(errorMessage);
+      setStatusType('error');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Register camera
   const registerCamera = async () => {
@@ -309,48 +381,59 @@ export function SolDevNetDebug() {
       setStatusMessage('Fetching device public key from camera...');
       let devicePubkey: PublicKey;
       
+      // For scalable production: Get device info from PDA-based URL
+      // In production, this PDA would come from QR code or user input
+      let targetCameraPda: string;
+      
+      // Demo: Ask user for camera PDA or use default
+      const userProvidedPda = prompt('Enter camera PDA (or press OK for demo device):');
+      if (userProvidedPda && userProvidedPda.trim()) {
+        targetCameraPda = userProvidedPda.trim();
+      } else {
+        // Demo fallback - in production this would be from QR/NFC
+        targetCameraPda = 'HYq5rnk9r92eTLsEF7cZ2ZWcCLNp4KHE9qGFTEKxwt4L';
+      }
+      
       try {
-        // Import camera registry to get the actual camera instance
-        const { cameraRegistry } = await import('../../camera/camera-registry');
+        // Generate PDA-based URL for this specific device
+        const deviceApiUrl = `https://${targetCameraPda.toLowerCase()}.mmoment.xyz`;
+        console.log(`Fetching device info from: ${deviceApiUrl}/api/device-info`);
         
-        // Try to get the camera instance using the known Jetson PDA
-        const JETSON_CAMERA_PDA = 'HYq5rnk9r92eTLsEF7cZ2ZWcCLNp4KHE9qGFTEKxwt4L'; // Your Jetson PDA
-        const camera = await cameraRegistry.getCamera(JETSON_CAMERA_PDA);
-        
-        if (camera && 'getDevicePublicKey' in camera) {
-          const deviceKey = await (camera as any).getDevicePublicKey();
-          if (deviceKey) {
-            devicePubkey = new PublicKey(deviceKey);
-            console.log('Fetched device pubkey from camera service:', devicePubkey.toString());
+        const deviceInfoResponse = await fetch(`${deviceApiUrl}/api/device-info`);
+        if (deviceInfoResponse.ok) {
+          const deviceInfo = await deviceInfoResponse.json();
+          if (deviceInfo.device_pubkey) {
+            devicePubkey = new PublicKey(deviceInfo.device_pubkey);
+            console.log(`✅ Fetched device pubkey from ${targetCameraPda}:`, devicePubkey.toString());
           } else {
-            throw new Error('No device key returned from camera');
+            throw new Error('No device_pubkey in response');
           }
         } else {
-          throw new Error('Camera not available or missing getDevicePublicKey method');
+          throw new Error(`HTTP error: ${deviceInfoResponse.status}`);
         }
-      } catch (cameraError) {
-        console.warn('Could not fetch device key from camera service, using fallback:', cameraError);
+      } catch (pdaError) {
+        console.warn('PDA-based URL failed, trying legacy URL:', pdaError);
         
-        // Fallback: Try direct HTTP call to known Jetson URL
+        // Fallback: Try legacy URL for existing demo device
         try {
-          const JETSON_URL = 'https://jetson.mmoment.xyz';
-          const deviceInfoResponse = await fetch(`${JETSON_URL}/api/device-info`);
+          const LEGACY_JETSON_URL = 'https://jetson.mmoment.xyz';
+          const deviceInfoResponse = await fetch(`${LEGACY_JETSON_URL}/api/device-info`);
           if (deviceInfoResponse.ok) {
             const deviceInfo = await deviceInfoResponse.json();
             if (deviceInfo.device_pubkey) {
               devicePubkey = new PublicKey(deviceInfo.device_pubkey);
-              console.log('Fetched device pubkey via direct HTTP:', devicePubkey.toString());
+              console.log('✅ Fetched device pubkey via legacy URL:', devicePubkey.toString());
             } else {
-              throw new Error('No device_pubkey in HTTP response');
+              throw new Error('No device_pubkey in legacy response');
             }
           } else {
-            throw new Error(`HTTP error: ${deviceInfoResponse.status}`);
+            throw new Error(`Legacy HTTP error: ${deviceInfoResponse.status}`);
           }
-        } catch (httpError) {
-          console.warn('HTTP fallback also failed, using known device key:', httpError);
-          // Final fallback to known device key for demo/testing
+        } catch (legacyError) {
+          console.warn('All HTTP attempts failed, using demo device key:', legacyError);
+          // Final fallback for demo
           devicePubkey = new PublicKey('BXqMyo3Uh6SiLr3xh9iEBCY9AgV1aUciymK37SpNgbNE');
-          setStatusMessage('Using fallback device key (camera service unavailable)');
+          setStatusMessage('Using demo device key (device unavailable)');
         }
       }
 
@@ -1850,6 +1933,16 @@ export function SolDevNetDebug() {
             </div>
 
             <div className="flex space-x-2 mb-4">
+              {!initialized && (
+                <button
+                  onClick={initializeRegistry}
+                  className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 font-semibold"
+                  disabled={loading}
+                >
+                  {loading ? 'Initializing...' : 'Initialize Registry'}
+                </button>
+              )}
+              
               <button
                 onClick={async () => {
                   await fetchRegisteredCameras();
