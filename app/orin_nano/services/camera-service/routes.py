@@ -16,8 +16,14 @@ from functools import wraps
 from flask import request, jsonify, Response, render_template, abort, send_file, current_app, stream_with_context
 import cv2
 
+# Import device signer for DePIN authentication
+from services.device_signer import DeviceSigner
+
 # Set up logging
 logger = logging.getLogger("CameraRoutes")
+
+# Initialize device signer (singleton)
+device_signer = DeviceSigner()
 
 # Our simple face recognition is always available
 FACENET_AVAILABLE = True
@@ -67,6 +73,46 @@ def require_session(f):
         
     return decorated_function
 
+def sign_response(f):
+    """
+    Decorator to sign API responses with device ed25519 key for DePIN authentication.
+    Creates cryptographic proof that response came from this specific hardware device.
+    
+    Future Enhancement: Same device key can be used for on-chain transaction signing.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        try:
+            result = f(*args, **kwargs)
+
+            # Only sign successful JSON responses from specific endpoints
+            if isinstance(result, dict) or (hasattr(result, 'get_json') and result.get_json()):
+                if isinstance(result, dict):
+                    response_data = result
+                else:
+                    response_data = result.get_json()
+
+                # Only sign if response indicates success or contains meaningful data
+                if response_data and (response_data.get('success', True) or 'data' in response_data):
+                    # Sign the response with device key
+                    signed_data = device_signer.sign_response(response_data)
+                    
+                    logger.debug(f"Response signed by device: {device_signer.get_public_key()[:12]}...")
+
+                    if isinstance(result, dict):
+                        return signed_data
+                    else:
+                        return jsonify(signed_data)
+
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in device signing decorator: {e}")
+            # Return original result if signing fails to avoid breaking functionality
+            return result
+            
+    return decorated_function
+
 # Register all routes
 def register_routes(app):
     """Register all routes with the Flask app"""
@@ -103,11 +149,13 @@ def register_routes(app):
     
     # Health & Status
     @app.route('/api/health')
+    @sign_response
     def api_health():
-        """Standardized health check endpoint"""
+        """Standardized health check endpoint with device signature"""
         return health()
     
     @app.route('/api/status')
+    @sign_response
     def api_status():
         """Main status endpoint for frontend - comprehensive system status"""
         try:
@@ -248,8 +296,9 @@ def register_routes(app):
     # Camera Actions
     @app.route('/api/capture', methods=['POST'])
     @require_session
+    @sign_response
     def api_capture():
-        """Standardized capture endpoint"""
+        """Standardized capture endpoint with device signing"""
         return capture_moment()
     
     @app.route('/api/record', methods=['POST'])
@@ -795,8 +844,9 @@ def register_routes(app):
         })
     
     @app.route('/api/camera/info', methods=['GET'])
+    @sign_response
     def api_camera_info():
-        """Get camera information for frontend discovery"""
+        """Get camera information for frontend discovery with device signature"""
         camera_pda = os.environ.get('CAMERA_PDA', 'unknown')
         camera_program_id = os.environ.get('CAMERA_PROGRAM_ID', 'unknown')
         

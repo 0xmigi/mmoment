@@ -183,14 +183,14 @@ class BufferService:
         if '/dev/video1' in available_devices and self._preferred_device != '/dev/video1':
             configs_to_try.append(('/dev/video1', 1, "Logitech webcam /dev/video1", self._width, self._height, self._fps))
         
-        # Then add the rest of the devices (excluding video1 since it's already added)
+        # Then add the rest of the devices (excluding video1 and video0/IMX477 since they're already handled)
         for device_path in available_devices:
-            if device_path not in [self._preferred_device, '/dev/video1']:
+            if device_path not in [self._preferred_device, '/dev/video1', '/dev/video0']:
                 device_index = int(device_path.replace('/dev/video', ''))
                 configs_to_try.append((device_path, device_index, f"Device {device_path}", self._width, self._height, self._fps))
         
-        # Also try common indices as backup
-        for idx in [1, 0, 2]:
+        # Also try common indices as backup (excluding index 0 which is typically IMX477)
+        for idx in [1, 2]:
             configs_to_try.append((None, idx, f"Index {idx}", self._width, self._height, self._fps))
             
         # Try each configuration until one works
