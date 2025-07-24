@@ -4,24 +4,26 @@
 seeds = true
 skip-lint = false
 
-[programs.localnet]
-camera_network = "Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S"
-
 [programs.devnet]
+camera_network = "E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL"
+
+[programs.localnet]
 camera_network = "Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "devnet"
+cluster = "Devnet"
 wallet = "./test-wallet.json"
 
 [scripts]
-test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
 camera-network = "node scripts/camera-network-client.js"
-face-test = "node scripts/face-recognition-test.js"
 face-checkin = "node scripts/face-recognition-checkin.js"
+face-test = "node scripts/face-recognition-test.js"
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
 
 [test]
 startup_wait = 10000
+shutdown_wait = 2000
+upgradeable = false

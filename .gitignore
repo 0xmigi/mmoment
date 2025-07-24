@@ -144,6 +144,9 @@ app/orin_nano/camera_service_new/test_results/
 *.pem
 *.key
 
+# IMPORTANT: Allow keypair recovery documentation
+!target/deploy/KEYPAIR_RECOVERY.md
+
 # Temporary files
 *.tmp
 .DS_Store

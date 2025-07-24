@@ -8,10 +8,10 @@ import { IDL } from './idl';
 import type { CameraNetwork } from './idl';
 
 // Updated program ID to match the one in lib.rs
-export const CAMERA_ACTIVATION_PROGRAM_ID = new PublicKey("Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S");
+export const CAMERA_ACTIVATION_PROGRAM_ID = new PublicKey("E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL");
 
 // Camera Network Program ID (same as the activation program ID)
-export const CAMERA_NETWORK_PROGRAM_ID = new PublicKey("Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S");
+export const CAMERA_NETWORK_PROGRAM_ID = new PublicKey("E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL");
 
 // Global cache to prevent multiple initializations
 let globalProgramInstance: Program<CameraNetwork> | null = null;

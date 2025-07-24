@@ -39,6 +39,12 @@ anchor run face-test       # Run face recognition tests
 anchor run face-checkin    # Run face check-in tests
 ```
 
+**CRITICAL: KEYPAIR MANAGEMENT**
+- **NEVER DELETE** `target/deploy/camera_network-keypair.json`
+- **ALWAYS RUN** `anchor keys sync` after any keypair changes
+- **BACKUP EXISTS** in `target/deploy/KEYPAIR_RECOVERY.md` with seed phrase
+- **Program ID**: E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL
+
 ### Camera Services (Python/Docker)
 ```bash
 # Jetson Orin Nano
@@ -90,9 +96,10 @@ src/
 ## Key Configuration
 
 ### Solana Program
-- **Program ID**: `Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S`
+- **Program ID**: `E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL`
 - **Network**: Devnet (`https://api.devnet.solana.com`)
 - **Test Wallet**: `./test-wallet.json`
+- **Keypair Recovery**: See `target/deploy/KEYPAIR_RECOVERY.md` for seed phrase
 
 ### Camera Hardware
 - **Primary Device**: NVIDIA Jetson Orin Nano
