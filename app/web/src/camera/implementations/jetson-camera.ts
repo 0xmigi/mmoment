@@ -15,6 +15,8 @@ import {
   CameraGestureResponse, 
   CameraSession 
 } from '../camera-interface';
+import { DeviceSignedResponse } from '../camera-types';
+import { hasValidDeviceSignature, logDeviceSignature } from '../device-signature-utils';
 
 export class JetsonCamera implements ICamera {
   public readonly cameraId: string;
@@ -47,6 +49,50 @@ export class JetsonCamera implements ICamera {
   private log(...args: any[]) {
     if (this.debugMode) {
       console.log(`[JetsonCamera:${this.cameraId.slice(0, 8)}]`, ...args);
+    }
+  }
+
+  /**
+   * Verify device signature on API responses for DePIN authentication
+   */
+  private verifyDeviceSignature(response: DeviceSignedResponse, endpoint: string): boolean {
+    logDeviceSignature(response, `${this.cameraId.slice(0, 8)}:${endpoint}`);
+    
+    const isValid = hasValidDeviceSignature(response);
+    if (!isValid) {
+      this.log(`⚠️ Device signature verification failed for ${endpoint}`);
+    } else {
+      this.log(`✅ Device signature verified for ${endpoint}`);
+    }
+    
+    return isValid;
+  }
+
+  /**
+   * Get device public key for camera registration
+   */
+  async getDevicePublicKey(): Promise<string | null> {
+    try {
+      this.log('Fetching device public key for DePIN registration...');
+      const response = await this.makeApiCall('/api/device-info', 'GET');
+      
+      if (response.ok) {
+        const data = await response.json() as DeviceSignedResponse & { device_pubkey: string };
+        
+        // Verify device signature
+        this.verifyDeviceSignature(data, 'device-info');
+        
+        if (data.device_pubkey) {
+          this.log('Retrieved device public key:', data.device_pubkey);
+          return data.device_pubkey;
+        }
+      }
+      
+      this.log('Failed to get device public key from /api/device-info');
+      return null;
+    } catch (error) {
+      this.log('Error fetching device public key:', error);
+      return null;
     }
   }
 

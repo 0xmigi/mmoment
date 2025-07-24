@@ -883,6 +883,23 @@ def register_routes(app):
             }
         })
 
+    @app.route('/api/device-info', methods=['GET'])
+    @sign_response
+    def api_device_info():
+        """Get device-specific information for DePIN registration with cryptographic signature"""
+        return jsonify({
+            'success': True,
+            'device_pubkey': device_signer.get_public_key(),
+            'hardware_id': device_signer._get_hardware_key().decode('utf-8')[:16],  # Truncated for privacy
+            'model': 'NVIDIA Jetson Orin Nano',
+            'version': '1.0.0',
+            'capabilities': {
+                'signing': True,
+                'blockchain_ready': True,
+                'depin_authentication': True
+            }
+        })
+
     # ========================================
     # LEGACY ROUTES (For backward compatibility)
     # ========================================

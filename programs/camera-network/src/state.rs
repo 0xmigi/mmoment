@@ -21,6 +21,7 @@ pub struct CameraAccount {
     pub access_count: u64,       // Number of users who have accessed this camera
     pub features: CameraFeatures, // Features enabled on this camera
     pub bump: u8,                // PDA bump
+    pub device_pubkey: Option<Pubkey>, // Device signing key for DePIN authentication (added at end for upgrade safety)
 }
 
 // Camera metadata structure
@@ -168,6 +169,7 @@ pub struct RegisterCameraArgs {
     pub location: Option<[i64; 2]>,
     pub description: String,
     pub features: CameraFeatures,
+    pub device_pubkey: Option<Pubkey>, // Optional device key for backwards compatibility
 }
 
 // Update camera arguments

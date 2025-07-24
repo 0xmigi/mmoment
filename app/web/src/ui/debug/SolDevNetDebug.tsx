@@ -66,6 +66,7 @@ interface CameraData {
   registrationDate: number;
   lastActivity: number;
   userCheckedIn?: boolean;
+  devicePubkey?: string; // Device signing key for DePIN authentication
 }
 
 // Add a helper for transaction confirmation with retries and timeouts
@@ -304,6 +305,55 @@ export function SolDevNetDebug() {
       );
       console.log('Registry PDA:', registryPda.toString());
 
+      // Get device public key from camera before registration
+      setStatusMessage('Fetching device public key from camera...');
+      let devicePubkey: PublicKey;
+      
+      try {
+        // Import camera registry to get the actual camera instance
+        const { cameraRegistry } = await import('../../camera/camera-registry');
+        
+        // Try to get the camera instance using the known Jetson PDA
+        const JETSON_CAMERA_PDA = 'HYq5rnk9r92eTLsEF7cZ2ZWcCLNp4KHE9qGFTEKxwt4L'; // Your Jetson PDA
+        const camera = await cameraRegistry.getCamera(JETSON_CAMERA_PDA);
+        
+        if (camera && 'getDevicePublicKey' in camera) {
+          const deviceKey = await (camera as any).getDevicePublicKey();
+          if (deviceKey) {
+            devicePubkey = new PublicKey(deviceKey);
+            console.log('Fetched device pubkey from camera service:', devicePubkey.toString());
+          } else {
+            throw new Error('No device key returned from camera');
+          }
+        } else {
+          throw new Error('Camera not available or missing getDevicePublicKey method');
+        }
+      } catch (cameraError) {
+        console.warn('Could not fetch device key from camera service, using fallback:', cameraError);
+        
+        // Fallback: Try direct HTTP call to known Jetson URL
+        try {
+          const JETSON_URL = 'https://jetson.mmoment.xyz';
+          const deviceInfoResponse = await fetch(`${JETSON_URL}/api/device-info`);
+          if (deviceInfoResponse.ok) {
+            const deviceInfo = await deviceInfoResponse.json();
+            if (deviceInfo.device_pubkey) {
+              devicePubkey = new PublicKey(deviceInfo.device_pubkey);
+              console.log('Fetched device pubkey via direct HTTP:', devicePubkey.toString());
+            } else {
+              throw new Error('No device_pubkey in HTTP response');
+            }
+          } else {
+            throw new Error(`HTTP error: ${deviceInfoResponse.status}`);
+          }
+        } catch (httpError) {
+          console.warn('HTTP fallback also failed, using known device key:', httpError);
+          // Final fallback to known device key for demo/testing
+          devicePubkey = new PublicKey('BXqMyo3Uh6SiLr3xh9iEBCY9AgV1aUciymK37SpNgbNE');
+          setStatusMessage('Using fallback device key (camera service unavailable)');
+        }
+      }
+
       // Use `any` for args type for simplicity
       const registerCameraArgs: {
         name: string;
@@ -316,7 +366,8 @@ export function SolDevNetDebug() {
           videoRecording: boolean;
           liveStreaming: boolean;
           messaging: boolean;
-        }
+        };
+        devicePubkey: PublicKey | null;
       } = {
         name: cameraName.trim(),
         model: cameraModel.trim(),
@@ -328,7 +379,8 @@ export function SolDevNetDebug() {
           videoRecording: true,
           liveStreaming: true,
           messaging: false
-        }
+        },
+        devicePubkey: devicePubkey // Will be Some(devicePubkey) in Rust
       };
 
       console.log('Camera registration args:', registerCameraArgs);
@@ -926,7 +978,9 @@ export function SolDevNetDebug() {
               registrationDate: account.metadata?.registrationDate?.toNumber() || 0,
               lastActivity: account.lastActivityAt?.toNumber() || 0,
               // Set the userCheckedIn flag based on the stored sessions
-              userCheckedIn: userSessions[accountInfo.publicKey.toString()] || false
+              userCheckedIn: userSessions[accountInfo.publicKey.toString()] || false,
+              // Extract device pubkey if available (Optional field for upgrade compatibility)
+              devicePubkey: account.devicePubkey ? account.devicePubkey.toString() : undefined
             };
 
             cameras.push(camera);
@@ -1004,7 +1058,9 @@ export function SolDevNetDebug() {
                 registrationDate: decodedAccount.metadata?.registrationDate?.toNumber() || 0,
                 lastActivity: decodedAccount.lastActivityAt?.toNumber() || 0,
                 // Set the userCheckedIn flag based on the stored sessions
-                userCheckedIn: userSessions[account.pubkey.toString()] || false
+                userCheckedIn: userSessions[account.pubkey.toString()] || false,
+                // Extract device pubkey if available (Optional field for upgrade compatibility)
+                devicePubkey: decodedAccount.devicePubkey ? decodedAccount.devicePubkey.toString() : undefined
               };
 
               cameras.push(camera);
@@ -1550,6 +1606,17 @@ export function SolDevNetDebug() {
                     Status: <span className={`font-medium ${isActive ? 'text-green-600' : 'text-red-600'}`}>
                       {isActive ? 'Active' : 'Inactive'}
                     </span>
+                  </p>
+                  
+                  <p className="text-sm text-gray-600">
+                    DePIN Signing: <span className={`font-medium ${camera.devicePubkey ? 'text-green-600' : 'text-gray-400'}`}>
+                      {camera.devicePubkey ? 'Enabled' : 'Not Available'}
+                    </span>
+                    {camera.devicePubkey && (
+                      <span className="ml-2 bg-green-100 text-green-800 text-xs px-2 py-0.5 rounded">
+                        Device Authenticated
+                      </span>
+                    )}
                   </p>
 
                   {!isOldFormat && camera.activeSessions !== undefined && (

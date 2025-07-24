@@ -21,7 +21,7 @@ pub struct RegisterCamera<'info> {
     #[account(
         init,
         payer = owner,
-        space = 8 + 32 + 200 + 1 + 8 + 8 + 1 + 8 + 5 + 1, // Discriminator + owner + metadata + is_active + counters + features + bump
+        space = 8 + 32 + 200 + 1 + 8 + 8 + 1 + 8 + 5 + 1 + 1 + 32, // Discriminator + owner + metadata + is_active + counters + features + bump + Option<Pubkey> (1 + 32)
         seeds = [
             b"camera",
             args.name.as_bytes(),
@@ -54,6 +54,7 @@ pub fn handler(ctx: Context<RegisterCamera>, args: RegisterCameraArgs) -> Result
     camera.access_count = 0;
     camera.features = args.features;
     camera.bump = ctx.bumps.camera;
+    camera.device_pubkey = args.device_pubkey; // Optional field for backwards compatibility
     
     // Set metadata
     camera.metadata = CameraMetadata {
