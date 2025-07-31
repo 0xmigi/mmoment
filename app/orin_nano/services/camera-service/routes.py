@@ -139,7 +139,11 @@ def register_routes(app):
                 'face_recognize': '/api/face/recognize',
                 'gesture_current': '/api/gesture/current',
                 'visualization_face': '/api/visualization/face',
-                'visualization_gesture': '/api/visualization/gesture'
+                'visualization_gesture': '/api/visualization/gesture',
+                'device_info': '/api/device-info',
+                'scan_registration_qr': '/api/scan-registration-qr',
+                'wifi_scan': '/api/setup/wifi/scan',
+                'wifi_setup': '/api/setup/wifi'
             }
         })
 
@@ -153,6 +157,140 @@ def register_routes(app):
     def api_health():
         """Standardized health check endpoint with device signature"""
         return health()
+    
+    # Device Registration & Configuration
+    @app.route('/api/device/registration/start', methods=['POST'])
+    @sign_response
+    def api_device_registration_start():
+        """Start device registration polling for backend configuration"""
+        try:
+            from services.device_registration import get_device_registration_service
+            
+            registration_service = get_device_registration_service()
+            registration_service.start_polling()
+            
+            return jsonify({
+                'success': True,
+                'message': 'Device registration polling started',
+                'device_pubkey': device_signer.get_public_key(),
+                'status': 'polling_for_configuration'
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to start device registration: {e}")
+            return jsonify({
+                'success': False,
+                'error': f"Failed to start registration: {str(e)}"
+            }), 500
+    
+    @app.route('/api/device/registration/status')
+    @sign_response
+    def api_device_registration_status():
+        """Get current device registration status"""
+        try:
+            from services.device_registration import get_device_registration_service
+            
+            registration_service = get_device_registration_service()
+            device_info = registration_service.get_device_info()
+            
+            return jsonify({
+                'success': True,
+                'device_info': device_info,
+                'is_configured': registration_service.is_configured()
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to get registration status: {e}")
+            return jsonify({
+                'success': False,
+                'error': f"Failed to get status: {str(e)}"
+            }), 500
+    
+    @app.route('/api/device/claim', methods=['POST'])
+    @sign_response
+    def api_device_claim():
+        """Claim a device with backend using QR token"""
+        try:
+            data = request.get_json()
+            claim_token = data.get('claim_token')
+            wifi_credentials = data.get('wifi_credentials')
+            
+            if not claim_token:
+                return jsonify({
+                    'success': False,
+                    'error': 'claim_token is required'
+                }), 400
+            
+            # Get device information
+            device_pubkey = device_signer.get_public_key()
+            device_info = device_signer.get_device_info()
+            
+            # Claim the device with backend
+            backend_url = os.getenv('BACKEND_HOST', '192.168.1.80')
+            backend_port = os.getenv('BACKEND_PORT', '3001')
+            
+            claim_response = requests.post(
+                f"http://{backend_url}:{backend_port}/api/device/claim",
+                json={
+                    'token': claim_token,
+                    'device_pubkey': device_pubkey,
+                    'device_info': device_info,
+                    'wifi_credentials': wifi_credentials
+                },
+                timeout=10
+            )
+            
+            if claim_response.status_code == 200:
+                # Start polling for configuration
+                from services.device_registration import get_device_registration_service
+                registration_service = get_device_registration_service()
+                registration_service.start_polling()
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Device claimed successfully, polling for configuration',
+                    'device_pubkey': device_pubkey
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f"Failed to claim device: {claim_response.status_code}"
+                }), 400
+                
+        except Exception as e:
+            logger.error(f"Failed to claim device: {e}")
+            return jsonify({
+                'success': False,
+                'error': f"Failed to claim device: {str(e)}"
+            }), 500
+    
+    @app.route('/api/device/tunnel/status')
+    @sign_response
+    def api_device_tunnel_status():
+        """Get current tunnel status and configuration"""
+        try:
+            from services.device_registration import get_device_registration_service
+            from services.tunnel_manager import get_tunnel_manager
+            
+            registration_service = get_device_registration_service()
+            tunnel_manager = get_tunnel_manager()
+            
+            tunnel_status = tunnel_manager.get_tunnel_status()
+            device_config = registration_service.get_device_config()
+            
+            return jsonify({
+                'success': True,
+                'tunnel_status': tunnel_status,
+                'device_config': device_config,
+                'is_configured': registration_service.is_configured()
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to get tunnel status: {e}")
+            return jsonify({
+                'success': False,
+                'error': f"Failed to get tunnel status: {str(e)}"
+            }), 500
     
     @app.route('/api/status')
     @sign_response
@@ -942,6 +1080,235 @@ def register_routes(app):
                 'networks': []
             })
 
+    @app.route('/api/scan-registration-qr', methods=['POST'])
+    def api_scan_registration_qr():
+        """
+        Scan for registration QR code containing WiFi credentials and claim endpoint.
+        Activates camera for QR scanning mode and processes registration data.
+        """
+        try:
+            import cv2
+            import json
+            import requests
+            from pyzbar import pyzbar
+            import time
+            
+            logger.info("[QR-SCAN] Starting QR code registration scan")
+            
+            # Get timeout from request, default to 60 seconds (longer for debugging)
+            data = request.get_json() or {}
+            max_scan_time = data.get('timeout', 60)  # Default 60 seconds, configurable
+            debug_mode = data.get('debug', False)  # Debug mode - no WiFi/claiming, just QR detection
+            
+            buffer_service = get_services()['buffer']
+            start_time = time.time()
+            frame_count = 0
+            qr_attempts = 0
+            
+            logger.info(f"[QR-SCAN] Starting scan with {max_scan_time}s timeout")
+            
+            while (time.time() - start_time) < max_scan_time:
+                # Get current frame
+                frame, timestamp = buffer_service.get_frame()
+                frame_count += 1
+                
+                if frame is None:
+                    if frame_count % 100 == 0:  # Log every 100 failed frame attempts
+                        logger.warning(f"[QR-SCAN] No frame available after {frame_count} attempts")
+                    time.sleep(0.1)
+                    continue
+                
+                # Log progress every 100 frames
+                if frame_count % 100 == 0:
+                    elapsed = time.time() - start_time
+                    logger.info(f"[QR-SCAN] Processed {frame_count} frames in {elapsed:.1f}s, frame shape: {frame.shape}")
+                
+                # Scan for QR codes
+                qr_codes = pyzbar.decode(frame)
+                qr_attempts += 1
+                
+                # Log QR scan attempts periodically
+                if qr_attempts % 50 == 0:
+                    logger.info(f"[QR-SCAN] QR decode attempts: {qr_attempts}, codes found: {len(qr_codes)}")
+                
+                if len(qr_codes) > 0:
+                    logger.info(f"[QR-SCAN] Found {len(qr_codes)} QR code(s) in frame!")
+                
+                for qr_code in qr_codes:
+                    try:
+                        # Decode QR code data
+                        qr_data = qr_code.data.decode('utf-8')
+                        registration_data = json.loads(qr_data)
+                        
+                        logger.info(f"[QR-SCAN] Found QR code with registration data")
+                        
+                        # Validate required fields
+                        required_fields = ['wifi_ssid', 'wifi_password', 'claim_endpoint', 'user_wallet', 'expires']
+                        if not all(field in registration_data for field in required_fields):
+                            logger.warning(f"[QR-SCAN] QR code missing required fields")
+                            continue
+                        
+                        # Check if QR code has expired
+                        if registration_data['expires'] < time.time():
+                            logger.warning(f"[QR-SCAN] QR code has expired")
+                            continue
+                        
+                        logger.info(f"[QR-SCAN] Valid registration QR found for user: {registration_data['user_wallet'][:8]}...")
+                        
+                        # Debug mode - just return the parsed data without WiFi/claiming
+                        if debug_mode:
+                            logger.info("[QR-SCAN] Debug mode - returning parsed QR data without WiFi/claiming")
+                            return jsonify({
+                                'success': True,
+                                'debug_mode': True,
+                                'parsed_qr_data': registration_data,
+                                'device_pubkey': device_signer.get_public_key(),
+                                'message': 'QR code parsed successfully (debug mode - no WiFi/claiming performed)'
+                            })
+                        
+                        # Check if already connected to internet - skip WiFi setup if so
+                        if _is_internet_connected():
+                            logger.info(f"[QR-SCAN] Already have internet connectivity, skipping WiFi connection to: {registration_data['wifi_ssid']}")
+                        else:
+                            # Connect to WiFi
+                            logger.info(f"[QR-SCAN] No internet connectivity, attempting WiFi connection to: {registration_data['wifi_ssid']}")
+                            wifi_success = _connect_to_wifi(registration_data['wifi_ssid'], registration_data['wifi_password'])
+                            if not wifi_success:
+                                logger.error(f"[QR-SCAN] WiFi connection failed for: {registration_data['wifi_ssid']}")
+                                return jsonify({
+                                    'success': False,
+                                    'error': f'Failed to connect to WiFi network: {registration_data["wifi_ssid"]}',
+                                    'parsed_qr_data': registration_data,
+                                    'step_failed': 'wifi_connection'
+                                }), 500
+                        
+                        # Wait for internet connectivity
+                        connectivity_attempts = 0
+                        while not _is_internet_connected() and connectivity_attempts < 10:
+                            time.sleep(2)
+                            connectivity_attempts += 1
+                        
+                        if not _is_internet_connected():
+                            logger.error("[QR-SCAN] WiFi connected but no internet access")
+                            return jsonify({
+                                'success': False,
+                                'error': 'Connected to WiFi but no internet access',
+                                'parsed_qr_data': registration_data,
+                                'step_failed': 'internet_connectivity'
+                            }), 500
+                        
+                        # Claim device with backend
+                        device_claim_data = {
+                            'device_pubkey': device_signer.get_public_key(),
+                            'device_model': 'jetson_orin_nano'
+                        }
+                        
+                        logger.info(f"[QR-SCAN] Claiming device at endpoint: {registration_data['claim_endpoint']}")
+                        
+                        claim_response = requests.post(
+                            registration_data['claim_endpoint'],
+                            json=device_claim_data,
+                            timeout=15
+                        )
+                        
+                        if claim_response.status_code != 200:
+                            logger.error(f"[QR-SCAN] Device claim failed: {claim_response.status_code}")
+                            return jsonify({
+                                'success': False,
+                                'error': f'Device claim failed: {claim_response.status_code}',
+                                'parsed_qr_data': registration_data,
+                                'step_failed': 'device_claim',
+                                'claim_response_status': claim_response.status_code,
+                                'claim_response_text': claim_response.text[:500]  # First 500 chars
+                            }), 500
+                        
+                        logger.info(f"[QR-SCAN] Device successfully claimed by user: {registration_data['user_wallet'][:8]}...")
+                        
+                        return jsonify({
+                            'success': True,
+                            'user_wallet': registration_data['user_wallet'],
+                            'device_pubkey': device_signer.get_public_key(),
+                            'wifi_connected': True,
+                            'device_claimed': True,
+                            'message': 'Device registration completed successfully'
+                        })
+                        
+                    except json.JSONDecodeError:
+                        # Not a valid JSON QR code, continue scanning
+                        continue
+                    except Exception as e:
+                        logger.error(f"[QR-SCAN] Error processing QR code: {e}")
+                        continue
+                
+                # Brief pause before next frame
+                time.sleep(0.1)
+            
+            # Timeout reached
+            elapsed = time.time() - start_time
+            logger.warning(f"[QR-SCAN] Timeout after {elapsed:.1f}s - processed {frame_count} frames, {qr_attempts} QR attempts")
+            return jsonify({
+                'success': False,
+                'error': f'QR code scan timeout after {elapsed:.1f}s',
+                'debug_info': {
+                    'frames_processed': frame_count,
+                    'qr_decode_attempts': qr_attempts,
+                    'timeout_seconds': max_scan_time,
+                    'elapsed_seconds': round(elapsed, 1)
+                }
+            }), 408
+            
+        except Exception as e:
+            logger.error(f"[QR-SCAN] Unexpected error: {e}")
+            return jsonify({
+                'success': False,
+                'error': f'QR scan failed: {str(e)}'
+            }), 500
+
+    def _connect_to_wifi(ssid, password):
+        """Connect to WiFi network using nmcli"""
+        try:
+            import subprocess
+            
+            logger.info(f"[WIFI] Connecting to network: {ssid}")
+            
+            # First check if already connected to this network
+            check_result = subprocess.run(['nmcli', '-t', '-f', 'ACTIVE,SSID', 'dev', 'wifi'], 
+                                        capture_output=True, text=True, timeout=10)
+            
+            if check_result.returncode == 0:
+                for line in check_result.stdout.strip().split('\n'):
+                    if line.startswith('yes:') and ssid in line:
+                        logger.info(f"[WIFI] Already connected to {ssid}")
+                        return True
+            
+            # Delete any existing connection with same name
+            subprocess.run(['nmcli', 'connection', 'delete', ssid], 
+                         capture_output=True)
+            
+            # Create new WiFi connection
+            if password:
+                cmd = ['nmcli', 'device', 'wifi', 'connect', ssid, 'password', password]
+            else:
+                cmd = ['nmcli', 'device', 'wifi', 'connect', ssid]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                logger.info(f"[WIFI] Successfully connected to {ssid}")
+                return True
+            else:
+                # Check if the error is because we're already connected
+                if "already connected" in result.stderr.lower() or "device is already active" in result.stderr.lower():
+                    logger.info(f"[WIFI] Already connected to {ssid} (detected from error message)")
+                    return True
+                
+                logger.error(f"[WIFI] Failed to connect to {ssid}: {result.stderr}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"[WIFI] WiFi connection error: {e}")
+            return False
+
     @app.route('/api/setup/wifi', methods=['POST'])
     def api_wifi_setup():
         """Configure WiFi credentials during device setup"""
@@ -1681,6 +2048,11 @@ def register_routes(app):
     def local_test():
         """Local camera test page"""
         return render_template('local_test.html')
+        
+    @app.route('/qr-monitor')
+    def qr_monitor():
+        """QR registration monitoring page - shows what Jetson processes from frontend QR codes"""
+        return render_template('qr_monitor.html')
         
     @app.route('/api-test')
     def api_test():

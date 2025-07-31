@@ -126,6 +126,11 @@ def init_services():
     blockchain_sync.start()
     logger.info("🔗 Blockchain session sync initialized - camera will auto-enable for on-chain check-ins")
     
+    # Initialize Device Registration Service (for QR-based setup flow)
+    from services.device_registration import get_device_registration_service
+    device_registration = get_device_registration_service()
+    logger.info("📱 Device registration service initialized - ready for QR-based device setup")
+    
     # Inject services into the buffer service for processing
     logger.info("Injecting services into buffer service...")
     buffer_service.inject_services(

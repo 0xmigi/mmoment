@@ -36,7 +36,24 @@ CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 # Solana configuration
 SOLANA_RPC_URL = os.getenv('SOLANA_RPC_URL', 'https://api.devnet.solana.com')
 CAMERA_PROGRAM_ID = os.getenv('CAMERA_PROGRAM_ID', 'YourCameraProgramIdHere')  # Replace with actual program ID
-CAMERA_PDA = os.getenv('CAMERA_PDA', 'YourCameraPDAHere')  # Replace with actual camera PDA
+def get_camera_pda():
+    """Get camera PDA dynamically from config file or environment"""
+    # First try environment variable (for backward compatibility)
+    env_pda = os.getenv('CAMERA_PDA')
+    if env_pda and env_pda != 'YourCameraPDAHere':
+        return env_pda
+    
+    # Then try config file (written by DeviceRegistrationService)
+    config_path = '/app/config/device_config.json'
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                return config.get('camera_pda')
+    except Exception as e:
+        logger.debug(f"Could not read device config: {e}")
+    
+    return None
 
 # Initialize Solana client
 solana_client = Client(SOLANA_RPC_URL)
@@ -488,11 +505,11 @@ def purge_biometric_session():
 def get_checked_in_users_api():
     """Get all users currently checked in to the camera"""
     try:
-        camera_pubkey = request.args.get('camera_pubkey', CAMERA_PDA)
+        camera_pubkey = request.args.get('camera_pubkey', get_camera_pda())
         
         if not camera_pubkey or camera_pubkey == 'YourCameraPDAHere':
             return jsonify({
-                "error": "Camera PDA not configured. Please set CAMERA_PDA environment variable."
+                "error": "Camera PDA not configured. Please complete device registration first."
             }), 400
         
         checked_in_users = get_checked_in_users(camera_pubkey)
@@ -514,14 +531,14 @@ def check_user_status_api():
     try:
         data = request.json
         user_pubkey = data.get('user_pubkey')
-        camera_pubkey = data.get('camera_pubkey', CAMERA_PDA)
+        camera_pubkey = data.get('camera_pubkey', get_camera_pda())
         
         if not user_pubkey:
             return jsonify({"error": "User public key is required"}), 400
         
         if not camera_pubkey or camera_pubkey == 'YourCameraPDAHere':
             return jsonify({
-                "error": "Camera PDA not configured. Please set CAMERA_PDA environment variable."
+                "error": "Camera PDA not configured. Please complete device registration first."
             }), 400
         
         is_checked_in = is_user_checked_in(user_pubkey, camera_pubkey)
@@ -545,7 +562,7 @@ def derive_session_pda_api():
     try:
         data = request.json
         user_pubkey = data.get('user_pubkey')
-        camera_pubkey = data.get('camera_pubkey', CAMERA_PDA)
+        camera_pubkey = data.get('camera_pubkey', get_camera_pda())
         program_id = data.get('program_id', CAMERA_PROGRAM_ID)
         
         if not user_pubkey:

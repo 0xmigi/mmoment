@@ -10,10 +10,11 @@ ENV REBUILD_TIMESTAMP=${REBUILD_TIMESTAMP}
 # Set working directory
 WORKDIR /app
 
-# Install additional system dependencies including FFmpeg for streaming
+# Install additional system dependencies including FFmpeg for streaming and NetworkManager for WiFi
 RUN apt-get update && apt-get install -y \
     curl \
     ffmpeg \
+    network-manager \
     && rm -rf /var/lib/apt/lists/*
 
 # Create required directories
