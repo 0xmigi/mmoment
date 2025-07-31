@@ -143,6 +143,9 @@ interface CameraContextType {
   selectedCamera: CameraData | null;
   setSelectedCamera: (camera: CameraData | null) => void;
   fetchCameraById: (cameraId: string) => Promise<CameraData | null>;
+  // Add global camera list refresh
+  triggerCameraListRefresh: () => void;
+  onCameraListRefresh: (callback: () => void) => () => void;
 }
 
 const CameraContext = createContext<CameraContextType | undefined>(undefined);
@@ -156,6 +159,9 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
   const [isInitialized, setIsInitialized] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Add refresh callback system
+  const [refreshCallbacks] = useState(new Set<() => void>());
   
   // Add selected camera state
   const [selectedCamera, setSelectedCamera] = useState<CameraData | null>(() => {
@@ -341,6 +347,26 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
     await checkInitialization();
   };
 
+  // Global camera list refresh functions
+  const triggerCameraListRefresh = useCallback(() => {
+    console.log('[CameraProvider] Triggering camera list refresh for all components');
+    refreshCallbacks.forEach(callback => {
+      try {
+        callback();
+      } catch (error) {
+        console.error('[CameraProvider] Error in refresh callback:', error);
+      }
+    });
+  }, [refreshCallbacks]);
+
+  const onCameraListRefresh = useCallback((callback: () => void) => {
+    refreshCallbacks.add(callback);
+    // Return cleanup function
+    return () => {
+      refreshCallbacks.delete(callback);
+    };
+  }, [refreshCallbacks]);
+
   // Check initialization when wallet connects or program changes
   useEffect(() => {
     if (primaryWallet?.address && program && !programLoading) {
@@ -375,7 +401,10 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
         // Add new properties
         selectedCamera,
         setSelectedCamera: handleSetSelectedCamera,
-        fetchCameraById
+        fetchCameraById,
+        // Add global refresh functions
+        triggerCameraListRefresh,
+        onCameraListRefresh
       }}
     >
       {children}

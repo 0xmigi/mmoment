@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useProgram } from '../anchor/setup';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { isSolanaWallet } from '@dynamic-labs/solana';
+import { useCamera } from './CameraProvider';
 
 interface CameraData {
   owner: string;
@@ -23,6 +24,7 @@ export function CameraSelector({ onSelect }: { onSelect: (camera: CameraData) =>
   const { primaryWallet } = useDynamicContext();
   const { program } = useProgram();
   const navigate = useNavigate();
+  const { onCameraListRefresh } = useCamera();
   
   const [loading, setLoading] = useState(false);
   const [cameras, setCameras] = useState<CameraData[]>([]);
@@ -96,6 +98,15 @@ export function CameraSelector({ onSelect }: { onSelect: (camera: CameraData) =>
   useEffect(() => {
     fetchCameras();
   }, [primaryWallet?.address, program]);
+
+  // Subscribe to global camera list refresh events
+  useEffect(() => {
+    const unsubscribe = onCameraListRefresh(() => {
+      console.log('[CameraSelector] Received camera list refresh event');
+      fetchCameras();
+    });
+    return unsubscribe;
+  }, [onCameraListRefresh]);
 
   return (
     <div className="p-4 bg-white rounded-lg shadow">

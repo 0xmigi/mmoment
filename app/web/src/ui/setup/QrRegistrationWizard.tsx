@@ -323,15 +323,43 @@ export function QrRegistrationWizard({
       setProgressMessage('Waiting for blockchain confirmation...');
       await program.provider.connection.confirmTransaction(tx);
 
-      setCurrentStep('complete');
-      setProgressMessage('Camera registration complete!');
+      // Use the camera PDA from the transaction/registration
+      
+      // Notify backend about PDA assignment so device can configure tunnel
+      try {
+        setProgressMessage('Configuring device tunnel...');
+        const pdaAssignResponse = await fetch(`${backendUrl}/api/claim/${claimToken}/assign-pda`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            camera_pda: cameraPda.toString(),
+            transaction_id: tx
+          })
+        });
 
-      // Notify parent
+        if (pdaAssignResponse.ok) {
+          const pdaAssignResult = await pdaAssignResponse.json();
+          console.log('PDA assigned to device:', pdaAssignResult);
+          setProgressMessage(`Camera registered and tunnel configured: ${pdaAssignResult.subdomain}`);
+        } else {
+          console.warn('Failed to assign PDA to device:', await pdaAssignResponse.text());
+          setProgressMessage('Camera registered (tunnel configuration may be pending)');
+        }
+      } catch (pdaError) {
+        console.error('Error assigning PDA to device:', pdaError);
+        setProgressMessage('Camera registered (tunnel configuration may be pending)');
+      }
+
+      setCurrentStep('complete');
+
+      // Notify parent with refresh instruction
       onComplete?.({
         device: claimedDevice,
         cameraName,
         transactionId: tx,
-        devicePubkey: claimedDevice.devicePubkey
+        devicePubkey: claimedDevice.devicePubkey,
+        cameraPda: cameraPda.toString(), // Include the PDA for reference
+        shouldRefreshCameras: true // Signal that camera lists need refresh
       });
 
     } catch (err) {

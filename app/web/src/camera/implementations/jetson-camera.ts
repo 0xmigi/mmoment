@@ -295,10 +295,20 @@ export class JetsonCamera implements ICamera {
           this.lastStreamingStatus = streamingStatus;
         }
         
+        // Parse camera status from response - handle both /api/status and /api/camera/info formats
+        let isOnline = true; // Default to online if we got a successful response
+        if (data.camera_status?.online !== undefined) {
+          isOnline = data.camera_status.online;
+        } else if (data.camera_info?.camera_status?.online !== undefined) {
+          isOnline = data.camera_info.camera_status.online;
+        } else if (data.online !== undefined) {
+          isOnline = data.online;
+        }
+
         return {
           success: true,
           data: {
-            isOnline: true,
+            isOnline: isOnline,
             isStreaming: streamingStatus,
             isRecording: data.recording || data.data?.recording || false,
             lastSeen: Date.now(),

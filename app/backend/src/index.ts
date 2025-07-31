@@ -287,7 +287,112 @@ app.get('/api/claim/:token/status', (req, res) => {
   }
 });
 
-// 4. Cleanup endpoint to remove expired claims (optional, for debugging)
+// 4. Notify device of its assigned PDA for Cloudflare tunnel configuration
+app.post('/api/claim/:token/assign-pda', (req, res) => {
+  try {
+    const { token } = req.params;
+    const { camera_pda, transaction_id } = req.body;
+    
+    if (!camera_pda) {
+      return res.status(400).json({ error: 'camera_pda is required' });
+    }
+    
+    const claim = pendingClaims.get(token);
+    
+    if (!claim) {
+      return res.status(404).json({ error: 'Claim token not found' });
+    }
+    
+    if (claim.status !== 'claimed') {
+      return res.status(400).json({ error: 'Device has not claimed this token yet' });
+    }
+    
+    // Store PDA assignment in claim for device to retrieve
+    (claim as any).assignedPda = camera_pda;
+    (claim as any).transactionId = transaction_id;
+    (claim as any).pdaAssignedAt = Date.now();
+    
+    console.log(`Assigned PDA ${camera_pda} to device ${claim.devicePubkey} (token: ${token})`);
+    
+    // In a real implementation, you might want to:
+    // 1. Store this in a database
+    // 2. Push notify the device via webhook/WebSocket
+    // 3. Send to device management service
+    
+    res.json({ 
+      success: true,
+      message: 'PDA assigned to device',
+      camera_pda,
+      subdomain: `${camera_pda.toLowerCase()}.mmoment.xyz`
+    });
+  } catch (error) {
+    console.error('Error assigning PDA to device:', error);
+    res.status(500).json({ error: 'Failed to assign PDA to device' });
+  }
+});
+
+// 5. Device endpoint to retrieve assigned PDA configuration
+app.get('/api/device/:device_pubkey/config', (req, res) => {
+  try {
+    const { device_pubkey } = req.params;
+    
+    // Find claim by device pubkey
+    let foundClaim = null;
+    let foundToken = null;
+    
+    for (const [token, claim] of pendingClaims.entries()) {
+      if (claim.devicePubkey === device_pubkey) {
+        foundClaim = claim;
+        foundToken = token;
+        break;
+      }
+    }
+    
+    if (!foundClaim) {
+      return res.status(404).json({ 
+        error: 'No configuration found for this device',
+        device_pubkey 
+      });
+    }
+    
+    const assignedPda = (foundClaim as any).assignedPda;
+    
+    if (!assignedPda) {
+      return res.status(202).json({ 
+        status: 'pending',
+        message: 'Device claimed but PDA not yet assigned',
+        device_pubkey,
+        claimed_at: foundClaim.created
+      });
+    }
+    
+    // Return configuration for device to use
+    const config = {
+      device_pubkey,
+      camera_pda: assignedPda,
+      subdomain: assignedPda.toLowerCase(),
+      full_domain: `${assignedPda.toLowerCase()}.mmoment.xyz`,
+      transaction_id: (foundClaim as any).transactionId,
+      assigned_at: (foundClaim as any).pdaAssignedAt,
+      user_wallet: foundClaim.userWallet,
+      api_endpoints: {
+        camera_info: `https://${assignedPda.toLowerCase()}.mmoment.xyz/api/camera/info`,
+        health: `https://${assignedPda.toLowerCase()}.mmoment.xyz/api/health`,
+        status: `https://${assignedPda.toLowerCase()}.mmoment.xyz/api/camera/status`,
+        stream: `https://${assignedPda.toLowerCase()}.mmoment.xyz/api/camera/stream`
+      }
+    };
+    
+    console.log(`Device ${device_pubkey} retrieved config for PDA ${assignedPda}`);
+    
+    res.json(config);
+  } catch (error) {
+    console.error('Error retrieving device config:', error);
+    res.status(500).json({ error: 'Failed to retrieve device configuration' });
+  }
+});
+
+// 6. Cleanup endpoint to remove expired claims (optional, for debugging)
 app.post('/api/claim/cleanup', (req, res) => {
   const now = Date.now();
   let cleanedUp = 0;

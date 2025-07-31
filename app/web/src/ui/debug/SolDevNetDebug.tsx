@@ -8,6 +8,7 @@ import { CAMERA_ACTIVATION_PROGRAM_ID } from '../../anchor/setup';
 import { IDL } from '../../anchor/idl';
 import { isSolanaWallet } from '@dynamic-labs/solana';
 import { useNavigate } from 'react-router-dom';
+import { useCamera } from '../../camera/CameraProvider';
 
 // Define IDL type for stricter checking
 // type CameraActivationIdl = typeof IDL;
@@ -128,6 +129,7 @@ export function SolDevNetDebug() {
   const { primaryWallet } = dynamicContext;
   const { connection } = useConnection();
   const navigate = useNavigate();
+  const { onCameraListRefresh, triggerCameraListRefresh } = useCamera();
 
   // State variables
   const [loading, setLoading] = useState(false);
@@ -507,8 +509,9 @@ export function SolDevNetDebug() {
       setCameraName('');
       setCameraModel('');
 
-      // Refresh list of cameras
+      // Refresh list of cameras and notify other components
       await fetchRegisteredCameras();
+      triggerCameraListRefresh();
     } catch (err) {
       console.error('Error registering camera:', err);
 
@@ -1206,6 +1209,17 @@ export function SolDevNetDebug() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialized, program]);
+
+  // Subscribe to global camera list refresh events
+  useEffect(() => {
+    const unsubscribe = onCameraListRefresh(() => {
+      console.log('[SolDevNetDebug] Received camera list refresh event');
+      if (initialized && program) {
+        fetchRegisteredCameras();
+      }
+    });
+    return unsubscribe;
+  }, [onCameraListRefresh, initialized, program]);
 
   // Add a helper function to get camera status display - Removed as unused
   // const getCameraStatusDisplay = (camera: CameraData) => {

@@ -129,21 +129,36 @@ export class CameraRegistry {
 
       const cameraInfo = await response.json();
       
+      // Determine camera type based on capabilities if not provided
+      let cameraType = cameraInfo.type;
+      if (!cameraType || cameraType === 'unknown') {
+        // Auto-detect camera type based on capabilities
+        const caps = cameraInfo.capabilities;
+        if (caps && caps.face_recognition && caps.gesture_detection && caps.livepeer_streaming) {
+          cameraType = 'jetson';
+        } else if (caps && caps.media_capture && !caps.face_recognition) {
+          cameraType = 'pi5';
+        } else {
+          // Default to jetson for PDA-based cameras with advanced capabilities
+          cameraType = 'jetson';
+        }
+      }
+      
       // Create camera configuration from discovered info
       const config: CameraConfig = {
         cameraId: cameraPda,
-        cameraType: cameraInfo.type || 'unknown',
+        cameraType: cameraType,
         apiUrl: apiUrl,
         name: cameraInfo.name || `Camera ${cameraPda.slice(0, 8)}`,
         description: cameraInfo.description || 'Discovered camera',
-        capabilities: cameraInfo.capabilities || {
-          canTakePhotos: true,
-          canRecordVideos: true,
+        capabilities: {
+          canTakePhotos: cameraInfo.capabilities?.media_capture || true,
+          canRecordVideos: cameraInfo.capabilities?.media_capture || true,
           canStream: true,
-          canDetectGestures: false,
-          canRecognizeFaces: false,
-          hasLivepeerStreaming: false,
-          supportedStreamFormats: ['mjpeg']
+          canDetectGestures: cameraInfo.capabilities?.gesture_detection || false,
+          canRecognizeFaces: cameraInfo.capabilities?.face_recognition || false,
+          hasLivepeerStreaming: cameraInfo.capabilities?.livepeer_streaming || false,
+          supportedStreamFormats: cameraInfo.capabilities?.livepeer_streaming ? ['livepeer', 'mjpeg'] : ['mjpeg']
         }
       };
 
@@ -219,8 +234,8 @@ export class CameraRegistry {
           // For unknown camera types, try to determine based on PDA or capabilities
           this.log(`Unknown camera type: ${entry.cameraType}, attempting auto-detection`);
           
-          // Default to Pi5 for unknown types
-          return new Pi5Camera(entry.cameraId, apiUrl);
+          // Default to Jetson for unknown types since they're likely PDA-based advanced cameras
+          return new JetsonCamera(entry.cameraId, apiUrl);
       }
     } catch (error) {
       this.log(`Error creating camera instance:`, error);
@@ -291,36 +306,58 @@ export class CameraRegistry {
     // Check all cameras in parallel
     const promises = cameras.map(async (entry) => {
       try {
-        // Try PDA-based URL first
-        const response = await fetch(`${entry.apiUrl}/api/health`, {
-          method: 'GET',
-          timeout: 5000,
-          mode: 'cors',
-          credentials: 'omit'
-        } as any);
+        // Try multiple health check endpoints in order of preference
+        const healthEndpoints = ['/api/health', '/api/status', '/api/camera/info'];
+        let isHealthy = false;
         
-        const isHealthy = response.ok;
-        results.set(entry.cameraId, isHealthy);
-        this.updateCameraStatus(entry.cameraId, isHealthy);
-        
-        // If PDA-based URL fails and we have a legacy URL, try that
-        if (!isHealthy && entry.config?.legacyUrl) {
+        for (const endpoint of healthEndpoints) {
           try {
-            const legacyResponse = await fetch(`${entry.config.legacyUrl}/api/health`, {
+            const response = await fetch(`${entry.apiUrl}${endpoint}`, {
               method: 'GET',
               timeout: 5000,
               mode: 'cors',
               credentials: 'omit'
             } as any);
             
-            const legacyHealthy = legacyResponse.ok;
-            if (legacyHealthy) {
-              this.log(`Camera ${entry.cameraId} responded to legacy URL, updating API URL`);
-              entry.apiUrl = entry.config.legacyUrl;
-              results.set(entry.cameraId, true);
-              this.updateCameraStatus(entry.cameraId, true);
+            if (response.ok) {
+              isHealthy = true;
+              break; // Stop trying once we get a successful response
             }
-          } catch (legacyError) {
+          } catch (endpointError) {
+            // Continue to next endpoint
+            continue;
+          }
+        }
+        
+        results.set(entry.cameraId, isHealthy);
+        this.updateCameraStatus(entry.cameraId, isHealthy);
+        
+        // If PDA-based URL fails and we have a legacy URL, try that
+        if (!isHealthy && entry.config?.legacyUrl) {
+          for (const endpoint of healthEndpoints) {
+            try {
+              const legacyResponse = await fetch(`${entry.config.legacyUrl}${endpoint}`, {
+                method: 'GET',
+                timeout: 5000,
+                mode: 'cors',
+                credentials: 'omit'
+              } as any);
+              
+              if (legacyResponse.ok) {
+                this.log(`Camera ${entry.cameraId} responded to legacy URL, updating API URL`);
+                entry.apiUrl = entry.config.legacyUrl;
+                results.set(entry.cameraId, true);
+                this.updateCameraStatus(entry.cameraId, true);
+                isHealthy = true;
+                break;
+              }
+            } catch (legacyError) {
+              // Continue to next endpoint
+              continue;
+            }
+          }
+          
+          if (!isHealthy) {
             this.log(`Both PDA and legacy URLs failed for ${entry.cameraId}`);
           }
         }

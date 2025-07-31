@@ -8,16 +8,24 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DeviceSetupWizard } from '../setup/DeviceSetupWizard';
+import { useCamera } from '../../camera/CameraProvider';
 
 export function CameraRegisterPage() {
   const [setupComplete, setSetupComplete] = useState(false);
   const [registeredCamera, setRegisteredCamera] = useState<any>(null);
   const navigate = useNavigate();
+  const { triggerCameraListRefresh } = useCamera();
 
   const handleSetupComplete = (cameraData: any) => {
     setSetupComplete(true);
     setRegisteredCamera(cameraData);
     console.log('Camera setup completed:', cameraData);
+    
+    // Trigger camera list refresh for all components
+    if (cameraData.shouldRefreshCameras) {
+      console.log('Triggering global camera list refresh after registration');
+      triggerCameraListRefresh();
+    }
     
     // Optionally navigate to camera view
     setTimeout(() => {
