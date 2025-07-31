@@ -157,8 +157,153 @@ interface TimelineEvent {
   cameraId?: string;
 }
 
+// Device claim storage (in-memory)
+interface DeviceClaim {
+  userWallet: string;
+  created: number;
+  expires: number;
+  status: 'pending' | 'claimed' | 'expired';
+  devicePubkey?: string;
+  deviceModel?: string;
+}
+
 const timelineEvents: TimelineEvent[] = [];
 const cameraRooms = new Map<string, Set<string>>();
+const pendingClaims = new Map<string, DeviceClaim>();
+
+// Device claim endpoints for QR-based registration
+// 1. Frontend creates a claim token with user wallet and WiFi credentials
+app.post('/api/claim/create', (req, res) => {
+  try {
+    const { userWallet } = req.body;
+    
+    if (!userWallet) {
+      return res.status(400).json({ error: 'userWallet is required' });
+    }
+
+    // Generate secure random token
+    const crypto = require('crypto');
+    const claimToken = crypto.randomBytes(32).toString('hex');
+    
+    // Create claim record with 10 minute expiry
+    const claimData: DeviceClaim = {
+      userWallet,
+      created: Date.now(),
+      expires: Date.now() + (10 * 60 * 1000), // 10 minutes
+      status: 'pending'
+    };
+    
+    pendingClaims.set(claimToken, claimData);
+    
+    console.log(`Created claim token ${claimToken} for wallet ${userWallet}`);
+    
+    res.json({ 
+      claimToken,
+      expiresAt: claimData.expires,
+      claimEndpoint: `${req.protocol}://${req.get('host')}/api/claim/${claimToken}`
+    });
+  } catch (error) {
+    console.error('Error creating claim token:', error);
+    res.status(500).json({ error: 'Failed to create claim token' });
+  }
+});
+
+// 2. Jetson device claims ownership using the token
+app.post('/api/claim/:token', (req, res) => {
+  try {
+    const { token } = req.params;
+    const { device_pubkey, device_model } = req.body;
+    
+    if (!device_pubkey) {
+      return res.status(400).json({ error: 'device_pubkey is required' });
+    }
+    
+    const claim = pendingClaims.get(token);
+    
+    if (!claim) {
+      return res.status(404).json({ error: 'Claim token not found' });
+    }
+    
+    if (claim.expires < Date.now()) {
+      claim.status = 'expired';
+      return res.status(410).json({ error: 'Claim token has expired' });
+    }
+    
+    if (claim.status !== 'pending') {
+      return res.status(409).json({ error: 'Claim token already used' });
+    }
+    
+    // Update claim with device information
+    claim.devicePubkey = device_pubkey;
+    claim.deviceModel = device_model || 'Unknown Device';
+    claim.status = 'claimed';
+    
+    console.log(`Device ${device_pubkey} claimed token ${token} for wallet ${claim.userWallet}`);
+    
+    res.json({ 
+      success: true,
+      userWallet: claim.userWallet,
+      message: 'Device successfully claimed'
+    });
+  } catch (error) {
+    console.error('Error processing device claim:', error);
+    res.status(500).json({ error: 'Failed to process device claim' });
+  }
+});
+
+// 3. Frontend polls to check if device has been claimed
+app.get('/api/claim/:token/status', (req, res) => {
+  try {
+    const { token } = req.params;
+    const claim = pendingClaims.get(token);
+    
+    if (!claim) {
+      return res.status(404).json({ status: 'not_found' });
+    }
+    
+    // Check if expired
+    if (claim.expires < Date.now() && claim.status === 'pending') {
+      claim.status = 'expired';
+    }
+    
+    const response = {
+      status: claim.status,
+      created: claim.created,
+      expires: claim.expires,
+      devicePubkey: claim.devicePubkey,
+      deviceModel: claim.deviceModel
+    };
+    
+    // Clean up expired or claimed tokens after 1 hour
+    if ((claim.status === 'claimed' || claim.status === 'expired') && 
+        (Date.now() - claim.created) > (60 * 60 * 1000)) {
+      pendingClaims.delete(token);
+    }
+    
+    res.json(response);
+  } catch (error) {
+    console.error('Error checking claim status:', error);
+    res.status(500).json({ error: 'Failed to check claim status' });
+  }
+});
+
+// 4. Cleanup endpoint to remove expired claims (optional, for debugging)
+app.post('/api/claim/cleanup', (req, res) => {
+  const now = Date.now();
+  let cleanedUp = 0;
+  
+  for (const [token, claim] of pendingClaims.entries()) {
+    if (claim.expires < now || (now - claim.created) > (60 * 60 * 1000)) {
+      pendingClaims.delete(token);
+      cleanedUp++;
+    }
+  }
+  
+  res.json({ 
+    message: `Cleaned up ${cleanedUp} expired claims`,
+    activeClaims: pendingClaims.size 
+  });
+});
 
 // Socket connection handling
 io.on('connection', (socket) => {
@@ -257,8 +402,8 @@ io.engine.on('connection_error', (err) => {
 });
 
 // Start server with error handling
-const port = process.env.PORT || 3001;
-httpServer.listen(port, () => {
+const port = Number(process.env.PORT) || 3001;
+httpServer.listen(port, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
   console.log(`Environment: ${process.env.NODE_ENV}`);
   console.log('Server configuration:', {

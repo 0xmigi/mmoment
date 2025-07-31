@@ -9,10 +9,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DeviceSetupWizard } from '../setup/DeviceSetupWizard';
 
-type RegistrationMode = 'wizard' | 'manual';
-
 export function CameraRegisterPage() {
-  const [registrationMode, setRegistrationMode] = useState<RegistrationMode>('wizard');
   const [setupComplete, setSetupComplete] = useState(false);
   const [registeredCamera, setRegisteredCamera] = useState<any>(null);
   const navigate = useNavigate();
@@ -120,123 +117,47 @@ export function CameraRegisterPage() {
           </p>
         </div>
 
-        {/* Registration Mode Selection */}
-        <div className="mb-8">
-          <div className="flex justify-center space-x-4">
-            <button
-              onClick={() => setRegistrationMode('wizard')}
-              className={`px-6 py-3 rounded-lg font-medium ${
-                registrationMode === 'wizard'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-700 border border-gray-300'
-              }`}
-            >
-              🎯 Quick Setup (Recommended)
-            </button>
-            <button
-              onClick={() => setRegistrationMode('manual')}
-              className={`px-6 py-3 rounded-lg font-medium ${
-                registrationMode === 'manual'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-700 border border-gray-300'
-              }`}
-            >
-              ⚙️ Manual Registration
-            </button>
-          </div>
-        </div>
-
         {/* Registration Content */}
         <div className="flex justify-center">
-          {registrationMode === 'wizard' ? (
-            <div>
-              <div className="mb-6 text-center">
-                <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                  Automated Device Setup
-                </h2>
-                <p className="text-gray-600 mb-4">
-                  Make sure your camera is powered on and you're connected to the same network.
-                </p>
-                
-                {/* Feature highlights */}
-                <div className="grid grid-cols-2 gap-4 max-w-md mx-auto mb-6">
-                  <div className="bg-white rounded-lg p-3 border">
-                    <div className="text-2xl mb-1">🔍</div>
-                    <div className="text-sm font-medium">Auto Discovery</div>
-                    <div className="text-xs text-gray-500">Finds your device automatically</div>
-                  </div>
-                  <div className="bg-white rounded-lg p-3 border">
-                    <div className="text-2xl mb-1">📶</div>
-                    <div className="text-sm font-medium">WiFi Setup</div>
-                    <div className="text-xs text-gray-500">Configure network connection</div>
-                  </div>
-                  <div className="bg-white rounded-lg p-3 border">
-                    <div className="text-2xl mb-1">🔗</div>
-                    <div className="text-sm font-medium">Blockchain</div>
-                    <div className="text-xs text-gray-500">Register on-chain securely</div>
-                  </div>
-                  <div className="bg-white rounded-lg p-3 border">
-                    <div className="text-2xl mb-1">🛡️</div>
-                    <div className="text-sm font-medium">DePIN Auth</div>
-                    <div className="text-xs text-gray-500">Cryptographic device signing</div>
-                  </div>
-                </div>
-              </div>
-
-              <DeviceSetupWizard
-                onComplete={handleSetupComplete}
-                onError={handleSetupError}
-              />
-            </div>
-          ) : (
-            <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">
-                Manual Registration
+          <div>
+            <div className="mb-6 text-center">
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                QR Code Setup
               </h2>
               <p className="text-gray-600 mb-4">
-                For advanced users or custom setups. You'll need to manually configure 
-                your device and provide connection details.
+                Enter your WiFi details and show the QR code to your camera - it's that simple!
               </p>
               
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Device IP Address
-                  </label>
-                  <input
-                    type="text"
-                    className="w-full p-2 border border-gray-300 rounded-md"
-                    placeholder="192.168.1.100"
-                  />
+              {/* Feature highlights */}
+              <div className="grid grid-cols-2 gap-4 max-w-md mx-auto mb-6">
+                <div className="bg-white rounded-lg p-3 border">
+                  <div className="text-2xl mb-1">📱</div>
+                  <div className="text-sm font-medium">QR Code</div>
+                  <div className="text-xs text-gray-500">Show to camera to setup</div>
                 </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Camera Name
-                  </label>
-                  <input
-                    type="text"
-                    className="w-full p-2 border border-gray-300 rounded-md"
-                    placeholder="Living Room Camera"
-                  />
+                <div className="bg-white rounded-lg p-3 border">
+                  <div className="text-2xl mb-1">📶</div>
+                  <div className="text-sm font-medium">WiFi Setup</div>
+                  <div className="text-xs text-gray-500">Automatic network connection</div>
                 </div>
-
-                <button 
-                  className="w-full bg-gray-400 text-white py-2 px-4 rounded-md cursor-not-allowed"
-                  disabled
-                >
-                  Manual Setup (Coming Soon)
-                </button>
-              </div>
-
-              <div className="mt-4 p-3 bg-yellow-50 rounded-lg">
-                <p className="text-sm text-yellow-800">
-                  💡 <strong>Tip:</strong> The Quick Setup mode handles everything automatically 
-                  and is much easier for first-time setup!
-                </p>
+                <div className="bg-white rounded-lg p-3 border">
+                  <div className="text-2xl mb-1">🔗</div>
+                  <div className="text-sm font-medium">Blockchain</div>
+                  <div className="text-xs text-gray-500">Register on-chain securely</div>
+                </div>
+                <div className="bg-white rounded-lg p-3 border">
+                  <div className="text-2xl mb-1">🛡️</div>
+                  <div className="text-sm font-medium">DePIN Auth</div>
+                  <div className="text-xs text-gray-500">Cryptographic device signing</div>
+                </div>
               </div>
             </div>
-          )}
+
+            <DeviceSetupWizard
+              onComplete={handleSetupComplete}
+              onError={handleSetupError}
+            />
+          </div>
         </div>
 
         {/* Security Notice */}

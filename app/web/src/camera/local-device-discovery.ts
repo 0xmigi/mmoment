@@ -133,7 +133,7 @@ export class LocalDeviceDiscovery {
       deviceId: 'DEMO-JETSON-001',
       model: 'MMOMENT Jetson Orin Nano (Demo)',
       setupRequired: false,
-      devicePubkey: 'BXqMyo3Uh6SiLr3xh9iEBCY9AgV1aUciymK37SpNgbNE' // Your known device key
+      devicePubkey: undefined // Mock device has no real device key
     };
 
     this.discoveredDevices.set('demo.localhost', mockDevice);

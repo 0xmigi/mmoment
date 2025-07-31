@@ -7,6 +7,9 @@ build/
 *.o
 *.a
 
+# Rust/Anchor build artifacts
+target/
+
 # Environment variables
 .env
 .env.local

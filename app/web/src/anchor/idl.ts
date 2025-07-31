@@ -297,6 +297,37 @@ export type CameraNetwork = {
           "type": "bytes"
         }
       ]
+    },
+    {
+      "name": "recordActivity",
+      "docs": [
+        "Record a camera activity (photo, video, stream)"
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "camera",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "session",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": "RecordActivityArgs"
+          }
+        }
+      ]
     }
   ],
   "accounts": [
@@ -368,6 +399,12 @@ export type CameraNetwork = {
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "devicePubkey",
+            "type": {
+              "option": "publicKey"
+            }
           }
         ]
       }
@@ -537,6 +574,24 @@ export type CameraNetwork = {
   ],
   "types": [
     {
+      "name": "RecordActivityArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "actionType",
+            "type": {
+              "defined": "CameraActionType"
+            }
+          },
+          {
+            "name": "metadata",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
       "name": "CameraMetadata",
       "type": {
         "kind": "struct",
@@ -660,6 +715,12 @@ export type CameraNetwork = {
             "type": {
               "defined": "CameraFeatures"
             }
+          },
+          {
+            "name": "devicePubkey",
+            "type": {
+              "option": "publicKey"
+            }
           }
         ]
       }
@@ -715,6 +776,29 @@ export type CameraNetwork = {
           {
             "name": "metadata",
             "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CameraActionType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "PhotoCapture"
+          },
+          {
+            "name": "VideoRecord"
+          },
+          {
+            "name": "StreamStart"
+          },
+          {
+            "name": "StreamStop"
+          },
+          {
+            "name": "Custom"
           }
         ]
       }
@@ -1234,6 +1318,37 @@ export const IDL: CameraNetwork = {
           "type": "bytes"
         }
       ]
+    },
+    {
+      "name": "recordActivity",
+      "docs": [
+        "Record a camera activity (photo, video, stream)"
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "camera",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "session",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": "RecordActivityArgs"
+          }
+        }
+      ]
     }
   ],
   "accounts": [
@@ -1305,6 +1420,12 @@ export const IDL: CameraNetwork = {
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "devicePubkey",
+            "type": {
+              "option": "publicKey"
+            }
           }
         ]
       }
@@ -1474,6 +1595,24 @@ export const IDL: CameraNetwork = {
   ],
   "types": [
     {
+      "name": "RecordActivityArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "actionType",
+            "type": {
+              "defined": "CameraActionType"
+            }
+          },
+          {
+            "name": "metadata",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
       "name": "CameraMetadata",
       "type": {
         "kind": "struct",
@@ -1597,6 +1736,12 @@ export const IDL: CameraNetwork = {
             "type": {
               "defined": "CameraFeatures"
             }
+          },
+          {
+            "name": "devicePubkey",
+            "type": {
+              "option": "publicKey"
+            }
           }
         ]
       }
@@ -1652,6 +1797,29 @@ export const IDL: CameraNetwork = {
           {
             "name": "metadata",
             "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CameraActionType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "PhotoCapture"
+          },
+          {
+            "name": "VideoRecord"
+          },
+          {
+            "name": "StreamStart"
+          },
+          {
+            "name": "StreamStop"
+          },
+          {
+            "name": "Custom"
           }
         ]
       }
