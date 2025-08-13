@@ -500,7 +500,6 @@ export class PinataService implements IPFSProvider {
         timestamp: new Date(pin.date_pinned).toISOString(),
         backupUrls: [
           `https://ipfs.io/ipfs/${pin.ipfs_pin_hash}`,
-          `https://cloudflare-ipfs.com/ipfs/${pin.ipfs_pin_hash}`,
           `https://gateway.ipfs.io/ipfs/${pin.ipfs_pin_hash}`
         ],
         provider: this.name,

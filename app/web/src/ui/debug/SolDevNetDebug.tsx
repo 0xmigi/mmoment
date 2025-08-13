@@ -169,7 +169,7 @@ export function SolDevNetDebug() {
   // ----------------------------
 
   // Initialize program when wallet is connected
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   useEffect(() => {
     if (!primaryWallet?.address || !connection) return;
 
@@ -196,7 +196,7 @@ export function SolDevNetDebug() {
             const signer = await primaryWallet.getSigner();
             return await Promise.all(txs.map(tx => signer.signTransaction(tx)));
           },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         } as any,
         { commitment: 'confirmed' }
       );
@@ -212,7 +212,7 @@ export function SolDevNetDebug() {
   }, [primaryWallet?.address, connection]);
 
   // Check if registry is initialized
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   useEffect(() => {
     if (!primaryWallet?.address || !connection || !program) return;
 
@@ -631,7 +631,7 @@ export function SolDevNetDebug() {
   };
   
   // Update useEffect to check session status after fetching cameras
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   useEffect(() => {
     if (registeredCameras.length > 0 && primaryWallet?.address) {
       checkUserSessionStatus();
@@ -698,7 +698,7 @@ export function SolDevNetDebug() {
       let faceDataExists = false;
       try {
         // Fetch with generic account type
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const faceAccount = await program.account.faceData.fetch(faceDataPda) as any;
         if (faceAccount) { // Check if account data is valid
            faceDataExists = true;
@@ -970,7 +970,7 @@ export function SolDevNetDebug() {
       
       for (const sessionInfo of userSessionAccounts) {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           
           const session = sessionInfo.account as any;
           const cameraKey = session.camera.toString();
           
@@ -1021,7 +1021,7 @@ export function SolDevNetDebug() {
       console.log('Registry address:', registryAddress.toString());
 
       // Try to fetch the registry account, but don't fail if it doesn't exist
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       let registryAccount: any | undefined;
       try {
         // Explicitly use the cameraRegistry type
@@ -1048,7 +1048,7 @@ export function SolDevNetDebug() {
 
         for (const accountInfo of cameraAccounts) {
           try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+             
             const account = accountInfo.account as any;
             
             // Access metadata properly through the account structure
@@ -1122,7 +1122,7 @@ export function SolDevNetDebug() {
 
             try {
               // Try to decode using program
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+               
               const decodedAccount = await program.coder.accounts.decode(
                 'cameraAccount',
                 account.account.data
@@ -1207,7 +1207,7 @@ export function SolDevNetDebug() {
     if (initialized && program) {
       fetchRegisteredCameras();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [initialized, program]);
 
   // Subscribe to global camera list refresh events

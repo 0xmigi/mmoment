@@ -1,8 +1,10 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, @typescript-eslint/no-non-null-assertion */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useDynamicContext, useEmbeddedWallet } from '@dynamic-labs/sdk-react-core';
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { Timeline } from '../../timeline/Timeline';
+import { timelineService } from '../../timeline/timeline-service';
+import { TimelineEvent, TimelineEventType } from '../../timeline/timeline-types';
 import MediaGallery from '../../media/Gallery';
 import { CameraControls } from './MobileControls';
 import { ToastMessage } from '../../core/types/toast';
@@ -15,7 +17,7 @@ import { unifiedCameraService } from '../../camera/unified-camera-service';
 import { unifiedIpfsService } from '../../storage/ipfs/unified-ipfs-service';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { TransactionModal } from '../../auth/components/TransactionModal';
-import { StopCircle, Play, Camera, Video, Loader, Link2, CheckCircle } from 'lucide-react';
+import { StopCircle, Play, Camera, Video, Loader, Link2, CheckCircle, User } from 'lucide-react';
 import { useCameraStatus } from '../../camera/useCameraStatus';
 import { CameraModal } from '../../camera/CameraModal';
 import { cameraStatus } from '../../camera/camera-status';
@@ -24,28 +26,6 @@ import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import { IDL } from '../../anchor/idl';
 import { FaceEnrollmentButton } from '../../camera/FaceEnrollmentButton';
 import { CameraActionResponse } from '../../camera/camera-interface';
-
-type TimelineEventType =
-  | 'photo_captured'
-  | 'video_recorded'
-  | 'stream_started'
-  | 'stream_ended'
-  | 'initialization'
-  | 'face_enrolled';
-
-interface TimelineEvent {
-  type: TimelineEventType;
-  user: {
-    address: string;
-    username?: string;
-    displayName?: string;
-    pfpUrl?: string;
-  };
-  timestamp: number;
-  transactionId?: string;
-  mediaUrl?: string;
-  cameraId?: string;
-}
 
 
 // Update the CameraIdDisplay component to add a forced refresh when the modal is closed
@@ -206,6 +186,11 @@ export function CameraView() {
     refreshTimeline?: () => void;
     refreshEvents?: () => void;
   }>(null);
+  const mobileTimelineRef = useRef<{ 
+    addEvent?: (event: Omit<TimelineEvent, 'id'>) => void; 
+    refreshTimeline?: () => void;
+    refreshEvents?: () => void;
+  }>(null);
   const [cameraAccount, setCameraAccount] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [currentToast, setCurrentToast] = useState<ToastMessage | null>(null);
@@ -222,6 +207,9 @@ export function CameraView() {
   
   // Add state to track gesture controls status changes
   const [gestureControlsEnabled, setGestureControlsEnabled] = useState(false);
+  
+  // Add state for mobile camera modal
+  const [isMobileCameraModalOpen, setIsMobileCameraModalOpen] = useState(false);
 
   // Helper function to detect if we're using the Jetson camera
   // const isJetsonCamera = (cameraId: string | null): boolean => {
@@ -327,10 +315,8 @@ export function CameraView() {
         }
       });
 
-      // Add the event to the timeline
-      if (timelineRef.current?.addEvent) {
-        timelineRef.current?.addEvent(event);
-      }
+      // Emit the event to the timeline service
+      timelineService.emitEvent(event);
     }
   };
 
@@ -600,7 +586,7 @@ export function CameraView() {
           const cameraPublicKey = new PublicKey(cameraId);
 
           // Find the session PDA
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+           
           const [_sessionPda] = PublicKey.findProgramAddressSync(
             [
               Buffer.from('session'),
@@ -727,15 +713,6 @@ export function CameraView() {
     }
 
     try {
-      // Add basic rate limiting - don't check more than once every 3 seconds
-      const lastCheckTime = parseInt(localStorage.getItem('lastCheckUserSessionTime') || '0');
-      const now = Date.now();
-      if (now - lastCheckTime < 3000) {
-        // Return the current state without checking
-        return isCheckedIn;
-      }
-      
-      localStorage.setItem('lastCheckUserSessionTime', now.toString());
 
       const userPublicKey = new PublicKey(primaryWallet.address);
       const cameraPublicKey = new PublicKey(cameraAccount);
@@ -1328,8 +1305,8 @@ export function CameraView() {
             }}
           />
 
-          <div className="bg-white rounded-lg mb-6 px-6">
-            <div className="py-4 flex justify-between items-center">
+          <div className="bg-white rounded-lg mb-0 px-6">
+            <div className="py-4 flex justify-between items-center hidden md:flex">
               <CameraIdDisplay
                 cameraId={cameraId}
                 selectedCamera={selectedCamera}
@@ -1338,7 +1315,7 @@ export function CameraView() {
               />
             </div>
           </div>
-          <div className="px-2">
+          <div className="px-2 pt-0">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="md:col-span-3 relative">
                 {/* Face Enrollment Button - positioned next to stream */}
@@ -1370,6 +1347,51 @@ export function CameraView() {
                     />
                   </div>
                 )}
+
+                {/* Unified TikTok-style status bar - aligned with timeline - MOBILE ONLY */}
+                <div 
+                  className="absolute top-2 left-2 z-40 flex items-center gap-1 cursor-pointer md:hidden"
+                  onClick={() => setIsMobileCameraModalOpen(true)}
+                >
+                  {/* Camera Status Rectangle */}
+                  {!cameraId && !cameraAccount && !selectedCamera ? (
+                    <div className="bg-gray-600 text-white text-xs font-bold px-1 py-0.5 rounded">
+                      DISCONNECTED
+                    </div>
+                  ) : !currentCameraStatus.isLive ? (
+                    <div className="bg-gray-500 text-white text-xs font-bold px-1 py-0.5 rounded">
+                      OFFLINE
+                    </div>
+                  ) : currentCameraStatus.isStreaming ? (
+                    <div className="bg-red-500 text-white text-xs font-bold px-1 py-0.5 rounded flex items-center gap-1">
+                      <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
+                      LIVE
+                    </div>
+                  ) : (
+                    <div className="bg-green-500 text-white text-xs font-bold px-1 py-0.5 rounded">
+                      ONLINE
+                    </div>
+                  )}
+                  
+                  {/* Camera ID */}
+                  <div className="bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">
+                    id:{(cameraAccount || selectedCamera?.publicKey || 'None').slice(0, 4)}...
+                    {(cameraAccount || selectedCamera?.publicKey || 'None').slice(-4)}
+                  </div>
+                  
+                  {/* Check-in Status Icon */}
+                  {isCheckedIn ? (
+                    <CheckCircle className="w-3 h-3 text-green-400" />
+                  ) : (
+                    <Link2 className="w-3 h-3 text-blue-400" />
+                  )}
+                </div>
+
+                {/* Mobile Timeline Overlay - positioned below status badge */}
+                <div className="absolute top-10 left-2 z-30 md:hidden">
+                  <Timeline ref={mobileTimelineRef} variant="camera" cameraId={cameraAccount || undefined} mobileOverlay={true} />
+                </div>
+
                 <StreamPlayer />
 
                 <div className="hidden sm:flex absolute -right-14 top-0 flex-col h-full z-[45]">
@@ -1431,7 +1453,7 @@ export function CameraView() {
               </div>
             </div>
           </div>
-          <div className="flex-1 mt-2 px-2">
+          <div id="camera-controls" className="flex-1 mt-2 px-2">
             <CameraControls
               onTakePicture={handleDirectPhoto}
               onRecordVideo={handleDirectVideo}
@@ -1442,7 +1464,7 @@ export function CameraView() {
           </div>
           <div className="max-w-3xl mt-6 mx-auto flex flex-col justify-top relative">
             <div className="relative mb-36">
-              <div className="flex pl-6 items-center gap-2">
+              <div className="hidden md:flex pl-6 items-center gap-2">
                 {!cameraId && !cameraAccount && !selectedCamera ? (
                   <div className="flex items-center gap-2">
                     <span className="relative flex h-3 w-3 -ml-1">
@@ -1481,7 +1503,7 @@ export function CameraView() {
               </div>
             </div>
 
-            <div className="absolute mt-12 pb-20 pl-5 left-0 w-full">
+            <div className="absolute mt-12 pb-20 pl-5 left-0 w-full hidden md:block">
               <Timeline ref={timelineRef} variant="camera" cameraId={cameraAccount || undefined} />
               <div
                 className="top-0 left-0 right-0 pointer-events-none"
@@ -1499,6 +1521,32 @@ export function CameraView() {
           </div>
         </div>
       </div>
+
+      {/* Mobile Camera Modal */}
+      <CameraModal
+        isOpen={isMobileCameraModalOpen}
+        onClose={() => setIsMobileCameraModalOpen(false)}
+        onCheckStatusChange={(newStatus: boolean) => {
+          console.log("Mobile modal status change:", newStatus);
+          setIsCheckedIn(newStatus);
+          // Refresh timeline if needed
+          if (timelineRef.current?.refreshTimeline) {
+            timelineRef.current?.refreshTimeline();
+          }
+        }}
+        camera={{
+          id: cameraAccount || selectedCamera?.publicKey || '',
+          owner: selectedCamera?.owner || currentCameraStatus.owner || '',
+          ownerDisplayName: selectedCamera?.metadata?.name || "newProgramCamera",
+          model: selectedCamera?.metadata?.model || "pi5",
+          isLive: currentCameraStatus.isLive || false,
+          isStreaming: currentCameraStatus.isStreaming || false,
+          status: 'ok',
+          lastSeen: Date.now(),
+          showDevInfo: !cameraAccount && !selectedCamera?.publicKey,
+          defaultDevCamera: 'EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA'
+        }}
+      />
     </>
   );
 }

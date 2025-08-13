@@ -14,12 +14,30 @@ interface TimelineProps {
   userAddress?: string;
   variant?: 'camera' | 'full';
   cameraId?: string;
+  mobileOverlay?: boolean;
 }
 
 // Get the display count based on screen width
 const getDisplayCount = () => {
   if (typeof window === 'undefined') return 13;
-  return window.innerWidth < 640 ? 23 : 13;
+  return window.innerWidth < 768 ? 17 : 13;
+};
+
+// Get mobile timeline count based on proportional scaling with stream window
+const getMobileTimelineCount = () => {
+  if (typeof window === 'undefined') return 10;
+  const width = window.innerWidth;
+  
+  // Scale with very aggressive curve - calibrated for iPhone 12 as baseline
+  const minWidth = 320;
+  const maxWidth = 768;
+  const minItems = 14;  // Just a bit longer for iPhone 12
+  const maxItems = 30; // Increased proportionally
+  
+  const linearRatio = Math.min(Math.max((width - minWidth) / (maxWidth - minWidth), 0), 1);
+  // Use even more aggressive curve - square the ratio for dramatic scaling
+  const curvedRatio = linearRatio * linearRatio;
+  return Math.round(minItems + (maxItems - minItems) * curvedRatio);
 };
 
 // Add this function before the Timeline component
@@ -46,12 +64,13 @@ const getEventText = (type: TimelineEventType): string => {
   }
 };
 
-export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full', cameraId }, ref) => {
+export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full', cameraId, mobileOverlay = false }, ref) => {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [selectedUser, setSelectedUser] = useState<TimelineUser | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
   const [displayCount, setDisplayCount] = useState(getDisplayCount());
+  const [mobileTimelineCount, setMobileTimelineCount] = useState(getMobileTimelineCount());
   const { user } = useDynamicContext();
   const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
   const [selectedMedia, setSelectedMedia] = useState<IPFSMedia | null>(null);
@@ -193,12 +212,14 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     fetchUserProfiles();
   }, [events, user?.verifiedCredentials, userProfiles]);
 
+
   // Update display count on window resize
   useEffect(() => {
     if (variant !== 'camera') return;
 
     const handleResize = () => {
       setDisplayCount(getDisplayCount());
+      setMobileTimelineCount(getMobileTimelineCount());
     };
 
     window.addEventListener('resize', handleResize);
@@ -277,31 +298,35 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     // Apply enrichEventWithUserInfo to all events
     const enrichedEvents = filteredEvents.map(event => enrichEventWithUserInfo(event));
     
-    return variant === 'camera' 
-      ? enrichedEvents.slice(0, displayCount)
-      : enrichedEvents;
-  }, [filteredEvents, variant, displayCount, enrichEventWithUserInfo]);
+    return variant === 'camera' && !mobileOverlay
+      ? enrichedEvents.slice(0, displayCount) // Desktop: use JavaScript count (perfect!)
+      : variant === 'camera' && mobileOverlay
+        ? enrichedEvents.slice(0, mobileTimelineCount) // Mobile: scale with window width
+        : enrichedEvents;
+  }, [filteredEvents, variant, displayCount, mobileTimelineCount, userProfiles]);
 
-  const getEventIcon = (type: TimelineEventType) => {
+  const getEventIcon = (type: TimelineEventType, isOverlay = false) => {
+    const iconClass = `w-4 h-4 ${isOverlay ? 'text-white' : ''}`;
+    
     switch (type) {
       case 'initialization':
-        return <Power className="w-4 h-4" />;
+        return <Power className={iconClass} />;
       case 'photo_captured':
-        return <Camera className="w-4 h-4" />;
+        return <Camera className={iconClass} />;
       case 'video_recorded':
-        return <Video className="w-4 h-4" />;
+        return <Video className={iconClass} />;
       case 'stream_started':
-        return <Radio className="w-4 h-4 text-red-500" />;
+        return <Radio className={`${iconClass} ${isOverlay ? '' : 'text-red-500'}`} />;
       case 'stream_ended':
-        return <Signal className="w-4 h-4 text-gray-400" />;
+        return <Signal className={`${iconClass} ${isOverlay ? '' : 'text-gray-400'}`} />;
       case 'check_in':
-        return <User className="w-4 h-4 text-green-500" />;
+        return <User className={`${iconClass} ${isOverlay ? '' : 'text-green-500'}`} />;
       case 'check_out':
-        return <User className="w-4 h-4 text-gray-400" />;
+        return <User className={`${iconClass} ${isOverlay ? '' : 'text-gray-400'}`} />;
       case 'face_enrolled':
-        return <User className="w-4 h-4 text-blue-500" />;
+        return <User className={`${iconClass} ${isOverlay ? '' : 'text-blue-500'}`} />;
       default:
-        return <User className="w-4 h-4" />;
+        return <User className={iconClass} />;
     }
   };
 
@@ -333,36 +358,38 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
 
   return (
     <div className="w-full relative" ref={timelineRef}>
-      {/* Container with fixed height based on display count */}
+      {/* Container - desktop uses JavaScript calculation, mobile uses CSS width-based */}
       <div 
         className="relative"
         style={{ 
-          height: variant === 'camera' 
+          height: variant === 'camera' && !mobileOverlay
             ? `${(displayCount + 1) * 3.5}rem`
             : 'auto'
         }}
       >
         {/* Vertical timeline line */}
-        <div className="absolute left-[4px] sm:left-[6px] top-0 h-full w-px bg-gray-200" />
+        <div className="absolute left-[4px] md:left-[6px] top-0 h-full w-px bg-gray-200" />
         
-        <div className="space-y-4 sm:space-y-6 w-full">
+        <div className="space-y-4 md:space-y-6 w-full">
           {displayEvents.length === 0 ? (
-            <p className="text-gray-500 text-sm pl-16">No activity yet</p>
+            <p className={`text-sm pl-16 ${mobileOverlay ? 'text-white' : 'text-gray-500'}`}>No activity yet</p>
           ) : (
             <>
               {displayEvents.map((event, index) => (
                 <div key={event.id} className="flex items-center">
                   {/* User avatar and action icon - always visible */}
-                  <div className="relative flex items-center mr-3 sm:mr-5 z-10">
-                    <div className="w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-white border border-gray-200 -ml-[4px] sm:-ml-[4px] mr-2 flex items-center justify-center">
-                      {getEventIcon(event.type)}
+                  <div className="relative flex items-center mr-3 md:mr-5 z-10">
+                    <div className={`w-4 h-4 md:w-5 md:h-5 rounded-full -ml-[4px] md:-ml-[4px] mr-2 flex items-center justify-center ${
+                      mobileOverlay ? '' : 'bg-white border border-gray-200'
+                    }`}>
+                      {getEventIcon(event.type, mobileOverlay)}
                     </div>
                     <div 
                       onClick={(e) => {
                         e.stopPropagation();
                         handleProfileClick(event);
                       }}
-                      className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
+                      className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
                     >
                       {event.user.pfpUrl ? (
                         <img 
@@ -371,25 +398,29 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                           className="w-full h-full object-cover"
                         />
                       ) : (
-                        <User className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600" />
+                        <User className="w-3 h-3 md:w-4 md:h-4 text-gray-600" />
                       )}
                     </div>
                   </div>
 
                   {/* Event details - fade out only in camera view */}
                   <div 
-                    className={`ml-2 sm:ml-3 flex-left bg-white transition-opacity cursor-pointer ${
+                    className={`ml-2 md:ml-3 flex-left transition-opacity cursor-pointer ${
+                      mobileOverlay ? '' : 'bg-white'
+                    } ${
                       variant === 'camera' && index > 1 ? 'opacity-0' : ''
                     }`}
                     onClick={() => event.mediaUrl && handleMediaClick(event)}
                   >
-                    <p className="text-xs sm:text-sm text-gray-800">
+                    <p className={`text-xs md:text-sm ${mobileOverlay ? 'text-white' : 'text-gray-800'}`}>
                       <span 
                         onClick={(e) => {
                           e.stopPropagation();
                           handleProfileClick(event);
                         }}
-                        className="font-medium cursor-pointer hover:text-blue-600 transition-colors"
+                        className={`font-medium cursor-pointer transition-colors ${
+                          mobileOverlay ? 'hover:text-gray-300' : 'hover:text-blue-600'
+                        }`}
                       >
                         {event.user.displayName || event.user.username || 
                          `${event.user.address.slice(0, 6)}...${event.user.address.slice(-4)}`}
@@ -397,7 +428,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                       {' '}
                       {getEventText(event.type)}
                     </p>
-                    <p className="text-xs text-gray-500">
+                    <p className={`${mobileOverlay ? 'text-[10px]' : 'text-xs'} ${mobileOverlay ? 'text-gray-300' : 'text-gray-500'}`}>
                       {event.timestamp > Date.now() - 60000 
                         ? 'less than a minute ago'
                         : `${Math.floor((Date.now() - event.timestamp) / 60000)} minutes ago`
@@ -413,11 +444,11 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
 
       {/* Profile Stack with connected timeline */}
       {variant === 'camera' && (
-        <div className="relative">
+        <div className="relative mt-2">
           {/* Corner and horizontal line container */}
           <div className="absolute left-0 top-0 w-full">
             {/* L-shaped corner with rounded curve using CSS */}
-            <div className="absolute left-[4px] sm:left-[6px] w-[12px] h-[12px]">
+            <div className="absolute left-[4px] md:left-[6px] w-[12px] h-[12px]">
               {/* Curved corner */}
               <div 
                 className="absolute left-0 bottom-0 w-[12px] h-[12px] border-b border-l border-gray-200 rounded-bl-[12px]"
@@ -429,9 +460,9 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
           </div>
 
           {/* Profile stack - adjusted padding to align with curve */}
-          <div className="pl-10 sm:pl-14">
+          <div className="pl-10 md:pl-14">
             <div className="flex items-center">
-              <div className="flex -space-x-1.5 sm:-space-x-2">
+              <div className="flex -space-x-1.5 md:-space-x-2">
                 {Array.from(new Set(events.map(e => e.user.address)))
                   .slice(0, 6)
                   .map((address, i) => {
@@ -439,7 +470,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                     return (
                       <div
                         key={address}
-                        className="relative w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center overflow-hidden"
+                        className="relative w-6 h-6 md:w-8 md:h-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center overflow-hidden"
                         style={{ zIndex: 6 - i }}
                       >
                         {event?.user.pfpUrl ? (
@@ -449,13 +480,13 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                             className="w-full h-full object-cover"
                           />
                         ) : (
-                          <User className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600" />
+                          <User className="w-3 h-3 md:w-4 md:h-4 text-gray-600" />
                         )}
                       </div>
                     );
                   })}
               </div>
-              <span className="ml-3 text-xs sm:text-sm text-gray-600 font-medium">
+              <span className={`ml-3 text-xs md:text-sm font-medium ${mobileOverlay ? 'text-white' : 'text-gray-600'}`}>
                 {new Set(events.map(e => e.user.address)).size || 0} Recently active
               </span>
             </div>

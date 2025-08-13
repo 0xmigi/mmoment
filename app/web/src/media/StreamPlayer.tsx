@@ -4,6 +4,7 @@ import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from '../anchor/setup';
 import { useCamera } from '../camera/CameraProvider';
 import { useParams } from 'react-router-dom';
 import { unifiedCameraService } from '../camera/unified-camera-service';
+import { WebRTCStreamPlayer } from './WebRTCStreamPlayer';
 
 // Simple cache for stream info to reduce API calls
 const streamInfoCache = { 
@@ -28,6 +29,7 @@ const StreamPlayer = memo(() => {
   const [error, setError] = useState<string | null>(null);
   const [isMobile] = useState(() => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
   const [loadingRetry, setLoadingRetry] = useState(0);
+  const [useWebRTC, setUseWebRTC] = useState(true); // WebRTC only for testing
   const pollInterval = useRef<NodeJS.Timeout>();
   const lastFetchTime = useRef(0);
   const isCameraOperation = useRef(false);
@@ -158,6 +160,7 @@ const StreamPlayer = memo(() => {
     };
   }, []);
 
+
   useEffect(() => {
     // Fetch stream info for all cameras using standardized API
     fetchStreamInfo();
@@ -192,7 +195,7 @@ const StreamPlayer = memo(() => {
 
   if (isLoading) {
     return (
-      <div className="aspect-video bg-gray-900 rounded-lg flex items-center justify-center">
+      <div className="aspect-[9/16] md:aspect-video bg-gray-900 rounded-lg flex items-center justify-center">
         <p className="text-gray-400">
           Loading stream...
           {isMobile && loadingRetry > 0 && (
@@ -205,7 +208,7 @@ const StreamPlayer = memo(() => {
 
   if (error) {
     return (
-      <div className="aspect-video w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
+      <div className="aspect-[9/16] md:aspect-video w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
         <div className="text-center">
           <p className="text-gray-400">Failed to load stream</p>
           {isMobile && error && (
@@ -225,12 +228,24 @@ const StreamPlayer = memo(() => {
     );
   }
 
+  // WebRTC only for testing (no fallback)
+  if (useWebRTC) {
+    return (
+      <WebRTCStreamPlayer 
+        onError={(error) => {
+          console.log('[StreamPlayer] WebRTC failed:', error);
+          // Don't fallback during testing
+        }}
+      />
+    );
+  }
+
   // Handle Livepeer streams (Pi5 cameras and Jetson cameras)
   // Show Livepeer streams if playbackId exists, regardless of isActive status
   // because Jetson streams are always available
   if (streamInfo?.playbackId) {
     return (
-      <div className="aspect-video bg-black rounded-lg overflow-hidden relative">
+      <div className="aspect-[9/16] md:aspect-video bg-black rounded-lg overflow-hidden relative">
         <Player 
           title="Camera Stream"
           playbackId={streamInfo.playbackId}
@@ -261,6 +276,14 @@ const StreamPlayer = memo(() => {
             </div>
           );
         })()}
+        <div className="absolute top-2 right-2">
+          <button
+            onClick={() => setUseWebRTC(true)}
+            className="bg-blue-500 bg-opacity-80 hover:bg-opacity-100 text-white text-xs px-2 py-1 rounded transition-all"
+          >
+            Try WebRTC
+          </button>
+        </div>
       </div>
     );
   }
@@ -268,7 +291,7 @@ const StreamPlayer = memo(() => {
   // Handle MJPEG streams (legacy - keeping for fallback)
   if (streamInfo?.streamType === 'mjpeg' && streamInfo.streamUrl) {
     return (
-      <div className="aspect-video bg-black rounded-lg overflow-hidden">
+      <div className="aspect-[9/16] md:aspect-video bg-black rounded-lg overflow-hidden">
         <img 
           src={streamInfo.streamUrl}
           alt="Camera Stream"
@@ -282,7 +305,7 @@ const StreamPlayer = memo(() => {
   // Only show "Stream is offline" if we have no playback ID and no stream URL
   if (!streamInfo?.isActive && !streamInfo?.playbackId && !streamInfo?.streamUrl) {
     return (
-      <div className="aspect-video w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
+      <div className="aspect-[9/16] md:aspect-video w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
         <div className="text-center">
           <p className="text-gray-400">Stream is offline</p>
         </div>
@@ -292,7 +315,7 @@ const StreamPlayer = memo(() => {
 
   // Fallback for unknown stream types
   return (
-    <div className="aspect-video w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
+    <div className="aspect-[9/16] md:aspect-video w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
       <div className="text-center">
         <p className="text-gray-400">Unsupported stream format</p>
       </div>

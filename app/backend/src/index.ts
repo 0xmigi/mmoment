@@ -410,6 +410,9 @@ app.post('/api/claim/cleanup', (req, res) => {
   });
 });
 
+// WebRTC signaling storage
+const webrtcPeers = new Map<string, { cameraId?: string, type: 'camera' | 'viewer' }>();
+
 // Socket connection handling
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
@@ -487,8 +490,64 @@ io.on('connection', (socket) => {
     socket.emit('recentEvents', sortedEvents);
   });
 
+  // WebRTC Signaling Events
+  socket.on('register-camera', (data: { cameraId: string }) => {
+    console.log(`Camera ${data.cameraId} registering for WebRTC on socket ${socket.id}`);
+    webrtcPeers.set(socket.id, { cameraId: data.cameraId, type: 'camera' });
+    socket.join(`webrtc-${data.cameraId}`);
+  });
+
+  socket.on('register-viewer', (data: { cameraId: string }) => {
+    console.log(`Viewer registering for WebRTC camera ${data.cameraId} on socket ${socket.id}`);
+    webrtcPeers.set(socket.id, { cameraId: data.cameraId, type: 'viewer' });
+    socket.join(`webrtc-${data.cameraId}`);
+    
+    // Notify camera that a viewer wants to connect
+    socket.to(`webrtc-${data.cameraId}`).emit('viewer-wants-connection', { viewerId: socket.id });
+  });
+
+  socket.on('webrtc-offer', (data: { cameraId: string, offer: any, targetId?: string }) => {
+    console.log(`WebRTC offer for camera ${data.cameraId}`);
+    if (data.targetId) {
+      // Direct offer to specific peer
+      socket.to(data.targetId).emit('webrtc-offer', { 
+        offer: data.offer, 
+        senderId: socket.id,
+        cameraId: data.cameraId 
+      });
+    } else {
+      // Broadcast offer to camera room
+      socket.to(`webrtc-${data.cameraId}`).emit('webrtc-offer', { 
+        offer: data.offer, 
+        senderId: socket.id,
+        cameraId: data.cameraId 
+      });
+    }
+  });
+
+  socket.on('webrtc-answer', (data: { answer: any, targetId: string, cameraId: string }) => {
+    console.log(`WebRTC answer for camera ${data.cameraId}`);
+    socket.to(data.targetId).emit('webrtc-answer', { 
+      answer: data.answer, 
+      senderId: socket.id,
+      cameraId: data.cameraId 
+    });
+  });
+
+  socket.on('webrtc-ice-candidate', (data: { candidate: any, targetId: string, cameraId: string }) => {
+    console.log(`WebRTC ICE candidate for camera ${data.cameraId}`);
+    socket.to(data.targetId).emit('webrtc-ice-candidate', { 
+      candidate: data.candidate, 
+      senderId: socket.id,
+      cameraId: data.cameraId 
+    });
+  });
+
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
+    // Clean up WebRTC peer tracking
+    webrtcPeers.delete(socket.id);
+    
     // Clean up camera room memberships
     cameraRooms.forEach((sockets, roomId) => {
       if (sockets.has(socket.id)) {

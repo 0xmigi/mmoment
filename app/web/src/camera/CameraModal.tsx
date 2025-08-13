@@ -58,7 +58,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
   const isOwner = primaryWallet?.address === camera.owner;
 
   // Check if this is a Jetson camera (has advanced features)
-  const isJetsonCamera = camera.id === CONFIG.JETSON_CAMERA_PDA || camera.model === 'jetson';
+  const isJetsonCamera = camera.id === CONFIG.JETSON_CAMERA_PDA || camera.model === 'jetson' || camera.model === 'jetson_orin_nano';
 
   // Add more frequent status updates to the parent component
   useEffect(() => {
@@ -232,7 +232,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       let count = 0;
       for (const sessionInfo of userSessionAccounts) {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           
           const session = sessionInfo.account as any;
           const sessionCameraKey = session.camera.toString();
           

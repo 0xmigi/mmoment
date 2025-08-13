@@ -11,7 +11,7 @@ interface CameraControlsProps {
 
 export function CameraControls({ onTakePicture, onRecordVideo, onToggleStream, isLoading, isStreaming }: CameraControlsProps) {
   return (
-    <div className="sm:hidden flex gap-2">
+    <div className="md:hidden flex gap-2">
       <button 
         onClick={onTakePicture}
         disabled={isLoading}

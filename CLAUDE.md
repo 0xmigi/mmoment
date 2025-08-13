@@ -189,3 +189,4 @@ Services are managed via Docker Compose with:
 - **IPFS/Pinata**: Decentralized storage for media
 - **Walrus**: Alternative storage solution
 - **Dynamic.xyz**: Wallet connection and authentication
+- Do not use any git commands unless I specifially say or you request it verbally with reasoning

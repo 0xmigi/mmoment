@@ -212,7 +212,7 @@ export class CameraRegistry {
   private createCameraInstance(entry: CameraRegistryEntry): ICamera | undefined {
     try {
       // Use PDA-based URL by default, with legacy URL as fallback
-      let apiUrl = entry.apiUrl;
+      const apiUrl = entry.apiUrl;
       const legacyUrl = entry.config?.legacyUrl;
       
       switch (entry.cameraType.toLowerCase()) {

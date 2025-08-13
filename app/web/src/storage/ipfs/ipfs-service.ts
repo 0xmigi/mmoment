@@ -170,7 +170,6 @@ export class IPFSService {
     }
     urls.push(
       `https://ipfs.io/ipfs/${ipfsHash}`,
-      `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`,
       `https://gateway.ipfs.io/ipfs/${ipfsHash}`
     );
     return urls;
