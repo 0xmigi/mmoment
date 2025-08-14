@@ -410,6 +410,25 @@ app.post('/api/claim/cleanup', (req, res) => {
   });
 });
 
+// WebRTC Status endpoint for debugging
+app.get('/api/webrtc/status', (req, res) => {
+  const peers = Array.from(webrtcPeers.entries()).map(([socketId, peer]) => ({
+    socketId,
+    ...peer
+  }));
+  
+  const cameras = peers.filter(p => p.type === 'camera');
+  const viewers = peers.filter(p => p.type === 'viewer');
+  
+  res.json({
+    totalPeers: peers.length,
+    cameras: cameras.length,
+    viewers: viewers.length,
+    activeCameras: cameras.map(c => c.cameraId),
+    peers
+  });
+});
+
 // WebRTC signaling storage
 const webrtcPeers = new Map<string, { cameraId?: string, type: 'camera' | 'viewer' }>();
 
@@ -492,9 +511,13 @@ io.on('connection', (socket) => {
 
   // WebRTC Signaling Events
   socket.on('register-camera', (data: { cameraId: string }) => {
-    console.log(`Camera ${data.cameraId} registering for WebRTC on socket ${socket.id}`);
+    console.log(`🎥 Camera ${data.cameraId} registering for WebRTC on socket ${socket.id}`);
     webrtcPeers.set(socket.id, { cameraId: data.cameraId, type: 'camera' });
     socket.join(`webrtc-${data.cameraId}`);
+    
+    // Debug room state after camera joins
+    const roomSockets = io.sockets.adapter.rooms.get(`webrtc-${data.cameraId}`);
+    console.log(`🎥 Camera joined room webrtc-${data.cameraId}, now has ${roomSockets ? roomSockets.size : 0} sockets`);
   });
 
   socket.on('register-viewer', (data: { cameraId: string }) => {
@@ -502,7 +525,12 @@ io.on('connection', (socket) => {
     webrtcPeers.set(socket.id, { cameraId: data.cameraId, type: 'viewer' });
     socket.join(`webrtc-${data.cameraId}`);
     
+    // Check how many peers are in the room
+    const roomSockets = io.sockets.adapter.rooms.get(`webrtc-${data.cameraId}`);
+    console.log(`Room webrtc-${data.cameraId} has ${roomSockets ? roomSockets.size : 0} sockets`);
+    
     // Notify camera that a viewer wants to connect
+    console.log(`Notifying camera in room webrtc-${data.cameraId} that viewer ${socket.id} wants to connect`);
     socket.to(`webrtc-${data.cameraId}`).emit('viewer-wants-connection', { viewerId: socket.id });
   });
 
