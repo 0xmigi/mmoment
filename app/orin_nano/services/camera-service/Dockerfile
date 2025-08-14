@@ -11,7 +11,7 @@ ENV REBUILD_TIMESTAMP=${REBUILD_TIMESTAMP}
 WORKDIR /app
 
 # Install additional system dependencies including FFmpeg for streaming and NetworkManager for WiFi
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive TZ=America/New_York apt-get install -y \
     curl \
     ffmpeg \
     network-manager \
@@ -30,8 +30,8 @@ COPY .env.rebuild /tmp/rebuild_marker
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies with exact versions to avoid conflicts
+RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
 # Copy application code
 COPY . .

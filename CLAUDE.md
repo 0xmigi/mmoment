@@ -63,7 +63,7 @@ python -m camera_service.main  # Start camera service
 The system uses a **three-container Docker architecture** on NVIDIA Jetson devices:
 
 ### 1. Camera Service Container (Port 5002)
-- **Primary API gateway** accessible via `jetson.mmoment.xyz`
+- **Primary API gateway** accessible via `https://[camera-pda].mmoment.xyz`
 - Computer vision processing (YOLOv8 face detection, InsightFace recognition)
 - Real-time streaming via Livepeer RTMP
 - Session management and access control
@@ -105,7 +105,7 @@ src/
 - **Primary Device**: NVIDIA Jetson Orin Nano
 - **Fallback Device**: Raspberry Pi 5
 - **Camera Access**: `/dev/video0`, `/dev/video1`, `/dev/video2`
-- **Public Access**: `jetson.mmoment.xyz` via Cloudflare tunnel
+- **Public Access**: `https://[camera-pda].mmoment.xyz` via Cloudflare tunnel (each Jetson gets unique PDA-based URL after on-chain registration)
 
 ### Streaming Integration
 - **Livepeer Network**: Hardware-accelerated RTMP streaming

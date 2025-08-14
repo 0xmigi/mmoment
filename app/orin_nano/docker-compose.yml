@@ -10,8 +10,11 @@ services:
     build:
       context: ./services/camera-service
       dockerfile: Dockerfile
-    ports:
-      - "5002:5002"
+    network_mode: host
+    # ports:
+    #   - "5002:5002"
+    #   # WebRTC media ports for ICE connectivity
+    #   - "10000-10100:10000-10100/udp"
     volumes:
       - ./data/images:/app/photos
       - ./data/videos:/app/videos  
@@ -28,8 +31,16 @@ services:
       - DISPLAY=${DISPLAY}
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,display
-      - BIOMETRIC_SECURITY_URL=http://biometric-security:5003
-      - SOLANA_MIDDLEWARE_URL=http://solana-middleware:5001
+      - BIOMETRIC_SECURITY_URL=http://172.17.0.1:5003
+      - SOLANA_MIDDLEWARE_URL=http://172.17.0.1:5001
+      # Backend connection for WebRTC signaling and device registration (now local)
+      - BACKEND_HOST=localhost
+      - BACKEND_PORT=3001
+      # WebRTC external IP for ICE candidates
+      - WEBRTC_EXTERNAL_IP=192.168.1.232
+      # Force Python to use the external IP for socket binding
+      - HOSTNAME=192.168.1.232
+      - HOST=192.168.1.232
       # Blockchain Configuration  
       - CAMERA_PROGRAM_ID=E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL
       # CAMERA_PDA will be set dynamically after device registration
@@ -38,18 +49,18 @@ services:
       - CLOUDFLARE_API_TOKEN=KZkPikyV6obPoDlxTFwtKxfrxukonzAEpzVs4JM3
       - CLOUDFLARE_ZONE_ID=a14bb2a85b1c73cab3b192854218f2fb
       - CLOUDFLARE_TUNNEL_ID=6257e873-7943-4b85-b8a3-72b5b9d0a500
-      # Livepeer Configuration (Current Active Account)
-      - LIVEPEER_API_KEY=${LIVEPEER_API_KEY}
-      - LIVEPEER_STREAM_KEY=${LIVEPEER_STREAM_KEY}
+      # Livepeer Configuration (Current Active Account - Has Credits) - HARDCODED TO PREVENT ISSUES
+      - LIVEPEER_API_KEY=eea9bcf2-ac98-4454-a3ab-b0e610a27f05
+      - LIVEPEER_STREAM_KEY=6315-9m3d-yfzn-xhf6
       - LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
-      - LIVEPEER_PLAYBACK_ID=${LIVEPEER_PLAYBACK_ID}
-      # Previous Account (Commented Out)
+      - LIVEPEER_PLAYBACK_ID=6315myh7iojrn5uk
+      # Backup Account (Commented Out)
       # - LIVEPEER_API_KEY=${LIVEPEER_API_KEY_OLD}
       # - LIVEPEER_STREAM_KEY=${LIVEPEER_STREAM_KEY_OLD}
       # - LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
-      # - LIVEPEER_PLAYBACK_ID=${LIVEPEER_PLAYBACK_ID_OLD}
-    networks:
-      - mmoment-network
+      # - LIVEPEER_PLAYBOOK_ID=${LIVEPEER_PLAYBACK_ID_OLD}
+    # networks:
+    #   - mmoment-network
     runtime: nvidia
     privileged: true
     cap_add:

@@ -142,9 +142,8 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
       setConnectionState('connecting');
       setError(null);
 
-      // Connect to signaling server (your backend)
-      // Use the same backend URL that the Jetson is using
-      const backendUrl = 'http://192.168.1.247:3001'; // Backend IP from Jetson logs
+      // Connect to signaling server (running locally on Jetson now)
+      const backendUrl = 'http://localhost:3001'; // Local backend for debugging
       console.log('[WebRTC] Connecting to backend:', backendUrl);
       
       const socket = io(backendUrl, {

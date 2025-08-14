@@ -51,6 +51,7 @@ def init_services():
     from services.capture_service import get_capture_service
     from services.session_service import get_session_service
     from services.livepeer_stream_service import LivepeerStreamService
+    from services.webrtc_service import get_webrtc_service
     
     # Try to import GPU Face service (new unified service)
     gpu_face_service = None
@@ -85,6 +86,9 @@ def init_services():
     LivepeerStreamService.reset_instance()
     livepeer_service = LivepeerStreamService()
     
+    # Get WebRTC service instance
+    webrtc_service = get_webrtc_service()
+    
     # Start the buffer service first (it's the source of truth)
     logger.info("Starting buffer service...")
     if not buffer_service.start():
@@ -118,6 +122,12 @@ def init_services():
     livepeer_service.set_services(temp_services)
     logger.info("Injected visual services into Livepeer service for overlay support")
     
+    # Initialize WebRTC service with buffer service
+    logger.info("Initializing WebRTC service...")
+    webrtc_service.set_buffer_service(buffer_service)
+    webrtc_service.start()
+    logger.info("WebRTC service started - ready for sub-second latency streaming")
+    
     # Initialize Blockchain Session Sync Service
     from services.blockchain_session_sync import get_blockchain_session_sync, reset_blockchain_session_sync
     reset_blockchain_session_sync()  # Ensure fresh instance with current environment variables
@@ -144,7 +154,8 @@ def init_services():
         'gesture': gesture_service,
         'capture': capture_service,
         'session': session_service,
-        'livepeer': livepeer_service
+        'livepeer': livepeer_service,
+        'webrtc': webrtc_service
     }
     
     # Add GPU Face service if available
@@ -245,6 +256,8 @@ def main():
     finally:
         # Shut down services
         logger.info("Stopping services...")
+        if 'webrtc' in services:
+            services['webrtc'].stop()
         if 'livepeer' in services:
             services['livepeer'].cleanup_stream()
         if 'gesture' in services:

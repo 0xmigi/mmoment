@@ -301,6 +301,7 @@ def register_routes(app):
             buffer_service = services['buffer']
             capture_service = services.get('capture')
             livepeer_service = services.get('livepeer')
+            webrtc_service = services.get('webrtc')
             
             # Get buffer/camera status
             buffer_status = buffer_service.get_status()
@@ -330,6 +331,16 @@ def register_routes(app):
                         'format': 'livepeer'
                     })
             
+            # Get WebRTC status
+            webrtc_status = {}
+            if webrtc_service:
+                webrtc_status = webrtc_service.get_status()
+            
+            # Add WebRTC to stream info if available
+            stream_formats = ['livepeer']
+            if webrtc_status.get('connected', False):
+                stream_formats.append('webrtc')
+            
             return jsonify({
                 'success': True,
                 'timestamp': int(time.time()),
@@ -342,7 +353,13 @@ def register_routes(app):
                     'recordingInfo': {
                         'isActive': is_recording,
                         'currentFilename': current_filename
-                    }
+                    },
+                    'webrtcInfo': {
+                        'available': webrtc_status.get('running', False),
+                        'connected': webrtc_status.get('connected', False),
+                        'activeConnections': webrtc_status.get('active_connections', 0)
+                    },
+                    'supportedFormats': stream_formats
                 }
             })
         except Exception as e:
@@ -429,7 +446,36 @@ def register_routes(app):
                 'error': str(e)
             }), 500
 
-
+    @app.route('/api/stream/webrtc/status', methods=['GET'])
+    def api_webrtc_status():
+        """Get WebRTC stream status"""
+        try:
+            webrtc_service = get_services().get('webrtc')
+            
+            if not webrtc_service:
+                return jsonify({
+                    'success': False,
+                    'error': 'WebRTC service not available'
+                }), 404
+            
+            status = webrtc_service.get_status()
+            
+            return jsonify({
+                'success': True,
+                'status': 'available' if status['running'] else 'stopped',
+                'running': status['running'],
+                'connected': status['connected'],
+                'camera_pda': status['camera_pda'],
+                'backend_url': status['backend_url'],
+                'active_connections': status['active_connections'],
+                'connections': status['connections']
+            })
+        except Exception as e:
+            logger.error(f"Error getting WebRTC stream status: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
 
     # Camera Actions
     @app.route('/api/capture', methods=['POST'])
