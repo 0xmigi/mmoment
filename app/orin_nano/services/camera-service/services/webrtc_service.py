@@ -43,8 +43,14 @@ class BufferVideoTrack(VideoStreamTrack):
         """
         Receive the next video frame
         """
-        logger.info(f"🎥🎥 BufferVideoTrack.recv() called - GENERATING FRAME at {time.time()}")
-        logger.info(f"🎥🎥 WEBRTC MEDIA FLOW IS ACTIVE - ICE CONNECTION IS WORKING!")
+        # Only log every 30th frame to avoid spam
+        if hasattr(self, '_frame_count'):
+            self._frame_count += 1
+        else:
+            self._frame_count = 1
+            
+        if self._frame_count % 30 == 0:
+            logger.info(f"🎥 WebRTC video track generating frame #{self._frame_count}")
         current_time = time.time()
         
         # Maintain frame rate
@@ -148,10 +154,30 @@ class WebRTCService:
         # Get external IP for WebRTC
         self.external_ip = os.environ.get('WEBRTC_EXTERNAL_IP', '192.168.1.232')
         
-        # LOCAL NETWORK WEBRTC - No STUN servers for same-network connections
+        # ENHANCED WEBRTC WITH MULTIPLE STUN/TURN SERVERS
+        from aiortc import RTCIceServer
         self.rtc_config = RTCConfiguration(
-            iceServers=[]  # Empty for local network - forces host candidates only
+            iceServers=[
+                # Multiple STUN servers for redundancy
+                RTCIceServer(urls=['stun:stun.l.google.com:19302']),
+                RTCIceServer(urls=['stun:stun1.l.google.com:19302']),
+                RTCIceServer(urls=['stun:stun.cloudflare.com:3478']),
+                # Multiple TURN servers for NAT traversal
+                RTCIceServer(
+                    urls=['turn:openrelay.metered.ca:80'],
+                    username='openrelayproject',
+                    credential='openrelayproject'
+                ),
+                RTCIceServer(
+                    urls=['turn:openrelay.metered.ca:443'],
+                    username='openrelayproject',
+                    credential='openrelayproject'
+                ),
+            ]
         )
+        
+        # Configure port range for media - use the same range as docker-compose
+        self.media_port_range = (10000, 10100)
         
         logger.info(f"WebRTC service configured with external IP: {self.external_ip}")
     
@@ -183,13 +209,17 @@ class WebRTCService:
     
     def start(self):
         """Start the WebRTC service"""
+        logger.info(f"🚀 WebRTC service start() called - buffer_service: {self.buffer_service}, running: {self.running}")
+        
         if self.running:
             logger.warning("WebRTC service already running")
             return
         
         if not self.buffer_service:
-            logger.error("Buffer service not set - cannot start WebRTC service")
+            logger.error("❌ Buffer service not set - cannot start WebRTC service")
             return False
+        
+        logger.info("✅ Starting WebRTC service with buffer service")
         
         self.running = True
         
@@ -254,6 +284,8 @@ class WebRTCService:
         @self.sio.event
         async def connect():
             logger.info("🔗 Connected to signaling server - Socket.IO connected successfully")
+            # Clean up any leftover socat processes from previous runs
+            await self._cleanup_all_socat_processes()
         
         @self.sio.event
         async def disconnect():
@@ -400,10 +432,9 @@ class WebRTCService:
         logger.info(f"CRITICAL: Starting _create_peer_connection_and_offer for viewer {viewer_id}")
         
         try:
-            # FORCE IMMEDIATE CONNECTION - skip ICE negotiation bullshit
+            # Create peer connection with standard configuration
             pc = RTCPeerConnection(configuration=self.rtc_config)
-            
-            # Note: ICE configuration is handled by RTCConfiguration and SDP IP replacement
+            logger.info(f"🔍 Created peer connection with standard configuration")
             
             self.connections[viewer_id] = pc
             logger.info(f"CRITICAL: Created RTCPeerConnection for viewer {viewer_id} with external IP {self.external_ip}")
@@ -416,6 +447,10 @@ class WebRTCService:
             video_track = BufferVideoTrack(self.buffer_service)
             pc.addTrack(video_track)
             logger.info(f"CRITICAL: Added video track to peer connection for viewer {viewer_id}")
+            
+            # ENHANCED: Set up dynamic port discovery and redirection
+            self._setup_port_redirection_for_viewer(pc, viewer_id)
+            
         except Exception as e:
             logger.error(f"CRITICAL: Failed to create peer connection: {e}")
             import traceback
@@ -429,10 +464,14 @@ class WebRTCService:
             if pc.connectionState == "connected":
                 logger.info(f"🎉 WEBRTC CONNECTION ESTABLISHED with viewer {viewer_id}")
             elif pc.connectionState == "failed":
-                # Clean up failed connection
+                # Clean up failed connection and port redirections
+                await self._cleanup_viewer_redirections(viewer_id)
                 if viewer_id in self.connections:
                     del self.connections[viewer_id]
                     logger.warning(f"❌ Removed failed connection for viewer {viewer_id}")
+            elif pc.connectionState == "closed":
+                # Clean up closed connection and port redirections
+                await self._cleanup_viewer_redirections(viewer_id)
         
         @pc.on("iceconnectionstatechange")
         async def on_iceconnectionstatechange():
@@ -455,10 +494,12 @@ class WebRTCService:
                 # Check if we have any candidates
                 candidates_sent = hasattr(pc, '_candidates_sent') and pc._candidates_sent > 0
                 if not candidates_sent:
-                    logger.warning(f"🚨 No ICE candidates were sent! Sending manual host candidate as backup")
+                    logger.warning(f"🚨 No ICE candidates were sent! Sending manual candidate for redirected port")
+                    
+                    # Send manual candidate for our redirected port 10000
                     manual_candidate = {
                         'candidate': {
-                            'candidate': f"candidate:1 1 UDP 2130706431 {self.external_ip} 9 typ host",
+                            'candidate': f"candidate:1 1 UDP 2130706431 {self.external_ip} 10000 typ host",
                             'sdpMid': '0',
                             'sdpMLineIndex': 0
                         },
@@ -466,7 +507,7 @@ class WebRTCService:
                         'cameraId': self.camera_pda
                     }
                     await self.sio.emit('webrtc-ice-candidate', manual_candidate)
-                    logger.info(f"🧊 Sent manual ICE candidate to viewer {viewer_id}: {manual_candidate}")
+                    logger.info(f"🧊 Sent manual ICE candidate for redirected port 10000 to viewer {viewer_id}: {manual_candidate}")
                     pc._candidates_sent = getattr(pc, '_candidates_sent', 0) + 1
         
         @pc.on("icecandidate")
@@ -475,21 +516,29 @@ class WebRTCService:
                 # Track candidates being sent
                 pc._candidates_sent = getattr(pc, '_candidates_sent', 0) + 1
                 
-                # Fix ICE candidate IP to use external IP instead of internal IP
+                # Log full candidate details for debugging
                 candidate_ip = candidate.ip
-                if candidate.ip.startswith('192.168.') or candidate.ip.startswith('10.') or candidate.ip.startswith('172.'):
-                    candidate_ip = self.external_ip
-                    logger.info(f"🧊 Fixed ICE candidate IP from {candidate.ip} to {candidate_ip}")
+                logger.info(f"🧊 ICE candidate generated - IP: {candidate_ip}, Port: {candidate.port}, Type: {candidate.type}, Protocol: {candidate.protocol}")
                 
+                # CRITICAL: Check for Docker-internal IPs
+                if candidate_ip.startswith('172.17.') or candidate_ip.startswith('172.18.'):
+                    logger.warning(f"🚨 Docker-internal IP detected in ICE candidate: {candidate_ip}")
+                    # Force external IP for Docker-internal candidates
+                    candidate_ip = self.external_ip
+                    logger.info(f"🧊 Replaced Docker IP with external IP: {candidate_ip}")
+                
+                # CRITICAL: Replace aiortc's actual port with our redirected port 10000
+                redirected_port = 10000
                 candidate_data = {
                     'candidate': {
-                        'candidate': f"candidate:{candidate.foundation} {candidate.component} {candidate.protocol.upper()} {candidate.priority} {candidate_ip} {candidate.port} typ {candidate.type}",
+                        'candidate': f"candidate:{candidate.foundation} {candidate.component} {candidate.protocol.upper()} {candidate.priority} {candidate_ip} {redirected_port} typ {candidate.type}",
                         'sdpMid': candidate.sdpMid,
                         'sdpMLineIndex': candidate.sdpMLineIndex
                     },
                     'targetId': viewer_id,
                     'cameraId': self.camera_pda
                 }
+                logger.info(f"🧊 Redirected ICE candidate: actual port {candidate.port} → advertised port {redirected_port}")
                 await self.sio.emit('webrtc-ice-candidate', candidate_data)
                 logger.info(f"🧊 Sent ICE candidate #{pc._candidates_sent} to viewer {viewer_id}: {candidate_data}")
         
@@ -504,14 +553,66 @@ class WebRTCService:
             await pc.setLocalDescription(offer)
             logger.info(f"CRITICAL: Set local description for viewer {viewer_id}")
             
-            # Fix SDP to use external IP instead of 0.0.0.0
+            # Log the original SDP for debugging
+            logger.info(f"🔍 ORIGINAL SDP: {offer.sdp[:500]}...")
+            
+            # Fix SDP to use external IP and proper media ports
             fixed_sdp = offer.sdp.replace('c=IN IP4 0.0.0.0', f'c=IN IP4 {self.external_ip}')
             fixed_sdp = fixed_sdp.replace('o=- ', f'o=- ').replace(' IN IP4 0.0.0.0\r\n', f' IN IP4 {self.external_ip}\r\n')
             
-            if fixed_sdp != offer.sdp:
-                logger.info(f"CRITICAL: Fixed SDP for viewer {viewer_id} - replaced 0.0.0.0 with {self.external_ip}")
+            # CRITICAL FIX: Find what port aiortc actually bound to and use that
+            import re
+            actual_rtp_port = None
+            actual_rtcp_port = None
+            
+            # Try to extract actual bound ports from aiortc
+            try:
+                # Check if we can get the actual bound port from aiortc internals
+                if hasattr(pc, '_sctp') and hasattr(pc._sctp, '_transport'):
+                    dtls_transport = pc._sctp._transport
+                    if hasattr(dtls_transport, '_transport'):
+                        ice_transport = dtls_transport._transport
+                        if hasattr(ice_transport, '_connection') and hasattr(ice_transport._connection, '_local_address'):
+                            local_addr = ice_transport._connection._local_address
+                            if local_addr and len(local_addr) > 1:
+                                actual_rtp_port = local_addr[1]
+                                actual_rtcp_port = actual_rtp_port + 1
+                                logger.info(f"🔍 Found aiortc actual bound port: {actual_rtp_port}")
+            except Exception as e:
+                logger.warning(f"Could not extract actual aiortc port: {e}")
+            
+            # Use the actual port if detected, otherwise use our target range
+            if actual_rtp_port:
+                target_rtp_port = actual_rtp_port
+                target_rtcp_port = actual_rtcp_port
+                logger.info(f"🔍 Using detected aiortc port: {target_rtp_port}")
             else:
-                logger.warning(f"CRITICAL: No IP replacement needed in SDP for viewer {viewer_id}")
+                # Default to 10000 range for SDP but let aiortc choose actual port
+                target_rtp_port = 10000
+                target_rtcp_port = 10001
+                logger.info(f"🔍 Using default ports in SDP: {target_rtp_port}/{target_rtcp_port}")
+            
+            # CRITICAL: Force SDP to advertise our redirected ports (10000/10001)
+            target_rtp_port = 10000
+            target_rtcp_port = 10001
+            
+            logger.info(f"🔍 BEFORE SDP fix - original SDP: {fixed_sdp[:300]}...")
+            
+            # Replace any m=video port with our redirected port
+            fixed_sdp = re.sub(r'm=video \d+', f'm=video {target_rtp_port}', fixed_sdp)
+            fixed_sdp = re.sub(r'a=rtcp:\d+', f'a=rtcp:{target_rtcp_port}', fixed_sdp)
+            
+            # Also handle RTCP with IP address format
+            fixed_sdp = re.sub(r'a=rtcp:\d+ IN IP4 ([^\r\n]+)', f'a=rtcp:{target_rtcp_port} IN IP4 \\1', fixed_sdp)
+            
+            logger.info(f"🔍 AFTER SDP fix - modified SDP: {fixed_sdp[:300]}...")
+            logger.info(f"🔍 SDP now advertises RTP port {target_rtp_port}, RTCP port {target_rtcp_port}")
+            logger.info(f"🔍 Traffic will be redirected by socat to actual aiortc ports")
+            
+            if fixed_sdp != offer.sdp:
+                logger.info(f"CRITICAL: Fixed SDP for viewer {viewer_id} - replaced IPs and ports")
+            else:
+                logger.warning(f"CRITICAL: No major SDP changes needed for viewer {viewer_id}")
             
             # Send offer to viewer via signaling server
             offer_data = {
@@ -527,45 +628,47 @@ class WebRTCService:
             await self.sio.emit('webrtc-offer', offer_data)
             logger.info(f"CRITICAL: Successfully sent WebRTC offer to viewer {viewer_id}")
             
-            # NUCLEAR OPTION - SKIP ICE COMPLETELY AND START VIDEO IMMEDIATELY
-            logger.info(f"🚨 NUCLEAR OPTION: Starting video track IMMEDIATELY without waiting for ICE")
+            # Wait for ICE connection with timeout
+            logger.info(f"🧊 Waiting for ICE connection establishment...")
             
-            # Give ICE 2 seconds max, then start video anyway
-            async def start_video_after_delay():
-                await asyncio.sleep(2.0)
-                logger.info(f"💥 FORCING VIDEO START - fuck ICE negotiation")
+            async def monitor_ice_connection():
+                ice_timeout = 10.0  # 10 second timeout for ICE
+                start_time = time.time()
                 
-                # Manually trigger video track recv() to start generating frames
-                if viewer_id in self.connections:
-                    video_track = None
-                    for transceiver in pc.getTransceivers():
-                        if transceiver.sender and transceiver.sender.track:
-                            video_track = transceiver.sender.track
-                            break
-                    
-                    if video_track:
-                        logger.info(f"🎥 FOUND VIDEO TRACK - manually starting frame generation")
-                        try:
-                            # Start a background task to continuously generate frames
-                            asyncio.create_task(self._force_video_generation(video_track))
-                        except Exception as e:
-                            logger.error(f"Failed to start forced video generation: {e}")
+                while time.time() - start_time < ice_timeout:
+                    if viewer_id not in self.connections:
+                        logger.warning(f"Viewer {viewer_id} connection removed during ICE wait")
+                        return
+                        
+                    if pc.iceConnectionState == "connected":
+                        logger.info(f"🎉 ICE connection established for viewer {viewer_id} after {time.time() - start_time:.2f}s")
+                        return
+                    elif pc.iceConnectionState == "failed":
+                        logger.error(f"❌ ICE connection failed for viewer {viewer_id} after {time.time() - start_time:.2f}s")
+                        return
+                        
+                    await asyncio.sleep(0.5)
+                
+                # ICE timeout - log detailed state
+                logger.warning(f"⏰ ICE connection timeout after {ice_timeout}s for viewer {viewer_id}")
+                logger.warning(f"⏰ Final states - ICE: {pc.iceConnectionState}, Connection: {pc.connectionState}")
+                logger.warning(f"⏰ ICE Gathering: {pc.iceGatheringState}, Signaling: {pc.signalingState}")
             
-            # Start the delayed video generation
-            asyncio.create_task(start_video_after_delay())
+            # Start ICE monitoring
+            asyncio.create_task(monitor_ice_connection())
             
-            # Still send ONE simple host candidate for completeness
-            simple_candidate = {
+            # Send single host candidate for our redirected port 10000
+            single_candidate = {
                 'candidate': {
-                    'candidate': f"candidate:1 1 UDP 2130706431 {self.external_ip} 9 typ host",
+                    'candidate': f"candidate:1 1 UDP 2130706431 {self.external_ip} 10000 typ host",
                     'sdpMid': '0',
                     'sdpMLineIndex': 0
                 },
                 'targetId': viewer_id,
                 'cameraId': self.camera_pda
             }
-            await self.sio.emit('webrtc-ice-candidate', simple_candidate)
-            logger.info(f"🧊 Sent single host candidate: {simple_candidate['candidate']['candidate']}")
+            await self.sio.emit('webrtc-ice-candidate', single_candidate)
+            logger.info(f"🧊 Sent single host candidate for redirected port 10000: {single_candidate['candidate']['candidate']}")
             
         except Exception as e:
             logger.error(f"CRITICAL: Failed to create WebRTC offer for viewer {viewer_id}: {e}")
@@ -575,24 +678,297 @@ class WebRTCService:
             if viewer_id in self.connections:
                 del self.connections[viewer_id]
     
-    async def _force_video_generation(self, video_track):
-        """Bypass ICE and manually trigger video frame generation"""
-        logger.info(f"🎥 FORCE VIDEO GENERATION STARTED")
+    def _setup_port_redirection_for_viewer(self, pc, viewer_id):
+        """Set up dynamic port redirection after ICE gathering is complete"""
+        logger.info(f"🔄 Setting up port redirection monitoring for viewer {viewer_id}")
         
+        @pc.on("icegatheringstatechange")
+        async def on_ice_gathering_for_redirection():
+            logger.info(f"🔍 Port redirection handler - ICE gathering state for viewer {viewer_id}: {pc.iceGatheringState}")
+            if pc.iceGatheringState == "complete":
+                logger.info(f"🔍 ICE gathering complete for viewer {viewer_id}, discovering actual ports...")
+                await self._discover_and_redirect_ports(viewer_id)
+                
+        # NOTE: Disabled aggressive health monitoring as it was too strict
+        # asyncio.create_task(self._monitor_connection_health(viewer_id))
+    
+    async def _discover_and_redirect_ports(self, viewer_id):
+        """Discover what ports aiortc actually bound to and set up redirection"""
         try:
-            for i in range(100):  # Generate 100 frames over ~3 seconds
-                logger.info(f"🎥 MANUAL FRAME #{i+1} - BYPASSING ICE")
-                
-                # Manually call recv() on the video track to force frame generation
-                frame = await video_track.recv()
-                logger.info(f"🎥 SUCCESS: Generated frame {i+1}")
-                
-                await asyncio.sleep(0.033)  # ~30 fps
+            # Read current UDP bindings to find aiortc ports
+            with open('/proc/net/udp', 'r') as f:
+                udp_data = f.readlines()
+            
+            # Find recently bound high ports (likely aiortc)
+            current_ports = []
+            for line in udp_data[1:]:  # Skip header
+                parts = line.split()
+                if len(parts) >= 2:
+                    local_address = parts[1]
+                    if ':' in local_address:
+                        port_hex = local_address.split(':')[1]
+                        port_dec = int(port_hex, 16)
+                        # Look for ports in aiortc's typical range
+                        if port_dec >= 30000:
+                            current_ports.append(port_dec)
+            
+            if not current_ports:
+                logger.warning(f"No high ports found for viewer {viewer_id}")
+                return
+            
+            # Select the two most recently bound ports (likely RTP/RTCP pair)
+            current_ports.sort(reverse=True)  # Most recent first
+            aiortc_rtp_port = current_ports[0] if len(current_ports) > 0 else None
+            aiortc_rtcp_port = current_ports[1] if len(current_ports) > 1 else None
+            
+            if aiortc_rtp_port:
+                logger.info(f"🔍 Detected aiortc RTP port: {aiortc_rtp_port}")
+                # Set up socat redirection from 10000 to actual aiortc port
+                await self._setup_port_redirect(10000, aiortc_rtp_port, viewer_id)
+            
+            if aiortc_rtcp_port:
+                logger.info(f"🔍 Detected aiortc RTCP port: {aiortc_rtcp_port}")
+                # Set up socat redirection from 10001 to actual aiortc port
+                await self._setup_port_redirect(10001, aiortc_rtcp_port, viewer_id)
                 
         except Exception as e:
-            logger.error(f"Force video generation failed: {e}")
+            logger.error(f"Failed to discover aiortc ports for viewer {viewer_id}: {e}")
+    
+    async def _setup_port_redirect(self, advertised_port, actual_port, viewer_id):
+        """Set up socat to redirect traffic from advertised_port to actual_port"""
+        import subprocess
+        try:
+            # Kill any existing socat process for this advertised port
+            subprocess.run(['pkill', '-f', f'socat.*UDP-LISTEN:{advertised_port}'], 
+                         capture_output=True, check=False)
+            
+            # Find what IP the aiortc port is actually bound to
+            target_ip = "127.0.0.1"  # Default
+            try:
+                result = subprocess.run(['netstat', '-uln'], capture_output=True, text=True)
+                for line in result.stdout.split('\n'):
+                    if f':{actual_port}' in line:
+                        parts = line.split()
+                        if len(parts) >= 4:
+                            bind_address = parts[3]
+                            if ':' in bind_address:
+                                ip_part = bind_address.split(':')[0]
+                                if ip_part == '0.0.0.0':
+                                    target_ip = "127.0.0.1"  # Use localhost for 0.0.0.0
+                                elif ip_part.startswith('172.17.'):
+                                    target_ip = ip_part  # Use Docker IP directly
+                                else:
+                                    target_ip = ip_part
+                                logger.info(f"🔍 Found aiortc port {actual_port} bound to {ip_part}, using {target_ip}")
+                                break
+            except Exception as e:
+                logger.warning(f"Could not detect aiortc binding IP for port {actual_port}: {e}")
+            
+            # Start socat to redirect UDP traffic
+            cmd = [
+                'socat', 
+                f'UDP-LISTEN:{advertised_port},bind=0.0.0.0,reuseaddr,fork',
+                f'UDP-CONNECT:{target_ip}:{actual_port}'
+            ]
+            
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            logger.info(f"🔀 Started port redirection: {advertised_port} → {target_ip}:{actual_port} for viewer {viewer_id}")
+            logger.info(f"🔀 Socat command: {' '.join(cmd)}")
+            
+            # Store the process so we can clean it up later
+            if not hasattr(self, '_port_redirects'):
+                self._port_redirects = {}
+            self._port_redirects[f"{viewer_id}_{advertised_port}"] = process
+            
+        except Exception as e:
+            logger.error(f"Failed to set up port redirect {advertised_port}→{actual_port}: {e}")
+
+    async def _cleanup_viewer_redirections(self, viewer_id):
+        """Clean up port redirections for a specific viewer"""
+        if hasattr(self, '_port_redirects'):
+            keys_to_remove = []
+            for key, process in self._port_redirects.items():
+                if key.startswith(f"{viewer_id}_"):
+                    try:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=2)  # Wait for clean termination
+                        except:
+                            process.kill()  # Force kill if needed
+                        logger.info(f"🧹 Cleaned up port redirection: {key}")
+                    except Exception as e:
+                        logger.warning(f"Error cleaning up redirection {key}: {e}")
+                    keys_to_remove.append(key)
+            
+            for key in keys_to_remove:
+                del self._port_redirects[key]
+                
+    async def _monitor_connection_health(self, viewer_id):
+        """Monitor WebRTC connection health and handle timeouts"""
+        try:
+            # Wait for ICE to complete (with timeout)
+            timeout = 15.0  # Increased from 10s to 15s
+            start_time = asyncio.get_event_loop().time()
+            
+            while True:
+                if viewer_id not in self.connections:
+                    logger.info(f"❌ Connection {viewer_id} no longer exists, stopping health monitor")
+                    return
+                    
+                pc = self.connections[viewer_id]
+                current_time = asyncio.get_event_loop().time()
+                
+                # Check ICE connection state
+                ice_state = pc.iceConnectionState
+                connection_state = pc.connectionState
+                
+                if ice_state in ['connected', 'completed']:
+                    logger.info(f"✅ ICE connection successful for viewer {viewer_id} after {current_time - start_time:.1f}s")
+                    return
+                    
+                if ice_state in ['failed', 'disconnected']:
+                    logger.warning(f"❌ ICE connection failed for viewer {viewer_id}: {ice_state}")
+                    await self._handle_connection_failure(viewer_id)
+                    return
+                    
+                if connection_state in ['failed', 'closed']:
+                    logger.warning(f"❌ Peer connection failed for viewer {viewer_id}: {connection_state}")
+                    await self._handle_connection_failure(viewer_id)
+                    return
+                    
+                if current_time - start_time > timeout:
+                    logger.warning(f"⏰ ICE connection timeout after {timeout}s for viewer {viewer_id}")
+                    logger.warning(f"⏰ Final states - ICE: {ice_state}, Connection: {connection_state}")
+                    logger.warning(f"⏰ ICE Gathering: {pc.iceGatheringState}, Signaling: {pc.signalingState}")
+                    await self._handle_connection_timeout(viewer_id)
+                    return
+                
+                await asyncio.sleep(1)  # Check every second
+                
+        except Exception as e:
+            logger.error(f"❌ Error monitoring connection health for {viewer_id}: {e}")
+            
+    async def _handle_connection_failure(self, viewer_id):
+        """Handle WebRTC connection failure"""
+        try:
+            logger.warning(f"🔄 Handling connection failure for viewer {viewer_id}")
+            
+            # Clean up the failed connection
+            await self._cleanup_viewer_connection(viewer_id)
+            
+            # Notify frontend about the failure
+            try:
+                await self.sio.emit('webrtc-connection-failed', {
+                    'viewerId': viewer_id,
+                    'reason': 'Connection failed - please try refreshing'
+                })
+            except Exception as e:
+                logger.error(f"Failed to notify frontend of connection failure: {e}")
+                
+        except Exception as e:
+            logger.error(f"Error handling connection failure for {viewer_id}: {e}")
+            
+    async def _handle_connection_timeout(self, viewer_id):
+        """Handle ICE connection timeout"""
+        try:
+            logger.warning(f"🔄 Handling connection timeout for viewer {viewer_id}")
+            
+            # Try restarting the connection once
+            if not hasattr(self, '_restart_attempts'):
+                self._restart_attempts = {}
+                
+            attempts = self._restart_attempts.get(viewer_id, 0)
+            if attempts < 1:  # Only try once
+                self._restart_attempts[viewer_id] = attempts + 1
+                logger.info(f"🔄 Attempting connection restart for viewer {viewer_id} (attempt {attempts + 1})")
+                
+                # Clean up current connection
+                await self._cleanup_viewer_connection(viewer_id)
+                
+                # Wait a moment
+                await asyncio.sleep(2)
+                
+                # Restart the connection
+                await self._create_peer_connection_and_offer(viewer_id)
+            else:
+                logger.warning(f"❌ Giving up on viewer {viewer_id} after {attempts} restart attempts")
+                await self._cleanup_viewer_connection(viewer_id)
+                
+                # Notify frontend about the timeout
+                try:
+                    await self.sio.emit('webrtc-connection-timeout', {
+                        'viewerId': viewer_id,
+                        'reason': 'Connection timed out - please refresh and try again'
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to notify frontend of timeout: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Error handling connection timeout for {viewer_id}: {e}")
+            
+    async def _cleanup_viewer_connection(self, viewer_id):
+        """Clean up all resources for a viewer connection"""
+        try:
+            # Close peer connection
+            if viewer_id in self.connections:
+                try:
+                    await self.connections[viewer_id].close()
+                except Exception as e:
+                    logger.warning(f"Error closing peer connection for {viewer_id}: {e}")
+                del self.connections[viewer_id]
+                
+            # Clean up port redirections
+            await self._cleanup_viewer_redirections(viewer_id)
+            
+            # Clean up restart attempts
+            if hasattr(self, '_restart_attempts') and viewer_id in self._restart_attempts:
+                del self._restart_attempts[viewer_id]
+                
+            logger.info(f"🧹 Cleaned up all resources for viewer {viewer_id}")
+            
+        except Exception as e:
+            logger.error(f"Error during viewer cleanup for {viewer_id}: {e}")
+            
+    async def _cleanup_all_socat_processes(self):
+        """Clean up all existing socat processes on startup"""
+        import subprocess
+        try:
+            # Kill all socat processes that might be left from previous runs
+            result = subprocess.run(['pkill', '-f', 'UDP-LISTEN:10000'], capture_output=True, check=False)
+            result = subprocess.run(['pkill', '-f', 'UDP-LISTEN:10001'], capture_output=True, check=False)
+            
+            # Wait for processes to terminate
+            await asyncio.sleep(1)
+            
+            logger.info("🧹 Cleaned up all existing socat processes on startup")
+            
+        except Exception as e:
+            logger.warning(f"Error cleaning up socat processes on startup: {e}")
+
+    async def handle_webrtc_answer(self, data):
+        """Handle WebRTC answer from client"""
+        try:
+            viewer_id = data.get('viewerId') or data.get('targetId')
+            answer_data = data.get('answer')
+            
+            if not viewer_id or not answer_data:
+                logger.error(f"Invalid answer data: {data}")
+                return
+            
+            if viewer_id not in self.connections:
+                logger.error(f"No peer connection found for viewer {viewer_id}")
+                return
+                
+            pc = self.connections[viewer_id]
+            answer = RTCSessionDescription(sdp=answer_data['sdp'], type=answer_data['type'])
+            
+            await pc.setRemoteDescription(answer)
+            logger.info(f"✅ Set remote description (answer) for viewer {viewer_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to handle WebRTC answer: {e}")
             import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"Answer handling traceback: {traceback.format_exc()}")
     
     def stop(self):
         """Stop the WebRTC service"""

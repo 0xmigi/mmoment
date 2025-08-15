@@ -11,10 +11,7 @@ services:
       context: ./services/camera-service
       dockerfile: Dockerfile
     network_mode: host
-    # ports:
-    #   - "5002:5002"
-    #   # WebRTC media ports for ICE connectivity
-    #   - "10000-10100:10000-10100/udp"
+    # Note: ports not needed with host networking - container uses host's network directly
     volumes:
       - ./data/images:/app/photos
       - ./data/videos:/app/videos  
