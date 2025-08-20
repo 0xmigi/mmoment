@@ -153,3 +153,39 @@ app/orin_nano/camera_service_new/test_results/
 # Temporary files
 *.tmp
 .DS_Store
+
+# Debug and test files
+debug-*.js
+test-*.html
+test-*.js
+*-test.js
+test-wallet.json
+
+# Log files
+*.log
+
+# Temporary shell scripts
+restart_*.sh
+start-*.sh
+setup_*.sh
+convert-*.js
+
+# Build directories
+dist/
+build/
+target/
+
+# Dependencies
+node_modules/
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local

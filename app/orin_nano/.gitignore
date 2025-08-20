@@ -4,51 +4,57 @@ __pycache__/
 *$py.class
 *.so
 .Python
-.env
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
+dist/
+build/
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
 # Logs
 *.log
 logs/
 
-# Model files (large binary files)
-camera_service/models/*.caffemodel
-camera_service/models/*.t7
-camera_service/models/*.pb
-
-# Data directories
-data/videos/*
+# Local data and media
 data/images/*
-data/faces/*
-data/face_embeddings/*
+data/videos/*
 data/recordings/*
-!data/videos/.gitkeep
-!data/images/.gitkeep
-!data/faces/.gitkeep
-!data/face_embeddings/.gitkeep
-!data/recordings/.gitkeep
+data/face_embeddings/*
+data/faces/*
+data/*.json
+data/*.key
+!data/.gitkeep
 
-# Credentials
-*.json
-*.pem
-*.key
+# Device specific
+data/device/*
+!data/device/.gitkeep
+data/config/device_config.json
 
 # Temporary files
 *.tmp
-.DS_Store *.log
-logs/
+*.bak
+.DS_Store
+
+# Model files (downloaded at runtime)
+*.pt
+*.pth
+*.onnx
+
+# Test files
+test_*.py
+*_test.py
+*.test.*
+
+# Environment variables
+.env
+.env.local
+setup_env_vars.sh

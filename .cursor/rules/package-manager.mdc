@@ -1,6 +1,0 @@
----
-description: 
-globs: 
-alwaysApply: true
----
-use yarn for all possible package management

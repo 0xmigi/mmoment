@@ -12,6 +12,17 @@ import logging
 import argparse
 import threading
 from pathlib import Path
+
+# Use environment-configured RTP ports from docker-compose (respects external configuration)
+# Only set defaults if not already configured - use range that includes our target ports
+if 'AIORTC_RTP_MIN_PORT' not in os.environ:
+    os.environ['AIORTC_RTP_MIN_PORT'] = '10000'
+if 'AIORTC_RTP_MAX_PORT' not in os.environ:
+    os.environ['AIORTC_RTP_MAX_PORT'] = '10100'
+
+logger = logging.getLogger('CameraService')
+logger.info(f"Using RTP port range: {os.environ.get('AIORTC_RTP_MIN_PORT')}-{os.environ.get('AIORTC_RTP_MAX_PORT')}")
+
 from flask import Flask, jsonify
 from flask_cors import CORS
 
@@ -24,8 +35,6 @@ logging.basicConfig(
         logging.FileHandler(os.path.expanduser('~/mmoment/app/orin_nano/camera_service/logs/camera_service.log'))
     ]
 )
-
-logger = logging.getLogger('CameraService')
 
 # Create required directories
 def create_directories():
@@ -123,10 +132,21 @@ def init_services():
     logger.info("Injected visual services into Livepeer service for overlay support")
     
     # Initialize WebRTC service with buffer service
-    logger.info("Initializing WebRTC service...")
+    logger.info("🚀 Initializing WebRTC service...")
+    logger.info(f"🔧 Setting buffer service for WebRTC: {buffer_service}")
     webrtc_service.set_buffer_service(buffer_service)
-    webrtc_service.start()
-    logger.info("WebRTC service started - ready for sub-second latency streaming")
+    
+    logger.info("🚀 Starting WebRTC service...")
+    webrtc_start_result = webrtc_service.start()
+    if webrtc_start_result:
+        logger.info("✅ WebRTC service started successfully - ready for sub-second latency streaming")
+    else:
+        logger.error("❌ CRITICAL: WebRTC service failed to start!")
+        logger.error("❌ This will prevent real-time video streaming functionality")
+        # Don't exit - let other services continue, but log the failure
+    
+    # Give WebRTC service time to initialize async components
+    time.sleep(2)
     
     # Initialize Blockchain Session Sync Service
     from services.blockchain_session_sync import get_blockchain_session_sync, reset_blockchain_session_sync

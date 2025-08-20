@@ -18,6 +18,20 @@ from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack, R
 from aiortc.contrib.media import MediaPlayer
 import asyncio
 import queue
+
+# FORCE aiortc to recognize correct network interface for ICE candidates
+import aioice
+_original_get_host_addresses = aioice.ice.get_host_addresses
+
+def _force_jetson_interface(use_ipv4=True, use_ipv6=False):
+    """Force aiortc to use Jetson's actual IP instead of 0.0.0.0"""
+    jetson_ip = '192.168.1.232'  # Force use of actual Jetson IP
+    if use_ipv4:
+        return [jetson_ip]
+    return []
+
+# Patch aiortc's interface discovery
+aioice.ice.get_host_addresses = _force_jetson_interface
 from av import VideoFrame
 
 logger = logging.getLogger("WebRTCService")
@@ -58,8 +72,8 @@ class BufferVideoTrack(VideoStreamTrack):
             await asyncio.sleep(self.frame_interval - (current_time - self.last_frame_time))
         
         try:
-            # Get frame from buffer service
-            frame_data = self.buffer_service.get_frame()
+            # Get processed frame from buffer service (includes face detection overlays)
+            frame_data = self.buffer_service.get_processed_frame()
             
             # Handle different return formats from buffer service
             if isinstance(frame_data, tuple) and len(frame_data) > 0:
@@ -284,8 +298,8 @@ class WebRTCService:
         @self.sio.event
         async def connect():
             logger.info("🔗 Connected to signaling server - Socket.IO connected successfully")
-            # Clean up any leftover socat processes from previous runs
-            await self._cleanup_all_socat_processes()
+            # MINIMAL WebRTC: No port redirection needed
+            logger.info("🚀 MINIMAL WebRTC: Starting with natural port bindings (no socat)")
         
         @self.sio.event
         async def disconnect():
@@ -448,8 +462,8 @@ class WebRTCService:
             pc.addTrack(video_track)
             logger.info(f"CRITICAL: Added video track to peer connection for viewer {viewer_id}")
             
-            # ENHANCED: Set up dynamic port discovery and redirection
-            self._setup_port_redirection_for_viewer(pc, viewer_id)
+            # MINIMAL APPROACH: No port redirection - let aiortc handle ports naturally
+            logger.info(f"🧊 MINIMAL WebRTC: Using aiortc's natural port binding for viewer {viewer_id}")
             
         except Exception as e:
             logger.error(f"CRITICAL: Failed to create peer connection: {e}")
@@ -464,14 +478,14 @@ class WebRTCService:
             if pc.connectionState == "connected":
                 logger.info(f"🎉 WEBRTC CONNECTION ESTABLISHED with viewer {viewer_id}")
             elif pc.connectionState == "failed":
-                # Clean up failed connection and port redirections
-                await self._cleanup_viewer_redirections(viewer_id)
+                # Clean up failed connection
+                logger.info(f"🧹 Cleaning up failed connection for viewer {viewer_id}")
                 if viewer_id in self.connections:
                     del self.connections[viewer_id]
                     logger.warning(f"❌ Removed failed connection for viewer {viewer_id}")
             elif pc.connectionState == "closed":
-                # Clean up closed connection and port redirections
-                await self._cleanup_viewer_redirections(viewer_id)
+                # Clean up closed connection
+                logger.info(f"🧹 Cleaning up closed connection for viewer {viewer_id}")
         
         @pc.on("iceconnectionstatechange")
         async def on_iceconnectionstatechange():
@@ -491,24 +505,8 @@ class WebRTCService:
             if pc.iceGatheringState == "complete":
                 logger.info(f"🧊 ICE gathering complete for viewer {viewer_id} - should have sent candidates")
                 
-                # Check if we have any candidates
-                candidates_sent = hasattr(pc, '_candidates_sent') and pc._candidates_sent > 0
-                if not candidates_sent:
-                    logger.warning(f"🚨 No ICE candidates were sent! Sending manual candidate for redirected port")
-                    
-                    # Send manual candidate for our redirected port 10000
-                    manual_candidate = {
-                        'candidate': {
-                            'candidate': f"candidate:1 1 UDP 2130706431 {self.external_ip} 10000 typ host",
-                            'sdpMid': '0',
-                            'sdpMLineIndex': 0
-                        },
-                        'targetId': viewer_id,
-                        'cameraId': self.camera_pda
-                    }
-                    await self.sio.emit('webrtc-ice-candidate', manual_candidate)
-                    logger.info(f"🧊 Sent manual ICE candidate for redirected port 10000 to viewer {viewer_id}: {manual_candidate}")
-                    pc._candidates_sent = getattr(pc, '_candidates_sent', 0) + 1
+                # SIMPLE APPROACH: Let aiortc handle ICE candidates naturally
+                logger.info(f"🧊 SIMPLE WebRTC: Relying on aiortc's natural ICE candidate generation")
         
         @pc.on("icecandidate")
         async def on_icecandidate(candidate):
@@ -519,28 +517,38 @@ class WebRTCService:
                 # Log full candidate details for debugging
                 candidate_ip = candidate.ip
                 logger.info(f"🧊 ICE candidate generated - IP: {candidate_ip}, Port: {candidate.port}, Type: {candidate.type}, Protocol: {candidate.protocol}")
-                
-                # CRITICAL: Check for Docker-internal IPs
-                if candidate_ip.startswith('172.17.') or candidate_ip.startswith('172.18.'):
-                    logger.warning(f"🚨 Docker-internal IP detected in ICE candidate: {candidate_ip}")
-                    # Force external IP for Docker-internal candidates
-                    candidate_ip = self.external_ip
-                    logger.info(f"🧊 Replaced Docker IP with external IP: {candidate_ip}")
-                
-                # CRITICAL: Replace aiortc's actual port with our redirected port 10000
-                redirected_port = 10000
-                candidate_data = {
-                    'candidate': {
-                        'candidate': f"candidate:{candidate.foundation} {candidate.component} {candidate.protocol.upper()} {candidate.priority} {candidate_ip} {redirected_port} typ {candidate.type}",
+            else:
+                logger.warning(f"🧊 ICE candidate event fired with None candidate for viewer {viewer_id}")
+                return
+            
+            # CRITICAL: Check for Docker-internal IPs
+            if candidate_ip.startswith('172.17.') or candidate_ip.startswith('172.18.'):
+                logger.warning(f"🚨 Docker-internal IP detected in ICE candidate: {candidate_ip}")
+                # Force external IP for Docker-internal candidates
+                candidate_ip = self.external_ip
+                logger.info(f"🧊 Replaced Docker IP with external IP: {candidate_ip}")
+            
+            # MINIMAL: Use aiortc's actual port without redirection
+            actual_port = candidate.port
+            candidate_data = {
+                'candidate': {
+                        'candidate': f"candidate:{candidate.foundation} {candidate.component} {candidate.protocol.upper()} {candidate.priority} {candidate_ip} {actual_port} typ {candidate.type}",
                         'sdpMid': candidate.sdpMid,
-                        'sdpMLineIndex': candidate.sdpMLineIndex
+                        'sdpMLineIndex': candidate.sdpMLineIndex,
+                        # FRONTEND COMPATIBILITY: Add parsed fields that frontend might expect
+                        'protocol': candidate.protocol.lower(),
+                        'address': candidate_ip,
+                        'port': actual_port,
+                        'type': candidate.type,
+                        'priority': candidate.priority,
+                        'foundation': candidate.foundation,
+                        'component': candidate.component
                     },
                     'targetId': viewer_id,
                     'cameraId': self.camera_pda
                 }
-                logger.info(f"🧊 Redirected ICE candidate: actual port {candidate.port} → advertised port {redirected_port}")
-                await self.sio.emit('webrtc-ice-candidate', candidate_data)
-                logger.info(f"🧊 Sent ICE candidate #{pc._candidates_sent} to viewer {viewer_id}: {candidate_data}")
+            await self.sio.emit('webrtc-ice-candidate', candidate_data)
+            logger.info(f"🧊 Sent ICE candidate #{pc._candidates_sent} to viewer {viewer_id}: {candidate_data}")
         
         logger.info(f"Created peer connection for viewer {viewer_id}")
         
@@ -553,11 +561,18 @@ class WebRTCService:
             await pc.setLocalDescription(offer)
             logger.info(f"CRITICAL: Set local description for viewer {viewer_id}")
             
-            # Log the original SDP for debugging
-            logger.info(f"🔍 ORIGINAL SDP: {offer.sdp[:500]}...")
+            # GITHUB SOLUTION: Use pc.localDescription.sdp - this contains ALL ICE candidates!
+            # aiortc embeds ICE candidates in SDP after setLocalDescription()
+            final_offer = RTCSessionDescription(
+                type=pc.localDescription.type,
+                sdp=pc.localDescription.sdp
+            )
+            
+            logger.info(f"🎯 USING pc.localDescription.sdp WITH ICE CANDIDATES")
+            logger.info(f"🔍 Final SDP: {final_offer.sdp[:500]}...")
             
             # Fix SDP to use external IP and proper media ports
-            fixed_sdp = offer.sdp.replace('c=IN IP4 0.0.0.0', f'c=IN IP4 {self.external_ip}')
+            fixed_sdp = final_offer.sdp.replace('c=IN IP4 0.0.0.0', f'c=IN IP4 {self.external_ip}')
             fixed_sdp = fixed_sdp.replace('o=- ', f'o=- ').replace(' IN IP4 0.0.0.0\r\n', f' IN IP4 {self.external_ip}\r\n')
             
             # CRITICAL FIX: Find what port aiortc actually bound to and use that
@@ -592,22 +607,9 @@ class WebRTCService:
                 target_rtcp_port = 10001
                 logger.info(f"🔍 Using default ports in SDP: {target_rtp_port}/{target_rtcp_port}")
             
-            # CRITICAL: Force SDP to advertise our redirected ports (10000/10001)
-            target_rtp_port = 10000
-            target_rtcp_port = 10001
-            
-            logger.info(f"🔍 BEFORE SDP fix - original SDP: {fixed_sdp[:300]}...")
-            
-            # Replace any m=video port with our redirected port
-            fixed_sdp = re.sub(r'm=video \d+', f'm=video {target_rtp_port}', fixed_sdp)
-            fixed_sdp = re.sub(r'a=rtcp:\d+', f'a=rtcp:{target_rtcp_port}', fixed_sdp)
-            
-            # Also handle RTCP with IP address format
-            fixed_sdp = re.sub(r'a=rtcp:\d+ IN IP4 ([^\r\n]+)', f'a=rtcp:{target_rtcp_port} IN IP4 \\1', fixed_sdp)
-            
-            logger.info(f"🔍 AFTER SDP fix - modified SDP: {fixed_sdp[:300]}...")
-            logger.info(f"🔍 SDP now advertises RTP port {target_rtp_port}, RTCP port {target_rtcp_port}")
-            logger.info(f"🔍 Traffic will be redirected by socat to actual aiortc ports")
+            # SIMPLE APPROACH: Don't modify ports - use aiortc's natural ports
+            logger.info(f"🔍 SIMPLE WebRTC: Using aiortc's natural ports without redirection")
+            logger.info(f"🔍 Original SDP (keeping as-is): {fixed_sdp[:200]}...")
             
             if fixed_sdp != offer.sdp:
                 logger.info(f"CRITICAL: Fixed SDP for viewer {viewer_id} - replaced IPs and ports")
@@ -627,6 +629,9 @@ class WebRTCService:
             logger.info(f"CRITICAL: Sending webrtc-offer event with data: {offer_data}")
             await self.sio.emit('webrtc-offer', offer_data)
             logger.info(f"CRITICAL: Successfully sent WebRTC offer to viewer {viewer_id}")
+            
+            # MINIMAL APPROACH: No manual ICE candidates - trust aiortc
+            logger.info(f"🧊 MINIMAL WebRTC: Letting aiortc generate all ICE candidates naturally")
             
             # Wait for ICE connection with timeout
             logger.info(f"🧊 Waiting for ICE connection establishment...")
@@ -657,18 +662,8 @@ class WebRTCService:
             # Start ICE monitoring
             asyncio.create_task(monitor_ice_connection())
             
-            # Send single host candidate for our redirected port 10000
-            single_candidate = {
-                'candidate': {
-                    'candidate': f"candidate:1 1 UDP 2130706431 {self.external_ip} 10000 typ host",
-                    'sdpMid': '0',
-                    'sdpMLineIndex': 0
-                },
-                'targetId': viewer_id,
-                'cameraId': self.camera_pda
-            }
-            await self.sio.emit('webrtc-ice-candidate', single_candidate)
-            logger.info(f"🧊 Sent single host candidate for redirected port 10000: {single_candidate['candidate']['candidate']}")
+            # MINIMAL WebRTC: No manual ICE candidates - rely entirely on aiortc
+            logger.info("🚀 MINIMAL WebRTC: Relying on aiortc's automatic ICE candidate generation only")
             
         except Exception as e:
             logger.error(f"CRITICAL: Failed to create WebRTC offer for viewer {viewer_id}: {e}")
@@ -918,7 +913,7 @@ class WebRTCService:
                 del self.connections[viewer_id]
                 
             # Clean up port redirections
-            await self._cleanup_viewer_redirections(viewer_id)
+            logger.info(f"🧹 Minimal cleanup for viewer {viewer_id} - no redirections to clean")
             
             # Clean up restart attempts
             if hasattr(self, '_restart_attempts') and viewer_id in self._restart_attempts:

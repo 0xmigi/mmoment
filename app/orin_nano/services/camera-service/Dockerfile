@@ -15,6 +15,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive TZ=America/New_York apt-get
     curl \
     ffmpeg \
     network-manager \
+    socat \
     && rm -rf /var/lib/apt/lists/*
 
 # Create required directories
