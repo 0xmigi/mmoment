@@ -192,7 +192,7 @@ const getTimelineWebSocketUrl = () => {
   // In development, try to connect to the local server first
   if (window.location.hostname.includes('localhost')) {
     // Use HTTP for health check and WS for socket connection
-    return "ws://localhost:3001";
+    return "ws://192.168.1.232:3001";
   }
   return "wss://mmoment-production.up.railway.app";
 };
@@ -224,7 +224,7 @@ export const CONFIG = {
   // Timeline backend is your Railway service
   BACKEND_URL: isProduction 
     ? "https://mmoment-production.up.railway.app"
-    : "http://localhost:3001",
+    : "http://192.168.1.232:3001",
   isProduction,
   isCloudflareProxy: isCloudflareProxy(),
   isMobileBrowser: isMobileBrowser(),
