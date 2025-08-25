@@ -11,7 +11,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { PublicKey, SystemProgram, Transaction, Connection } from '@solana/web3.js';
+import { PublicKey, SystemProgram, Connection } from '@solana/web3.js';
 import { AnchorProvider, Program, Idl } from '@coral-xyz/anchor';
 import { IDL } from '../../anchor/idl';
 import { CAMERA_ACTIVATION_PROGRAM_ID } from '../../anchor/setup';
@@ -89,18 +89,18 @@ export function QrRegistrationWizard({
         connection,
         {
           publicKey: new PublicKey(primaryWallet.address),
-          signTransaction: async (tx: Transaction) => {
+          signTransaction: async (tx: any) => {
             if (!isSolanaWallet(primaryWallet)) {
               throw new Error('Not a Solana wallet');
             }
-            const signer = await primaryWallet.getSigner();
+            const signer = await (primaryWallet as any).getSigner();
             return await signer.signTransaction(tx);
           },
-          signAllTransactions: async (txs: Transaction[]) => {
+          signAllTransactions: async (txs: any[]) => {
             if (!isSolanaWallet(primaryWallet)) {
               throw new Error('Not a Solana wallet');
             }
-            const signer = await primaryWallet.getSigner();
+            const signer = await (primaryWallet as any).getSigner();
             return await signer.signAllTransactions(txs);
           },
         },
@@ -271,7 +271,7 @@ export function QrRegistrationWizard({
 
     try {
       // Get wallet public key
-      const ownerPublicKey = new PublicKey(walletAddress);
+      const ownerPublicKey = new PublicKey(walletAddress!);
 
       // Find the camera PDA - EXACTLY as in the working debug page
       const [cameraPda] = PublicKey.findProgramAddressSync(

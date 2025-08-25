@@ -324,7 +324,7 @@ export class LocalDeviceDiscovery {
 
       return new Promise((resolve) => {
         navigator.geolocation.getCurrentPosition(
-          (position) => {
+          (_position) => {
             // Store/compare with device setup location
             console.log('📍 Location verified for local setup');
             resolve(true);

@@ -10,7 +10,6 @@ interface WebRTCStreamPlayerProps {
 }
 
 const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ 
-  fallback, 
   onError 
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -280,7 +279,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
 
           await peerConnection.setRemoteDescription(data.offer);
           console.log('[WebRTC] Set remote description, creating answer...');
-          console.log('[WebRTC] Remote streams after setRemoteDescription:', peerConnection.getRemoteStreams?.() || 'getRemoteStreams not available');
+          console.log('[WebRTC] Remote streams after setRemoteDescription:', (peerConnection as any).getRemoteStreams?.() || 'getRemoteStreams not available');
           console.log('[WebRTC] Transceivers:', peerConnection.getTransceivers());
           
           const answer = await peerConnection.createAnswer();
@@ -315,11 +314,11 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
         if (peerConnectionRef.current) {
           try {
             console.log('[WebRTC] Received ICE candidate from camera:', {
-              protocol: data.candidate.protocol,
-              address: data.candidate.address,
-              port: data.candidate.port,
-              type: data.candidate.type,
-              priority: data.candidate.priority
+              protocol: (data.candidate as any).protocol,
+              address: (data.candidate as any).address,
+              port: (data.candidate as any).port,
+              type: (data.candidate as any).type,
+              priority: (data.candidate as any).priority
             });
             await peerConnectionRef.current.addIceCandidate(data.candidate);
             console.log('[WebRTC] Successfully added ICE candidate');

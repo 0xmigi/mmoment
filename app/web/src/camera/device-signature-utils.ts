@@ -1,4 +1,4 @@
-import { DeviceSignature, DeviceSignedResponse } from './camera-types';
+import { DeviceSignedResponse } from './camera-types';
 
 /**
  * Device signature verification utilities for DePIN authentication
@@ -112,7 +112,7 @@ export function logDeviceSignature(response: DeviceSignedResponse, context: stri
  */
 export async function verifyCryptographicSignature(
   response: DeviceSignedResponse,
-  originalPayload?: object
+  _originalPayload?: object
 ): Promise<boolean> {
   // This would require implementing Ed25519 signature verification
   // using a library like tweetnacl or similar

@@ -232,13 +232,13 @@ export const CONFIG = {
   TIMELINE_WS_URL: getTimelineWebSocketUrl(),
   CAMERA_PDA: import.meta.env.VITE_CAMERA_PDA || 'EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA',
   // Jetson camera PDA
-  JETSON_CAMERA_PDA: 'WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD',
+  JETSON_CAMERA_PDA: 'H1WoNBkWJgNcePeyr65xEEwjFgGDboSpL5UbJan5VyhG',
   isUsingDifferentLocalPorts: isUsingDifferentLocalPorts(),
   
   // Known camera configurations with PDA-based URLs
   KNOWN_CAMERAS: {
     // Jetson Orin Nano
-    'WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD': {
+    'H1WoNBkWJgNcePeyr65xEEwjFgGDboSpL5UbJan5VyhG': {
       type: 'jetson',
       name: 'Jetson Orin Nano Camera',
       description: 'NVIDIA Jetson Orin Nano with advanced computer vision',

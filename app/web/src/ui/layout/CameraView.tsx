@@ -17,7 +17,7 @@ import { unifiedCameraService } from '../../camera/unified-camera-service';
 import { unifiedIpfsService } from '../../storage/ipfs/unified-ipfs-service';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { TransactionModal } from '../../auth/components/TransactionModal';
-import { StopCircle, Play, Camera, Video, Loader, Link2, CheckCircle, User } from 'lucide-react';
+import { StopCircle, Play, Camera, Video, Loader, Link2, CheckCircle } from 'lucide-react';
 import { useCameraStatus } from '../../camera/useCameraStatus';
 import { CameraModal } from '../../camera/CameraModal';
 import { cameraStatus } from '../../camera/camera-status';
@@ -199,7 +199,7 @@ export function CameraView() {
   const [isCheckedIn, setIsCheckedIn] = useState(false);
   
   // Add state to store video recording transaction signature
-  const [_recordingTransactionSignature, setRecordingTransactionSignature] = useState<string | null>(null);
+  const [_recordingTransactionSignature] = useState<string | null>(null);
 
   // Add state for gesture monitoring
   const [gestureMonitoring, setGestureMonitoring] = useState(false);
@@ -1350,41 +1350,45 @@ export function CameraView() {
 
                 {/* Unified TikTok-style status bar - aligned with timeline - MOBILE ONLY */}
                 <div 
-                  className="absolute top-2 left-2 z-40 flex items-center gap-1 cursor-pointer md:hidden"
+                  className="absolute top-2 left-2 z-40 flex items-center cursor-pointer md:hidden"
                   onClick={() => setIsMobileCameraModalOpen(true)}
                 >
-                  {/* Camera Status Rectangle */}
-                  {!cameraId && !cameraAccount && !selectedCamera ? (
-                    <div className="bg-gray-600 text-white text-xs font-bold px-1 py-0.5 rounded">
-                      DISCONNECTED
+                  <div className="flex items-center bg-black bg-opacity-70 rounded overflow-hidden">
+                    {/* Camera Status Section */}
+                    {!cameraId && !cameraAccount && !selectedCamera ? (
+                      <div className="bg-gray-600 text-white text-xs font-bold px-1.5 py-0.5">
+                        DISCONNECTED
+                      </div>
+                    ) : !currentCameraStatus.isLive ? (
+                      <div className="bg-gray-500 text-white text-xs font-bold px-1.5 py-0.5">
+                        OFFLINE
+                      </div>
+                    ) : currentCameraStatus.isStreaming ? (
+                      <div className="bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 flex items-center gap-1">
+                        <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
+                        LIVE
+                      </div>
+                    ) : (
+                      <div className="bg-green-500 text-white text-xs font-bold px-1.5 py-0.5">
+                        ONLINE
+                      </div>
+                    )}
+                    
+                    {/* Camera ID Section */}
+                    <div className="text-white text-xs px-1.5 py-0.5 border-l border-white border-opacity-20">
+                      id:{(cameraAccount || selectedCamera?.publicKey || 'None').slice(0, 4)}...
+                      {(cameraAccount || selectedCamera?.publicKey || 'None').slice(-4)}
                     </div>
-                  ) : !currentCameraStatus.isLive ? (
-                    <div className="bg-gray-500 text-white text-xs font-bold px-1 py-0.5 rounded">
-                      OFFLINE
-                    </div>
-                  ) : currentCameraStatus.isStreaming ? (
-                    <div className="bg-red-500 text-white text-xs font-bold px-1 py-0.5 rounded flex items-center gap-1">
-                      <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
-                      LIVE
-                    </div>
-                  ) : (
-                    <div className="bg-green-500 text-white text-xs font-bold px-1 py-0.5 rounded">
-                      ONLINE
-                    </div>
-                  )}
-                  
-                  {/* Camera ID */}
-                  <div className="bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">
-                    id:{(cameraAccount || selectedCamera?.publicKey || 'None').slice(0, 4)}...
-                    {(cameraAccount || selectedCamera?.publicKey || 'None').slice(-4)}
                   </div>
                   
                   {/* Check-in Status Icon */}
-                  {isCheckedIn ? (
-                    <CheckCircle className="w-3 h-3 text-green-400" />
-                  ) : (
-                    <Link2 className="w-3 h-3 text-blue-400" />
-                  )}
+                  <div className="ml-2">
+                    {isCheckedIn ? (
+                      <CheckCircle className="w-3 h-3 text-green-400" />
+                    ) : (
+                      <Link2 className="w-3 h-3 text-blue-400" />
+                    )}
+                  </div>
                 </div>
 
                 {/* Mobile Timeline Overlay - positioned below status badge */}
@@ -1462,8 +1466,8 @@ export function CameraView() {
               isStreaming={currentCameraStatus.isStreaming}
             />
           </div>
-          <div className="max-w-3xl mt-6 mx-auto flex flex-col justify-top relative">
-            <div className="relative mb-36">
+          <div className="max-w-3xl mt-6 md:mt-6 mx-auto flex flex-col justify-top relative">
+            <div className="relative mb-12 md:mb-36">
               <div className="hidden md:flex pl-6 items-center gap-2">
                 {!cameraId && !cameraAccount && !selectedCamera ? (
                   <div className="flex items-center gap-2">
@@ -1513,8 +1517,8 @@ export function CameraView() {
               />
             </div>
 
-            <div className="relative md:ml-20 ml-16 bg-white">
-              <div className="relative pl-4 pr-2 sm:px-4">
+            <div className="relative md:ml-20 bg-white">
+              <div className="relative px-2 sm:pl-4 sm:pr-2 md:px-4">
                 <MediaGallery mode="recent" maxRecentItems={6} cameraId={cameraAccount || undefined} />
               </div>
             </div>

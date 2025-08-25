@@ -237,7 +237,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                 {/* Footer Info */}
                 <div className="px-4 flex justify-center py-2">
                   <p className="text-sm text-gray-500">
-                    Moment is a secure content network
+                    social memory and compute for IRL
                   </p>
                 </div>
               </div>
