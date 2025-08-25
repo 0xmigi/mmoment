@@ -299,6 +299,9 @@ class BufferService:
                 cv2.putText(frame, f"Frame: {self.counter}", 
                            (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
                 
+                # Rotate virtual camera frame to match physical camera orientation
+                frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                
                 return True, frame
                 
             def isOpened(self):
@@ -355,6 +358,10 @@ class BufferService:
                 except Exception as e:
                     logger.error(f"Exception during frame capture: {e}")
                     ret, frame = False, None
+                
+                # Rotate frame 90 degrees counter-clockwise to correct physical mounting orientation
+                if ret and frame is not None and frame.size > 0:
+                    frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
                 
                 # Check if frame capture was successful
                 if not ret or frame is None or frame.size == 0:
