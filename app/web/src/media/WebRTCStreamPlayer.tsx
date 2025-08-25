@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useCamera } from '../camera/CameraProvider';
 import { useParams } from 'react-router-dom';
+import { CONFIG } from '../core/config';
 
 interface WebRTCStreamPlayerProps {
   fallback?: React.ReactNode;
@@ -83,13 +84,23 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
   const createPeerConnection = useCallback(() => {
     const config: RTCConfiguration = {
       iceServers: [
+        // STUN servers for NAT traversal
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' }
+        // Free public TURN server for relay fallback
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject', 
+          credential: 'openrelayproject'
+        }
       ],
       iceCandidatePoolSize: 10,
-      iceTransportPolicy: 'all'
+      iceTransportPolicy: 'all' // Try both direct and relay
     };
 
     const peerConnection = new RTCPeerConnection(config);
@@ -217,11 +228,16 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
       setError(null);
 
       // Connect to signaling server (running locally on Jetson now)
-      const backendUrl = 'http://192.168.1.232:3001'; // Local backend for debugging
+      const backendUrl = CONFIG.BACKEND_URL;
       console.log('[WebRTC] Connecting to backend:', backendUrl);
+      console.log('[WebRTC] Environment mode:', CONFIG.isProduction ? 'Production' : 'Development');
       
-      // Quick network connectivity test
-      console.log('[WebRTC] 🌍 Network Test: Can you ping 192.168.1.232? Are you on the same network?');
+      // Network connectivity test with environment-appropriate messaging
+      if (CONFIG.isProduction) {
+        console.log('[WebRTC] 🌍 Production Mode: Using Railway backend for WebRTC signaling');
+      } else {
+        console.log('[WebRTC] 🌍 Development Mode: Using local backend. Are you on the same network?');
+      }
       
       const socket = io(backendUrl, {
         transports: ['websocket', 'polling'],

@@ -13,11 +13,11 @@ services:
     network_mode: host
     # Note: ports not needed with host networking - container uses host's network directly
     extra_hosts:
-      - "solana-middleware:172.19.0.2"
-      - "biometric-security:172.19.0.3"
+      - "solana-middleware:172.21.0.3"
+      - "biometric-security:172.21.0.2"
     volumes:
       - ./data/images:/app/photos
-      - ./data/videos:/app/videos  
+      - /mnt/nvme/mmoment-videos:/app/videos  # Using NVMe SSD for video storage
       - ./data/face_embeddings:/app/face_embeddings
       - ./data/faces:/app/faces
       - ./data/recordings:/app/recordings
@@ -33,10 +33,12 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,display
       - BIOMETRIC_SECURITY_URL=http://biometric-security:5003
       - SOLANA_MIDDLEWARE_URL=http://solana-middleware:5001
-      # Backend connection for WebRTC signaling and device registration (now local)
-      - BACKEND_HOST=localhost
+      # Backend connection for WebRTC signaling and device registration
+      # Development: local backend, Production: Railway backend
+      - BACKEND_HOST=192.168.1.232
       - BACKEND_PORT=3001
-      - BACKEND_URL=http://localhost:3001
+      - BACKEND_URL=http://192.168.1.232:3001
+      # Production: - BACKEND_URL=https://mmoment-production.up.railway.app
       # WebRTC external IP for ICE candidates
       - WEBRTC_EXTERNAL_IP=192.168.1.232
       # aiortc port range for minimal WebRTC

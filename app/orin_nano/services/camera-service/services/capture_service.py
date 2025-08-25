@@ -462,29 +462,45 @@ class CaptureService:
     def _cleanup_videos(self) -> None:
         """Clean up old videos if the limit is reached"""
         try:
-            # Get all videos
-            videos = list(Path(self._videos_dir).glob(f"*.{self._video_format}"))
+            # Get all videos (both .mov and .mp4)
+            mov_videos = list(Path(self._videos_dir).glob("*.mov"))
+            mp4_videos = list(Path(self._videos_dir).glob("*.mp4"))
             
-            # Check if cleanup is needed
-            if len(videos) < self._max_videos * self._cleanup_threshold:
+            # Group videos by base name (without extension)
+            video_groups = {}
+            for video in mov_videos + mp4_videos:
+                # Extract base name without extension and suffix
+                base_name = video.stem
+                if base_name not in video_groups:
+                    video_groups[base_name] = []
+                video_groups[base_name].append(video)
+            
+            # Check if cleanup is needed (count unique videos, not files)
+            if len(video_groups) <= self._max_videos:
                 return
                 
-            # Sort by modification time (oldest first)
-            videos.sort(key=lambda x: x.stat().st_mtime)
+            # Sort groups by oldest file modification time
+            sorted_groups = sorted(
+                video_groups.items(),
+                key=lambda x: min(f.stat().st_mtime for f in x[1])
+            )
             
-            # Calculate how many to delete
-            to_delete = len(videos) - self._max_videos
+            # Calculate how many video groups to delete
+            to_delete = len(video_groups) - self._max_videos
             
             if to_delete <= 0:
                 return
                 
-            # Delete oldest videos
-            for video in videos[:to_delete]:
-                try:
-                    video.unlink()
-                    logger.debug(f"Deleted old video: {video}")
-                except Exception as e:
-                    logger.error(f"Failed to delete video {video}: {e}")
+            # Delete oldest video groups (both .mov and .mp4)
+            deleted_count = 0
+            for base_name, files in sorted_groups[:to_delete]:
+                for video_file in files:
+                    try:
+                        video_file.unlink()
+                        logger.debug(f"Deleted old video: {video_file}")
+                        deleted_count += 1
+                    except Exception as e:
+                        logger.error(f"Failed to delete video {video_file}: {e}")
                     
             logger.info(f"Cleaned up {to_delete} old videos")
             
