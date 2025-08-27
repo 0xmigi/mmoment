@@ -1055,7 +1055,7 @@ def register_routes(app):
                     'online': buffer_status['running'],
                     'fps': buffer_status['fps'],
                     'resolution': f"{buffer_service._width}x{buffer_service._height}",
-                    'device': buffer_service._preferred_device
+                    'device': 'auto-detected'
                 },
                 'capabilities': {
                     'face_recognition': True,
@@ -1458,7 +1458,7 @@ def register_routes(app):
             'timestamp': int(time.time() * 1000),
             'camera': {
                 'index': buffer_service._camera_index,
-                'preferred_device': buffer_service._preferred_device,
+                'preferred_device': 'auto-detected',
                 'resolution': f"{buffer_service._width}x{buffer_service._height}",
                 'target_fps': buffer_service._fps
             }
@@ -2203,7 +2203,7 @@ def register_routes(app):
             time.sleep(1)  # Allow time for camera to release
         
         # Clear the preferred device to force a fresh scan
-        buffer_service._preferred_device = None
+        # REMOVED: No more preferred device logic
         
         # Try to restart
         success = buffer_service.start()
@@ -2215,7 +2215,7 @@ def register_routes(app):
             'was_running': was_running,
             'now_running': buffer_service._running,
             'camera_index': buffer_service._camera_index,
-            'preferred_device': buffer_service._preferred_device
+            'preferred_device': 'auto-detected'
         })
 
     # Face management endpoints
