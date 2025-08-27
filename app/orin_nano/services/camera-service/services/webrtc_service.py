@@ -72,7 +72,7 @@ class BufferVideoTrack(VideoStreamTrack):
             await asyncio.sleep(self.frame_interval - (current_time - self.last_frame_time))
         
         try:
-            # Get processed frame from buffer service (includes face detection overlays)
+            # Get processed frame from buffer service (includes face detection boxes)
             frame_data = self.buffer_service.get_processed_frame()
             
             # Handle different return formats from buffer service

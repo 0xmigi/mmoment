@@ -62,14 +62,16 @@ def init_services():
     from services.livepeer_stream_service import LivepeerStreamService
     from services.webrtc_service import get_webrtc_service
     
-    # Try to import GPU Face service (new unified service)
+    # GPU Face service for YOLOv8 + InsightFace face detection and recognition
     gpu_face_service = None
     try:
         from services.gpu_face_service import get_gpu_face_service
         gpu_face_service = get_gpu_face_service()
-        logger.info("GPU Face service (YOLOv8 + InsightFace) initialized")
-    except ImportError:
-        logger.warning("GPU Face service not available")
+        logger.info("GPU Face service (YOLOv8 + InsightFace) initialized on GPU - NO CPU FALLBACK")
+    except (ImportError, RuntimeError) as e:
+        logger.error(f"GPU Face service FAILED - GPU not available or CPU fallback detected: {e}")
+        logger.error("SERVICE WILL NOT START WITHOUT PROPER GPU ACCELERATION")
+        gpu_face_service = None
     
     # Try to import DeepFace service (legacy)
     deepface_service = None
@@ -115,9 +117,9 @@ def init_services():
     else:
         logger.warning("GPU face service not available - face recognition disabled")
     
-    # Start the gesture service if MediaPipe is available
-    logger.info("Starting gesture service...")
-    gesture_service.start(buffer_service)
+    # DISABLED: Gesture service causing excessive CPU usage (200%+)
+    logger.info("DISABLED gesture service - was causing 200% CPU usage")
+    # gesture_service.start(buffer_service)
     
     # Initialize Livepeer service with buffer service
     logger.info("Initializing Livepeer service...")
@@ -148,13 +150,14 @@ def init_services():
     # Give WebRTC service time to initialize async components
     time.sleep(2)
     
-    # Initialize Blockchain Session Sync Service
-    from services.blockchain_session_sync import get_blockchain_session_sync, reset_blockchain_session_sync
-    reset_blockchain_session_sync()  # Ensure fresh instance with current environment variables
-    blockchain_sync = get_blockchain_session_sync()
-    blockchain_sync.set_services(session_service, gpu_face_service)
-    blockchain_sync.start()
-    logger.info("🔗 Blockchain session sync initialized - camera will auto-enable for on-chain check-ins")
+    # TEMPORARILY DISABLED FOR CPU TESTING
+    # from services.blockchain_session_sync import get_blockchain_session_sync, reset_blockchain_session_sync
+    # reset_blockchain_session_sync()  # Ensure fresh instance with current environment variables
+    # blockchain_sync = get_blockchain_session_sync()
+    # blockchain_sync.set_services(session_service, gpu_face_service)
+    # blockchain_sync.start()
+    # logger.info("🔗 Blockchain session sync initialized - camera will auto-enable for on-chain check-ins")
+    logger.warning("BLOCKCHAIN SYNC DISABLED FOR CPU TESTING")
     
     # Initialize Device Registration Service (for QR-based setup flow)
     from services.device_registration import get_device_registration_service

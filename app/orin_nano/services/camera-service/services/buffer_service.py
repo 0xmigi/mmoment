@@ -53,27 +53,15 @@ class BufferService:
         self._latest_timestamp = 0
         self._frame_counter = 0
         
-        # Load camera settings from config
-        self._config = self._load_camera_config()
-        
-        # Camera settings
-        self._camera_index = 0
-        # Check for environment variable override for camera device
-        env_camera_device = os.environ.get('CAMERA_DEVICE')
-        if env_camera_device:
-            logger.info(f"Using camera device from environment variable: {env_camera_device}")
-            self._preferred_device = env_camera_device
-        else:
-            # Try top-level config first, then nested config for backwards compatibility
-            self._preferred_device = self._config.get('preferred_device') or self._config.get('camera', {}).get('preferred_device', '/dev/video1')
-            logger.info(f"Using camera device from config: {self._preferred_device}")
-            
-        self._width = self._config.get('width') or self._config.get('camera', {}).get('width', 1280)
-        self._height = self._config.get('height') or self._config.get('camera', {}).get('height', 720)
-        self._fps = self._config.get('fps') or self._config.get('camera', {}).get('fps', 30)  # Use 30 FPS for better streaming
-        self._buffersize = self._config.get('buffersize') or self._config.get('camera', {}).get('buffersize', 1)
-        self._reconnect_attempts = self._config.get('reconnect_attempts') or self._config.get('camera', {}).get('reconnect_attempts', 3)
-        self._reconnect_delay = self._config.get('reconnect_delay') or self._config.get('camera', {}).get('reconnect_delay', 0.3)
+        # SIMPLE HARDCODED SETTINGS - NO MORE CONFIG FILE MESS
+        # NOTE: Camera captures at 1280x720, then rotated to 720x1280 for mobile
+        self._width = 720   # After rotation: portrait width
+        self._height = 1280 # After rotation: portrait height  
+        self._fps = 30
+        self._buffersize = 1
+        self._reconnect_attempts = 3
+        self._reconnect_delay = 0.3
+        logger.info(f"Camera settings: {self._width}x{self._height}@{self._fps}fps")
         
         # Statistics
         self._stats_lock = threading.Lock()
@@ -85,7 +73,7 @@ class BufferService:
         self._last_health_check = 0
         self._health_status = "Not started"
         
-        logger.info(f"BufferService initialized with settings: {self._width}x{self._height}@{self._fps}fps, preferred device: {self._preferred_device}")
+        logger.info(f"BufferService initialized with settings: {self._width}x{self._height}@{self._fps}fps")
 
     def _load_camera_config(self):
         """Load camera configuration from file"""
@@ -105,7 +93,7 @@ class BufferService:
         # Default config
         return {
             'camera': {
-                'preferred_device': '/dev/video1',
+                # REMOVED: No more hardcoded device preference
                 'width': 1280,
                 'height': 720,
                 'fps': 30,
@@ -164,37 +152,25 @@ class BufferService:
             self._camera = None
             time.sleep(self._reconnect_delay)
         
-        # Get list of available video devices
+        # SIMPLE CAMERA DETECTION - NO MORE HARDCODED MESS
         import glob
         available_devices = sorted(glob.glob('/dev/video*'))
         logger.info(f"Found video devices: {available_devices}")
         
-        # Define a list of configurations to try
-        # Format: (device_path, device_index, name, width, height, fps)
+        # ONE SIMPLE PRIORITY: Try devices in order until one works
         configs_to_try = []
-        
-        # PRIORITIZE /dev/video1 (Logitech webcam) over /dev/video0 (IMX477)
-        # First, try the preferred device from config if it exists
-        if self._preferred_device in available_devices:
-            device_index = int(self._preferred_device.replace('/dev/video', ''))
-            configs_to_try.append((self._preferred_device, device_index, f"Preferred device {self._preferred_device}", self._width, self._height, self._fps))
-        
-        # Then prioritize /dev/video1 (Logitech) if it's not already the preferred device
-        if '/dev/video1' in available_devices and self._preferred_device != '/dev/video1':
-            configs_to_try.append(('/dev/video1', 1, "Logitech webcam /dev/video1", self._width, self._height, self._fps))
-        
-        # Then add the rest of the devices (excluding video1 and video0/IMX477 since they're already handled)
         for device_path in available_devices:
-            if device_path not in [self._preferred_device, '/dev/video1', '/dev/video0']:
-                device_index = int(device_path.replace('/dev/video', ''))
-                configs_to_try.append((device_path, device_index, f"Device {device_path}", self._width, self._height, self._fps))
+            device_index = int(device_path.replace('/dev/video', ''))
+            configs_to_try.append((device_path, device_index, f"Device {device_path}", self._width, self._height, self._fps))
         
-        # Also try common indices as backup (excluding index 0 which is typically IMX477)
-        for idx in [1, 2]:
+        # Fallback to indices if devices don't work
+        for idx in [0, 1, 2]:
             configs_to_try.append((None, idx, f"Index {idx}", self._width, self._height, self._fps))
             
         # Try each configuration until one works
         for device_path, index, name, width, height, fps in configs_to_try:
+            # Camera captures at landscape 1280x720, then we rotate to portrait 720x1280
+            camera_width, camera_height = 1280, 720
             try:
                 logger.info(f"Trying camera {name}")
                 
@@ -214,9 +190,9 @@ class BufferService:
                     camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
                     logger.info(f"Set MJPEG format for Logitech camera {device_path}")
                 
-                # Set camera properties AFTER setting format
-                camera.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-                camera.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                # Set camera properties AFTER setting format  
+                camera.set(cv2.CAP_PROP_FRAME_WIDTH, camera_width)
+                camera.set(cv2.CAP_PROP_FRAME_HEIGHT, camera_height)
                 camera.set(cv2.CAP_PROP_FPS, fps)
                 
                 # Set additional camera properties for better stability
@@ -256,12 +232,8 @@ class BufferService:
                 self._camera_index = index
                 logger.info(f"Successfully opened camera {name} with resolution {frame.shape[1]}x{frame.shape[0]}")
                 
-                # Only save as preferred device if it's /dev/video1 or if no preferred device is set
-                # This prevents the IMX477 camera from overwriting the Logitech preference
-                if device_path and (device_path == '/dev/video1' or not self._preferred_device):
-                    if self._preferred_device != device_path:
-                        self._preferred_device = device_path
-                        self._save_preferred_device(device_path)
+                # REMOVED: No more preferred device saving logic
+                # Camera detection is now automatic with no preferences
                 
                 return camera
                 
@@ -269,54 +241,9 @@ class BufferService:
                 logger.warning(f"Error opening camera {name}: {e}")
                 continue
         
-        # Failed to open any camera, create a virtual test camera
-        logger.warning("No physical camera detected, creating virtual test camera")
-        
-        class VirtualCamera:
-            def __init__(self, width, height, fps):
-                self.width = width
-                self.height = height
-                self.fps = fps
-                self.counter = 0
-                self.opened = True
-                
-            def read(self):
-                # Create a test pattern frame
-                frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
-                
-                # Add some dynamic element
-                self.counter += 1
-                
-                # Draw a moving circle
-                radius = 50
-                x = int(self.width/2 + radius * np.sin(self.counter / 30))
-                y = int(self.height/2 + radius * np.cos(self.counter / 30))
-                
-                # Draw circle and text
-                cv2.circle(frame, (x, y), 50, (0, 165, 255), -1)
-                cv2.putText(frame, "Virtual Camera - No Device Connected", 
-                           (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-                cv2.putText(frame, f"Frame: {self.counter}", 
-                           (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-                
-                # Rotate virtual camera frame to match physical camera orientation
-                frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-                
-                return True, frame
-                
-            def isOpened(self):
-                return self.opened
-                
-            def release(self):
-                self.opened = False
-                
-            def set(self, prop, value):
-                return True
-        
-        virtual_camera = VirtualCamera(self._width, self._height, self._fps)
-        self._camera_index = -1
-        logger.info(f"Virtual test camera created with resolution {self._width}x{self._height}")
-        return virtual_camera
+        # Failed to open any camera - fail fast for production DePIN device
+        logger.error("No physical camera detected. DePIN camera device requires working camera hardware.")
+        return None
 
     def _save_preferred_device(self, device_path):
         """Save the preferred device to the config file"""
@@ -359,8 +286,9 @@ class BufferService:
                     logger.error(f"Exception during frame capture: {e}")
                     ret, frame = False, None
                 
-                # Rotate frame 90 degrees counter-clockwise to correct physical mounting orientation
+                # Rotate frame to vertical 16:9 for mobile viewing (720x1280)
                 if ret and frame is not None and frame.size > 0:
+                    # Rotate 90 degrees counterclockwise: 1280x720 -> 720x1280
                     frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
                 
                 # Check if frame capture was successful
