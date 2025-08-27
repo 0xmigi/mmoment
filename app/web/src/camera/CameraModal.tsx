@@ -795,21 +795,6 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                     </button>
                   </div>
                 </div>
-                
-                <div className="mb-4">
-                  <div className="text-sm text-gray-700">Camera PDA</div>
-                  <div className="flex items-center">
-                    <div className="text-sm font-medium">
-                      {formatAddress(camera.defaultDevCamera || '')}
-                    </div>
-                    <button
-                      onClick={() => window.open(`https://solscan.io/account/${camera.defaultDevCamera}?cluster=devnet`, '_blank')}
-                      className="ml-1 text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center"
-                    >
-                      <ExternalLink className="w-3 h-3 ml-1" />
-                    </button>
-                  </div>
-                </div>
               </div>
             ) : (
               // Original camera details layout

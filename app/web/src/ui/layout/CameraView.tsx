@@ -1374,11 +1374,13 @@ export function CameraView() {
                       </div>
                     )}
                     
-                    {/* Camera ID Section */}
-                    <div className="text-white text-xs px-1.5 py-0.5 border-l border-white border-opacity-20">
-                      id:{(cameraAccount || selectedCamera?.publicKey || 'None').slice(0, 4)}...
-                      {(cameraAccount || selectedCamera?.publicKey || 'None').slice(-4)}
-                    </div>
+                    {/* Camera ID Section - only show when camera is selected */}
+                    {(cameraId || cameraAccount || selectedCamera) && (
+                      <div className="text-white text-xs px-1.5 py-0.5 border-l border-white border-opacity-20">
+                        id:{(cameraAccount || selectedCamera?.publicKey || cameraId || '').slice(0, 4)}...
+                        {(cameraAccount || selectedCamera?.publicKey || cameraId || '').slice(-4)}
+                      </div>
+                    )}
                   </div>
                   
                   {/* Check-in Status Icon */}
