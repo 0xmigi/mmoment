@@ -8,21 +8,6 @@ import { StorageService, StorageResult, UploadOptions } from '../storage-provide
 // Using a CDN URL for the WASM file
 const WALRUS_WASM_URL = 'https://unpkg.com/@mysten/walrus-wasm@latest/web/walrus_wasm_bg.wasm';
 
-// Create the SUI client for Walrus
-const suiClient = new SuiClient({
-  url: getFullnodeUrl('testnet'),
-});
-
-// Create a Walrus client with reasonable timeout settings
-const walrusClient = new WalrusClient({
-  network: 'testnet',
-  suiClient,
-  wasmUrl: WALRUS_WASM_URL,
-  storageNodeClientOptions: {
-    timeout: 60_000, // 60 seconds timeout
-  },
-});
-
 export interface WalrusStorageQuota {
   totalBytes: number;
   usedBytes: number;
@@ -38,6 +23,31 @@ export class WalrusSdkService implements IPFSProvider, StorageService {
   readonly gateway = 'https://aggregator.walrus-testnet.walrus.space'; 
   readonly publisher = 'https://publisher.walrus-testnet.walrus.space';
   readonly aggregator = 'https://aggregator.walrus-testnet.walrus.space';
+  
+  private suiClient: SuiClient | null = null;
+  private walrusClient: WalrusClient | null = null;
+  
+  // Lazy initialization of clients
+  private getClients() {
+    if (!this.suiClient) {
+      this.suiClient = new SuiClient({
+        url: getFullnodeUrl('testnet'),
+      });
+    }
+    
+    if (!this.walrusClient) {
+      this.walrusClient = new WalrusClient({
+        network: 'testnet',
+        suiClient: this.suiClient as any, // Type assertion to work around version conflicts
+        wasmUrl: WALRUS_WASM_URL,
+        storageNodeClientOptions: {
+          timeout: 60_000, // 60 seconds timeout
+        },
+      });
+    }
+    
+    return { suiClient: this.suiClient, walrusClient: this.walrusClient };
+  }
   
   // Storage plans in bytes with corresponding costs
   private storagePlans = {
@@ -56,6 +66,7 @@ export class WalrusSdkService implements IPFSProvider, StorageService {
   async isAvailable(): Promise<boolean> {
     try {
       // For now we'll just check if the client is initialized
+      const { walrusClient } = this.getClients();
       return !!walrusClient;
     } catch (error) {
       console.error('Walrus health check failed:', error);
@@ -101,6 +112,7 @@ export class WalrusSdkService implements IPFSProvider, StorageService {
         console.log(`Attempting SDK upload with ${uint8Array.length} bytes and ${storageEpochs} epochs...`);
         
         // Attempt direct upload via SDK
+        const { walrusClient } = this.getClients();
         const { blobId } = await walrusClient.writeBlob({
           blob: uint8Array,
           deletable: true,
@@ -245,6 +257,7 @@ export class WalrusSdkService implements IPFSProvider, StorageService {
       
       // Try checking via SDK first
       try {
+        const { walrusClient } = this.getClients();
         const blob = await walrusClient.readBlob({ blobId });
         return blob.length > 0;
       } catch (sdkError) {
