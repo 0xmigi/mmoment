@@ -31,7 +31,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <LivepeerConfig client={livepeerClient}>
         <DynamicContextProvider
           settings={{
-            environmentId: "93e6248c-4446-4f78-837d-fedf6391d174",
+            // environmentId: "0a6c159-0b98-4ce9-a715-d30a29b09a43",
+            environmentId: "0a64c159-0b98-4ce9-a715-d30a29b09a43",
             walletConnectors: [SolanaWalletConnectors],
             walletsFilter: (wallets: WalletOption[]) => {
               const phantomWallet = wallets.find(w => w.name.toLowerCase() === 'phantom');

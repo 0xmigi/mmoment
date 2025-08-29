@@ -298,11 +298,19 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     // Apply enrichEventWithUserInfo to all events
     const enrichedEvents = filteredEvents.map(event => enrichEventWithUserInfo(event));
     
-    return variant === 'camera' && !mobileOverlay
-      ? enrichedEvents.slice(0, displayCount) // Desktop: use JavaScript count (perfect!)
-      : variant === 'camera' && mobileOverlay
-        ? enrichedEvents.slice(0, mobileTimelineCount) // Mobile: scale with window width
-        : enrichedEvents;
+    if (variant === 'camera' && !mobileOverlay) {
+      return enrichedEvents.slice(0, displayCount); // Desktop: use JavaScript count (perfect!)
+    } else if (variant === 'camera' && mobileOverlay) {
+      // Mobile: Always create array of mobileTimelineCount length
+      // Fill with actual events first, then pad with empty slots
+      const result = enrichedEvents.slice(0, mobileTimelineCount);
+      // Pad with null entries to always reach mobileTimelineCount
+      while (result.length < mobileTimelineCount) {
+        result.push(null as any);
+      }
+      return result;
+    }
+    return enrichedEvents;
   }, [filteredEvents, variant, displayCount, mobileTimelineCount, userProfiles]);
 
   const getEventIcon = (type: TimelineEventType, isOverlay = false) => {
@@ -375,68 +383,79 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
             <p className={`text-sm pl-16 ${mobileOverlay ? 'text-white' : 'text-gray-500'}`}>No activity yet</p>
           ) : (
             <>
-              {displayEvents.map((event, index) => (
-                <div key={event.id} className="flex items-center">
-                  {/* User avatar and action icon - always visible */}
-                  <div className="relative flex items-center mr-3 md:mr-5 z-10">
-                    <div className={`w-4 h-4 md:w-5 md:h-5 rounded-full -ml-[4px] md:-ml-[4px] mr-2 flex items-center justify-center ${
-                      mobileOverlay ? '' : 'bg-white border border-gray-200'
-                    }`}>
-                      {getEventIcon(event.type, mobileOverlay)}
+              {displayEvents.map((event, index) => {
+                // Handle null events (empty slots) for mobile overlay
+                if (!event) {
+                  return (
+                    <div key={`empty-${index}`} className="h-8">
+                      {/* Empty slot - just space, no visual elements */}
                     </div>
-                    <div 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleProfileClick(event);
-                      }}
-                      className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
-                    >
-                      {event.user.pfpUrl ? (
-                        <img 
-                          src={event.user.pfpUrl} 
-                          alt={event.user.displayName || event.user.username || 'User'} 
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <User className="w-3 h-3 md:w-4 md:h-4 text-gray-600" />
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Event details - fade out only in camera view */}
-                  <div 
-                    className={`ml-2 md:ml-3 flex-left transition-opacity cursor-pointer ${
-                      mobileOverlay ? '' : 'bg-white'
-                    } ${
-                      variant === 'camera' && index > 1 ? 'opacity-0' : ''
-                    }`}
-                    onClick={() => event.mediaUrl && handleMediaClick(event)}
-                  >
-                    <p className={`text-xs md:text-sm ${mobileOverlay ? 'text-white' : 'text-gray-800'}`}>
-                      <span 
+                  );
+                }
+                
+                return (
+                  <div key={event.id} className="flex items-center">
+                    {/* User avatar and action icon - always visible */}
+                    <div className="relative flex items-center mr-3 md:mr-5 z-10">
+                      <div className={`w-4 h-4 md:w-5 md:h-5 rounded-full -ml-[4px] md:-ml-[4px] mr-2 flex items-center justify-center ${
+                        mobileOverlay ? '' : 'bg-white border border-gray-200'
+                      }`}>
+                        {getEventIcon(event.type, mobileOverlay)}
+                      </div>
+                      <div 
                         onClick={(e) => {
                           e.stopPropagation();
                           handleProfileClick(event);
                         }}
-                        className={`font-medium cursor-pointer transition-colors ${
-                          mobileOverlay ? 'hover:text-gray-300' : 'hover:text-blue-600'
-                        }`}
+                        className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
                       >
-                        {event.user.displayName || event.user.username || 
-                         `${event.user.address.slice(0, 6)}...${event.user.address.slice(-4)}`}
-                      </span>
-                      {' '}
-                      {getEventText(event.type)}
-                    </p>
-                    <p className={`${mobileOverlay ? 'text-[10px]' : 'text-xs'} ${mobileOverlay ? 'text-gray-300' : 'text-gray-500'}`}>
-                      {event.timestamp > Date.now() - 60000 
-                        ? 'less than a minute ago'
-                        : `${Math.floor((Date.now() - event.timestamp) / 60000)} minutes ago`
-                      }
-                    </p>
+                        {event.user.pfpUrl ? (
+                          <img 
+                            src={event.user.pfpUrl} 
+                            alt={event.user.displayName || event.user.username || 'User'} 
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <User className="w-3 h-3 md:w-4 md:h-4 text-gray-600" />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Event details - fade out only in camera view */}
+                    <div 
+                      className={`ml-2 md:ml-3 flex-left transition-opacity cursor-pointer ${
+                        mobileOverlay ? '' : 'bg-white'
+                      } ${
+                        variant === 'camera' && index > 1 ? 'opacity-0' : ''
+                      }`}
+                      onClick={() => event.mediaUrl && handleMediaClick(event)}
+                    >
+                      <p className={`text-xs md:text-sm ${mobileOverlay ? 'text-white' : 'text-gray-800'}`}>
+                        <span 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleProfileClick(event);
+                          }}
+                          className={`font-medium cursor-pointer transition-colors ${
+                            mobileOverlay ? 'hover:text-gray-300' : 'hover:text-blue-600'
+                          }`}
+                        >
+                          {event.user.displayName || event.user.username || 
+                           `${event.user.address.slice(0, 6)}...${event.user.address.slice(-4)}`}
+                        </span>
+                        {' '}
+                        {getEventText(event.type)}
+                      </p>
+                      <p className={`${mobileOverlay ? 'text-[10px]' : 'text-xs'} ${mobileOverlay ? 'text-gray-300' : 'text-gray-500'}`}>
+                        {event.timestamp > Date.now() - 60000 
+                          ? 'less than a minute ago'
+                          : `${Math.floor((Date.now() - event.timestamp) / 60000)} minutes ago`
+                        }
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </>
           )}
         </div>
@@ -444,7 +463,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
 
       {/* Profile Stack with connected timeline */}
       {variant === 'camera' && (
-        <div className="relative mt-2">
+        <div className="relative">
           {/* Corner and horizontal line container */}
           <div className="absolute left-0 top-0 w-full">
             {/* L-shaped corner with rounded curve using CSS */}
