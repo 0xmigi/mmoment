@@ -3,7 +3,13 @@
 echo "🎬 Starting MMoment Camera System..."
 
 # Navigate to the project directory
-cd /home/azuolas/mmoment/app/orin_nano
+cd /mnt/nvme/mmoment/app/orin_nano
+
+# Load environment variables
+if [ -f .env ]; then
+    echo "Loading environment variables from .env..."
+    export $(grep -v '^#' .env | xargs)
+fi
 
 # Stop any existing containers
 echo "Stopping existing containers..."
