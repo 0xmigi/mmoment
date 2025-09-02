@@ -4,6 +4,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { config } from 'dotenv';
+import dgram from 'dgram';
 
 // Load environment variables
 config();
@@ -593,7 +594,125 @@ io.engine.on('connection_error', (err) => {
   console.error('Socket.IO connection error:', err);
 });
 
-// Start server with error handling
+// Simple TURN server implementation
+const TURN_PORT = Number(process.env.TURN_PORT) || 3478;
+const TURN_USERNAME = process.env.TURN_USERNAME || 'mmoment';
+const TURN_PASSWORD = process.env.TURN_PASSWORD || 'webrtc123';
+
+// Store active TURN allocations
+const turnAllocations = new Map<string, {
+  clientAddress: string,
+  clientPort: number,
+  relayPort: number,
+  relaySocket: dgram.Socket,
+  peers: Map<string, { address: string, port: number }>
+}>();
+
+// Create TURN server
+const turnServer = dgram.createSocket('udp4');
+
+turnServer.on('message', (msg, rinfo) => {
+  try {
+    // Simple TURN protocol implementation
+    // Check if this is a TURN allocation request
+    if (msg.length > 20) {
+      const messageType = msg.readUInt16BE(0);
+      
+      if (messageType === 0x0003) { // TURN Allocate Request
+        console.log(`TURN: Allocation request from ${rinfo.address}:${rinfo.port}`);
+        
+        // Create a relay socket for this client
+        const relaySocket = dgram.createSocket('udp4');
+        let relayPort = 40000 + Math.floor(Math.random() * 10000);
+        
+        relaySocket.bind(relayPort, () => {
+          const allocationId = `${rinfo.address}:${rinfo.port}`;
+          
+          // Store allocation
+          turnAllocations.set(allocationId, {
+            clientAddress: rinfo.address,
+            clientPort: rinfo.port,
+            relayPort: relayPort,
+            relaySocket: relaySocket,
+            peers: new Map()
+          });
+          
+          // Handle relay traffic
+          relaySocket.on('message', (relayMsg, relayRinfo) => {
+            // Forward relay traffic back to the client
+            turnServer.send(relayMsg, rinfo.port, rinfo.address);
+          });
+          
+          // Send success response with relay address
+          const response = Buffer.alloc(28);
+          response.writeUInt16BE(0x0103, 0); // Allocate Success Response
+          response.writeUInt16BE(8, 2); // Message Length
+          response.writeUInt32BE(0x2112A442, 4); // Magic Cookie
+          // Add relay address attribute
+          response.writeUInt16BE(0x0016, 20); // XOR-RELAYED-ADDRESS
+          response.writeUInt16BE(8, 22); // Length
+          response.writeUInt16BE(0x01, 24); // IPv4
+          response.writeUInt16BE(relayPort ^ 0x2112, 26); // XOR'd port
+          
+          turnServer.send(response, rinfo.port, rinfo.address);
+          
+          console.log(`TURN: Allocated relay port ${relayPort} for ${allocationId}`);
+        });
+        
+        relaySocket.on('error', (err) => {
+          console.error(`TURN relay socket error:`, err);
+        });
+        
+      } else {
+        // Handle data forwarding
+        const allocationId = `${rinfo.address}:${rinfo.port}`;
+        const allocation = turnAllocations.get(allocationId);
+        
+        if (allocation) {
+          // This is data from the client to be relayed
+          // In a full TURN implementation, you'd parse the destination from TURN headers
+          // For simplicity, we'll relay to the first peer or back to the client
+          
+          // Forward to relay socket (which will send to peers)
+          allocation.relaySocket.send(msg, 0, msg.length, allocation.relayPort, 'localhost');
+        }
+      }
+    }
+  } catch (error) {
+    console.error('TURN server error:', error);
+  }
+});
+
+turnServer.on('error', (err) => {
+  console.error('TURN server error:', err);
+});
+
+turnServer.on('listening', () => {
+  const address = turnServer.address();
+  console.log(`TURN server listening on ${address?.address}:${address?.port}`);
+  console.log(`TURN credentials: ${TURN_USERNAME}:${TURN_PASSWORD}`);
+});
+
+// Start TURN server
+turnServer.bind(TURN_PORT, '0.0.0.0');
+
+// TURN server info endpoint
+app.get('/api/turn/info', (req, res) => {
+  const turnInfo = {
+    host: req.headers.host?.split(':')[0] || 'localhost',
+    port: TURN_PORT,
+    username: TURN_USERNAME,
+    credential: TURN_PASSWORD,
+    urls: [
+      `turn:${req.headers.host?.split(':')[0] || 'localhost'}:${TURN_PORT}`,
+      `turn:${req.headers.host?.split(':')[0] || 'localhost'}:${TURN_PORT}?transport=udp`
+    ]
+  };
+  
+  res.json(turnInfo);
+});
+
+// Start HTTP server with error handling
 const port = Number(process.env.PORT) || 3001;
 httpServer.listen(port, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
@@ -603,6 +722,8 @@ httpServer.listen(port, '0.0.0.0', () => {
     headersTimeout: httpServer.headersTimeout,
     socketTransports: io.engine.opts.transports,
     socketPingTimeout: io.engine.opts.pingTimeout,
-    socketPingInterval: io.engine.opts.pingInterval
+    socketPingInterval: io.engine.opts.pingInterval,
+    turnPort: TURN_PORT,
+    turnUsername: TURN_USERNAME
   });
 });

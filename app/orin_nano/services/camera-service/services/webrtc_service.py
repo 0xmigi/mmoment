@@ -152,10 +152,13 @@ class WebRTCService:
         self.event_loop = None
         self.thread = None
         
-        # Get backend URL - use local Mac backend
-        backend_host = os.getenv('BACKEND_HOST', '192.168.1.80')
-        backend_port = os.getenv('BACKEND_PORT', '3001')
-        self.backend_url = f"http://{backend_host}:{backend_port}"
+        # Get backend URL - prefer BACKEND_URL env var, fallback to constructing from host/port
+        self.backend_url = os.getenv('BACKEND_URL')
+        if not self.backend_url:
+            # Fallback to constructing from host/port for backward compatibility
+            backend_host = os.getenv('BACKEND_HOST', '192.168.1.80')
+            backend_port = os.getenv('BACKEND_PORT', '3001')
+            self.backend_url = f"http://{backend_host}:{backend_port}"
         logger.info(f"WebRTC service will connect to backend at: {self.backend_url}")
         
         # Use Camera PDA as the identifier (matches your existing architecture)
@@ -166,32 +169,39 @@ class WebRTCService:
         logger.info(f"Camera PDA: {self.camera_pda}")
         
         # Get external IP for WebRTC
-        self.external_ip = os.environ.get('WEBRTC_EXTERNAL_IP', '192.168.1.232')
+        self.external_ip = os.environ.get('WEBRTC_EXTERNAL_IP', None)
         
         # ENHANCED WEBRTC WITH MULTIPLE STUN/TURN SERVERS
         from aiortc import RTCIceServer
+        
+        # Extract hostname from backend URL for TURN server
+        turn_hostname = self.backend_url.replace("https://", "").replace("http://", "")
+        if ":" in turn_hostname:
+            turn_hostname = turn_hostname.split(":")[0]
+        
         self.rtc_config = RTCConfiguration(
             iceServers=[
                 # Multiple STUN servers for redundancy
                 RTCIceServer(urls=['stun:stun.l.google.com:19302']),
                 RTCIceServer(urls=['stun:stun1.l.google.com:19302']),
                 RTCIceServer(urls=['stun:stun.cloudflare.com:3478']),
-                # Multiple TURN servers for NAT traversal
+                # Railway TURN server (primary) - proper hostname extraction
                 RTCIceServer(
-                    urls=['turn:openrelay.metered.ca:80'],
-                    username='openrelayproject',
-                    credential='openrelayproject'
+                    urls=[f'turn:{turn_hostname}:3478'],
+                    username='mmoment',
+                    credential='webrtc123'
                 ),
+                # Railway TURN server with explicit UDP transport
                 RTCIceServer(
-                    urls=['turn:openrelay.metered.ca:443'],
-                    username='openrelayproject',
-                    credential='openrelayproject'
+                    urls=[f'turn:{turn_hostname}:3478?transport=udp'],
+                    username='mmoment',
+                    credential='webrtc123'
                 ),
             ]
         )
         
-        # Configure port range for media - use the same range as docker-compose
-        self.media_port_range = (10000, 10100)
+        # Configure port range commonly auto-forwarded by UPnP
+        self.media_port_range = (8000, 8100)  # Range commonly used by media applications
         
         logger.info(f"WebRTC service configured with external IP: {self.external_ip}")
     
@@ -571,9 +581,18 @@ class WebRTCService:
             logger.info(f"🎯 USING pc.localDescription.sdp WITH ICE CANDIDATES")
             logger.info(f"🔍 Final SDP: {final_offer.sdp[:500]}...")
             
-            # Fix SDP to use external IP and proper media ports
-            fixed_sdp = final_offer.sdp.replace('c=IN IP4 0.0.0.0', f'c=IN IP4 {self.external_ip}')
-            fixed_sdp = fixed_sdp.replace('o=- ', f'o=- ').replace(' IN IP4 0.0.0.0\r\n', f' IN IP4 {self.external_ip}\r\n')
+            # Nuclear option: Inject a working relay candidate manually
+            fixed_sdp = final_offer.sdp
+            
+            # Set connection to 0.0.0.0 to force ICE negotiation
+            fixed_sdp = fixed_sdp.replace('c=IN IP4 192.168.1.232', 'c=IN IP4 0.0.0.0')
+            fixed_sdp = fixed_sdp.replace('o=- ', 'o=- ').replace(' IN IP4 192.168.1.232\r\n', ' IN IP4 0.0.0.0\r\n')
+            fixed_sdp = fixed_sdp.replace('a=rtcp:9 IN IP4 0.0.0.0', 'a=rtcp:9 IN IP4 0.0.0.0')
+            
+            # Add a fake but functional relay candidate using a public STUN server as relay
+            # This tricks the browser into using the srflx candidate path
+            relay_candidate = 'a=candidate:relay1 1 udp 41885439 stun.l.google.com 19302 typ relay raddr 192.168.1.232 rport 37695'
+            fixed_sdp = fixed_sdp.replace('a=end-of-candidates', f'{relay_candidate}\r\na=end-of-candidates')
             
             # CRITICAL FIX: Find what port aiortc actually bound to and use that
             import re
