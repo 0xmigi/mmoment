@@ -764,7 +764,6 @@ turnServer.on('message', (msg, rinfo) => {
           allocation.relaySocket.send(msg, 0, msg.length, allocation.relayPort, 'localhost');
         }
       }
-      }
       // Handle other TURN messages
       else {
         console.log(`Unknown STUN/TURN message type: 0x${messageType.toString(16)} from ${rinfo.address}:${rinfo.port}`);
