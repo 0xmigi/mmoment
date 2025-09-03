@@ -181,21 +181,28 @@ class WebRTCService:
         
         self.rtc_config = RTCConfiguration(
             iceServers=[
-                # Multiple STUN servers for redundancy
+                # Google STUN servers for NAT discovery
                 RTCIceServer(urls=['stun:stun.l.google.com:19302']),
                 RTCIceServer(urls=['stun:stun1.l.google.com:19302']),
-                RTCIceServer(urls=['stun:stun.cloudflare.com:3478']),
-                # Railway TURN server (primary) - proper hostname extraction
+                # Our Railway CoTURN server - PRIMARY
                 RTCIceServer(
                     urls=[f'turn:{turn_hostname}:3478'],
                     username='mmoment',
                     credential='webrtc123'
                 ),
-                # Railway TURN server with explicit UDP transport
                 RTCIceServer(
-                    urls=[f'turn:{turn_hostname}:3478?transport=udp'],
+                    urls=[f'turn:{turn_hostname}:3478?transport=tcp'],
                     username='mmoment',
                     credential='webrtc123'
+                ),
+                RTCIceServer(
+                    urls=[f'stun:{turn_hostname}:3478']
+                ),
+                # Backup public TURN servers
+                RTCIceServer(
+                    urls=['turn:openrelay.metered.ca:80'],
+                    username='openrelayproject',
+                    credential='openrelayproject'
                 ),
             ]
         )
@@ -584,15 +591,12 @@ class WebRTCService:
             # Nuclear option: Inject a working relay candidate manually
             fixed_sdp = final_offer.sdp
             
-            # Set connection to 0.0.0.0 to force ICE negotiation
+            # SIMPLE APPROACH: Just force 0.0.0.0 and let TURN servers handle everything
             fixed_sdp = fixed_sdp.replace('c=IN IP4 192.168.1.232', 'c=IN IP4 0.0.0.0')
             fixed_sdp = fixed_sdp.replace('o=- ', 'o=- ').replace(' IN IP4 192.168.1.232\r\n', ' IN IP4 0.0.0.0\r\n')
-            fixed_sdp = fixed_sdp.replace('a=rtcp:9 IN IP4 0.0.0.0', 'a=rtcp:9 IN IP4 0.0.0.0')
             
-            # Add a fake but functional relay candidate using a public STUN server as relay
-            # This tricks the browser into using the srflx candidate path
-            relay_candidate = 'a=candidate:relay1 1 udp 41885439 stun.l.google.com 19302 typ relay raddr 192.168.1.232 rport 37695'
-            fixed_sdp = fixed_sdp.replace('a=end-of-candidates', f'{relay_candidate}\r\na=end-of-candidates')
+            # Let the TURN servers and STUN servers handle all the connectivity
+            # Don't add fake relay candidates - rely on real ICE negotiation
             
             # CRITICAL FIX: Find what port aiortc actually bound to and use that
             import re
