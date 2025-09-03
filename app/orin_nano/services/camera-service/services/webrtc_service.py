@@ -183,14 +183,16 @@ class WebRTCService:
             iceServers=[
                 # Google STUN servers
                 RTCIceServer(urls=['stun:stun.l.google.com:19302']),
-                # Railway CoTURN server on port 8080 (Railway's exposed port)
+                # Railway CoTURN server on port 8080 (TCP transport for Railway compatibility)
                 RTCIceServer(
-                    urls=[f'turn:{turn_hostname}:8080'],
+                    urls=[f'turn:{turn_hostname}:8080?transport=tcp'],
                     username='mmoment',
                     credential='webrtc123'
                 ),
                 RTCIceServer(
-                    urls=[f'stun:{turn_hostname}:8080']
+                    urls=[f'turns:{turn_hostname}:8080?transport=tcp'],
+                    username='mmoment',
+                    credential='webrtc123'
                 ),
             ]
         )

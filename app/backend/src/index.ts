@@ -5,6 +5,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import { config } from 'dotenv';
 import dgram from 'dgram';
+import net from 'net';
 
 // Load environment variables
 config();
@@ -612,8 +613,8 @@ const turnAllocations = new Map<string, {
   peers: Map<string, { address: string, port: number }>
 }>();
 
-// Create TURN server
-const turnServer = dgram.createSocket('udp4');
+// Create TURN server (TCP for Railway compatibility)
+const turnServer = net.createServer();
 
 // Helper function to parse STUN/TURN messages
 function parseStunMessage(msg: Buffer) {
@@ -665,70 +666,75 @@ function createXorMappedAddress(address: string, port: number): Buffer {
   return attr;
 }
 
-turnServer.on('message', (msg, rinfo) => {
-  try {
-    const stunMsg = parseStunMessage(msg);
-    if (!stunMsg) return;
-    
-    const { messageType, transactionId } = stunMsg;
+turnServer.on('connection', (socket) => {
+  console.log(`TCP TURN connection from ${socket.remoteAddress}:${socket.remotePort}`);
+  
+  socket.on('data', (data) => {
+    try {
+      const stunMsg = parseStunMessage(data);
+      if (!stunMsg) return;
       
-      // Handle STUN Binding Request (0x0001)
-      if (messageType === 0x0001) {
-        console.log(`STUN Binding request from ${rinfo.address}:${rinfo.port}`);
+      const { messageType, transactionId } = stunMsg;
+      const clientAddress = socket.remoteAddress || '127.0.0.1';
+      const clientPort = socket.remotePort || 0;
         
-        // Create XOR-MAPPED-ADDRESS attribute
-        const xorMappedAddr = createXorMappedAddress(rinfo.address, rinfo.port);
-        
-        // Send STUN Binding Response (0x0101)
-        const response = createStunResponse(0x0101, transactionId, [xorMappedAddr]);
-        turnServer.send(response, rinfo.port, rinfo.address);
-        
-        console.log(`STUN Binding response sent to ${rinfo.address}:${rinfo.port}`);
-      }
-      // Handle TURN Allocate Request (0x0003)
-      else if (messageType === 0x0003) {
-        console.log(`TURN: Allocation request from ${rinfo.address}:${rinfo.port}`);
+        // Handle STUN Binding Request (0x0001)
+        if (messageType === 0x0001) {
+          console.log(`STUN Binding request from ${clientAddress}:${clientPort}`);
+          
+          // Create XOR-MAPPED-ADDRESS attribute
+          const xorMappedAddr = createXorMappedAddress(clientAddress, clientPort);
+          
+          // Send STUN Binding Response (0x0101)
+          const response = createStunResponse(0x0101, transactionId, [xorMappedAddr]);
+          socket.write(response);
+          
+          console.log(`STUN Binding response sent to ${clientAddress}:${clientPort}`);
+        }
+        // Handle TURN Allocate Request (0x0003)
+        else if (messageType === 0x0003) {
+          console.log(`TURN: Allocation request from ${clientAddress}:${clientPort}`);
         
         // Create a relay socket for this client
         const relaySocket = dgram.createSocket('udp4');
         let relayPort = 40000 + Math.floor(Math.random() * 10000);
         
-        relaySocket.bind(relayPort, () => {
-          const allocationId = `${rinfo.address}:${rinfo.port}`;
-          
-          // Store allocation
-          turnAllocations.set(allocationId, {
-            clientAddress: rinfo.address,
-            clientPort: rinfo.port,
-            relayPort: relayPort,
-            relaySocket: relaySocket,
-            peers: new Map()
-          });
-          
-          // Handle relay traffic
-          relaySocket.on('message', (relayMsg, relayRinfo) => {
-            // Forward relay traffic back to the client
-            turnServer.send(relayMsg, rinfo.port, rinfo.address);
-          });
+          relaySocket.bind(relayPort, () => {
+            const allocationId = `${clientAddress}:${clientPort}`;
+            
+            // Store allocation
+            turnAllocations.set(allocationId, {
+              clientAddress: clientAddress,
+              clientPort: clientPort,
+              relayPort: relayPort,
+              relaySocket: relaySocket,
+              peers: new Map()
+            });
+            
+            // Handle relay traffic
+            relaySocket.on('message', (relayMsg, relayRinfo) => {
+              // Forward relay traffic back to the client
+              socket.write(relayMsg);
+            });
           
           // Create XOR-RELAYED-ADDRESS attribute
           const relayAddr = createXorMappedAddress('0.0.0.0', relayPort);
           relayAddr.writeUInt16BE(0x0016, 0); // Change type to XOR-RELAYED-ADDRESS
           
-          // Create XOR-MAPPED-ADDRESS for the client
-          const mappedAddr = createXorMappedAddress(rinfo.address, rinfo.port);
-          
-          // Create LIFETIME attribute (600 seconds)
-          const lifetime = Buffer.alloc(8);
-          lifetime.writeUInt16BE(0x000D, 0); // LIFETIME
-          lifetime.writeUInt16BE(4, 2); // Length
-          lifetime.writeUInt32BE(600, 4); // 600 seconds
-          
-          // Send Allocate Success Response (0x0103)
-          const response = createStunResponse(0x0103, transactionId, [relayAddr, mappedAddr, lifetime]);
-          turnServer.send(response, rinfo.port, rinfo.address);
-          
-          console.log(`TURN: Allocated relay port ${relayPort} for ${allocationId}`);
+            // Create XOR-MAPPED-ADDRESS for the client
+            const mappedAddr = createXorMappedAddress(clientAddress, clientPort);
+            
+            // Create LIFETIME attribute (600 seconds)
+            const lifetime = Buffer.alloc(8);
+            lifetime.writeUInt16BE(0x000D, 0); // LIFETIME
+            lifetime.writeUInt16BE(4, 2); // Length
+            lifetime.writeUInt32BE(600, 4); // 600 seconds
+            
+            // Send Allocate Success Response (0x0103)
+            const response = createStunResponse(0x0103, transactionId, [relayAddr, mappedAddr, lifetime]);
+            socket.write(response);
+            
+            console.log(`TURN: Allocated relay port ${relayPort} for ${allocationId}`);
         });
         
         relaySocket.on('error', (err) => {
@@ -736,58 +742,65 @@ turnServer.on('message', (msg, rinfo) => {
         });
         
       }
-      // Handle TURN Refresh Request (0x0004)
-      else if (messageType === 0x0004) {
-        console.log(`TURN Refresh request from ${rinfo.address}:${rinfo.port}`);
-        
-        // Send Refresh Success Response (0x0104)
-        const lifetime = Buffer.alloc(8);
-        lifetime.writeUInt16BE(0x000D, 0); // LIFETIME
-        lifetime.writeUInt16BE(4, 2); // Length
-        lifetime.writeUInt32BE(600, 4); // 600 seconds
-        
-        const response = createStunResponse(0x0104, transactionId, [lifetime]);
-        turnServer.send(response, rinfo.port, rinfo.address);
-      }
-      // Handle ChannelBind or Send Indication for data relay
-      else if (messageType === 0x0009 || messageType === 0x0016) {
-        // Handle data relay
-        const allocationId = `${rinfo.address}:${rinfo.port}`;
-        const allocation = turnAllocations.get(allocationId);
-        
-        if (allocation) {
-          // This is data from the client to be relayed
-          // In a full TURN implementation, you'd parse the destination from TURN headers
-          // For simplicity, we'll relay to the first peer or back to the client
+        // Handle TURN Refresh Request (0x0004)
+        else if (messageType === 0x0004) {
+          console.log(`TURN Refresh request from ${clientAddress}:${clientPort}`);
           
-          // Forward to relay socket (which will send to peers)
-          allocation.relaySocket.send(msg, 0, msg.length, allocation.relayPort, 'localhost');
+          // Send Refresh Success Response (0x0104)
+          const lifetime = Buffer.alloc(8);
+          lifetime.writeUInt16BE(0x000D, 0); // LIFETIME
+          lifetime.writeUInt16BE(4, 2); // Length
+          lifetime.writeUInt32BE(600, 4); // 600 seconds
+          
+          const response = createStunResponse(0x0104, transactionId, [lifetime]);
+          socket.write(response);
         }
-      }
-      // Handle other TURN messages
-      else {
-        console.log(`Unknown STUN/TURN message type: 0x${messageType.toString(16)} from ${rinfo.address}:${rinfo.port}`);
-      }
-  } catch (error) {
-    console.error('TURN server error:', error);
-  }
+        // Handle ChannelBind or Send Indication for data relay
+        else if (messageType === 0x0009 || messageType === 0x0016) {
+          // Handle data relay
+          const allocationId = `${clientAddress}:${clientPort}`;
+          const allocation = turnAllocations.get(allocationId);
+          
+          if (allocation) {
+            // This is data from the client to be relayed
+            // In a full TURN implementation, you'd parse the destination from TURN headers
+            // For simplicity, we'll relay to the first peer or back to the client
+            
+            // Forward to relay socket (which will send to peers)
+            allocation.relaySocket.send(data, 0, data.length, allocation.relayPort, 'localhost');
+          }
+        }
+        // Handle other TURN messages
+        else {
+          console.log(`Unknown STUN/TURN message type: 0x${messageType.toString(16)} from ${clientAddress}:${clientPort}`);
+        }
+    } catch (error) {
+      console.error('TCP TURN server error:', error);
+    }
+  });
+
+  socket.on('close', () => {
+    console.log(`TCP TURN connection closed from ${socket.remoteAddress}:${socket.remotePort}`);
+  });
+
+  socket.on('error', (err) => {
+    console.error('TCP TURN socket error:', err);
+  });
 });
 
 turnServer.on('error', (err) => {
   console.error('TURN server error:', err);
 });
 
-turnServer.on('listening', () => {
-  const address = turnServer.address();
-  console.log(`✅ Enhanced TURN server listening on ${address?.address}:${address?.port}`);
+// Start TCP TURN server
+turnServer.listen(TURN_PORT, '0.0.0.0', () => {
+  console.log(`✅ TCP TURN server listening on 0.0.0.0:${TURN_PORT}`);
   console.log(`TURN realm: ${TURN_REALM}`);
   console.log(`TURN credentials: ${TURN_USERNAME}:${TURN_PASSWORD}`);
   console.log(`External domain: ${EXTERNAL_IP}`);
   console.log(`Supported messages: STUN Binding, TURN Allocate, TURN Refresh`);
+  console.log(`Transport: TCP (Railway compatible)`);
 });
-
-// Start TURN server
-turnServer.bind(TURN_PORT, '0.0.0.0');
 
 // TURN server info endpoint
 app.get('/api/turn/info', (req, res) => {
