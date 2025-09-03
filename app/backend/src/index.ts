@@ -792,15 +792,18 @@ turnServer.on('error', (err) => {
   console.error('TURN server error:', err);
 });
 
-// Start TCP TURN server
-turnServer.listen(TURN_PORT, '0.0.0.0', () => {
-  console.log(`✅ TCP TURN server listening on 0.0.0.0:${TURN_PORT}`);
-  console.log(`TURN realm: ${TURN_REALM}`);
-  console.log(`TURN credentials: ${TURN_USERNAME}:${TURN_PASSWORD}`);
-  console.log(`External domain: ${EXTERNAL_IP}`);
-  console.log(`Supported messages: STUN Binding, TURN Allocate, TURN Refresh`);
-  console.log(`Transport: TCP (Railway compatible)`);
-});
+// TURN server disabled - Railway only provides one port for HTTP
+// TCP TURN on the same port as HTTP is not supported
+// turnServer.listen(TURN_PORT, '0.0.0.0', () => {
+//   console.log(`✅ TCP TURN server listening on 0.0.0.0:${TURN_PORT}`);
+//   console.log(`TURN realm: ${TURN_REALM}`);
+//   console.log(`TURN credentials: ${TURN_USERNAME}:${TURN_PASSWORD}`);
+//   console.log(`External domain: ${EXTERNAL_IP}`);
+//   console.log(`Supported messages: STUN Binding, TURN Allocate, TURN Refresh`);
+//   console.log(`Transport: TCP (Railway compatible)`);
+// });
+console.log('⚠️ TURN server disabled - Railway only supports HTTP on port 8080');
+console.log('⚠️ Use external TURN server for cross-network WebRTC');
 
 // TURN server info endpoint
 app.get('/api/turn/info', (req, res) => {

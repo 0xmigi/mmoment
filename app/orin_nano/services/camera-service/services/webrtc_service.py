@@ -183,16 +183,22 @@ class WebRTCService:
             iceServers=[
                 # Google STUN servers
                 RTCIceServer(urls=['stun:stun.l.google.com:19302']),
-                # Railway CoTURN server on port 8080 (TCP transport for Railway compatibility)
+                RTCIceServer(urls=['stun:stun1.l.google.com:19302']),
+                # OpenRelay public TURN server
                 RTCIceServer(
-                    urls=[f'turn:{turn_hostname}:8080?transport=tcp'],
-                    username='mmoment',
-                    credential='webrtc123'
+                    urls=['turn:openrelay.metered.ca:80'],
+                    username='openrelayproject',
+                    credential='openrelayproject'
                 ),
                 RTCIceServer(
-                    urls=[f'turns:{turn_hostname}:8080?transport=tcp'],
-                    username='mmoment',
-                    credential='webrtc123'
+                    urls=['turn:openrelay.metered.ca:443'],
+                    username='openrelayproject',
+                    credential='openrelayproject'
+                ),
+                RTCIceServer(
+                    urls=['turn:openrelay.metered.ca:443?transport=tcp'],
+                    username='openrelayproject',
+                    credential='openrelayproject'
                 ),
             ]
         )
