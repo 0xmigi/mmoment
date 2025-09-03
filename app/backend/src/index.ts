@@ -594,10 +594,14 @@ io.engine.on('connection_error', (err) => {
   console.error('Socket.IO connection error:', err);
 });
 
-// Simple TURN server implementation
+// Enhanced CoTURN-compatible server implementation for Railway
 const TURN_PORT = Number(process.env.TURN_PORT) || 3478;
 const TURN_USERNAME = process.env.TURN_USERNAME || 'mmoment';
 const TURN_PASSWORD = process.env.TURN_PASSWORD || 'webrtc123';
+const TURN_REALM = process.env.TURN_REALM || 'mmoment.xyz';
+
+// Get external IP for Railway deployment
+const EXTERNAL_IP = process.env.RAILWAY_PUBLIC_DOMAIN || 'mmoment-production.up.railway.app';
 
 // Store active TURN allocations
 const turnAllocations = new Map<string, {
@@ -611,14 +615,78 @@ const turnAllocations = new Map<string, {
 // Create TURN server
 const turnServer = dgram.createSocket('udp4');
 
+// Helper function to parse STUN/TURN messages
+function parseStunMessage(msg: Buffer) {
+  if (msg.length < 20) return null;
+  
+  const messageType = msg.readUInt16BE(0);
+  const messageLength = msg.readUInt16BE(2);
+  const magicCookie = msg.readUInt32BE(4);
+  const transactionId = msg.slice(8, 20);
+  
+  return { messageType, messageLength, magicCookie, transactionId };
+}
+
+// Helper function to create STUN/TURN response
+function createStunResponse(type: number, transactionId: Buffer, attributes: Buffer[] = []): Buffer {
+  const totalAttrLength = attributes.reduce((sum, attr) => sum + attr.length, 0);
+  const response = Buffer.alloc(20 + totalAttrLength);
+  
+  response.writeUInt16BE(type, 0); // Message type
+  response.writeUInt16BE(totalAttrLength, 2); // Message length
+  response.writeUInt32BE(0x2112A442, 4); // Magic cookie
+  transactionId.copy(response, 8); // Transaction ID
+  
+  // Copy attributes
+  let offset = 20;
+  for (const attr of attributes) {
+    attr.copy(response, offset);
+    offset += attr.length;
+  }
+  
+  return response;
+}
+
+// Helper to create XOR-MAPPED-ADDRESS attribute
+function createXorMappedAddress(address: string, port: number): Buffer {
+  const attr = Buffer.alloc(12);
+  attr.writeUInt16BE(0x0020, 0); // XOR-MAPPED-ADDRESS
+  attr.writeUInt16BE(8, 2); // Length
+  attr.writeUInt16BE(0x0001, 4); // IPv4 family
+  attr.writeUInt16BE(port ^ 0x2112, 6); // XOR'd port
+  
+  // XOR the IP address
+  const ipParts = address.split('.').map(Number);
+  const magicCookie = [0x21, 0x12, 0xA4, 0x42];
+  for (let i = 0; i < 4; i++) {
+    attr.writeUInt8(ipParts[i] ^ magicCookie[i], 8 + i);
+  }
+  
+  return attr;
+}
+
 turnServer.on('message', (msg, rinfo) => {
   try {
-    // Simple TURN protocol implementation
-    // Check if this is a TURN allocation request
-    if (msg.length > 20) {
-      const messageType = msg.readUInt16BE(0);
+    const stunMsg = parseStunMessage(msg);
+    if (!stunMsg) return;
+    
+    const { messageType, transactionId } = stunMsg;
       
-      if (messageType === 0x0003) { // TURN Allocate Request
+      // Handle STUN Binding Request (0x0001)
+      if (messageType === 0x0001) {
+        console.log(`STUN Binding request from ${rinfo.address}:${rinfo.port}`);
+        
+        // Create XOR-MAPPED-ADDRESS attribute
+        const xorMappedAddr = createXorMappedAddress(rinfo.address, rinfo.port);
+        
+        // Send STUN Binding Response (0x0101)
+        const response = createStunResponse(0x0101, transactionId, [xorMappedAddr]);
+        turnServer.send(response, rinfo.port, rinfo.address);
+        
+        console.log(`STUN Binding response sent to ${rinfo.address}:${rinfo.port}`);
+      }
+      // Handle TURN Allocate Request (0x0003)
+      else if (messageType === 0x0003) {
         console.log(`TURN: Allocation request from ${rinfo.address}:${rinfo.port}`);
         
         // Create a relay socket for this client
@@ -643,17 +711,21 @@ turnServer.on('message', (msg, rinfo) => {
             turnServer.send(relayMsg, rinfo.port, rinfo.address);
           });
           
-          // Send success response with relay address
-          const response = Buffer.alloc(28);
-          response.writeUInt16BE(0x0103, 0); // Allocate Success Response
-          response.writeUInt16BE(8, 2); // Message Length
-          response.writeUInt32BE(0x2112A442, 4); // Magic Cookie
-          // Add relay address attribute
-          response.writeUInt16BE(0x0016, 20); // XOR-RELAYED-ADDRESS
-          response.writeUInt16BE(8, 22); // Length
-          response.writeUInt16BE(0x01, 24); // IPv4
-          response.writeUInt16BE(relayPort ^ 0x2112, 26); // XOR'd port
+          // Create XOR-RELAYED-ADDRESS attribute
+          const relayAddr = createXorMappedAddress('0.0.0.0', relayPort);
+          relayAddr.writeUInt16BE(0x0016, 0); // Change type to XOR-RELAYED-ADDRESS
           
+          // Create XOR-MAPPED-ADDRESS for the client
+          const mappedAddr = createXorMappedAddress(rinfo.address, rinfo.port);
+          
+          // Create LIFETIME attribute (600 seconds)
+          const lifetime = Buffer.alloc(8);
+          lifetime.writeUInt16BE(0x000D, 0); // LIFETIME
+          lifetime.writeUInt16BE(4, 2); // Length
+          lifetime.writeUInt32BE(600, 4); // 600 seconds
+          
+          // Send Allocate Success Response (0x0103)
+          const response = createStunResponse(0x0103, transactionId, [relayAddr, mappedAddr, lifetime]);
           turnServer.send(response, rinfo.port, rinfo.address);
           
           console.log(`TURN: Allocated relay port ${relayPort} for ${allocationId}`);
@@ -663,8 +735,23 @@ turnServer.on('message', (msg, rinfo) => {
           console.error(`TURN relay socket error:`, err);
         });
         
-      } else {
-        // Handle data forwarding
+      }
+      // Handle TURN Refresh Request (0x0004)
+      else if (messageType === 0x0004) {
+        console.log(`TURN Refresh request from ${rinfo.address}:${rinfo.port}`);
+        
+        // Send Refresh Success Response (0x0104)
+        const lifetime = Buffer.alloc(8);
+        lifetime.writeUInt16BE(0x000D, 0); // LIFETIME
+        lifetime.writeUInt16BE(4, 2); // Length
+        lifetime.writeUInt32BE(600, 4); // 600 seconds
+        
+        const response = createStunResponse(0x0104, transactionId, [lifetime]);
+        turnServer.send(response, rinfo.port, rinfo.address);
+      }
+      // Handle ChannelBind or Send Indication for data relay
+      else if (messageType === 0x0009 || messageType === 0x0016) {
+        // Handle data relay
         const allocationId = `${rinfo.address}:${rinfo.port}`;
         const allocation = turnAllocations.get(allocationId);
         
@@ -677,7 +764,11 @@ turnServer.on('message', (msg, rinfo) => {
           allocation.relaySocket.send(msg, 0, msg.length, allocation.relayPort, 'localhost');
         }
       }
-    }
+      }
+      // Handle other TURN messages
+      else {
+        console.log(`Unknown STUN/TURN message type: 0x${messageType.toString(16)} from ${rinfo.address}:${rinfo.port}`);
+      }
   } catch (error) {
     console.error('TURN server error:', error);
   }
@@ -689,8 +780,11 @@ turnServer.on('error', (err) => {
 
 turnServer.on('listening', () => {
   const address = turnServer.address();
-  console.log(`TURN server listening on ${address?.address}:${address?.port}`);
+  console.log(`✅ Enhanced TURN server listening on ${address?.address}:${address?.port}`);
+  console.log(`TURN realm: ${TURN_REALM}`);
   console.log(`TURN credentials: ${TURN_USERNAME}:${TURN_PASSWORD}`);
+  console.log(`External domain: ${EXTERNAL_IP}`);
+  console.log(`Supported messages: STUN Binding, TURN Allocate, TURN Refresh`);
 });
 
 // Start TURN server
