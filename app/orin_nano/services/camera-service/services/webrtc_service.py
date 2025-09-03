@@ -181,28 +181,16 @@ class WebRTCService:
         
         self.rtc_config = RTCConfiguration(
             iceServers=[
-                # Google STUN servers for NAT discovery
+                # Google STUN servers
                 RTCIceServer(urls=['stun:stun.l.google.com:19302']),
-                RTCIceServer(urls=['stun:stun1.l.google.com:19302']),
-                # Our Railway CoTURN server - PRIMARY
+                # Railway CoTURN server on port 8080 (Railway's exposed port)
                 RTCIceServer(
-                    urls=[f'turn:{turn_hostname}:3478'],
+                    urls=[f'turn:{turn_hostname}:8080'],
                     username='mmoment',
                     credential='webrtc123'
                 ),
                 RTCIceServer(
-                    urls=[f'turn:{turn_hostname}:3478?transport=tcp'],
-                    username='mmoment',
-                    credential='webrtc123'
-                ),
-                RTCIceServer(
-                    urls=[f'stun:{turn_hostname}:3478']
-                ),
-                # Backup public TURN servers
-                RTCIceServer(
-                    urls=['turn:openrelay.metered.ca:80'],
-                    username='openrelayproject',
-                    credential='openrelayproject'
+                    urls=[f'stun:{turn_hostname}:8080']
                 ),
             ]
         )

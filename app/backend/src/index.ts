@@ -595,7 +595,7 @@ io.engine.on('connection_error', (err) => {
 });
 
 // Enhanced CoTURN-compatible server implementation for Railway
-const TURN_PORT = Number(process.env.TURN_PORT) || 3478;
+const TURN_PORT = Number(process.env.PORT) || 8080; // Use Railway's exposed port
 const TURN_USERNAME = process.env.TURN_USERNAME || 'mmoment';
 const TURN_PASSWORD = process.env.TURN_PASSWORD || 'webrtc123';
 const TURN_REALM = process.env.TURN_REALM || 'mmoment.xyz';
