@@ -93,13 +93,13 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
     
     const cryptoKey = await crypto.subtle.importKey(
       'raw',
-      keyData as ArrayBuffer,
+      keyData.buffer as ArrayBuffer,
       { name: 'HMAC', hash: 'SHA-1' },
       false,
       ['sign']
     );
     
-    const signature = await crypto.subtle.sign('HMAC', cryptoKey, messageData as ArrayBuffer);
+    const signature = await crypto.subtle.sign('HMAC', cryptoKey, messageData.buffer as ArrayBuffer);
     const hashArray = Array.from(new Uint8Array(signature));
     const credential = btoa(String.fromCharCode(...hashArray));
     

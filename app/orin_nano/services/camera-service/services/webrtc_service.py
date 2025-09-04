@@ -179,26 +179,33 @@ class WebRTCService:
         if ":" in turn_hostname:
             turn_hostname = turn_hostname.split(":")[0]
         
+        # Oracle Cloud CoTURN server with time-based auth
+        import time
+        import hmac
+        import hashlib
+        import base64
+        
+        # Generate time-based TURN credentials
+        timestamp = int(time.time()) + 86400  # Valid for 24 hours
+        username = str(timestamp)
+        secret = 'mmoment-webrtc-secret-2025'
+        
+        # Generate HMAC-SHA1 credential
+        mac = hmac.new(secret.encode(), username.encode(), hashlib.sha1)
+        credential = base64.b64encode(mac.digest()).decode()
+        
         self.rtc_config = RTCConfiguration(
             iceServers=[
                 # Google STUN servers
                 RTCIceServer(urls=['stun:stun.l.google.com:19302']),
-                RTCIceServer(urls=['stun:stun1.l.google.com:19302']),
-                # OpenRelay public TURN server
+                # Our Oracle CoTURN server
                 RTCIceServer(
-                    urls=['turn:openrelay.metered.ca:80'],
-                    username='openrelayproject',
-                    credential='openrelayproject'
+                    urls=['turn:129.80.99.75:3478'],
+                    username=username,
+                    credential=credential
                 ),
                 RTCIceServer(
-                    urls=['turn:openrelay.metered.ca:443'],
-                    username='openrelayproject',
-                    credential='openrelayproject'
-                ),
-                RTCIceServer(
-                    urls=['turn:openrelay.metered.ca:443?transport=tcp'],
-                    username='openrelayproject',
-                    credential='openrelayproject'
+                    urls=['stun:129.80.99.75:3478']
                 ),
             ]
         )
@@ -584,12 +591,10 @@ class WebRTCService:
             logger.info(f"🎯 USING pc.localDescription.sdp WITH ICE CANDIDATES")
             logger.info(f"🔍 Final SDP: {final_offer.sdp[:500]}...")
             
-            # Nuclear option: Inject a working relay candidate manually
+            # Keep the original SDP for proper TURN server functionality
             fixed_sdp = final_offer.sdp
             
-            # SIMPLE APPROACH: Just force 0.0.0.0 and let TURN servers handle everything
-            fixed_sdp = fixed_sdp.replace('c=IN IP4 192.168.1.232', 'c=IN IP4 0.0.0.0')
-            fixed_sdp = fixed_sdp.replace('o=- ', 'o=- ').replace(' IN IP4 192.168.1.232\r\n', ' IN IP4 0.0.0.0\r\n')
+            # DON'T modify IP addresses - let TURN servers handle NAT traversal properly
             
             # Let the TURN servers and STUN servers handle all the connectivity
             # Don't add fake relay candidates - rely on real ICE negotiation
