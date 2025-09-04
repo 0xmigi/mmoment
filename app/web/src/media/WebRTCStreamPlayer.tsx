@@ -80,26 +80,28 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
     cleanup();
   }, [cleanup, onError]);
 
-  const createPeerConnection = useCallback(() => {
-    // Generate simple time-based TURN credentials (matching camera service)
+  const createPeerConnection = useCallback(async () => {
+    // Generate time-based TURN credentials (matching camera service)
     const timestamp = Math.floor(Date.now() / 1000) + 86400; // Valid for 24 hours
     const username = timestamp.toString();
     const secret = 'mmoment-webrtc-secret-2025';
     
-    // Simple HMAC-SHA1 approximation (for testing - same secret as camera service)
-    // Note: In production, this should use proper HMAC-SHA1
-    const simpleHash = (key: string, message: string): string => {
-      const combined = key + message;
-      let hash = 0;
-      for (let i = 0; i < combined.length; i++) {
-        const char = combined.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash; // Convert to 32-bit integer
-      }
-      return btoa(Math.abs(hash).toString()).substring(0, 20);
-    };
+    // Proper HMAC-SHA1 implementation using Web Crypto API
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(secret);
+    const messageData = encoder.encode(username);
     
-    const credential = simpleHash(secret, username);
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw',
+      keyData,
+      { name: 'HMAC', hash: 'SHA-1' },
+      false,
+      ['sign']
+    );
+    
+    const signature = await crypto.subtle.sign('HMAC', cryptoKey, messageData);
+    const hashArray = Array.from(new Uint8Array(signature));
+    const credential = btoa(String.fromCharCode.apply(null, hashArray));
     
     console.log('[WebRTC] Oracle TURN credentials generated:', { 
       username: username, 
@@ -296,7 +298,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
         console.log('[WebRTC] Offer SDP:', data.offer.sdp);
         
         try {
-          const peerConnection = createPeerConnection();
+          const peerConnection = await createPeerConnection();
           peerConnectionRef.current = peerConnection;
 
           await peerConnection.setRemoteDescription(data.offer);
