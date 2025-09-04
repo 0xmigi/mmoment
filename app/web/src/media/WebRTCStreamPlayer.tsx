@@ -81,21 +81,43 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
   }, [cleanup, onError]);
 
   const createPeerConnection = useCallback(() => {
+    // Generate simple time-based TURN credentials (matching camera service)
+    const timestamp = Math.floor(Date.now() / 1000) + 86400; // Valid for 24 hours
+    const username = timestamp.toString();
+    const secret = 'mmoment-webrtc-secret-2025';
+    
+    // Simple HMAC-SHA1 approximation (for testing - same secret as camera service)
+    // Note: In production, this should use proper HMAC-SHA1
+    const simpleHash = (key: string, message: string): string => {
+      const combined = key + message;
+      let hash = 0;
+      for (let i = 0; i < combined.length; i++) {
+        const char = combined.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32-bit integer
+      }
+      return btoa(Math.abs(hash).toString()).substring(0, 20);
+    };
+    
+    const credential = simpleHash(secret, username);
+    
+    console.log('[WebRTC] Oracle TURN credentials generated:', { 
+      username: username, 
+      credential: credential.substring(0, 8) + '...',
+      server: '129.80.99.75:3478'
+    });
+
     const config: RTCConfiguration = {
       iceServers: [
-        // STUN servers for NAT traversal
+        // Primary STUN servers
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        // Free public TURN server for relay fallback
+        // Oracle Cloud CoTURN server (STUN)
+        { urls: 'stun:129.80.99.75:3478' },
+        // Oracle Cloud CoTURN server (TURN) with time-based auth
         {
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelayproject',
-          credential: 'openrelayproject'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelayproject', 
-          credential: 'openrelayproject'
+          urls: 'turn:129.80.99.75:3478',
+          username: username,
+          credential: credential
         }
       ],
       iceCandidatePoolSize: 10,
