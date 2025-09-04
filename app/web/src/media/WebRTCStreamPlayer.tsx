@@ -101,7 +101,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
     
     const signature = await crypto.subtle.sign('HMAC', cryptoKey, messageData);
     const hashArray = Array.from(new Uint8Array(signature));
-    const credential = btoa(String.fromCharCode.apply(null, hashArray));
+    const credential = btoa(String.fromCharCode(...hashArray));
     
     console.log('[WebRTC] Oracle TURN credentials generated:', { 
       username: username, 
