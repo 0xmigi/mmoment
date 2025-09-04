@@ -8,10 +8,10 @@ import { StorageService, StorageResult, UploadOptions } from '../storage-provide
 // Using a CDN URL for the WASM file
 const WALRUS_WASM_URL = 'https://unpkg.com/@mysten/walrus-wasm@latest/web/walrus_wasm_bg.wasm';
 
-// Create the SUI client for Walrus
+// Create the SUI client for Walrus with explicit type
 const suiClient = new SuiClient({
   url: getFullnodeUrl('testnet'),
-});
+}) as any; // Temporary fix for type mismatch
 
 // Create a Walrus client with reasonable timeout settings
 const walrusClient = new WalrusClient({
