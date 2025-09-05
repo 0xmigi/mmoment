@@ -111,19 +111,20 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
 
     const config: RTCConfiguration = {
       iceServers: [
-        // Primary STUN servers
-        { urls: 'stun:stun.l.google.com:19302' },
-        // Oracle Cloud CoTURN server (STUN)
-        { urls: 'stun:129.80.99.75:3478' },
-        // Oracle Cloud CoTURN server (TURN) with time-based auth
+        // Oracle Cloud CoTURN server (TURN) - prioritize first for cross-network
         {
           urls: 'turn:129.80.99.75:3478',
           username: username,
           credential: credential
-        }
+        },
+        // Oracle Cloud CoTURN server (STUN)
+        { urls: 'stun:129.80.99.75:3478' },
+        // Google STUN as fallback
+        { urls: 'stun:stun.l.google.com:19302' }
       ],
       iceCandidatePoolSize: 10,
-      iceTransportPolicy: 'relay' // Force relay through TURN for mobile data compatibility
+      // Allow both direct and relay connections for maximum compatibility
+      iceTransportPolicy: 'all'
     };
 
     const peerConnection = new RTCPeerConnection(config);

@@ -196,17 +196,15 @@ class WebRTCService:
         
         self.rtc_config = RTCConfiguration(
             iceServers=[
-                # Google STUN servers
-                RTCIceServer(urls=['stun:stun.l.google.com:19302']),
-                # Our Oracle CoTURN server
+                # Our Oracle CoTURN server - put TURN first for priority
                 RTCIceServer(
                     urls=['turn:129.80.99.75:3478'],
                     username=username,
                     credential=credential
                 ),
-                RTCIceServer(
-                    urls=['stun:129.80.99.75:3478']
-                ),
+                # STUN servers as fallback
+                RTCIceServer(urls=['stun:129.80.99.75:3478']),
+                RTCIceServer(urls=['stun:stun.l.google.com:19302']),
             ]
         )
         
