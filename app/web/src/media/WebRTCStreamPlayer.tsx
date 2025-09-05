@@ -123,7 +123,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
         }
       ],
       iceCandidatePoolSize: 10,
-      iceTransportPolicy: 'all' // Try both direct and relay
+      iceTransportPolicy: 'relay' // Force relay through TURN for mobile data compatibility
     };
 
     const peerConnection = new RTCPeerConnection(config);
