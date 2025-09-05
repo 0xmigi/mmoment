@@ -119,12 +119,17 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
         },
         // Oracle Cloud CoTURN server (STUN)
         { urls: 'stun:129.80.99.75:3478' },
-        // Google STUN as fallback
-        { urls: 'stun:stun.l.google.com:19302' }
+        // Additional STUN servers for better connectivity
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
       ],
       iceCandidatePoolSize: 10,
       // Allow both direct and relay connections for maximum compatibility
-      iceTransportPolicy: 'all'
+      iceTransportPolicy: 'all',
+      // Mobile network optimizations
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require'
     };
 
     const peerConnection = new RTCPeerConnection(config);
@@ -215,15 +220,19 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
       } else if (iceState === 'failed') {
         console.error('[WebRTC] ❌ ICE connection failed - network connectivity issue');
         console.error('[WebRTC] This usually means the camera and viewer cannot reach each other');
-        handleError('Network connectivity failed - check if devices are on same network');
+        console.error('[WebRTC] Mobile networks may require TURN relay for connectivity');
+        handleError('Network connectivity failed - trying TURN relay for mobile networks');
       } else if (iceState === 'disconnected') {
         console.warn('[WebRTC] ⚠️ ICE connection disconnected');
-        // Don't immediately fail on disconnect, might reconnect
+        // Mobile networks may have longer reconnection times
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const reconnectTimeout = isMobile ? 10000 : 5000; // 10s for mobile, 5s for desktop
+        
         setTimeout(() => {
           if (peerConnection.iceConnectionState === 'disconnected') {
             handleError('ICE connection lost');
           }
-        }, 5000);
+        }, reconnectTimeout);
       }
     };
 
