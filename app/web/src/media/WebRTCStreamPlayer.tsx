@@ -121,28 +121,37 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
       server: '129.80.99.75:3478'
     });
 
+    // iOS Safari/Chrome cellular network detection
+    const isIOSCellular = isMobile && /iPhone|iPad|iPod/.test(navigator.userAgent);
+    
     const config: RTCConfiguration = {
       iceServers: [
-        // Oracle Cloud CoTURN server (TURN) - prioritize first for cross-network
+        // Oracle Cloud CoTURN server - TCP for iOS cellular, UDP primary
         {
-          urls: 'turn:129.80.99.75:3478',
+          urls: isIOSCellular ? [
+            'turn:129.80.99.75:3478?transport=tcp',  // TCP TURN for iOS cellular
+            'turn:129.80.99.75:3478'                 // UDP fallback
+          ] : 'turn:129.80.99.75:3478',
           username: username,
           credential: credential
         },
-        // Oracle Cloud CoTURN server (STUN)
-        { urls: 'stun:129.80.99.75:3478' },
-        // Additional STUN servers for better connectivity
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
+        // STUN servers - reduce for iOS to speed up ICE
+        ...(isIOSCellular ? [] : [
+          { urls: 'stun:129.80.99.75:3478' },
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ])
       ],
-      iceCandidatePoolSize: 10,
-      // Allow both direct and relay connections for maximum compatibility
-      iceTransportPolicy: 'all',
-      // Mobile network optimizations
+      // iOS cellular optimizations
+      iceCandidatePoolSize: isIOSCellular ? 20 : 10,  // More candidates for iOS
+      iceTransportPolicy: isIOSCellular ? 'relay' : 'all',  // Force TURN for iOS cellular
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require'
     };
+    
+    if (isIOSCellular) {
+      console.log('[WebRTC] 📱 iOS Cellular detected - forcing TURN relay mode');
+    }
 
     const peerConnection = new RTCPeerConnection(config);
 
