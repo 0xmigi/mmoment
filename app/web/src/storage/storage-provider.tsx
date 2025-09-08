@@ -3,7 +3,6 @@ import { unifiedIpfsService } from './ipfs/unified-ipfs-service';
 import { pinataService } from './ipfs/pinata-service';
 import { filebaseService } from './ipfs/filebase-service';
 import { walrusService } from './walrus';
-import { walrusSdkService } from './walrus/walrus-sdk-service';
 
 console.log('Storage provider initializing with IPFS services');
 
@@ -32,10 +31,10 @@ export interface StorageService {
 }
 
 // All available storage providers
-export type StorageProvider = 'ipfs' | 'pinata' | 'filebase' | 'walrus' | 'walrus-sdk';
+export type StorageProvider = 'ipfs' | 'pinata' | 'filebase' | 'walrus';
 
 // The types of storage providers we can use
-export type StorageProviderType = 'pinata' | 'filebase' | 'walrus' | 'walrus-sdk';
+export type StorageProviderType = 'pinata' | 'filebase' | 'walrus';
 
 // Storage context type
 interface StorageContextType {
@@ -187,12 +186,9 @@ function getStorageService(provider: StorageProvider): StorageService {
     case 'walrus':
       return walrusService as StorageService;
       
-    case 'walrus-sdk':
-      return walrusSdkService as StorageService;
-    
     default:
-      // Default to Walrus SDK if available, otherwise Walrus
-      return (walrusSdkService || walrusService) as StorageService;
+      // Default to Walrus
+      return walrusService as StorageService;
   }
 }
 

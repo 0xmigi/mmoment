@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { walrusSdkService } from '../../storage/walrus/walrus-sdk-service';
+import { walrusService } from '../../storage/walrus';
 import { WalrusStorageInfo } from '../settings/WalrusStorageInfo';
 
 interface WalrusExampleProps {
@@ -30,8 +30,8 @@ export const WalrusExample: React.FC<WalrusExampleProps> = ({ walletAddress }) =
       setUploading(true);
       setError(null);
       
-      // Upload to Walrus with storage epochs using the SDK service
-      const result = await walrusSdkService.upload(file, {
+      // Upload to Walrus with storage epochs using the service
+      const result = await walrusService.upload(file, {
         metadata: { 
           walletAddress,
           storageEpochs
@@ -56,7 +56,7 @@ export const WalrusExample: React.FC<WalrusExampleProps> = ({ walletAddress }) =
         <p className="text-blue-600">
           This demo uploads files to the Walrus testnet using Mysten's official SDK. 
           Files are stored for the specified number of storage epochs.
-          The publisher endpoint used is: <code className="bg-blue-100 px-1">{walrusSdkService.publisher}</code>
+          The publisher endpoint used is: <code className="bg-blue-100 px-1">{walrusService.publisher}</code>
         </p>
       </div>
       
