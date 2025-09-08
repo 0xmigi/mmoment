@@ -25,8 +25,8 @@ export default function MediaViewer({
   const [deleting, setDeleting] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [startY, setStartY] = useState(0);
-  const [currentY, setCurrentY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState(0);
 
   // Scroll to show EXIF just barely peeking when modal opens
   useEffect(() => {
@@ -51,51 +51,88 @@ export default function MediaViewer({
   }, [isOpen]);
 
   // Handle touch/mouse events for swipe down to close
-  const handleStart = (clientY: number) => {
+  const handleStart = (
+    clientY: number,
+    e: React.TouchEvent | React.MouseEvent
+  ) => {
     setStartY(clientY);
-    setCurrentY(clientY);
     setIsDragging(true);
+    setDragOffset(0);
+    // Prevent default to stop bouncing
+    e.preventDefault();
   };
 
-  const handleMove = (clientY: number) => {
+  const handleMove = (
+    clientY: number,
+    e: React.TouchEvent | React.MouseEvent
+  ) => {
     if (!isDragging) return;
-    setCurrentY(clientY);
 
+    e.preventDefault(); // Prevent scroll bounce
     const diff = clientY - startY;
-    // Only track downward swipes when at top of scroll
-    if (
-      scrollContainerRef.current &&
-      scrollContainerRef.current.scrollTop === 0 &&
-      diff > 0
-    ) {
-      // Apply a slight resistance to the drag
-      const translateY = Math.min(diff * 0.5, 200);
-      scrollContainerRef.current.style.transform = `translateY(${translateY}px)`;
-      scrollContainerRef.current.style.transition = "none";
+
+    // Only handle downward swipes
+    if (diff > 0) {
+
+      // Apply resistance to the drag (40% of actual movement)
+      const offset = Math.min(diff * 0.4, 250);
+      setDragOffset(offset);
+
+      // Add opacity effect based on drag distance
+      if (scrollContainerRef.current) {
+        const opacity = Math.max(0.3, 1 - (offset / 250) * 0.7);
+        scrollContainerRef.current.style.opacity = opacity.toString();
+      }
     }
   };
 
   const handleEnd = () => {
     if (!isDragging) return;
 
-    const diff = currentY - startY;
-    // Close if swiped down more than 100px when at top
-    if (
-      scrollContainerRef.current &&
-      scrollContainerRef.current.scrollTop === 0 &&
-      diff > 100
-    ) {
-      onClose();
-    } else if (scrollContainerRef.current) {
+    // Close if swiped down more than 80px
+    if (dragOffset > 80) {
+      // Animate out before closing
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.style.transition =
+          "transform 0.2s ease-out, opacity 0.2s ease-out";
+        scrollContainerRef.current.style.transform = "translateY(100%)";
+        scrollContainerRef.current.style.opacity = "0";
+      }
+
+      setTimeout(() => {
+        onClose();
+        // Reset after close
+        setDragOffset(0);
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.style.transform = "";
+          scrollContainerRef.current.style.opacity = "";
+          scrollContainerRef.current.style.transition = "";
+        }
+      }, 200);
+    } else {
       // Snap back if not enough swipe
-      scrollContainerRef.current.style.transform = "translateY(0)";
-      scrollContainerRef.current.style.transition = "transform 0.3s ease-out";
+      setDragOffset(0);
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.style.opacity = "1";
+      }
     }
 
     setIsDragging(false);
     setStartY(0);
-    setCurrentY(0);
   };
+
+  // Reset on close
+  useEffect(() => {
+    if (!isOpen) {
+      setDragOffset(0);
+      setIsDragging(false);
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.style.transform = "";
+        scrollContainerRef.current.style.opacity = "";
+        scrollContainerRef.current.style.transition = "";
+      }
+    }
+  }, [isOpen]);
 
   if (!media) return null;
 
@@ -201,20 +238,32 @@ export default function MediaViewer({
 
   return (
     <Dialog open={isOpen} onClose={onClose} className="relative z-[100]">
-      {/* Full-screen container */}
-      <div className="fixed inset-0 bg-white">
-        <Dialog.Panel className="w-full h-full flex flex-col bg-white">
-          {/* Scrollable Content - No header */}
+      {/* Full-screen container with prevent overscroll */}
+      <div
+        className="fixed inset-0 bg-black"
+        style={{ touchAction: isDragging ? "none" : "auto" }}
+      >
+        <Dialog.Panel className="w-full h-full flex flex-col bg-white relative">
+          {/* Fixed swipe indicator at top - only visible on mobile */}
+          <div
+            className="fixed top-3 left-1/2 -translate-x-1/2 z-[110] md:hidden cursor-grab active:cursor-grabbing"
+            onTouchStart={(e) => handleStart(e.touches[0].clientY, e)}
+            onTouchMove={(e) => handleMove(e.touches[0].clientY, e)}
+            onTouchEnd={handleEnd}
+            style={{ touchAction: "none" }}
+          >
+            <div className="w-12 h-1.5 bg-white/70 backdrop-blur-sm rounded-full shadow-lg" />
+          </div>
+
+          {/* Scrollable Content with drag transform */}
           <div
             ref={scrollContainerRef}
             className="flex-1 overflow-y-auto bg-white"
-            onTouchStart={(e) => handleStart(e.touches[0].clientY)}
-            onTouchMove={(e) => handleMove(e.touches[0].clientY)}
-            onTouchEnd={handleEnd}
-            onMouseDown={(e) => handleStart(e.clientY)}
-            onMouseMove={(e) => handleMove(e.clientY)}
-            onMouseUp={handleEnd}
-            onMouseLeave={handleEnd}
+            style={{
+              transform: `translateY(${dragOffset}px)`,
+              transition: isDragging ? "none" : "transform 0.3s ease-out",
+              touchAction: "pan-y",
+            }}
           >
             {/* Media Section */}
             <div className="w-full">

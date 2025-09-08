@@ -1,84 +1,90 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { io, Socket } from 'socket.io-client';
-import { useCamera } from '../camera/CameraProvider';
-import { useParams } from 'react-router-dom';
-import { CONFIG } from '../core/config';
+import { useCamera } from "../camera/CameraProvider";
+import { CONFIG } from "../core/config";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { useParams } from "react-router-dom";
+import { io, Socket } from "socket.io-client";
 
 interface WebRTCStreamPlayerProps {
   fallback?: React.ReactNode;
   onError?: (error: string) => void;
 }
 
-const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ 
-  onError 
-}) => {
+const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const socketRef = useRef<Socket | null>(null);
-  const [connectionState, setConnectionState] = useState<'connecting' | 'connected' | 'failed' | 'disconnected'>('disconnected');
+  const [connectionState, setConnectionState] = useState<
+    "connecting" | "connected" | "failed" | "disconnected"
+  >("disconnected");
   const [error, setError] = useState<string | null>(null);
   const [pendingStream, setPendingStream] = useState<MediaStream | null>(null);
   const { selectedCamera } = useCamera();
   const { cameraId } = useParams<{ cameraId: string }>();
 
   // Get current camera ID
-  const currentCameraId = cameraId || selectedCamera?.publicKey || localStorage.getItem('directCameraId');
+  const currentCameraId =
+    cameraId ||
+    selectedCamera?.publicKey ||
+    localStorage.getItem("directCameraId");
 
   const cleanup = useCallback(() => {
-    console.log('[WebRTC] Cleaning up connection');
-    
+    console.log("[WebRTC] Cleaning up connection");
+
     // Close peer connection
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
-    
+
     // NOTE: Keep socket connection alive for recovery
     // Socket.IO signaling should persist through WebRTC failures
-    
+
     // Clear video
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    
+
     // Clear pending stream
     setPendingStream(null);
-    setConnectionState('disconnected');
+    setConnectionState("disconnected");
   }, []);
 
   // Full cleanup for component unmount
   const fullCleanup = useCallback(() => {
-    console.log('[WebRTC] Full cleanup including socket disconnect');
-    
+    console.log("[WebRTC] Full cleanup including socket disconnect");
+
     // Close peer connection
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
-    
+
     // Disconnect socket on component unmount
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current = null;
     }
-    
+
     // Clear video
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    
+
     // Clear pending stream
     setPendingStream(null);
-    setConnectionState('disconnected');
+    setConnectionState("disconnected");
   }, []);
 
-  const handleError = useCallback((errorMessage: string) => {
-    console.error('[WebRTC] Error:', errorMessage);
-    setError(errorMessage);
-    setConnectionState('failed');
-    onError?.(errorMessage);
-    cleanup();
-  }, [cleanup, onError]);
+  const handleError = useCallback(
+    (errorMessage: string) => {
+      console.error("[WebRTC] Error:", errorMessage);
+      setError(errorMessage);
+      setConnectionState("failed");
+      onError?.(errorMessage);
+      cleanup();
+    },
+    [cleanup, onError]
+  );
 
   // Detect mobile connections and cellular networks
   const isMobileConnection = () => {
@@ -126,7 +132,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
     
     const config: RTCConfiguration = {
       iceServers: [
-        // Oracle Cloud CoTURN server - TCP for iOS cellular, UDP primary
+        // Oracle Cloud CoTURN server - primary with iOS cellular optimization
         {
           urls: isIOSCellular ? [
             'turn:129.80.99.75:3478?transport=tcp',  // TCP TURN for iOS cellular
@@ -138,9 +144,20 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
         // STUN servers - reduce for iOS to speed up ICE
         ...(isIOSCellular ? [] : [
           { urls: 'stun:129.80.99.75:3478' },
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
-        ])
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" }
+        ]),
+        // Fallback public TURN servers
+        {
+          urls: "turn:openrelay.metered.ca:80",
+          username: "openrelayproject",
+          credential: "openrelayproject",
+        },
+        {
+          urls: "turn:openrelay.metered.ca:443",
+          username: "openrelayproject",
+          credential: "openrelayproject",
+        },
       ],
       // iOS cellular optimizations
       iceCandidatePoolSize: isIOSCellular ? 20 : 10,  // More candidates for iOS
@@ -157,101 +174,115 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
 
     peerConnection.onicecandidate = (event) => {
       if (event.candidate && socketRef.current && currentCameraId) {
-        console.log('[WebRTC] Sending ICE candidate:', {
+        console.log("[WebRTC] Sending ICE candidate:", {
           protocol: event.candidate.protocol,
           address: event.candidate.address,
           port: event.candidate.port,
           type: event.candidate.type,
-          priority: event.candidate.priority
+          priority: event.candidate.priority,
         });
-        socketRef.current.emit('webrtc-ice-candidate', {
+        socketRef.current.emit("webrtc-ice-candidate", {
           candidate: event.candidate,
-          targetId: 'camera',
-          cameraId: currentCameraId
+          targetId: "camera",
+          cameraId: currentCameraId,
         });
       } else if (event.candidate === null) {
-        console.log('[WebRTC] ICE gathering completed');
+        console.log("[WebRTC] ICE gathering completed");
       }
     };
 
     peerConnection.ontrack = (event) => {
-      console.log('[WebRTC] Received remote stream:', event);
-      console.log('[WebRTC] Number of streams:', event.streams.length);
-      console.log('[WebRTC] Stream details:', event.streams[0]);
-      
+      console.log("[WebRTC] Received remote stream:", event);
+      console.log("[WebRTC] Number of streams:", event.streams.length);
+      console.log("[WebRTC] Stream details:", event.streams[0]);
+
       const stream = event.streams[0];
       if (stream) {
-        console.log('[WebRTC] Stream received, checking video element...');
-        console.log('[WebRTC] Stream active:', stream.active);
-        console.log('[WebRTC] Stream video tracks:', stream.getVideoTracks());
-        
+        console.log("[WebRTC] Stream received, checking video element...");
+        console.log("[WebRTC] Stream active:", stream.active);
+        console.log("[WebRTC] Stream video tracks:", stream.getVideoTracks());
+
         if (videoRef.current) {
-          console.log('[WebRTC] Video element available, setting srcObject immediately');
+          console.log(
+            "[WebRTC] Video element available, setting srcObject immediately"
+          );
           videoRef.current.srcObject = stream;
-          
+
           // Force video to load and play
           videoRef.current.load();
-          videoRef.current.play().catch(error => {
-            console.warn('[WebRTC] Video play failed:', error);
+          videoRef.current.play().catch((error) => {
+            console.warn("[WebRTC] Video play failed:", error);
           });
-          
-          setConnectionState('connected');
+
+          setConnectionState("connected");
           setPendingStream(null);
         } else {
-          console.log('[WebRTC] Video element not ready, storing stream for later');
+          console.log(
+            "[WebRTC] Video element not ready, storing stream for later"
+          );
           setPendingStream(stream);
-          setConnectionState('connected');
+          setConnectionState("connected");
         }
       } else {
-        console.error('[WebRTC] No stream in track event');
+        console.error("[WebRTC] No stream in track event");
       }
     };
 
     peerConnection.onconnectionstatechange = () => {
       const state = peerConnection.connectionState;
-      console.log('[WebRTC] Connection state changed:', state);
-      
-      if (state === 'connected') {
-        console.log('[WebRTC] 🎉 Connection established successfully!');
-        setConnectionState('connected');
+      console.log("[WebRTC] Connection state changed:", state);
+
+      if (state === "connected") {
+        console.log("[WebRTC] 🎉 Connection established successfully!");
+        setConnectionState("connected");
         setError(null);
-      } else if (state === 'connecting') {
-        console.log('[WebRTC] Connection in progress...');
-        setConnectionState('connecting');
-      } else if (state === 'failed') {
-        console.error('[WebRTC] ❌ Connection failed - this might be a network/firewall issue');
-        handleError('Connection failed - check network connectivity');
-      } else if (state === 'disconnected') {
-        console.warn('[WebRTC] ⚠️ Connection disconnected');
-        handleError('Connection disconnected');
+      } else if (state === "connecting") {
+        console.log("[WebRTC] Connection in progress...");
+        setConnectionState("connecting");
+      } else if (state === "failed") {
+        console.error(
+          "[WebRTC] ❌ Connection failed - this might be a network/firewall issue"
+        );
+        handleError("Connection failed - check network connectivity");
+      } else if (state === "disconnected") {
+        console.warn("[WebRTC] ⚠️ Connection disconnected");
+        handleError("Connection disconnected");
       }
     };
 
     peerConnection.oniceconnectionstatechange = () => {
       const iceState = peerConnection.iceConnectionState;
-      console.log('[WebRTC] 🧊 ICE connection state changed:', iceState);
-      
-      if (iceState === 'connected' || iceState === 'completed') {
-        console.log('[WebRTC] 🎉 ICE connection established successfully!');
-        setConnectionState('connected');
+      console.log("[WebRTC] 🧊 ICE connection state changed:", iceState);
+
+      if (iceState === "connected" || iceState === "completed") {
+        console.log("[WebRTC] 🎉 ICE connection established successfully!");
+        setConnectionState("connected");
         setError(null);
-      } else if (iceState === 'checking') {
-        console.log('[WebRTC] 🔍 ICE candidates are being checked...');
-        setConnectionState('connecting');
-      } else if (iceState === 'failed') {
-        console.error('[WebRTC] ❌ ICE connection failed - network connectivity issue');
-        console.error('[WebRTC] This usually means the camera and viewer cannot reach each other');
-        console.error('[WebRTC] Mobile networks may require TURN relay for connectivity');
-        handleError('Network connectivity failed - trying TURN relay for mobile networks');
-      } else if (iceState === 'disconnected') {
-        console.warn('[WebRTC] ⚠️ ICE connection disconnected');
+      } else if (iceState === "checking") {
+        console.log("[WebRTC] 🔍 ICE candidates are being checked...");
+        setConnectionState("connecting");
+      } else if (iceState === "failed") {
+        console.error(
+          "[WebRTC] ❌ ICE connection failed - network connectivity issue"
+        );
+        console.error(
+          "[WebRTC] This usually means the camera and viewer cannot reach each other"
+        );
+        console.error(
+          "[WebRTC] Mobile networks may require TURN relay for connectivity"
+        );
+        handleError(
+          "Network connectivity failed - trying TURN relay for mobile networks"
+        );
+      } else if (iceState === "disconnected") {
+        console.warn("[WebRTC] ⚠️ ICE connection disconnected");
         // Mobile networks may have longer reconnection times
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         const reconnectTimeout = isMobile ? 10000 : 5000; // 10s for mobile, 5s for desktop
         
         setTimeout(() => {
-          if (peerConnection.iceConnectionState === 'disconnected') {
-            handleError('ICE connection lost');
+          if (peerConnection.iceConnectionState === "disconnected") {
+            handleError("ICE connection lost");
           }
         }, reconnectTimeout);
       }
@@ -259,12 +290,12 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
 
     peerConnection.onicegatheringstatechange = () => {
       const gatheringState = peerConnection.iceGatheringState;
-      console.log('[WebRTC] ICE gathering state changed:', gatheringState);
+      console.log("[WebRTC] ICE gathering state changed:", gatheringState);
     };
 
     peerConnection.onsignalingstatechange = () => {
       const signalingState = peerConnection.signalingState;
-      console.log('[WebRTC] Signaling state changed:', signalingState);
+      console.log("[WebRTC] Signaling state changed:", signalingState);
     };
 
     return peerConnection;
@@ -272,150 +303,208 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
 
   const initializeWebRTC = useCallback(async () => {
     if (!currentCameraId) {
-      handleError('No camera ID available');
+      handleError("No camera ID available");
       return;
     }
 
     try {
-      console.log('[WebRTC] Initializing connection to camera:', currentCameraId);
-      setConnectionState('connecting');
+      console.log(
+        "[WebRTC] Initializing connection to camera:",
+        currentCameraId
+      );
+      setConnectionState("connecting");
       setError(null);
 
       // Connect to signaling server (running locally on Jetson now)
       const backendUrl = CONFIG.BACKEND_URL;
-      console.log('[WebRTC] Connecting to backend:', backendUrl);
-      console.log('[WebRTC] Environment mode:', CONFIG.isProduction ? 'Production' : 'Development');
-      
+      console.log("[WebRTC] Connecting to backend:", backendUrl);
+      console.log(
+        "[WebRTC] Environment mode:",
+        CONFIG.isProduction ? "Production" : "Development"
+      );
+
       // Network connectivity test with environment-appropriate messaging
       if (CONFIG.isProduction) {
-        console.log('[WebRTC] 🌍 Production Mode: Using Railway backend for WebRTC signaling');
+        console.log(
+          "[WebRTC] 🌍 Production Mode: Using Railway backend for WebRTC signaling"
+        );
       } else {
-        console.log('[WebRTC] 🌍 Development Mode: Using local backend. Are you on the same network?');
+        console.log(
+          "[WebRTC] 🌍 Development Mode: Using local backend. Are you on the same network?"
+        );
       }
-      
+
       const socket = io(backendUrl, {
-        transports: ['websocket', 'polling'],
+        transports: ["websocket", "polling"],
         timeout: 20000,
         reconnection: true,
         reconnectionAttempts: 5,
-        reconnectionDelay: 1000
+        reconnectionDelay: 1000,
       });
 
       socketRef.current = socket;
 
-      socket.on('connect', () => {
-        console.log('[WebRTC] Connected to signaling server successfully');
+      socket.on("connect", () => {
+        console.log("[WebRTC] Connected to signaling server successfully");
         // Register as viewer
-        console.log('[WebRTC] Registering as viewer for camera:', currentCameraId);
-        socket.emit('register-viewer', { cameraId: currentCameraId });
+        console.log(
+          "[WebRTC] Registering as viewer for camera:",
+          currentCameraId
+        );
+        socket.emit("register-viewer", { cameraId: currentCameraId });
       });
 
-      socket.on('connect_error', (error) => {
-        console.error('[WebRTC] Signaling server connection error:', error);
+      socket.on("connect_error", (error) => {
+        console.error("[WebRTC] Signaling server connection error:", error);
         handleError(`Signaling server connection failed: ${error.message}`);
       });
 
-      socket.on('disconnect', (reason) => {
-        console.log('[WebRTC] Signaling server disconnected:', reason);
-        if (reason === 'io server disconnect') {
+      socket.on("disconnect", (reason) => {
+        console.log("[WebRTC] Signaling server disconnected:", reason);
+        if (reason === "io server disconnect") {
           // Server disconnected us, don't retry
-          handleError('Signaling server disconnected');
+          handleError("Signaling server disconnected");
         }
       });
 
       // Handle WebRTC offer from camera
-      socket.on('webrtc-offer', async (data: { offer: RTCSessionDescriptionInit, senderId: string }) => {
-        console.log('[WebRTC] Received offer from camera:', data.offer);
-        console.log('[WebRTC] Offer SDP:', data.offer.sdp);
-        
-        try {
-          const peerConnection = await createPeerConnection();
-          peerConnectionRef.current = peerConnection;
+      socket.on(
+        "webrtc-offer",
+        async (data: {
+          offer: RTCSessionDescriptionInit;
+          senderId: string;
+        }) => {
+          console.log("[WebRTC] Received offer from camera:", data.offer);
+          console.log("[WebRTC] Offer SDP:", data.offer.sdp);
 
-          await peerConnection.setRemoteDescription(data.offer);
-          console.log('[WebRTC] Set remote description, creating answer...');
-          console.log('[WebRTC] Remote streams after setRemoteDescription:', (peerConnection as any).getRemoteStreams?.() || 'getRemoteStreams not available');
-          console.log('[WebRTC] Transceivers:', peerConnection.getTransceivers());
-          
-          const answer = await peerConnection.createAnswer();
-          await peerConnection.setLocalDescription(answer);
-          console.log('[WebRTC] Created and set local description (answer)');
-
-          socket.emit('webrtc-answer', {
-            answer,
-            targetId: data.senderId,
-            cameraId: currentCameraId
-          });
-
-          console.log('[WebRTC] Sent answer to camera, connection state:', peerConnection.connectionState);
-          console.log('[WebRTC] ICE connection state:', peerConnection.iceConnectionState);
-          console.log('[WebRTC] ICE gathering state:', peerConnection.iceGatheringState);
-          
-          // Log all local candidates after answer
-          setTimeout(() => {
-            console.log('[WebRTC] 📊 ICE Connection Summary:');
-            console.log('  - Connection State:', peerConnection.connectionState);
-            console.log('  - ICE Connection State:', peerConnection.iceConnectionState);
-            console.log('  - ICE Gathering State:', peerConnection.iceGatheringState);
-            console.log('  - Signaling State:', peerConnection.signalingState);
-          }, 2000);
-        } catch (error) {
-          handleError(`Failed to handle offer: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-      });
-
-      // Handle ICE candidates from camera
-      socket.on('webrtc-ice-candidate', async (data: { candidate: RTCIceCandidateInit }) => {
-        if (peerConnectionRef.current) {
           try {
-            const candidateType = (data.candidate as any).type;
-            const candidateInfo = {
-              protocol: (data.candidate as any).protocol,
-              address: (data.candidate as any).address,
-              port: (data.candidate as any).port,
-              type: candidateType,
-              priority: (data.candidate as any).priority
-            };
-            
-            if (candidateType === 'host') {
-              console.log('[WebRTC] 🏠 Received HOST candidate from camera:', candidateInfo);
-            } else if (candidateType === 'srflx') {
-              console.log('[WebRTC] 🌐 Received STUN candidate from camera:', candidateInfo);
-            } else if (candidateType === 'relay') {
-              console.log('[WebRTC] 🔄 Received TURN relay candidate from camera:', candidateInfo);
-            } else {
-              console.log('[WebRTC] Received ICE candidate from camera:', candidateInfo);
-            }
-            
-            await peerConnectionRef.current.addIceCandidate(data.candidate);
-            console.log('[WebRTC] Successfully added ICE candidate');
+            const peerConnection = await createPeerConnection();
+            peerConnectionRef.current = peerConnection;
+
+            await peerConnection.setRemoteDescription(data.offer);
+            console.log("[WebRTC] Set remote description, creating answer...");
+            console.log(
+              "[WebRTC] Remote streams after setRemoteDescription:",
+              (peerConnection as any).getRemoteStreams?.() ||
+                "getRemoteStreams not available"
+            );
+            console.log(
+              "[WebRTC] Transceivers:",
+              peerConnection.getTransceivers()
+            );
+
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            console.log("[WebRTC] Created and set local description (answer)");
+
+            socket.emit("webrtc-answer", {
+              answer,
+              targetId: data.senderId,
+              cameraId: currentCameraId,
+            });
+
+            console.log(
+              "[WebRTC] Sent answer to camera, connection state:",
+              peerConnection.connectionState
+            );
+            console.log(
+              "[WebRTC] ICE connection state:",
+              peerConnection.iceConnectionState
+            );
+            console.log(
+              "[WebRTC] ICE gathering state:",
+              peerConnection.iceGatheringState
+            );
+
+            // Log all local candidates after answer
+            setTimeout(() => {
+              console.log("[WebRTC] 📊 ICE Connection Summary:");
+              console.log(
+                "  - Connection State:",
+                peerConnection.connectionState
+              );
+              console.log(
+                "  - ICE Connection State:",
+                peerConnection.iceConnectionState
+              );
+              console.log(
+                "  - ICE Gathering State:",
+                peerConnection.iceGatheringState
+              );
+              console.log(
+                "  - Signaling State:",
+                peerConnection.signalingState
+              );
+            }, 2000);
           } catch (error) {
-            console.warn('[WebRTC] Failed to add ICE candidate:', error);
+            handleError(
+              `Failed to handle offer: ${
+                error instanceof Error ? error.message : "Unknown error"
+              }`
+            );
           }
         }
-      });
+      );
 
+      // Handle ICE candidates from camera
+      socket.on(
+        "webrtc-ice-candidate",
+        async (data: { candidate: RTCIceCandidateInit }) => {
+          if (peerConnectionRef.current) {
+            try {
+              const candidateType = (data.candidate as any).type;
+              const candidateInfo = {
+                protocol: (data.candidate as any).protocol,
+                address: (data.candidate as any).address,
+                port: (data.candidate as any).port,
+                type: candidateType,
+                priority: (data.candidate as any).priority,
+              };
+              
+              if (candidateType === 'host') {
+                console.log('[WebRTC] 🏠 Received HOST candidate from camera:', candidateInfo);
+              } else if (candidateType === 'srflx') {
+                console.log('[WebRTC] 🌐 Received STUN candidate from camera:', candidateInfo);
+              } else if (candidateType === 'relay') {
+                console.log('[WebRTC] 🔄 Received TURN relay candidate from camera:', candidateInfo);
+              } else {
+                console.log('[WebRTC] Received ICE candidate from camera:', candidateInfo);
+              }
 
+              await peerConnectionRef.current.addIceCandidate(data.candidate);
+              console.log("[WebRTC] Successfully added ICE candidate");
+            } catch (error) {
+              console.warn("[WebRTC] Failed to add ICE candidate:", error);
+            }
+          }
+        }
+      );
     } catch (error) {
-      handleError(`WebRTC initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      handleError(
+        `WebRTC initialization failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     }
   }, [currentCameraId, createPeerConnection, handleError]);
 
   // Handle pending stream when video element becomes available
   useEffect(() => {
     if (pendingStream && videoRef.current) {
-      console.log('[WebRTC] Video element now available, applying pending stream');
-      console.log('[WebRTC] Stream active:', pendingStream.active);
-      console.log('[WebRTC] Stream tracks:', pendingStream.getTracks());
-      
+      console.log(
+        "[WebRTC] Video element now available, applying pending stream"
+      );
+      console.log("[WebRTC] Stream active:", pendingStream.active);
+      console.log("[WebRTC] Stream tracks:", pendingStream.getTracks());
+
       videoRef.current.srcObject = pendingStream;
-      
+
       // Force video to load and play
       videoRef.current.load();
-      videoRef.current.play().catch(error => {
-        console.warn('[WebRTC] Video play failed:', error);
+      videoRef.current.play().catch((error) => {
+        console.warn("[WebRTC] Video play failed:", error);
       });
-      
+
       setPendingStream(null);
     }
   }, [pendingStream]);
@@ -433,9 +522,9 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
 
   // Auto-retry on failure with backoff
   useEffect(() => {
-    if (connectionState === 'failed' && currentCameraId) {
+    if (connectionState === "failed" && currentCameraId) {
       const retryTimeout = setTimeout(() => {
-        console.log('[WebRTC] 🔄 Retrying connection in 3 seconds...');
+        console.log("[WebRTC] 🔄 Retrying connection in 3 seconds...");
         cleanup(); // Clean up before retry
         setTimeout(() => initializeWebRTC(), 1000); // Brief pause before retry
       }, 3000);
@@ -444,70 +533,74 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
     }
   }, [connectionState, currentCameraId, initializeWebRTC, cleanup]);
 
-
   // Add video element event handlers for debugging
   const handleVideoLoadStart = () => {
-    console.log('[WebRTC] Video load start');
+    console.log("[WebRTC] Video load start");
   };
-  
+
   const handleVideoLoadedMetadata = () => {
-    console.log('[WebRTC] Video metadata loaded');
+    console.log("[WebRTC] Video metadata loaded");
     if (videoRef.current) {
-      console.log('[WebRTC] Video dimensions:', videoRef.current.videoWidth, 'x', videoRef.current.videoHeight);
+      console.log(
+        "[WebRTC] Video dimensions:",
+        videoRef.current.videoWidth,
+        "x",
+        videoRef.current.videoHeight
+      );
     }
   };
-  
+
   const handleVideoCanPlay = () => {
-    console.log('[WebRTC] Video can play');
+    console.log("[WebRTC] Video can play");
   };
-  
+
   const handleVideoPlay = () => {
-    console.log('[WebRTC] Video started playing');
+    console.log("[WebRTC] Video started playing");
   };
-  
+
   const handleVideoError = (e: any) => {
-    console.error('[WebRTC] Video error:', e.target.error);
+    console.error("[WebRTC] Video error:", e.target.error);
   };
 
   return (
     <div className="aspect-[9/16] md:aspect-video bg-black rounded-lg overflow-hidden">
-      {connectionState === 'connecting' && (
-        <div className="flex items-center justify-center h-full text-white">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2"></div>
-            <p>Connecting to camera...</p>
+        {connectionState === "connecting" && (
+          <div className="flex items-center justify-center h-full text-white">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2"></div>
+              <p>Connecting to camera...</p>
+            </div>
           </div>
-        </div>
-      )}
-      {error && (
-        <div className="flex items-center justify-center h-full text-red-400">
-          <div className="text-center">
-            <p>Connection failed</p>
-            <p className="text-sm mt-1">{error}</p>
-            {error?.includes('Network connectivity') && (
-              <div className="text-xs mt-2 text-gray-400">
-                <p>Troubleshooting:</p>
-                <p>• Are you on the same WiFi as the camera?</p>
-                <p>• Can you ping 192.168.1.232?</p>
-                <p>• Check if ports 9, 5001-5003 are open</p>
-              </div>
-            )}
+        )}
+        {error && (
+          <div className="flex items-center justify-center h-full text-red-400">
+            <div className="text-center">
+              <p>Connection failed</p>
+              <p className="text-sm mt-1">{error}</p>
+              {error?.includes("Network connectivity") && (
+                <div className="text-xs mt-2 text-gray-400">
+                  <p>Troubleshooting:</p>
+                  <p>• Are you on the same WiFi as the camera?</p>
+                  <p>• Can you ping 192.168.1.232?</p>
+                  <p>• Check if ports 9, 5001-5003 are open</p>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
-      <video
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
-        controls={false}
-        className="w-full h-full object-contain"
-        onLoadStart={handleVideoLoadStart}
-        onLoadedMetadata={handleVideoLoadedMetadata}
-        onCanPlay={handleVideoCanPlay}
-        onPlay={handleVideoPlay}
-        onError={handleVideoError}
-      />
+        )}
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          controls={false}
+          className="w-full h-full object-contain"
+          onLoadStart={handleVideoLoadStart}
+          onLoadedMetadata={handleVideoLoadedMetadata}
+          onCanPlay={handleVideoCanPlay}
+          onPlay={handleVideoPlay}
+          onError={handleVideoError}
+        />
     </div>
   );
 };

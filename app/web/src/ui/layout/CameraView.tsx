@@ -1548,7 +1548,7 @@ export function CameraView() {
                 {/* Face Enrollment Button - positioned next to stream */}
                 {currentCameraId &&
                   unifiedCameraService.hasCamera(currentCameraId) && (
-                    <div className="absolute top-2 right-2 z-50">
+                    <div className="absolute top-2 right-4 z-50">
                       <FaceEnrollmentButton
                         cameraId={currentCameraId}
                         walletAddress={primaryWallet?.address}
@@ -1595,7 +1595,7 @@ export function CameraView() {
 
                 {/* Unified TikTok-style status bar - aligned with timeline - MOBILE ONLY */}
                 <div
-                  className="absolute top-2 left-2 z-40 flex items-center cursor-pointer md:hidden"
+                  className="absolute top-2 left-4 z-40 flex items-center cursor-pointer md:hidden"
                   onClick={() => setIsMobileCameraModalOpen(true)}
                 >
                   <div className="flex items-center bg-black bg-opacity-70 rounded overflow-hidden">
@@ -1651,7 +1651,7 @@ export function CameraView() {
                 </div>
 
                 {/* Mobile Timeline Overlay - positioned below status badge */}
-                <div className="absolute top-10 left-2 z-30 md:hidden">
+                <div className="absolute top-10 left-2 z-30 md:hidden px-2">
                   <Timeline
                     ref={mobileTimelineRef}
                     variant="camera"
