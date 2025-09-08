@@ -563,7 +563,8 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
   };
 
   return (
-    <div className="aspect-[9/16] md:aspect-video bg-black rounded-lg overflow-hidden">
+    <div className="px-2">
+      <div className="aspect-[9/16] md:aspect-video bg-black rounded-lg overflow-hidden">
         {connectionState === "connecting" && (
           <div className="flex items-center justify-center h-full text-white">
             <div className="text-center">
@@ -601,6 +602,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
           onPlay={handleVideoPlay}
           onError={handleVideoError}
         />
+      </div>
     </div>
   );
 };
