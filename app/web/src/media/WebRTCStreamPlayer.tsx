@@ -87,22 +87,39 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
   );
 
 
-  const createPeerConnection = useCallback(() => {
+  const createPeerConnection = useCallback(async () => {
+    // Generate time-based TURN credentials
+    const timestamp = Math.floor(Date.now() / 1000) + 86400; // Valid for 24 hours
+    const username = timestamp.toString();
+    const secret = 'mmoment-webrtc-secret-2025';
+    
+    // Generate HMAC-SHA1 credential
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(secret),
+      { name: 'HMAC', hash: 'SHA-1' },
+      false,
+      ['sign']
+    );
+    const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(username));
+    const credential = btoa(String.fromCharCode(...new Uint8Array(signature)));
+
+    console.log("[WebRTC] 🔑 Generated TURN credentials:", { username, credential: credential.substring(0, 10) + '...' });
+
     const config: RTCConfiguration = {
       iceServers: [
         // STUN servers for NAT traversal
         { urls: "stun:stun.l.google.com:19302" },
         { urls: "stun:stun1.l.google.com:19302" },
-        // Free public TURN server for relay fallback
+        // Oracle Cloud CoTURN server with time-based auth
         {
-          urls: "turn:openrelay.metered.ca:80",
-          username: "openrelayproject",
-          credential: "openrelayproject",
-        },
-        {
-          urls: "turn:openrelay.metered.ca:443",
-          username: "openrelayproject",
-          credential: "openrelayproject",
+          urls: [
+            "turn:129.80.99.75:3478",
+            "turn:129.80.99.75:3478?transport=tcp"
+          ],
+          username: username,
+          credential: credential
         },
       ],
       iceCandidatePoolSize: 10,
@@ -113,12 +130,15 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
 
     peerConnection.onicecandidate = (event) => {
       if (event.candidate && socketRef.current && currentCameraId) {
-        console.log("[WebRTC] Sending ICE candidate:", {
+        console.log("[WebRTC] 🧊 BROWSER SENDING ICE candidate:", {
+          type: event.candidate.type,
           protocol: event.candidate.protocol,
           address: event.candidate.address,
           port: event.candidate.port,
-          type: event.candidate.type,
           priority: event.candidate.priority,
+          foundation: event.candidate.foundation,
+          component: event.candidate.component,
+          candidate_string: event.candidate.candidate
         });
         socketRef.current.emit("webrtc-ice-candidate", {
           candidate: event.candidate,
@@ -126,7 +146,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
           cameraId: currentCameraId,
         });
       } else if (event.candidate === null) {
-        console.log("[WebRTC] ICE gathering completed");
+        console.log("[WebRTC] 🧊 BROWSER ICE gathering completed");
       }
     };
 
@@ -310,7 +330,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
 
           try {
             console.log('[WebRTC] About to create peer connection...');
-            const peerConnection = createPeerConnection();
+            const peerConnection = await createPeerConnection();
             console.log('[WebRTC] Peer connection created successfully');
             peerConnectionRef.current = peerConnection;
 
