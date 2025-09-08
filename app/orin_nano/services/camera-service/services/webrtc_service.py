@@ -21,12 +21,41 @@ import queue
 
 # FORCE aiortc to recognize correct network interface for ICE candidates
 import aioice
+import socket
+import subprocess
 _original_get_host_addresses = aioice.ice.get_host_addresses
+
+def get_jetson_ip():
+    """Dynamically get Jetson's actual IP address"""
+    try:
+        # Try to get the primary network interface IP (excluding docker interfaces)
+        result = subprocess.run(
+            ["ip", "route", "get", "1.1.1.1"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if result.returncode == 0:
+            # Parse output like: "1.1.1.1 via 192.168.1.1 dev wlP1p1s0 src 192.168.1.232"
+            parts = result.stdout.split()
+            if 'src' in parts:
+                src_index = parts.index('src')
+                if src_index + 1 < len(parts):
+                    ip = parts[src_index + 1]
+                    logger.info(f"🌐 Detected Jetson IP dynamically: {ip}")
+                    return ip
+    except Exception as e:
+        logger.error(f"Failed to get IP dynamically: {e}")
+    
+    # Fallback to current IP if dynamic detection fails
+    fallback_ip = '192.168.1.232'
+    logger.warning(f"Using fallback IP: {fallback_ip}")
+    return fallback_ip
 
 def _force_jetson_interface(use_ipv4=True, use_ipv6=False):
     """Force aiortc to use Jetson's actual IP instead of 0.0.0.0"""
-    jetson_ip = '192.168.1.232'  # Force use of actual Jetson IP
     if use_ipv4:
+        jetson_ip = get_jetson_ip()
         return [jetson_ip]
     return []
 
@@ -168,8 +197,8 @@ class WebRTCService:
             self.camera_pda = self._get_device_id()
         logger.info(f"Camera PDA: {self.camera_pda}")
         
-        # Get external IP for WebRTC
-        self.external_ip = os.environ.get('WEBRTC_EXTERNAL_IP', None)
+        # Get external IP for WebRTC dynamically
+        self.external_ip = os.environ.get('WEBRTC_EXTERNAL_IP', get_jetson_ip())
         
         # ENHANCED WEBRTC WITH MULTIPLE STUN/TURN SERVERS
         from aiortc import RTCIceServer
@@ -196,15 +225,20 @@ class WebRTCService:
         
         self.rtc_config = RTCConfiguration(
             iceServers=[
-                # Our Oracle CoTURN server - put TURN first for priority
+                # Google STUN servers first (working for same-network)
+                RTCIceServer(urls=['stun:stun.l.google.com:19302']),
+                RTCIceServer(urls=['stun:stun1.l.google.com:19302']),
+                RTCIceServer(urls=['stun:stun.cloudflare.com:3478']),
+                # Oracle Cloud CoTURN server for cross-network - UDP and TCP
                 RTCIceServer(
-                    urls=['turn:129.80.99.75:3478'],
+                    urls=[
+                        'turn:129.80.99.75:3478',           # UDP TURN
+                        'turn:129.80.99.75:3478?transport=tcp'  # TCP TURN for mobile networks
+                    ],
                     username=username,
                     credential=credential
                 ),
-                # STUN servers as fallback
                 RTCIceServer(urls=['stun:129.80.99.75:3478']),
-                RTCIceServer(urls=['stun:stun.l.google.com:19302']),
             ]
         )
         
@@ -534,23 +568,41 @@ class WebRTCService:
                 
                 # Log full candidate details for debugging
                 candidate_ip = candidate.ip
-                logger.info(f"🧊 ICE candidate generated - IP: {candidate_ip}, Port: {candidate.port}, Type: {candidate.type}, Protocol: {candidate.protocol}")
+                candidate_type = candidate.type
+                
+                # Detailed logging for cross-network debugging
+                if candidate_type == 'host':
+                    logger.info(f"🏠 HOST candidate: {candidate_ip}:{candidate.port} ({candidate.protocol})")
+                elif candidate_type == 'srflx':
+                    logger.info(f"🌐 STUN candidate (server reflexive): {candidate_ip}:{candidate.port} ({candidate.protocol})")
+                elif candidate_type == 'relay':
+                    logger.info(f"🔄 TURN relay candidate: {candidate_ip}:{candidate.port} ({candidate.protocol}) - CRITICAL for cross-network!")
+                else:
+                    logger.info(f"🧊 ICE candidate ({candidate_type}): {candidate_ip}:{candidate.port} ({candidate.protocol})")
             else:
-                logger.warning(f"🧊 ICE candidate event fired with None candidate for viewer {viewer_id}")
+                logger.info(f"✅ ICE gathering complete signal for viewer {viewer_id}")
                 return
             
-            # CRITICAL: Check for Docker-internal IPs
-            if candidate_ip.startswith('172.17.') or candidate_ip.startswith('172.18.'):
-                logger.warning(f"🚨 Docker-internal IP detected in ICE candidate: {candidate_ip}")
+            # CRITICAL: Check for Docker-internal IPs only on host candidates
+            if candidate_type == 'host' and (candidate_ip.startswith('172.17.') or candidate_ip.startswith('172.18.')):
+                logger.warning(f"🚨 Docker-internal IP detected in host candidate: {candidate_ip}")
                 # Force external IP for Docker-internal candidates
                 candidate_ip = self.external_ip
                 logger.info(f"🧊 Replaced Docker IP with external IP: {candidate_ip}")
             
-            # MINIMAL: Use aiortc's actual port without redirection
+            # Use aiortc's actual port without redirection
             actual_port = candidate.port
+            
+            # Build proper ICE candidate string
+            ice_candidate_str = f"candidate:{candidate.foundation} {candidate.component} {candidate.protocol.upper()} {candidate.priority} {candidate_ip} {actual_port} typ {candidate.type}"
+            
+            # Add generation for relay candidates (TURN)
+            if candidate.type == 'relay' and hasattr(candidate, 'relatedAddress') and candidate.relatedAddress:
+                ice_candidate_str += f" raddr {candidate.relatedAddress} rport {candidate.relatedPort}"
+            
             candidate_data = {
                 'candidate': {
-                        'candidate': f"candidate:{candidate.foundation} {candidate.component} {candidate.protocol.upper()} {candidate.priority} {candidate_ip} {actual_port} typ {candidate.type}",
+                        'candidate': ice_candidate_str,
                         'sdpMid': candidate.sdpMid,
                         'sdpMLineIndex': candidate.sdpMLineIndex,
                         # FRONTEND COMPATIBILITY: Add parsed fields that frontend might expect
@@ -579,18 +631,38 @@ class WebRTCService:
             await pc.setLocalDescription(offer)
             logger.info(f"CRITICAL: Set local description for viewer {viewer_id}")
             
-            # GITHUB SOLUTION: Use pc.localDescription.sdp - this contains ALL ICE candidates!
-            # aiortc embeds ICE candidates in SDP after setLocalDescription()
+            # CRITICAL FIX: Wait for ICE gathering to complete before sending offer
+            # This ensures all ICE candidates (including TURN relay) are included in the SDP
+            logger.info(f"🧊 Waiting for ICE gathering to complete...")
+            ice_gathering_timeout = 5.0  # 5 second timeout for ICE gathering
+            start_time = time.time()
+            
+            while pc.iceGatheringState != 'complete' and (time.time() - start_time) < ice_gathering_timeout:
+                await asyncio.sleep(0.1)
+                logger.info(f"🧊 ICE gathering state: {pc.iceGatheringState}")
+            
+            if pc.iceGatheringState == 'complete':
+                logger.info(f"✅ ICE gathering completed after {time.time() - start_time:.2f}s")
+            else:
+                logger.warning(f"⚠️ ICE gathering timed out after {ice_gathering_timeout}s, state: {pc.iceGatheringState}")
+            
+            # Now use pc.localDescription which includes ALL gathered ICE candidates
             final_offer = RTCSessionDescription(
                 type=pc.localDescription.type,
                 sdp=pc.localDescription.sdp
             )
             
-            logger.info(f"🎯 USING pc.localDescription.sdp WITH ICE CANDIDATES")
-            logger.info(f"🔍 Final SDP: {final_offer.sdp[:500]}...")
+            logger.info(f"🎯 Using complete SDP with all ICE candidates")
+            logger.info(f"🔍 Final SDP preview: {final_offer.sdp[:500]}...")
             
-            # Keep the original SDP for proper TURN server functionality
-            fixed_sdp = final_offer.sdp
+            # Use the complete SDP with all ICE candidates
+            complete_sdp = final_offer.sdp
+            
+            # Log ICE candidates found in SDP for debugging
+            ice_candidate_lines = [line for line in complete_sdp.split('\n') if line.startswith('a=candidate:')]
+            logger.info(f"📊 Found {len(ice_candidate_lines)} ICE candidates in SDP:")
+            for candidate in ice_candidate_lines[:5]:  # Log first 5 candidates
+                logger.info(f"  - {candidate}")
             
             # DON'T modify IP addresses - let TURN servers handle NAT traversal properly
             
@@ -631,18 +703,13 @@ class WebRTCService:
             
             # SIMPLE APPROACH: Don't modify ports - use aiortc's natural ports
             logger.info(f"🔍 SIMPLE WebRTC: Using aiortc's natural ports without redirection")
-            logger.info(f"🔍 Original SDP (keeping as-is): {fixed_sdp[:200]}...")
+            logger.info(f"🔍 Complete SDP ready with all ICE candidates")
             
-            if fixed_sdp != offer.sdp:
-                logger.info(f"CRITICAL: Fixed SDP for viewer {viewer_id} - replaced IPs and ports")
-            else:
-                logger.warning(f"CRITICAL: No major SDP changes needed for viewer {viewer_id}")
-            
-            # Send offer to viewer via signaling server
+            # Send offer to viewer via signaling server with complete SDP
             offer_data = {
                 'offer': {
                     'type': offer.type,
-                    'sdp': fixed_sdp
+                    'sdp': complete_sdp
                 },
                 'targetId': viewer_id,
                 'cameraId': self.camera_pda

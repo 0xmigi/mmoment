@@ -1,10 +1,10 @@
-import { Dialog } from '@headlessui/react';
-import { X, ArrowUpRight, Download, Trash2 } from 'lucide-react';
-import { IPFSMedia } from '../storage/ipfs/ipfs-service';
-import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { useState } from 'react';
-import { unifiedIpfsService } from '../storage/ipfs/unified-ipfs-service';
-import { TimelineEvent } from '../timeline/timeline-types';
+import { IPFSMedia } from "../storage/ipfs/ipfs-service";
+import { unifiedIpfsService } from "../storage/ipfs/unified-ipfs-service";
+import { TimelineEvent } from "../timeline/timeline-types";
+import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
+import { Dialog } from "@headlessui/react";
+import { ArrowUpRight, Download, Trash2 } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
 
 interface MediaViewerProps {
   isOpen: boolean;
@@ -14,51 +14,130 @@ interface MediaViewerProps {
   onDelete?: (mediaId: string) => void;
 }
 
-export default function MediaViewer({ isOpen, onClose, media, event, onDelete }: MediaViewerProps) {
+export default function MediaViewer({
+  isOpen,
+  onClose,
+  media,
+  event,
+  onDelete,
+}: MediaViewerProps) {
   const { user, primaryWallet } = useDynamicContext();
   const [deleting, setDeleting] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [startY, setStartY] = useState(0);
+  const [currentY, setCurrentY] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Scroll to show EXIF just barely peeking when modal opens
+  useEffect(() => {
+    if (isOpen && scrollContainerRef.current) {
+      // Small delay to ensure content is rendered
+      setTimeout(() => {
+        if (scrollContainerRef.current) {
+          // Get the viewport height and image height
+          const viewportHeight = window.innerHeight;
+          const imgElement =
+            scrollContainerRef.current.querySelector("img, video");
+          if (imgElement) {
+            const imgHeight = imgElement.getBoundingClientRect().height;
+            // Scroll to show most of the image with just 40-60px of EXIF peeking at bottom
+            // This gives a hint that there's more content below without obscuring the image
+            const scrollPosition = Math.max(0, imgHeight - viewportHeight + 60);
+            scrollContainerRef.current.scrollTop = scrollPosition;
+          }
+        }
+      }, 50);
+    }
+  }, [isOpen]);
+
+  // Handle touch/mouse events for swipe down to close
+  const handleStart = (clientY: number) => {
+    setStartY(clientY);
+    setCurrentY(clientY);
+    setIsDragging(true);
+  };
+
+  const handleMove = (clientY: number) => {
+    if (!isDragging) return;
+    setCurrentY(clientY);
+
+    const diff = clientY - startY;
+    // Only track downward swipes when at top of scroll
+    if (
+      scrollContainerRef.current &&
+      scrollContainerRef.current.scrollTop === 0 &&
+      diff > 0
+    ) {
+      // Apply a slight resistance to the drag
+      const translateY = Math.min(diff * 0.5, 200);
+      scrollContainerRef.current.style.transform = `translateY(${translateY}px)`;
+      scrollContainerRef.current.style.transition = "none";
+    }
+  };
+
+  const handleEnd = () => {
+    if (!isDragging) return;
+
+    const diff = currentY - startY;
+    // Close if swiped down more than 100px when at top
+    if (
+      scrollContainerRef.current &&
+      scrollContainerRef.current.scrollTop === 0 &&
+      diff > 100
+    ) {
+      onClose();
+    } else if (scrollContainerRef.current) {
+      // Snap back if not enough swipe
+      scrollContainerRef.current.style.transform = "translateY(0)";
+      scrollContainerRef.current.style.transition = "transform 0.3s ease-out";
+    }
+
+    setIsDragging(false);
+    setStartY(0);
+    setCurrentY(0);
+  };
 
   if (!media) return null;
 
   // Get social identity from user's verified credentials
-  const farcasterCred = user?.verifiedCredentials?.find(cred => 
-    cred.oauthProvider === 'farcaster'
+  const farcasterCred = user?.verifiedCredentials?.find(
+    (cred) => cred.oauthProvider === "farcaster"
   );
-  
-  const twitterCred = user?.verifiedCredentials?.find(cred => 
-    cred.oauthProvider === 'twitter'
+
+  const twitterCred = user?.verifiedCredentials?.find(
+    (cred) => cred.oauthProvider === "twitter"
   );
-  
+
   // Prioritize Farcaster over Twitter
   const primarySocialCred = farcasterCred || twitterCred;
-  
+
   // Get social identity from event first, user's verified credentials as fallback
-  // This lets us display profile info correctly for other users
-  const displayName = event?.user.displayName || primarySocialCred?.oauthDisplayName;
+  const displayName =
+    event?.user.displayName || primarySocialCred?.oauthDisplayName;
   const username = event?.user.username || primarySocialCred?.oauthUsername;
-  const profileImage = event?.user.pfpUrl || primarySocialCred?.oauthAccountPhotos?.[0];
-  
+  const profileImage =
+    event?.user.pfpUrl || primarySocialCred?.oauthAccountPhotos?.[0];
+
   // Determine social provider from event data or current user credentials
   const socialProvider = (() => {
-    // If we have a username that includes farcaster.xyz, it's Farcaster
-    if (username?.includes('farcaster.xyz')) return 'Farcaster';
-    // If username has a Twitter domain
-    if (username?.includes('twitter.com')) return 'X / Twitter';
-    // Use the provider from credentials as a fallback
-    if (farcasterCred) return 'Farcaster';
-    if (twitterCred) return 'X / Twitter';
+    if (username?.includes("farcaster.xyz")) return "Farcaster";
+    if (username?.includes("twitter.com")) return "X / Twitter";
+    if (farcasterCred) return "Farcaster";
+    if (twitterCred) return "X / Twitter";
     return null;
   })();
-  
+
   // Only use wallet address as fallback if no social identity
-  const displayIdentity = displayName || `${media.walletAddress.slice(0, 4)}...${media.walletAddress.slice(-4)}`;
+  const displayIdentity =
+    displayName ||
+    `${media.walletAddress.slice(0, 4)}...${media.walletAddress.slice(-4)}`;
 
   // Use event's transaction ID if available, fallback to media's transaction ID
   const transactionId = event?.transactionId || media.transactionId;
 
   // Function to handle media download
   const handleDownload = (url: string, filename: string) => {
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = filename;
     document.body.appendChild(a);
@@ -69,105 +148,81 @@ export default function MediaViewer({ isOpen, onClose, media, event, onDelete }:
   // Function to handle media deletion
   const handleDelete = async (mediaId: string) => {
     if (!primaryWallet?.address || !media) return;
-    
+
     try {
       setDeleting(true);
-      
+
       let success = false;
 
-      if (media.provider === 'jetson') {
-        // Handle Jetson video deletion from localStorage
-        const jetsonVideos = JSON.parse(localStorage.getItem('jetson-videos') || '[]');
-        const filteredVideos = jetsonVideos.filter((video: any) => video.id !== mediaId);
-        localStorage.setItem('jetson-videos', JSON.stringify(filteredVideos));
+      if (media.provider === "jetson") {
+        const jetsonVideos = JSON.parse(
+          localStorage.getItem("jetson-videos") || "[]"
+        );
+        const filteredVideos = jetsonVideos.filter(
+          (video: IPFSMedia) => video.id !== mediaId
+        );
+        localStorage.setItem("jetson-videos", JSON.stringify(filteredVideos));
         success = true;
-        console.log('Deleted Jetson video from localStorage:', mediaId);
+        console.log("Deleted Jetson video from localStorage:", mediaId);
       } else {
-        // Handle IPFS media deletion with proper timing
-        console.log('🗑️ Starting IPFS media deletion for:', mediaId);
-        
-        // Add a small delay to allow UI to show loading state
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        success = await unifiedIpfsService.deleteMedia(mediaId, primaryWallet.address);
-        console.log('🗑️ IPFS media deletion result:', mediaId, 'success:', success);
-        
-        // Add another small delay before UI updates to ensure backend operations complete
+        console.log("🗑️ Starting IPFS media deletion for:", mediaId);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        success = await unifiedIpfsService.deleteMedia(
+          mediaId,
+          primaryWallet.address
+        );
+        console.log(
+          "🗑️ IPFS media deletion result:",
+          mediaId,
+          "success:",
+          success
+        );
+
         if (success) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       }
-      
+
       if (success) {
-        console.log('✅ MEDIA DELETION SUCCESS (MediaViewer):', mediaId);
+        console.log("✅ MEDIA DELETION SUCCESS (MediaViewer):", mediaId);
         if (onDelete) {
           onDelete(mediaId);
         }
         onClose();
       } else {
-        console.error('❌ MEDIA DELETION FAILED (MediaViewer):', mediaId);
+        console.error("❌ MEDIA DELETION FAILED (MediaViewer):", mediaId);
       }
     } catch (err) {
-      console.error('🗑️ MEDIA DELETION ERROR (MediaViewer):', err);
-      // Note: We're not showing a toast here since the deletion might still succeed
-      // The error could be from timing issues, not actual failure
+      console.error("🗑️ MEDIA DELETION ERROR (MediaViewer):", err);
     } finally {
       setDeleting(false);
     }
   };
 
   return (
-    <Dialog
-      open={isOpen}
-      onClose={onClose}
-      className="relative z-[100]"
-    >
-      {/* Backdrop */}
-      <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-
+    <Dialog open={isOpen} onClose={onClose} className="relative z-[100]">
       {/* Full-screen container */}
-      <div className="fixed inset-0 flex items-end sm:items-center justify-center p-2 sm:p-0">
-        <Dialog.Panel className="mx-auto w-full sm:w-[480px] md:w-[640px] rounded-xl bg-white shadow-xl">
-          {/* Header with buttons */}
-          <div className="flex items-center justify-between p-3 border-b border-gray-100">
-            <Dialog.Title className="text-base font-medium">
-              Media
-            </Dialog.Title>
-            <div className="flex items-center space-x-1">
-              <button
-                onClick={() => handleDownload(media.url, `${media.id}.${media.type === 'video' ? 'mp4' : 'jpg'}`)}
-                className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
-                title="Download"
-              >
-                <Download className="w-4 h-4 text-blue-500" />
-              </button>
-              <button
-                onClick={() => handleDelete(media.id)}
-                disabled={deleting}
-                className="p-1 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
-                title="Delete"
-              >
-                <Trash2 className={`w-4 h-4 text-red-500 ${deleting ? 'animate-spin' : ''}`} />
-              </button>
-              <button
-                onClick={onClose}
-                className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
-                title="Close"
-              >
-                <X className="w-4 h-4 text-gray-500" />
-              </button>
-            </div>
-          </div>
-
-          {/* Media Content */}
-          <div className="space-y-4">
-            {/* Media preview - removed padding */}
+      <div className="fixed inset-0 bg-white">
+        <Dialog.Panel className="w-full h-full flex flex-col bg-white">
+          {/* Scrollable Content - No header */}
+          <div
+            ref={scrollContainerRef}
+            className="flex-1 overflow-y-auto bg-white"
+            onTouchStart={(e) => handleStart(e.touches[0].clientY)}
+            onTouchMove={(e) => handleMove(e.touches[0].clientY)}
+            onTouchEnd={handleEnd}
+            onMouseDown={(e) => handleStart(e.clientY)}
+            onMouseMove={(e) => handleMove(e.clientY)}
+            onMouseUp={handleEnd}
+            onMouseLeave={handleEnd}
+          >
+            {/* Media Section */}
             <div className="w-full">
-              {media.type === 'video' ? (
+              {media.type === "video" ? (
                 <video
                   key={media.id}
                   src={media.url}
-                  className="w-full max-h-[60vh] object-contain"
+                  className="w-full h-auto"
                   controls
                   autoPlay
                   playsInline
@@ -176,7 +231,7 @@ export default function MediaViewer({ isOpen, onClose, media, event, onDelete }:
                 <img
                   src={media.url}
                   alt="Media preview"
-                  className="w-full max-h-[60vh] object-contain"
+                  className="w-full h-auto"
                   onError={(e) => {
                     const img = e.target as HTMLImageElement;
                     if (media.backupUrls?.length) {
@@ -190,11 +245,42 @@ export default function MediaViewer({ isOpen, onClose, media, event, onDelete }:
               )}
             </div>
 
-            {/* Info sections with padding */}
-            <div className="px-3 pb-3 space-y-4">
+            {/* Separator line */}
+            <div className="w-full h-px bg-gray-200" />
+
+            {/* Details Section */}
+            <div className="bg-white px-4 py-4 pb-safe-b min-h-screen">
+              {/* Action Buttons at top of EXIF section */}
+              <div className="flex justify-end gap-2 mb-4">
+                <button
+                  onClick={() =>
+                    handleDownload(
+                      media.url,
+                      `${media.id}.${media.type === "video" ? "mp4" : "jpg"}`
+                    )
+                  }
+                  className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
+                  title="Download"
+                >
+                  <Download className="w-4 h-4 text-blue-500" />
+                </button>
+                <button
+                  onClick={() => handleDelete(media.id)}
+                  disabled={deleting}
+                  className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-50"
+                  title="Delete"
+                >
+                  <Trash2
+                    className={`w-4 h-4 text-red-500 ${
+                      deleting ? "animate-spin" : ""
+                    }`}
+                  />
+                </button>
+              </div>
+
               {/* Core Identity Section */}
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-gray-100 overflow-hidden">
+              <div className="flex items-center gap-3 pb-4 border-b border-gray-100">
+                <div className="w-10 h-10 rounded-full bg-gray-100 overflow-hidden">
                   {profileImage && (
                     <img
                       src={profileImage}
@@ -203,15 +289,12 @@ export default function MediaViewer({ isOpen, onClose, media, event, onDelete }:
                     />
                   )}
                 </div>
-                <div>
-                  <div className="text-sm font-medium">
-                    {displayIdentity}
-                  </div>
+                <div className="flex-1">
+                  <div className="text-base font-medium">{displayIdentity}</div>
                   {socialProvider && (
-                    <div className="text-xs text-gray-500">
-                      {username && `@${username.replace('@', '')}`}
-                      {' '}
-                      <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded ml-1">
+                    <div className="text-sm text-gray-500">
+                      {username && `@${username.replace("@", "")}`}{" "}
+                      <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded ml-1">
                         {socialProvider}
                       </span>
                     </div>
@@ -220,23 +303,35 @@ export default function MediaViewer({ isOpen, onClose, media, event, onDelete }:
               </div>
 
               {/* Action Details */}
-              <div>
-                <div className="text-[13px] font-medium text-gray-900">Action</div>
-                <div className="mt-1 bg-gray-50 px-3 py-2 rounded-lg">
-                  <div className="text-sm text-gray-600">
-                    {event?.type === 'video_recorded' ? 'Video Recorded' : 
-                     event?.type === 'photo_captured' ? 'Photo Captured' : 
-                     event?.type === 'stream_started' ? 'Stream Started' : 
-                     event?.type === 'stream_ended' ? 'Stream Ended' : 'Photo Captured'}
+              <div className="py-4 border-b border-gray-100">
+                <div className="text-sm font-medium text-gray-900 mb-2">
+                  Action
+                </div>
+                <div className="bg-gray-50 px-3 py-2.5 rounded-lg">
+                  <div className="text-sm text-gray-700">
+                    {event?.type === "video_recorded"
+                      ? "Video Recorded"
+                      : event?.type === "photo_captured"
+                      ? "Photo Captured"
+                      : event?.type === "stream_started"
+                      ? "Stream Started"
+                      : event?.type === "stream_ended"
+                      ? "Stream Ended"
+                      : "Photo Captured"}
                   </div>
-                  <div className="text-xs text-gray-500 mt-0.5">
+                  <div className="text-xs text-gray-500 mt-1">
                     {new Date(media.timestamp).toLocaleString()}
                   </div>
                   {(event?.cameraId || media.cameraId) && (
-                    <div className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                    <div className="text-xs text-gray-500 mt-1.5 flex items-center gap-1">
                       <span>Camera: </span>
                       <span className="font-mono">
-                        {`${(event?.cameraId || media.cameraId || '').slice(0, 4)}...${(event?.cameraId || media.cameraId || '').slice(-4)}`}
+                        {`${(event?.cameraId || media.cameraId || "").slice(
+                          0,
+                          4
+                        )}...${(event?.cameraId || media.cameraId || "").slice(
+                          -4
+                        )}`}
                       </span>
                     </div>
                   )}
@@ -245,23 +340,55 @@ export default function MediaViewer({ isOpen, onClose, media, event, onDelete }:
 
               {/* Transaction */}
               {transactionId && (
-                <div>
-                  <div className="text-[13px] font-medium text-gray-900">Transaction</div>
-                  <div className="mt-1 bg-gray-50 px-3 py-2 rounded-lg flex items-center justify-between">
-                    <span className="text-xs font-mono text-gray-600 truncate max-w-[180px]">
-                      {`${transactionId.slice(0, 8)}...${transactionId.slice(-8)}`}
+                <div className="py-4 border-b border-gray-100">
+                  <div className="text-sm font-medium text-gray-900 mb-2">
+                    Transaction
+                  </div>
+                  <div className="bg-gray-50 px-3 py-2.5 rounded-lg flex items-center justify-between">
+                    <span className="text-sm font-mono text-gray-600 truncate max-w-[60%]">
+                      {`${transactionId.slice(0, 8)}...${transactionId.slice(
+                        -8
+                      )}`}
                     </span>
                     <a
                       href={`https://solscan.io/tx/${transactionId}?cluster=devnet`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
+                      className="text-sm text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
                     >
-                      View Tx <ArrowUpRight className="w-3 h-3" />
+                      View on Solscan <ArrowUpRight className="w-3.5 h-3.5" />
                     </a>
                   </div>
                 </div>
               )}
+
+              {/* Storage Info */}
+              <div className="py-4">
+                <div className="text-sm font-medium text-gray-900 mb-3">
+                  Storage
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">Provider</span>
+                    <span className="text-gray-700">
+                      {media.provider === "jetson" ? "Jetson Camera" : "IPFS"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">Media Type</span>
+                    <span className="text-gray-700 capitalize">
+                      {media.type}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">Media ID</span>
+                    <span className="text-gray-700 font-mono text-xs">{`${media.id.slice(
+                      0,
+                      8
+                    )}...`}</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </Dialog.Panel>

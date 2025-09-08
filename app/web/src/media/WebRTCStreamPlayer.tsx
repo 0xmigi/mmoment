@@ -80,7 +80,19 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
     cleanup();
   }, [cleanup, onError]);
 
+  // Detect mobile connections and cellular networks
+  const isMobileConnection = () => {
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const isSlowConnection = (navigator as any).connection?.effectiveType === 'slow-2g' || 
+                           (navigator as any).connection?.effectiveType === '2g' ||
+                           (navigator as any).connection?.effectiveType === '3g';
+    return isMobileDevice || isSlowConnection;
+  };
+
   const createPeerConnection = useCallback(async () => {
+    const isMobile = isMobileConnection();
+    console.log('[WebRTC] Detected connection type:', isMobile ? 'Mobile/Cellular' : 'Desktop/WiFi');
+    
     // Generate time-based TURN credentials (matching camera service)
     const timestamp = Math.floor(Date.now() / 1000) + 86400; // Valid for 24 hours
     const username = timestamp.toString();
@@ -347,13 +359,25 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({
       socket.on('webrtc-ice-candidate', async (data: { candidate: RTCIceCandidateInit }) => {
         if (peerConnectionRef.current) {
           try {
-            console.log('[WebRTC] Received ICE candidate from camera:', {
+            const candidateType = (data.candidate as any).type;
+            const candidateInfo = {
               protocol: (data.candidate as any).protocol,
               address: (data.candidate as any).address,
               port: (data.candidate as any).port,
-              type: (data.candidate as any).type,
+              type: candidateType,
               priority: (data.candidate as any).priority
-            });
+            };
+            
+            if (candidateType === 'host') {
+              console.log('[WebRTC] 🏠 Received HOST candidate from camera:', candidateInfo);
+            } else if (candidateType === 'srflx') {
+              console.log('[WebRTC] 🌐 Received STUN candidate from camera:', candidateInfo);
+            } else if (candidateType === 'relay') {
+              console.log('[WebRTC] 🔄 Received TURN relay candidate from camera:', candidateInfo);
+            } else {
+              console.log('[WebRTC] Received ICE candidate from camera:', candidateInfo);
+            }
+            
             await peerConnectionRef.current.addIceCandidate(data.candidate);
             console.log('[WebRTC] Successfully added ICE candidate');
           } catch (error) {
