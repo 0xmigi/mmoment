@@ -86,68 +86,14 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
     [cleanup, onError]
   );
 
-  // Detect mobile connections and cellular networks
-  const isMobileConnection = () => {
-    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const isSlowConnection = (navigator as any).connection?.effectiveType === 'slow-2g' || 
-                           (navigator as any).connection?.effectiveType === '2g' ||
-                           (navigator as any).connection?.effectiveType === '3g';
-    return isMobileDevice || isSlowConnection;
-  };
 
-  const createPeerConnection = useCallback(async () => {
-    const isMobile = isMobileConnection();
-    console.log('[WebRTC] Detected connection type:', isMobile ? 'Mobile/Cellular' : 'Desktop/WiFi');
-    
-    // Generate time-based TURN credentials (matching camera service)
-    const timestamp = Math.floor(Date.now() / 1000) + 86400; // Valid for 24 hours
-    const username = timestamp.toString();
-    const secret = 'mmoment-webrtc-secret-2025';
-    
-    // Proper HMAC-SHA1 implementation using Web Crypto API
-    const encoder = new TextEncoder();
-    const keyData = encoder.encode(secret);
-    const messageData = encoder.encode(username);
-    
-    const cryptoKey = await crypto.subtle.importKey(
-      'raw',
-      keyData.buffer as ArrayBuffer,
-      { name: 'HMAC', hash: 'SHA-1' },
-      false,
-      ['sign']
-    );
-    
-    const signature = await crypto.subtle.sign('HMAC', cryptoKey, messageData.buffer as ArrayBuffer);
-    const hashArray = Array.from(new Uint8Array(signature));
-    const credential = btoa(String.fromCharCode(...hashArray));
-    
-    console.log('[WebRTC] Oracle TURN credentials generated:', { 
-      username: username, 
-      credential: credential.substring(0, 8) + '...',
-      server: '129.80.99.75:3478'
-    });
-
-    // iOS Safari/Chrome cellular network detection
-    const isIOSCellular = isMobile && /iPhone|iPad|iPod/.test(navigator.userAgent);
-    
+  const createPeerConnection = useCallback(() => {
     const config: RTCConfiguration = {
       iceServers: [
-        // Oracle Cloud CoTURN server - primary with iOS cellular optimization
-        {
-          urls: isIOSCellular ? [
-            'turn:129.80.99.75:3478?transport=tcp',  // TCP TURN for iOS cellular
-            'turn:129.80.99.75:3478'                 // UDP fallback
-          ] : 'turn:129.80.99.75:3478',
-          username: username,
-          credential: credential
-        },
-        // STUN servers - reduce for iOS to speed up ICE
-        ...(isIOSCellular ? [] : [
-          { urls: 'stun:129.80.99.75:3478' },
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:stun1.l.google.com:19302" }
-        ]),
-        // Fallback public TURN servers
+        // STUN servers for NAT traversal
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+        // Free public TURN server for relay fallback
         {
           urls: "turn:openrelay.metered.ca:80",
           username: "openrelayproject",
@@ -159,16 +105,9 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
           credential: "openrelayproject",
         },
       ],
-      // iOS cellular optimizations
-      iceCandidatePoolSize: isIOSCellular ? 20 : 10,  // More candidates for iOS
-      iceTransportPolicy: isIOSCellular ? 'relay' : 'all',  // Force TURN for iOS cellular
-      bundlePolicy: 'max-bundle',
-      rtcpMuxPolicy: 'require'
+      iceCandidatePoolSize: 10,
+      iceTransportPolicy: "all", // Try both direct and relay
     };
-    
-    if (isIOSCellular) {
-      console.log('[WebRTC] 📱 iOS Cellular detected - forcing TURN relay mode');
-    }
 
     const peerConnection = new RTCPeerConnection(config);
 
@@ -268,23 +207,15 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         console.error(
           "[WebRTC] This usually means the camera and viewer cannot reach each other"
         );
-        console.error(
-          "[WebRTC] Mobile networks may require TURN relay for connectivity"
-        );
-        handleError(
-          "Network connectivity failed - trying TURN relay for mobile networks"
-        );
+        handleError("Network connectivity failed - check if devices are on same network");
       } else if (iceState === "disconnected") {
         console.warn("[WebRTC] ⚠️ ICE connection disconnected");
-        // Mobile networks may have longer reconnection times
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-        const reconnectTimeout = isMobile ? 10000 : 5000; // 10s for mobile, 5s for desktop
-        
+        // Don't immediately fail on disconnect, might reconnect
         setTimeout(() => {
           if (peerConnection.iceConnectionState === "disconnected") {
             handleError("ICE connection lost");
           }
-        }, reconnectTimeout);
+        }, 5000);
       }
     };
 
@@ -378,7 +309,9 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
           console.log("[WebRTC] Offer SDP:", data.offer.sdp);
 
           try {
-            const peerConnection = await createPeerConnection();
+            console.log('[WebRTC] About to create peer connection...');
+            const peerConnection = createPeerConnection();
+            console.log('[WebRTC] Peer connection created successfully');
             peerConnectionRef.current = peerConnection;
 
             await peerConnection.setRemoteDescription(data.offer);
