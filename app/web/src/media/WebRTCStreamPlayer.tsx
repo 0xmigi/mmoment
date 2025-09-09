@@ -139,7 +139,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
 
     const config: RTCConfiguration = {
       iceServers,
-      iceCandidatePoolSize: 20, // More candidate gathering
+      iceCandidatePoolSize: 30, // More candidates for better connectivity
       iceTransportPolicy: "all", // Try both direct and relay
       bundlePolicy: "max-bundle", // Bundle everything for better relay compatibility
       rtcpMuxPolicy: "require",
@@ -311,13 +311,15 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
           console.log("[WebRTC] Could not get disconnect stats:", e);
         }
         
-        // Don't immediately fail on disconnect, give relay candidates more time
+        // Give relay candidates much more time to establish connection
+        console.log("[WebRTC] 🔄 Giving relay candidates extended time to connect...");
+        
         setTimeout(() => {
           if (peerConnection.iceConnectionState === "disconnected") {
-            console.log("[WebRTC] ⏰ ICE still disconnected after timeout, checking for relay candidates...");
-            handleError("ICE connection lost");
+            console.log("[WebRTC] ⏰ ICE still disconnected after 20s timeout");
+            handleError("ICE connection failed - relay candidates could not establish connection");
           }
-        }, 10000); // Increased timeout for cellular networks
+        }, 20000); // Extended 20 second timeout for relay connections
       }
     };
 
