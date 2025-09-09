@@ -97,8 +97,8 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
     try {
       // Generate HMAC-SHA1 credential
       const encoder = new TextEncoder();
-      const secretBytes = encoder.encode(secret).buffer;
-      const usernameBytes = encoder.encode(username).buffer;
+      const secretBytes = encoder.encode(secret).buffer as ArrayBuffer;
+      const usernameBytes = encoder.encode(username).buffer as ArrayBuffer;
       
       const key = await crypto.subtle.importKey(
         'raw',
