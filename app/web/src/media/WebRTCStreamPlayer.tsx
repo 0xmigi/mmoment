@@ -18,6 +18,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
   >("disconnected");
   const [error, setError] = useState<string | null>(null);
   const [pendingStream, setPendingStream] = useState<MediaStream | null>(null);
+  const [connectionAttempts, setConnectionAttempts] = useState<number>(0);
   const { selectedCamera } = useCamera();
   const { cameraId } = useParams<{ cameraId: string }>();
 
@@ -137,13 +138,22 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
       console.log("[WebRTC] ⚠️ TURN server skipped due to credential failure");
     }
 
+    // Use relay-only mode on retry attempts
+    const useRelayOnly = connectionAttempts > 0;
+    
     const config: RTCConfiguration = {
       iceServers,
-      iceCandidatePoolSize: 30, // More candidates for better connectivity
-      iceTransportPolicy: "all", // Try both direct and relay
+      iceCandidatePoolSize: useRelayOnly ? 40 : 30, // More candidates for relay-only
+      iceTransportPolicy: useRelayOnly ? "relay" : "all", // Force relay on retry
       bundlePolicy: "max-bundle", // Bundle everything for better relay compatibility
       rtcpMuxPolicy: "require",
     };
+
+    if (useRelayOnly) {
+      console.log("[WebRTC] 🔒 Using RELAY-ONLY mode for connection attempt", connectionAttempts + 1);
+    } else {
+      console.log("[WebRTC] 🌐 Using ALL transport policies for first attempt");
+    }
 
     const peerConnection = new RTCPeerConnection(config);
 
@@ -214,6 +224,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         console.log("[WebRTC] 🎉 Connection established successfully!");
         setConnectionState("connected");
         setError(null);
+        setConnectionAttempts(0); // Reset counter on success
       } else if (state === "connecting") {
         console.log("[WebRTC] Connection in progress...");
         setConnectionState("connecting");
@@ -221,7 +232,24 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         console.error(
           "[WebRTC] ❌ Connection failed - this might be a network/firewall issue"
         );
-        handleError("Connection failed - check network connectivity");
+        // Increment connection attempts for relay-only retry
+        setConnectionAttempts(prev => prev + 1);
+        
+        if (connectionAttempts === 0) {
+          console.log("[WebRTC] 🔄 Connection failed, retrying with relay-only mode in 2 seconds...");
+          handleError("Connection failed - retrying with relay-only mode");
+          
+          // Auto-retry with relay-only mode
+          setTimeout(() => {
+            if (currentCameraId) {
+              console.log("[WebRTC] 🔒 Auto-retrying with relay-only mode...");
+              initializeWebRTC();
+            }
+          }, 2000);
+        } else {
+          console.log("[WebRTC] ❌ Relay-only connection also failed");
+          handleError("Connection failed - both direct and relay modes failed");
+        }
       } else if (state === "disconnected") {
         console.warn("[WebRTC] ⚠️ Connection disconnected");
         handleError("Connection disconnected");
@@ -236,6 +264,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         console.log("[WebRTC] 🎉 ICE connection established successfully!");
         setConnectionState("connected");
         setError(null);
+        setConnectionAttempts(0); // Reset counter on success
       } else if (iceState === "checking") {
         console.log("[WebRTC] 🔍 ICE candidates are being checked...");
         setConnectionState("connecting");
@@ -334,7 +363,8 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
     };
 
     return peerConnection;
-  }, [currentCameraId, handleError]);
+  }, [currentCameraId, handleError, connectionAttempts]);
+
 
   const initializeWebRTC = useCallback(async () => {
     if (!currentCameraId) {
