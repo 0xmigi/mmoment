@@ -258,7 +258,8 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
 
     peerConnection.oniceconnectionstatechange = () => {
       const iceState = peerConnection.iceConnectionState;
-      console.log("[WebRTC] 🧊 ICE connection state changed:", iceState);
+      const useRelayOnly = connectionAttemptsRef.current >= 1;
+      console.log("[WebRTC] 🧊 ICE connection state changed:", iceState, useRelayOnly ? "(relay-only mode)" : "");
 
       if (iceState === "connected" || iceState === "completed") {
         console.log("[WebRTC] 🎉 ICE connection established successfully!");
@@ -268,45 +269,130 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
       } else if (iceState === "checking") {
         console.log("[WebRTC] 🔍 ICE candidates are being checked...");
         setConnectionState("connecting");
+        
+        // In relay-only mode, set up data flow detection instead of relying on ICE checks
+        if (useRelayOnly) {
+          console.log("[WebRTC] 🔒 Relay-only mode: Setting up data flow detection...");
+          
+          // Check for data flow after 8 seconds (longer than normal ICE timeout)
+          setTimeout(() => {
+            if (peerConnection.iceConnectionState === "checking" || peerConnection.iceConnectionState === "failed") {
+              console.log("[WebRTC] 🔍 Relay-only mode: Checking for data flow...");
+              
+              peerConnection.getStats().then((stats) => {
+                let hasDataFlow = false;
+                let relayUsed = false;
+                
+                stats.forEach((report) => {
+                  if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                    relayUsed = true;
+                    console.log("[WebRTC] 📊 Found successful candidate pair in relay mode");
+                  }
+                  if (report.type === 'inbound-rtp' && (report.bytesReceived > 0 || report.packetsReceived > 0)) {
+                    hasDataFlow = true;
+                    console.log("[WebRTC] 📊 Data flow detected:", {
+                      bytes: report.bytesReceived,
+                      packets: report.packetsReceived
+                    });
+                  }
+                });
+                
+                if (hasDataFlow || relayUsed) {
+                  console.log("[WebRTC] 🎉 Relay connection working despite ICE checks - bypassing ICE failure!");
+                  setConnectionState("connected");
+                  setError(null);
+                  connectionAttemptsRef.current = 0;
+                } else {
+                  console.log("[WebRTC] ❌ No data flow detected in relay mode");
+                  handleError("Relay connection failed - no data flow detected");
+                }
+              }).catch((e) => {
+                console.error("[WebRTC] Failed to check data flow stats:", e);
+                handleError("Could not verify relay connection");
+              });
+            }
+          }, 8000);
+        }
       } else if (iceState === "failed") {
         console.error(
           "[WebRTC] ❌ ICE connection failed - network connectivity issue"
         );
-        console.error(
-          "[WebRTC] This usually means the camera and viewer cannot reach each other"
-        );
         
-        // Log failed candidate pairs for debugging
-        try {
-          peerConnection.getStats().then((stats) => {
-            console.log("[WebRTC] 📊 ICE Connection Failure Analysis:");
-            stats.forEach((report) => {
-              if (report.type === 'candidate-pair') {
-                console.log("[WebRTC] 📋 Candidate pair:", {
-                  state: report.state,
-                  priority: report.priority,
-                  nominated: report.nominated,
-                  local: report.localCandidateId,
-                  remote: report.remoteCandidateId
-                });
+        if (useRelayOnly) {
+          console.log("[WebRTC] 🔒 Relay-only mode failure - checking if data is actually flowing...");
+          
+          // Give relay more time to establish in case it's just slow
+          setTimeout(() => {
+            peerConnection.getStats().then((stats) => {
+              let hasDataFlow = false;
+              let relayAttempted = false;
+              
+              stats.forEach((report) => {
+                if (report.type === 'candidate-pair') {
+                  if (report.localCandidateId && report.remoteCandidateId) {
+                    // Check if any relay candidates were used
+                    stats.forEach((candidate) => {
+                      if ((candidate.id === report.localCandidateId || candidate.id === report.remoteCandidateId) && 
+                          candidate.candidateType === 'relay') {
+                        relayAttempted = true;
+                      }
+                    });
+                  }
+                }
+                if (report.type === 'inbound-rtp' && (report.bytesReceived > 0 || report.packetsReceived > 0)) {
+                  hasDataFlow = true;
+                  console.log("[WebRTC] 📊 Data flow detected despite ICE failure:", {
+                    bytes: report.bytesReceived,
+                    packets: report.packetsReceived
+                  });
+                }
+              });
+              
+              if (hasDataFlow) {
+                console.log("[WebRTC] 🎉 TURN relay working despite ICE failure - connection recovered!");
+                setConnectionState("connected");
+                setError(null);
+                connectionAttemptsRef.current = 0;
+                return;
               }
-              if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
-                console.log(`[WebRTC] 🗳️ ${report.type}:`, {
-                  id: report.id,
-                  candidateType: report.candidateType,
-                  protocol: report.protocol,
-                  address: report.address,
-                  port: report.port,
-                  priority: report.priority
-                });
+              
+              if (relayAttempted) {
+                console.log("[WebRTC] 🔒 Relay candidates found but no data flow - connection truly failed");
               }
+              
+              // Log failed candidate pairs for debugging
+              console.log("[WebRTC] 📊 ICE Connection Failure Analysis:");
+              stats.forEach((report) => {
+                if (report.type === 'candidate-pair') {
+                  console.log("[WebRTC] 📋 Candidate pair:", {
+                    state: report.state,
+                    priority: report.priority,
+                    nominated: report.nominated,
+                    local: report.localCandidateId,
+                    remote: report.remoteCandidateId
+                  });
+                }
+                if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
+                  console.log(`[WebRTC] 🗳️ ${report.type}:`, {
+                    id: report.id,
+                    candidateType: report.candidateType,
+                    protocol: report.protocol,
+                    address: report.address,
+                    port: report.port,
+                    priority: report.priority
+                  });
+                }
+              });
+              
+              handleError("Relay connection failed - TURN server not accessible");
             });
-          });
-        } catch (e) {
-          console.log("[WebRTC] Could not get failure stats:", e);
+          }, 3000);
+        } else {
+          console.error(
+            "[WebRTC] This usually means the camera and viewer cannot reach each other"
+          );
+          handleError("Network connectivity failed - check if devices are on same network");
         }
-        
-        handleError("Network connectivity failed - check if devices are on same network");
       } else if (iceState === "disconnected") {
         console.warn("[WebRTC] ⚠️ ICE connection disconnected");
         
