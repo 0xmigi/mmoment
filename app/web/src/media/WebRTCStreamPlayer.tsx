@@ -30,6 +30,12 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
     localStorage.getItem("directCameraId");
 
   const cleanup = useCallback(() => {
+    // Don't cleanup if relay connection is successful and working
+    if (relayConnectionSuccessRef.current) {
+      console.log("[WebRTC] 🔒 Skipping cleanup - relay connection is successful");
+      return;
+    }
+    
     console.log("[WebRTC] Cleaning up connection");
 
     // Close peer connection
@@ -242,7 +248,10 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         
         if (connectionAttemptsRef.current === 1) {
           console.log("[WebRTC] 🔄 Connection failed, retrying with relay-only mode in 2 seconds...");
-          handleError("Connection failed - retrying with relay-only mode");
+          // Don't call handleError if relay is already successful
+          if (!relayConnectionSuccessRef.current) {
+            handleError("Connection failed - retrying with relay-only mode");
+          }
           
           // Auto-retry with relay-only mode
           setTimeout(() => {
@@ -253,7 +262,9 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
           }, 2000);
         } else {
           console.log("[WebRTC] ❌ Relay-only connection also failed");
-          handleError("Connection failed - both direct and relay modes failed");
+          if (!relayConnectionSuccessRef.current) {
+            handleError("Connection failed - both direct and relay modes failed");
+          }
         }
       } else if (state === "disconnected") {
         if (relayConnectionSuccessRef.current) {
@@ -261,7 +272,9 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
           return;
         }
         console.warn("[WebRTC] ⚠️ Connection disconnected");
-        handleError("Connection disconnected");
+        if (!relayConnectionSuccessRef.current) {
+          handleError("Connection disconnected");
+        }
       }
     };
 
@@ -361,11 +374,15 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
                   connectionAttemptsRef.current = 0;
                 } else {
                   console.log("[WebRTC] ❌ No data flow detected in relay mode");
-                  handleError("Relay connection failed - no data flow detected");
+                  if (!relayConnectionSuccessRef.current) {
+                    handleError("Relay connection failed - no data flow detected");
+                  }
                 }
               }).catch((e) => {
                 console.error("[WebRTC] Failed to check data flow stats:", e);
-                handleError("Could not verify relay connection");
+                if (!relayConnectionSuccessRef.current) {
+                  handleError("Could not verify relay connection");
+                }
               });
             }
           }, 8000);
@@ -484,7 +501,9 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
                 }
               });
               
-              handleError("Relay connection failed - TURN server not accessible");
+              if (!relayConnectionSuccessRef.current) {
+                handleError("Relay connection failed - TURN server not accessible");
+              }
             });
           }, 3000);
         } else {
@@ -536,7 +555,9 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         setTimeout(() => {
           if (peerConnection.iceConnectionState === "disconnected") {
             console.log("[WebRTC] ⏰ ICE still disconnected after 20s timeout");
-            handleError("ICE connection failed - relay candidates could not establish connection");
+            if (!relayConnectionSuccessRef.current) {
+              handleError("ICE connection failed - relay candidates could not establish connection");
+            }
           }
         }, 20000); // Extended 20 second timeout for relay connections
       }
