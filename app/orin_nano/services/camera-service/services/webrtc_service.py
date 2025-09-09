@@ -229,11 +229,11 @@ class WebRTCService:
                 RTCIceServer(urls=['stun:stun.l.google.com:19302']),
                 RTCIceServer(urls=['stun:stun1.l.google.com:19302']),
                 RTCIceServer(urls=['stun:stun.cloudflare.com:3478']),
-                # Oracle Cloud CoTURN server for cross-network - UDP and TCP
+                # Oracle TURN server with UDP prioritization for local WiFi performance
                 RTCIceServer(
                     urls=[
-                        'turn:129.80.99.75:3478',           # UDP TURN
-                        'turn:129.80.99.75:3478?transport=tcp'  # TCP TURN for mobile networks
+                        'turn:129.80.99.75:3478',           # UDP first for best local WiFi performance
+                        'turn:129.80.99.75:3478?transport=tcp'  # TCP fallback for cellular
                     ],
                     username=username,
                     credential=credential

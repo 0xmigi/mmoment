@@ -127,13 +127,13 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
     if (credential) {
       iceServers.push({
         urls: [
-          "turn:129.80.99.75:3478",
-          "turn:129.80.99.75:3478?transport=tcp"
+          "turn:129.80.99.75:3478",                 // UDP first for best local WiFi performance
+          "turn:129.80.99.75:3478?transport=tcp"   // TCP fallback for cellular
         ],
         username: username,
         credential: credential
       });
-      console.log("[WebRTC] 🔄 TURN server added to ICE configuration");
+      console.log("[WebRTC] 🔄 Oracle TURN server added with UDP priority for local WiFi");
     } else {
       console.log("[WebRTC] ⚠️ TURN server skipped due to credential failure");
     }
