@@ -280,6 +280,37 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         handleError("Network connectivity failed - check if devices are on same network");
       } else if (iceState === "disconnected") {
         console.warn("[WebRTC] ⚠️ ICE connection disconnected");
+        
+        // Log candidate analysis on disconnect as well
+        try {
+          peerConnection.getStats().then((stats) => {
+            console.log("[WebRTC] 📊 ICE Disconnect Analysis:");
+            stats.forEach((report) => {
+              if (report.type === 'candidate-pair') {
+                console.log("[WebRTC] 📋 Candidate pair:", {
+                  state: report.state,
+                  priority: report.priority,
+                  nominated: report.nominated,
+                  local: report.localCandidateId,
+                  remote: report.remoteCandidateId
+                });
+              }
+              if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
+                console.log(`[WebRTC] 🗳️ ${report.type}:`, {
+                  id: report.id,
+                  candidateType: report.candidateType,
+                  protocol: report.protocol,
+                  address: report.address,
+                  port: report.port,
+                  priority: report.priority
+                });
+              }
+            });
+          });
+        } catch (e) {
+          console.log("[WebRTC] Could not get disconnect stats:", e);
+        }
+        
         // Don't immediately fail on disconnect, might reconnect
         setTimeout(() => {
           if (peerConnection.iceConnectionState === "disconnected") {
