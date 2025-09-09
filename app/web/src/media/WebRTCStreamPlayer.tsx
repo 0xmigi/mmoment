@@ -97,14 +97,17 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
     try {
       // Generate HMAC-SHA1 credential
       const encoder = new TextEncoder();
+      const secretBytes = encoder.encode(secret).buffer;
+      const usernameBytes = encoder.encode(username).buffer;
+      
       const key = await crypto.subtle.importKey(
         'raw',
-        encoder.encode(secret),
+        secretBytes,
         { name: 'HMAC', hash: 'SHA-1' } as HmacImportParams,
         false,
         ['sign']
       );
-      const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(username)) as ArrayBuffer;
+      const signature = await crypto.subtle.sign('HMAC', key, usernameBytes) as ArrayBuffer;
       credential = btoa(String.fromCharCode(...new Uint8Array(signature)));
       console.log("[WebRTC] ✅ Generated TURN credentials successfully:", { username, credential: credential.substring(0, 10) + '...' });
     } catch (error) {
