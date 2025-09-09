@@ -100,11 +100,11 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
       const key = await crypto.subtle.importKey(
         'raw',
         encoder.encode(secret),
-        { name: 'HMAC', hash: 'SHA-1' },
+        { name: 'HMAC', hash: 'SHA-1' } as HmacImportParams,
         false,
         ['sign']
       );
-      const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(username));
+      const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(username)) as ArrayBuffer;
       credential = btoa(String.fromCharCode(...new Uint8Array(signature)));
       console.log("[WebRTC] ✅ Generated TURN credentials successfully:", { username, credential: credential.substring(0, 10) + '...' });
     } catch (error) {
