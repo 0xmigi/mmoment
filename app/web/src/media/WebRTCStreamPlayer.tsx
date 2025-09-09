@@ -93,35 +93,49 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
     const username = timestamp.toString();
     const secret = 'mmoment-webrtc-secret-2025';
     
-    // Generate HMAC-SHA1 credential
-    const encoder = new TextEncoder();
-    const key = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(secret),
-      { name: 'HMAC', hash: 'SHA-1' },
-      false,
-      ['sign']
-    );
-    const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(username));
-    const credential = btoa(String.fromCharCode(...new Uint8Array(signature)));
+    let credential = '';
+    try {
+      // Generate HMAC-SHA1 credential
+      const encoder = new TextEncoder();
+      const key = await crypto.subtle.importKey(
+        'raw',
+        encoder.encode(secret),
+        { name: 'HMAC', hash: 'SHA-1' },
+        false,
+        ['sign']
+      );
+      const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(username));
+      credential = btoa(String.fromCharCode(...new Uint8Array(signature)));
+      console.log("[WebRTC] ✅ Generated TURN credentials successfully:", { username, credential: credential.substring(0, 10) + '...' });
+    } catch (error) {
+      console.error("[WebRTC] ❌ TURN credential generation failed:", error);
+      console.log("[WebRTC] 🔄 Falling back to simplified TURN config");
+      // Fallback: still try connecting without TURN
+    }
 
-    console.log("[WebRTC] 🔑 Generated TURN credentials:", { username, credential: credential.substring(0, 10) + '...' });
+    const iceServers: RTCIceServer[] = [
+      // STUN servers for NAT traversal
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+    ];
+
+    // Add TURN server only if credential generation succeeded
+    if (credential) {
+      iceServers.push({
+        urls: [
+          "turn:129.80.99.75:3478",
+          "turn:129.80.99.75:3478?transport=tcp"
+        ],
+        username: username,
+        credential: credential
+      });
+      console.log("[WebRTC] 🔄 TURN server added to ICE configuration");
+    } else {
+      console.log("[WebRTC] ⚠️ TURN server skipped due to credential failure");
+    }
 
     const config: RTCConfiguration = {
-      iceServers: [
-        // STUN servers for NAT traversal
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" },
-        // Oracle Cloud CoTURN server with time-based auth
-        {
-          urls: [
-            "turn:129.80.99.75:3478",
-            "turn:129.80.99.75:3478?transport=tcp"
-          ],
-          username: username,
-          credential: credential
-        },
-      ],
+      iceServers,
       iceCandidatePoolSize: 10,
       iceTransportPolicy: "all", // Try both direct and relay
     };
