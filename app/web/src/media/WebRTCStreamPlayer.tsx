@@ -141,6 +141,8 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
       iceServers,
       iceCandidatePoolSize: 10,
       iceTransportPolicy: "all", // Try both direct and relay
+      bundlePolicy: "balanced",
+      rtcpMuxPolicy: "require",
     };
 
     const peerConnection = new RTCPeerConnection(config);
@@ -244,6 +246,37 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         console.error(
           "[WebRTC] This usually means the camera and viewer cannot reach each other"
         );
+        
+        // Log failed candidate pairs for debugging
+        try {
+          peerConnection.getStats().then((stats) => {
+            console.log("[WebRTC] 📊 ICE Connection Failure Analysis:");
+            stats.forEach((report) => {
+              if (report.type === 'candidate-pair') {
+                console.log("[WebRTC] 📋 Candidate pair:", {
+                  state: report.state,
+                  priority: report.priority,
+                  nominated: report.nominated,
+                  local: report.localCandidateId,
+                  remote: report.remoteCandidateId
+                });
+              }
+              if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
+                console.log(`[WebRTC] 🗳️ ${report.type}:`, {
+                  id: report.id,
+                  candidateType: report.candidateType,
+                  protocol: report.protocol,
+                  address: report.address,
+                  port: report.port,
+                  priority: report.priority
+                });
+              }
+            });
+          });
+        } catch (e) {
+          console.log("[WebRTC] Could not get failure stats:", e);
+        }
+        
         handleError("Network connectivity failed - check if devices are on same network");
       } else if (iceState === "disconnected") {
         console.warn("[WebRTC] ⚠️ ICE connection disconnected");
