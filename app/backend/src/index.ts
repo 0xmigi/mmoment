@@ -522,8 +522,8 @@ io.on('connection', (socket) => {
     console.log(`🎥 Camera joined room webrtc-${data.cameraId}, now has ${roomSockets ? roomSockets.size : 0} sockets`);
   });
 
-  socket.on('register-viewer', (data: { cameraId: string }) => {
-    console.log(`Viewer registering for WebRTC camera ${data.cameraId} on socket ${socket.id}`);
+  socket.on('register-viewer', (data: { cameraId: string, cellularMode?: boolean }) => {
+    console.log(`Viewer registering for WebRTC camera ${data.cameraId} on socket ${socket.id}, cellular mode: ${data.cellularMode || false}`);
     webrtcPeers.set(socket.id, { cameraId: data.cameraId, type: 'viewer' });
     socket.join(`webrtc-${data.cameraId}`);
     
@@ -531,9 +531,12 @@ io.on('connection', (socket) => {
     const roomSockets = io.sockets.adapter.rooms.get(`webrtc-${data.cameraId}`);
     console.log(`Room webrtc-${data.cameraId} has ${roomSockets ? roomSockets.size : 0} sockets`);
     
-    // Notify camera that a viewer wants to connect
-    console.log(`Notifying camera in room webrtc-${data.cameraId} that viewer ${socket.id} wants to connect`);
-    socket.to(`webrtc-${data.cameraId}`).emit('viewer-wants-connection', { viewerId: socket.id });
+    // Notify camera that a viewer wants to connect with cellular mode flag
+    console.log(`Notifying camera in room webrtc-${data.cameraId} that viewer ${socket.id} wants to connect (cellular: ${data.cellularMode || false})`);
+    socket.to(`webrtc-${data.cameraId}`).emit('viewer-wants-connection', { 
+      viewerId: socket.id,
+      cellularMode: data.cellularMode || false
+    });
   });
 
   socket.on('webrtc-offer', (data: { cameraId: string, offer: any, targetId?: string }) => {

@@ -9,6 +9,54 @@ interface WebRTCStreamPlayerProps {
   onError?: (error: string) => void;
 }
 
+// Cellular connection detection helper
+const detectCellularConnection = (): boolean => {
+  // Method 1: Check Network Information API (if available)
+  const connection = (navigator as any).connection || 
+                    (navigator as any).mozConnection || 
+                    (navigator as any).webkitConnection;
+  
+  if (connection) {
+    const effectiveType = connection.effectiveType;
+    const type = connection.type;
+    
+    console.log("[WebRTC] Network connection info:", {
+      type,
+      effectiveType,
+      downlink: connection.downlink,
+      rtt: connection.rtt
+    });
+    
+    // Check if connection type indicates cellular
+    if (type === 'cellular' || type === 'wimax') {
+      console.log("[WebRTC] 📱 Cellular connection detected via Network API");
+      return true;
+    }
+    
+    // Check effective type for cellular patterns
+    if (effectiveType === '2g' || effectiveType === '3g') {
+      console.log("[WebRTC] 📱 Likely cellular based on effective type:", effectiveType);
+      return true;
+    }
+  }
+  
+  // Method 2: Check if we're on a mobile device (heuristic)
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  
+  // Method 3: Check screen size as additional hint
+  const isSmallScreen = window.innerWidth <= 768;
+  
+  // If mobile device and not on known WiFi (no local network detection)
+  if (isMobile && isSmallScreen) {
+    console.log("[WebRTC] 📱 Possible cellular connection (mobile device detected)");
+    // For mobile devices, default to cellular mode for safety
+    return true;
+  }
+  
+  console.log("[WebRTC] 📶 WiFi/Ethernet connection assumed");
+  return false;
+};
+
 const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
@@ -581,12 +629,19 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
 
       socket.on("connect", () => {
         console.log("[WebRTC] Connected to signaling server successfully");
-        // Register as viewer
+        // Detect if we're on cellular by checking connection type and network info
+        const isCellular = detectCellularConnection();
+        
+        // Register as viewer with cellular mode flag
         console.log(
           "[WebRTC] Registering as viewer for camera:",
-          currentCameraId
+          currentCameraId,
+          "Cellular mode:", isCellular
         );
-        socket.emit("register-viewer", { cameraId: currentCameraId });
+        socket.emit("register-viewer", { 
+          cameraId: currentCameraId,
+          cellularMode: isCellular 
+        });
       });
 
       socket.on("connect_error", (error) => {
