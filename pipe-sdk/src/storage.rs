@@ -28,10 +28,12 @@ impl StorageClient {
         filename: &str,
         options: UploadOptions,
     ) -> Result<UploadResult> {
+        let original_size = data.len() as u64;
         let (upload_data, encrypted_filename) = if options.encrypt {
             // Encrypt the data
+            let generated_password = CryptoEngine::generate_user_password(&user.user_id);
             let password = options.password.as_deref()
-                .unwrap_or(&CryptoEngine::generate_user_password(&user.user_id));
+                .unwrap_or(&generated_password);
 
             let (encrypted_data, metadata) = self.crypto.encrypt(&data, password)?;
             let packed = pack_encrypted_file(encrypted_data, &metadata)?;
@@ -52,7 +54,7 @@ impl StorageClient {
             filename: uploaded_name.clone(),
             file_id: Some(uploaded_name),
             encrypted: Some(options.encrypt),
-            size: Some(data.len() as u64),
+            size: Some(original_size),
         })
     }
 
@@ -70,8 +72,9 @@ impl StorageClient {
 
         // Check if file needs decryption (ends with .enc or decrypt requested)
         if options.decrypt || filename.ends_with(".enc") {
+            let generated_password = CryptoEngine::generate_user_password(&user.user_id);
             let password = options.password.as_deref()
-                .unwrap_or(&CryptoEngine::generate_user_password(&user.user_id));
+                .unwrap_or(&generated_password);
 
             // Unpack and decrypt
             let (encrypted_data, metadata) = unpack_encrypted_file(&data)?;

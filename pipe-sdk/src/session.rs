@@ -71,7 +71,7 @@ impl SessionManager {
         Ok(Self {
             client,
             sessions: Arc::new(DashMap::new()),
-            max_idle_time: Duration::from_hours(1),
+            max_idle_time: Duration::from_secs(3600),  // 1 hour
         })
     }
 

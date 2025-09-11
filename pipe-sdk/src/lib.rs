@@ -14,8 +14,8 @@ pub mod error;
 pub use client::PipeClient;
 pub use session::{SessionManager, UserSession};
 pub use storage::StorageClient;
-pub use crypto::CryptoEngine;
-pub use types::{User, UploadResult, FileInfo};
+pub use crypto::{CryptoEngine, pack_encrypted_file, unpack_encrypted_file};
+pub use types::{User, UploadResult, FileInfo, EncryptionMetadata};
 pub use error::{PipeError, Result};
 
 /// Quick start for Jetson/server use
@@ -24,6 +24,6 @@ pub async fn create_session_manager() -> Result<SessionManager> {
 }
 
 /// Quick start for browser/client use
-pub async fn create_download_client() -> Result<PipeClient> {
+pub fn create_download_client() -> PipeClient {
     PipeClient::new(None)
 }

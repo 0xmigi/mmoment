@@ -25,7 +25,7 @@ export default function MediaViewer({
   const [deleting, setDeleting] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [startY, setStartY] = useState(0);
-  const [currentY, setCurrentY] = useState(0);
+  const [, setCurrentY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState(0);
 

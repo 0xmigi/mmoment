@@ -4,6 +4,7 @@
 export * from './storage-provider';
 export * from './storage-service';
 export * from './ipfs';
+export * from './pipe';
 
 // Configuration
 export { getPinataCredentials, updatePinataCredentials } from './config';
@@ -27,7 +28,9 @@ export type { StorageProvider } from './storage-provider';
 
 // Re-export main services
 import { unifiedIpfsService } from './ipfs/unified-ipfs-service';
+import { pipeService } from './pipe';
 
 export {
-  unifiedIpfsService
+  unifiedIpfsService,
+  pipeService
 }; 

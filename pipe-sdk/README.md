@@ -1,26 +1,26 @@
-# Pipe API SDK - Built for MMOMENT Camera Network
+# Pipe API SDK
 
-A comprehensive SDK for Pipe Network's decentralized storage, designed specifically for multi-user applications like camera networks, IoT devices, and privacy-focused services.
+A comprehensive Rust SDK for Pipe Network's decentralized storage with native crypto payments, designed for multi-user applications.
 
 ## 🎯 Purpose
 
-This SDK enables the MMOMENT camera network to:
-1. **Jetson Side**: Upload encrypted photos/videos for each user to their own Pipe account
-2. **Browser Side**: Download and decrypt media for authorized users to view
+This SDK enables applications to:
+1. **Server Side**: Upload encrypted data for each user to their own Pipe account
+2. **Client Side**: Download and decrypt data for authorized users 
 3. **Privacy First**: All data encrypted client-side, users control their keys
 
 ## 🏗️ Architecture
 
 ```
 ┌──────────────────┐        ┌──────────────────┐
-│  Jetson Camera   │        │   User Browser   │
+│   Server App     │        │   Client App     │
 │   (Rust SDK)     │        │    (JS/WASM)     │
 └────────┬─────────┘        └────────┬─────────┘
          │                            │
          ▼                            ▼
     ┌─────────────────────────────────────┐
     │       Pipe Network REST API         │
-    │  (firestarter.pipenetwork.com)      │
+    │    (us-east-00-firestarter...)      │
     └─────────────────────────────────────┘
                       │
                       ▼

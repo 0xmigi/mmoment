@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 
-const DEFAULT_BASE_URL: &str = "https://firestarter.pipenetwork.com";
+const DEFAULT_BASE_URL: &str = "https://us-east-00-firestarter.pipenetwork.com";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Core client for Pipe Network API
@@ -84,11 +84,9 @@ impl PipeClient {
 
         let response = self.http
             .post(format!("{}{}", self.base_url, endpoint))
-            .query(&[
-                ("user_id", &user.user_id),
-                ("user_app_key", &user.user_app_key),
-                ("file_name", &filename.to_string()),
-            ])
+            .header("X-User-Id", &user.user_id)
+            .header("X-User-App-Key", &user.user_app_key)
+            .query(&[("file_name", filename)])
             .multipart(form)
             .send()
             .await?;
@@ -126,8 +124,8 @@ impl PipeClient {
         let response = self.http
             .get(format!("{}{}", self.base_url, endpoint))
             .query(&[
-                ("user_id", &user.user_id),
-                ("user_app_key", &user.user_app_key),
+                ("user_id", user.user_id.as_str()),
+                ("user_app_key", user.user_app_key.as_str()),
                 ("file_name", filename),
             ])
             .send()
@@ -235,18 +233,11 @@ impl PipeClient {
 
     /// Check SOL balance
     pub async fn check_sol_balance(&self, user: &User) -> Result<WalletBalance> {
-        #[derive(Serialize)]
-        struct BalanceRequest {
-            user_id: String,
-            user_app_key: String,
-        }
-
         let response = self.http
             .post(format!("{}/checkWallet", self.base_url))
-            .json(&BalanceRequest {
-                user_id: user.user_id.clone(),
-                user_app_key: user.user_app_key.clone(),
-            })
+            .header("X-User-Id", &user.user_id)
+            .header("X-User-App-Key", &user.user_app_key)
+            .json(&serde_json::json!({}))
             .send()
             .await?;
 

@@ -1,17 +1,17 @@
-//! Complete MMOMENT flow: Jetson upload → Browser download
+//! Complete multi-user flow: Server upload → Client download
 
 use pipe_api_sdk::{SessionManager, CryptoEngine, PipeClient, Result};
 use pipe_api_sdk::types::{DownloadOptions, EncryptionMetadata};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("🎥 MMOMENT + Pipe Integration Demo\n");
+    println!("🔥 Pipe SDK Multi-User Demo\n");
 
     // ====================================================================
-    // PART 1: JETSON SIDE - Camera captures and uploads
+    // PART 1: SERVER SIDE - Data processing and uploads
     // ====================================================================
 
-    println!("📷 JETSON CAMERA SIDE:");
+    println!("🖥️ SERVER SIDE:");
     println!("------------------------");
 
     // Initialize session manager on Jetson

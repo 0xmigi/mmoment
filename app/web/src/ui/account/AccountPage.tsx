@@ -2,6 +2,7 @@ import { useDynamicContext, useEmbeddedWallet } from '@dynamic-labs/sdk-react-co
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { Copy, User, LogOut, KeyRound, Check, Globe, Lock } from 'lucide-react';
+import { PipeStorageSection } from './PipeStorageSection';
 
 // Define interfaces
 interface SocialCredential {
@@ -246,6 +247,9 @@ export function AccountPage() {
             </div>
           </div>
         </div>
+
+        {/* Pipe Storage Section */}
+        <PipeStorageSection />
 
         {/* Wallet Backup Section - responsive padding */}
         {isEmbeddedWallet && (

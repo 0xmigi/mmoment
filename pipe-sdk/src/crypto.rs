@@ -114,13 +114,12 @@ impl CryptoEngine {
             .map_err(|e| PipeError::Crypto(format!("Key setup failed: {:?}", e)))?;
         let opening_key = LessSafeKey::new(unbound_key);
 
+        // Create nonce array
+        let mut nonce_array = [0u8; NONCE_LEN];
+        nonce_array.copy_from_slice(&nonce_bytes);
+        
         // Decrypt
-        let nonce = Nonce::assume_unique_for_key(
-            nonce_bytes
-                .as_slice()
-                .try_into()
-                .map_err(|_| PipeError::Crypto("Invalid nonce".into()))?,
-        );
+        let nonce = Nonce::assume_unique_for_key(nonce_array);
 
         let mut decrypted = encrypted_data.to_vec();
         opening_key

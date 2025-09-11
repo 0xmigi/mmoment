@@ -117,6 +117,28 @@ app.get('/debug/ping', (req, res) => {
   res.json({ pong: Date.now() });
 });
 
+// Pipe API endpoints
+app.get('/api/pipe/credentials', (req, res) => {
+  // TODO: In production, this should validate the user's wallet address
+  // and return their specific Pipe credentials from secure storage
+  res.json({
+    userId: 'b44f78e9-c596-43c7-a49c-9113878f44bb',
+    userAppKey: '0ddb15f187d8ec152c623086fd0d4cef3053a3df0a915187986e6294a11ec972'
+  });
+});
+
+app.post('/api/pipe/create-account', (req, res) => {
+  const { walletAddress } = req.body;
+  console.log(`Creating Pipe account for wallet: ${walletAddress}`);
+  
+  // For now, return the same test credentials
+  // TODO: Implement proper account creation logic
+  res.json({
+    userId: '6278b440-a47f-40b2-82da-50361a5d7f10',
+    userAppKey: '46da300420754cb283272c0b36dd3a11b87ba5b41fd30e3793fcd38d61ed5f97'
+  });
+});
+
 // Health check endpoint with connection test
 app.get('/health', async (req, res) => {
   try {
