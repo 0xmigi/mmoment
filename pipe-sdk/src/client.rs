@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 
-const DEFAULT_BASE_URL: &str = "https://us-east-00-firestarter.pipenetwork.com";
+const DEFAULT_BASE_URL: &str = "https://us-west-00-firestarter.pipenetwork.com";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Core client for Pipe Network API

@@ -554,7 +554,73 @@ def register_routes(app):
         # Verify this is the video we just recorded
         if filename and latest_video.get('filename') != filename:
             logger.warning(f"Expected filename {filename} but got {latest_video.get('filename')}")
-        
+
+        # Upload video to user's Pipe storage asynchronously
+        import asyncio
+        from services.pipe_storage_service import handle_user_capture_upload
+
+        pipe_upload_info = {'initiated': False, 'storage_provider': 'pipe'}
+
+        try:
+            # Read the video file data
+            video_path = latest_video.get('path')
+            if video_path and os.path.exists(video_path):
+                with open(video_path, 'rb') as f:
+                    video_data = f.read()
+
+                # Prepare metadata for Pipe upload
+                metadata = {
+                    'timestamp': latest_video.get('timestamp'),
+                    'camera_id': 'jetson01',  # TODO: Get actual camera ID from device config
+                    'size': latest_video.get('size'),
+                    'local_path': video_path,
+                    'local_filename': latest_video.get('filename'),
+                    'capture_type': 'video',
+                    'duration_seconds': duration_limit
+                }
+
+                # Upload to user's specific Pipe storage account
+                def run_pipe_upload():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        upload_result = loop.run_until_complete(
+                            handle_user_capture_upload(wallet_address, video_data, metadata)
+                        )
+                        if upload_result['success']:
+                            logger.info(f"✅ Video uploaded to {wallet_address[:8]}...'s Pipe: {upload_result.get('filename')}")
+                        else:
+                            logger.error(f"❌ Pipe video upload failed for {wallet_address[:8]}...: {upload_result.get('error')}")
+                    finally:
+                        loop.close()
+
+                # Start upload in background thread
+                import threading
+                upload_thread = threading.Thread(target=run_pipe_upload, daemon=True)
+                upload_thread.start()
+
+                pipe_upload_info = {
+                    'initiated': True,
+                    'target_wallet': wallet_address,
+                    'upload_status': 'uploading',
+                    'storage_provider': 'pipe'
+                }
+
+                logger.info(f"🎥 Video recorded for {wallet_address[:8]}... -> uploading to their Pipe storage")
+
+            else:
+                logger.error(f"Video file not found at {video_path}")
+                pipe_upload_info['error'] = 'Video file not found'
+
+        except Exception as e:
+            logger.error(f"Failed to initiate Pipe video upload for {wallet_address[:8]}...: {e}")
+            pipe_upload_info = {
+                'initiated': False,
+                'error': str(e),
+                'upload_status': 'failed',
+                'storage_provider': 'pipe'
+            }
+
         return jsonify({
             'success': True,
             'recording': False,
@@ -564,7 +630,8 @@ def register_routes(app):
             'path': latest_video.get('path'),
             'url': latest_video.get('url'),
             'size': latest_video.get('size'),
-            'timestamp': latest_video.get('timestamp')
+            'timestamp': latest_video.get('timestamp'),
+            'pipe_upload': pipe_upload_info
         })
     
     # Media Access
@@ -1640,7 +1707,32 @@ def register_routes(app):
         # Enable face boxes for all connected users
         face_service.enable_boxes(True)
         logger.info(f"Face boxes enabled for connected user: {display_name or username or wallet_address}")
-        
+
+        # Pre-authorize Pipe storage session for fast uploads
+        import asyncio
+        from services.pipe_storage_service import pre_authorize_user_session
+
+        def run_pipe_authorization():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                auth_success = loop.run_until_complete(pre_authorize_user_session(wallet_address))
+                if auth_success:
+                    logger.info(f"✅ Pipe session pre-authorized for {wallet_address[:8]}...")
+                else:
+                    logger.warning(f"⚠️ Pipe session pre-authorization failed for {wallet_address[:8]}...")
+            except Exception as e:
+                logger.error(f"❌ Pipe pre-authorization error for {wallet_address[:8]}...: {e}")
+            finally:
+                loop.close()
+
+        # Start Pipe authorization in background thread
+        import threading
+        pipe_auth_thread = threading.Thread(target=run_pipe_authorization, daemon=True)
+        pipe_auth_thread.start()
+
+        logger.info(f"🔗 User {wallet_address[:8]}... connected with Pipe pre-authorization initiated")
+
         return jsonify(session_info)
 
     @app.route('/disconnect', methods=['POST'])
@@ -1920,29 +2012,84 @@ def register_routes(app):
     @require_session
     def capture_moment():
         """
-        Capture a photo from the camera
-        Returns the photo data
+        Capture a photo from the camera and upload directly to user's Pipe storage
+        Returns the photo data and upload result
         """
         wallet_address = request.json.get('wallet_address')
-        
+
         # Get services
         buffer_service = get_services()['buffer']
         capture_service = get_services()['capture']
-        
+
         # Capture photo
         photo_info = capture_service.capture_photo(buffer_service, wallet_address)
-        
+
         if not photo_info['success']:
             return jsonify(photo_info), 500
-        
-        # Read the photo file and encode as base64
+
+        # Read the photo file data
         with open(photo_info['path'], 'rb') as f:
             image_data = f.read()
             base64_image = base64.b64encode(image_data).decode('utf-8')
-        
+
         # Add base64 data to response
         photo_info['image_data'] = f"data:image/jpeg;base64,{base64_image}"
-        
+
+        # Upload to user's Pipe storage asynchronously
+        import asyncio
+        from services.pipe_storage_service import handle_user_capture_upload
+
+        try:
+            # Prepare metadata for Pipe upload
+            metadata = {
+                'timestamp': photo_info.get('timestamp'),
+                'camera_id': 'jetson01',  # TODO: Get actual camera ID from device config
+                'width': photo_info.get('width'),
+                'height': photo_info.get('height'),
+                'local_path': photo_info['path'],
+                'local_filename': photo_info['filename'],
+                'capture_type': 'photo'
+            }
+
+            # Upload to user's specific Pipe storage account
+            def run_pipe_upload():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    upload_result = loop.run_until_complete(
+                        handle_user_capture_upload(wallet_address, image_data, metadata)
+                    )
+                    if upload_result['success']:
+                        logger.info(f"✅ Photo uploaded to {wallet_address[:8]}...'s Pipe: {upload_result.get('filename')}")
+                    else:
+                        logger.error(f"❌ Pipe upload failed for {wallet_address[:8]}...: {upload_result.get('error')}")
+                finally:
+                    loop.close()
+
+            # Start upload in background thread
+            import threading
+            upload_thread = threading.Thread(target=run_pipe_upload, daemon=True)
+            upload_thread.start()
+
+            # Add Pipe upload info to response
+            photo_info['pipe_upload'] = {
+                'initiated': True,
+                'target_wallet': wallet_address,
+                'upload_status': 'uploading',
+                'storage_provider': 'pipe'
+            }
+
+            logger.info(f"📸 Photo captured for {wallet_address[:8]}... -> uploading to their Pipe storage")
+
+        except Exception as e:
+            logger.error(f"Failed to initiate Pipe upload for {wallet_address[:8]}...: {e}")
+            photo_info['pipe_upload'] = {
+                'initiated': False,
+                'error': str(e),
+                'upload_status': 'failed',
+                'storage_provider': 'pipe'
+            }
+
         return jsonify(photo_info)
 
     @app.route('/start_recording', methods=['POST'])
