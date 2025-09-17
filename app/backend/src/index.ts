@@ -902,6 +902,116 @@ app.get("/api/device/:device_pubkey/config", (req, res) => {
   }
 });
 
+// Get user's files from Pipe storage
+app.get("/api/pipe/files/:walletAddress", async (req, res) => {
+  const { walletAddress } = req.params;
+
+  try {
+    const account = pipeAccounts.get(walletAddress);
+    if (!account || !account.accessToken) {
+      return res.status(404).json({ error: "Pipe account not found or not authenticated" });
+    }
+
+    // Check if token needs refresh
+    if (account.tokenExpiry && Date.now() >= account.tokenExpiry - 60000) {
+      console.log(`🔄 Token about to expire, refreshing for ${walletAddress}`);
+
+      const refreshResponse = await fetch(`${PIPE_API_BASE_URL}/auth/refresh`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          refresh_token: account.refreshToken,
+        }),
+      });
+
+      if (refreshResponse.ok) {
+        const tokenData = await refreshResponse.json();
+        account.accessToken = tokenData.access_token;
+        account.refreshToken = tokenData.refresh_token;
+        account.tokenExpiry = Date.now() + 3600 * 1000;
+        console.log(`✅ Token refreshed for ${walletAddress}`);
+      }
+    }
+
+    // List user's files
+    const filesResponse = await fetch(`${PIPE_API_BASE_URL}/files`, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${account.accessToken}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!filesResponse.ok) {
+      console.error(`Failed to fetch files: ${filesResponse.status}`);
+      return res.status(filesResponse.status).json({
+        error: "Failed to fetch files from Pipe"
+      });
+    }
+
+    const filesData = await filesResponse.json();
+
+    // Transform files to include full URLs
+    const transformedFiles = filesData.files?.map((file: any) => ({
+      ...file,
+      url: `${PIPE_API_BASE_URL}/files/${file.id}/content`,
+      // Add a public URL if available
+      publicUrl: file.public ? `${PIPE_API_BASE_URL}/public/${file.id}` : null
+    })) || [];
+
+    res.json({
+      files: transformedFiles,
+      total: filesData.total || transformedFiles.length
+    });
+  } catch (error) {
+    console.error("Error fetching Pipe files:", error);
+    res.status(500).json({ error: "Failed to fetch files" });
+  }
+});
+
+// Get a specific file from Pipe storage
+app.get("/api/pipe/file/:walletAddress/:fileId", async (req, res) => {
+  const { walletAddress, fileId } = req.params;
+
+  try {
+    const account = pipeAccounts.get(walletAddress);
+    if (!account || !account.accessToken) {
+      return res.status(404).json({ error: "Pipe account not found or not authenticated" });
+    }
+
+    // Get file metadata
+    const fileResponse = await fetch(`${PIPE_API_BASE_URL}/files/${fileId}`, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${account.accessToken}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!fileResponse.ok) {
+      return res.status(fileResponse.status).json({
+        error: "File not found"
+      });
+    }
+
+    const fileData = await fileResponse.json();
+
+    // Add URLs
+    const transformedFile = {
+      ...fileData,
+      url: `${PIPE_API_BASE_URL}/files/${fileId}/content`,
+      publicUrl: fileData.public ? `${PIPE_API_BASE_URL}/public/${fileId}` : null
+    };
+
+    res.json(transformedFile);
+  } catch (error) {
+    console.error("Error fetching Pipe file:", error);
+    res.status(500).json({ error: "Failed to fetch file" });
+  }
+});
+
 // Debug endpoint to clear Pipe accounts (for testing)
 app.post("/api/pipe/clear-accounts", (_req, res) => {
   pipeAccounts.clear();

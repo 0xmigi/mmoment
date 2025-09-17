@@ -1,4 +1,5 @@
 import { IPFSMedia } from "../storage/ipfs/ipfs-service";
+import { PipeGalleryItem } from "../storage/pipe/pipe-gallery-service";
 import { unifiedIpfsService } from "../storage/ipfs/unified-ipfs-service";
 import { TimelineEvent } from "../timeline/timeline-types";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
@@ -9,7 +10,7 @@ import { useState, useRef, useEffect } from "react";
 interface MediaViewerProps {
   isOpen: boolean;
   onClose: () => void;
-  media: IPFSMedia | null;
+  media: IPFSMedia | PipeGalleryItem | null;
   event?: TimelineEvent;
   onDelete?: (mediaId: string) => void;
 }

@@ -4,6 +4,7 @@ import { Image, Video } from 'lucide-react';
 import MediaViewer from './MediaViewer';
 import { unifiedIpfsService } from '../storage/ipfs/unified-ipfs-service';
 import { IPFSMedia } from '../storage/ipfs/ipfs-service';
+import { pipeGalleryService, PipeGalleryItem } from '../storage/pipe/pipe-gallery-service';
 
 interface MediaGalleryProps {
   mode?: 'recent' | 'archive';
@@ -13,19 +14,35 @@ interface MediaGalleryProps {
 
 export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, cameraId }: MediaGalleryProps) {
   const { primaryWallet } = useDynamicContext();
-  const [media, setMedia] = useState<IPFSMedia[]>([]);
+  const [media, setMedia] = useState<(IPFSMedia | PipeGalleryItem)[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [, setDeleting] = useState<string | null>(null);
-  const [selectedMedia, setSelectedMedia] = useState<IPFSMedia | null>(null);
+  const [selectedMedia, setSelectedMedia] = useState<IPFSMedia | PipeGalleryItem | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
+  const [storageType, setStorageType] = useState<'pinata' | 'pipe'>('pinata');
 
   // Add click handler for media items
-  const handleMediaClick = (media: IPFSMedia) => {
-    console.log("Viewing media with transaction ID:", media.transactionId || "none");
+  const handleMediaClick = (media: IPFSMedia | PipeGalleryItem) => {
+    console.log("Viewing media with transaction ID:", (media as IPFSMedia).transactionId || "none");
     setSelectedMedia(media);
     setIsViewerOpen(true);
   };
+
+  // Check storage type preference on mount and when it changes
+  useEffect(() => {
+    const checkStorageType = () => {
+      const type = pipeGalleryService.getStorageType();
+      setStorageType(type);
+    };
+
+    checkStorageType();
+    // Listen for storage changes
+    const handleStorageChange = () => checkStorageType();
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
 
   useEffect(() => {
     let isSubscribed = true;
@@ -45,9 +62,17 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
 
       try {
         setError(null);
-        
-        // Get ALL media from IPFS only - no localStorage shortcuts!
-        const allMedia = await unifiedIpfsService.getMediaForWallet(primaryWallet.address);
+
+        let allMedia: (IPFSMedia | PipeGalleryItem)[] = [];
+
+        if (storageType === 'pipe') {
+          // Get media from Pipe storage
+          console.log('📦 Fetching media from Pipe storage for:', primaryWallet.address);
+          allMedia = await pipeGalleryService.getUserFiles(primaryWallet.address);
+        } else {
+          // Get ALL media from IPFS only - no localStorage shortcuts!
+          allMedia = await unifiedIpfsService.getMediaForWallet(primaryWallet.address);
+        }
 
         if (!isSubscribed) return;
 
@@ -55,16 +80,23 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
         retryCount = 0;
 
         // Sort by timestamp, newest first
-        const sortedMedia = allMedia.sort((a, b) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        );
+        const sortedMedia = allMedia.sort((a, b) => {
+          const aTime = 'timestamp' in a ? new Date(a.timestamp).getTime() : a.timestamp;
+          const bTime = 'timestamp' in b ? new Date(b.timestamp).getTime() : b.timestamp;
+          return bTime - aTime;
+        });
 
         // Filter by cameraId if provided
         let cameraFilteredMedia = sortedMedia;
         if (cameraId) {
-          // Filter by cameraId stored in IPFS metadata
+          // Filter by cameraId stored in metadata
           cameraFilteredMedia = sortedMedia.filter(item => {
-            return item.cameraId === cameraId;
+            if ('cameraId' in item) {
+              return item.cameraId === cameraId;
+            } else if ('metadata' in item && item.metadata?.camera) {
+              return item.metadata.camera === cameraId;
+            }
+            return false;
           });
         }
 
@@ -107,7 +139,7 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
       isSubscribed = false;
       clearInterval(interval);
     };
-  }, [primaryWallet?.address, mode, maxRecentItems, cameraId]);
+  }, [primaryWallet?.address, mode, maxRecentItems, cameraId, storageType]);
 
   const handleDelete = async (mediaId: string) => {
     if (!primaryWallet?.address) return;
@@ -116,14 +148,22 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
       setDeleting(mediaId);
       setError(null);
 
-      console.log('🗑️ Starting IPFS media deletion for:', mediaId);
-      
-      // Add a small delay to allow UI to show loading state
-      await new Promise(resolve => setTimeout(resolve, 500));
+      let success = false;
 
-      // All media is in IPFS - delete from IPFS only
-      const success = await unifiedIpfsService.deleteMedia(mediaId, primaryWallet.address);
-      console.log('🗑️ IPFS media deletion result:', mediaId, 'success:', success);
+      if (storageType === 'pipe') {
+        console.log('🗑️ Pipe storage deletion not yet implemented for:', mediaId);
+        setError('Deletion from Pipe storage is not yet supported');
+        return;
+      } else {
+        console.log('🗑️ Starting IPFS media deletion for:', mediaId);
+
+        // Add a small delay to allow UI to show loading state
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // All media is in IPFS - delete from IPFS only
+        success = await unifiedIpfsService.deleteMedia(mediaId, primaryWallet.address);
+        console.log('🗑️ IPFS media deletion result:', mediaId, 'success:', success);
+      }
 
       if (success) {
         console.log('✅ MEDIA DELETION SUCCESS (Gallery):', mediaId);
@@ -163,7 +203,12 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h2 className="text-xl text-left font-bold text-gray-800 mb-6">{title}</h2>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-xl text-left font-bold text-gray-800">{title}</h2>
+        <div className="text-sm text-gray-500">
+          {storageType === 'pipe' ? '📦 Pipe Network' : '📎 Pinata IPFS'}
+        </div>
+      </div>
 
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
