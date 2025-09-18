@@ -172,7 +172,7 @@ export default function MediaViewer({
   // Only use wallet address as fallback if no social identity
   const displayIdentity =
     displayName ||
-    `${media.walletAddress.slice(0, 4)}...${media.walletAddress.slice(-4)}`;
+    (media.walletAddress ? `${media.walletAddress.slice(0, 4)}...${media.walletAddress.slice(-4)}` : 'Unknown');
 
   // Use event's transaction ID if available, fallback to media's transaction ID
   const transactionId = event?.transactionId || media.transactionId;

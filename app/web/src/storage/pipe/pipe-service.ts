@@ -43,7 +43,6 @@ export class PipeService implements PipeStorageProvider {
 
   private credentials: PipeCredentials | null = null;
   private baseUrl = "https://us-west-00-firestarter.pipenetwork.com";
-  private authTokens: { access_token?: string; refresh_token?: string } = {};
   private initPromise: Promise<void>;
 
   constructor() {

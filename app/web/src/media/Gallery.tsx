@@ -81,8 +81,8 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
 
         // Sort by timestamp, newest first
         const sortedMedia = allMedia.sort((a, b) => {
-          const aTime = 'timestamp' in a ? new Date(a.timestamp).getTime() : a.timestamp;
-          const bTime = 'timestamp' in b ? new Date(b.timestamp).getTime() : b.timestamp;
+          const aTime = typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : a.timestamp;
+          const bTime = typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : b.timestamp;
           return bTime - aTime;
         });
 
