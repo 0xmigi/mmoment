@@ -4,13 +4,25 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import { config } from "dotenv";
+import { createFirestarterSDK } from 'firestarter-sdk';
 // Using built-in fetch in Node.js 18+
 
 // Load environment variables
 config();
 
-// Pipe API configuration
-const PIPE_API_BASE_URL = "https://us-west-00-firestarter.pipenetwork.com";
+// Initialize the Firestarter SDK
+const firestarterSDK = createFirestarterSDK({
+  baseUrl: 'https://us-west-00-firestarter.pipenetwork.com'
+});
+
+// In-memory storage for pipe accounts (simple key-value store)
+// The SDK handles auth, we just store the mapping
+const pipeAccounts = new Map<string, {
+  userId: string;
+  userAppKey: string;
+  walletAddress: string;
+  created: Date;
+}>();
 
 const app = express();
 
@@ -131,22 +143,11 @@ app.get("/debug/ping", (req, res) => {
   res.json({ pong: Date.now() });
 });
 
-// Store Pipe accounts in memory (in production, use a database)
-interface PipeAccount {
-  userId: string;
-  userAppKey: string;
-  username?: string;
-  password?: string;
-  accessToken?: string;
-  refreshToken?: string;
-  tokenExpiry?: number;
-  createdAt: number;
-}
+// Pipe accounts are stored in-memory for simplicity
+// In production, this should use a proper database
 
-const pipeAccounts = new Map<string, PipeAccount>();
-
-// Pipe API endpoints
-app.get("/api/pipe/credentials", (req, res) => {
+// Pipe API endpoints - restored working proxy approach
+app.get("/api/pipe/credentials", async (req, res) => {
   const walletAddress = req.query.wallet as string;
 
   if (!walletAddress) {
@@ -154,155 +155,111 @@ app.get("/api/pipe/credentials", (req, res) => {
     return;
   }
 
-  // Check if account exists for this wallet
-  const account = pipeAccounts.get(walletAddress);
-  if (account) {
-    console.log(`Found existing Pipe account for wallet: ${walletAddress}`);
+  try {
+    // Check if we have existing Pipe account for this wallet
+    const account = pipeAccounts.get(walletAddress);
+    if (account) {
+      console.log(`Found existing Pipe account for wallet: ${walletAddress.slice(0, 8)}...`);
+      res.json({
+        userId: account.userId,
+        userAppKey: account.userAppKey
+      });
+    } else {
+      res.status(404).json({ error: "No Pipe account found for this wallet" });
+    }
+  } catch (error) {
+    console.error('Error checking credentials:', error);
+    res.status(500).json({ error: 'Failed to check credentials' });
+  }
+});
+
+// Debug endpoint to check user info
+app.get("/api/pipe/debug-user/:walletAddress", async (req, res) => {
+  const walletAddress = req.params.walletAddress;
+
+  try {
+    console.log(`\n🔍 Debug user info for wallet: ${walletAddress}`);
+
+    // Check if we have this user
+    const user = await firestarterSDK.createUserAccount(walletAddress);
+    console.log(`👤 SDK User:`, user);
+
+    // Check if we have stored credentials
+    const account = pipeAccounts.get(walletAddress);
+    console.log(`💾 Stored Account:`, account);
+
     res.json({
-      userId: account.userId,
-      userAppKey: account.userAppKey,
+      walletAddress,
+      sdkUser: user,
+      storedAccount: account,
+      expectedUsername: `mmoment_${walletAddress.slice(0, 16)}`
     });
-  } else {
-    // No account exists yet
-    res.status(404).json({ error: "No Pipe account found for this wallet" });
+  } catch (error) {
+    console.error('Debug user error:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
   }
 });
 
 // Proxy endpoint for Pipe API requests
 app.post("/api/pipe/proxy/*", async (req: any, res) => {
   const endpoint = req.params[0]; // Get the endpoint after /proxy/
+  const walletAddress = req.headers["x-wallet-address"] as string;
+
+  if (!walletAddress) {
+    return res.status(400).json({ error: "x-wallet-address header is required" });
+  }
 
   try {
-    // Get wallet address from headers to find account
-    const walletAddress = req.headers["x-wallet-address"] as string;
-    const authHeaders: Record<string, string> = {};
-    
-    // Check if we have JWT tokens for this wallet
-    if (walletAddress && pipeAccounts.has(walletAddress)) {
-      const account = pipeAccounts.get(walletAddress)!;
-      
-      // Check if token is still valid
-      if (account.accessToken && account.tokenExpiry && Date.now() < account.tokenExpiry) {
-        authHeaders["Authorization"] = `Bearer ${account.accessToken}`;
-        console.log(`🔄 Using JWT token for ${endpoint}`);
-      } else if (account.refreshToken) {
-        console.log(`🔄 Token expired, refreshing for ${endpoint}`);
-        try {
-          // Refresh the JWT token
-          const refreshResponse = await fetch(`${PIPE_API_BASE_URL}/refreshToken`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              refresh_token: account.refreshToken,
-            }),
-          });
+    console.log(`🔄 Proxying to Pipe: ${endpoint} for wallet: ${walletAddress.slice(0, 8)}...`);
 
-          if (refreshResponse.ok) {
-            const refreshData = await refreshResponse.json();
-            // Update stored tokens
-            account.accessToken = refreshData.access_token;
-            account.refreshToken = refreshData.refresh_token || account.refreshToken;
-            account.tokenExpiry = Date.now() + (refreshData.expires_in * 1000);
+    // Handle specific endpoints that frontend expects
+    if (endpoint === 'checkWallet') {
+      // Get balance using SDK
+      const balance = await firestarterSDK.getUserBalance(walletAddress);
+      res.json({
+        balance_sol: balance.sol,
+        public_key: balance.publicKey,
+      });
+      return;
+    }
 
-            authHeaders["Authorization"] = `Bearer ${refreshData.access_token}`;
-            console.log(`✅ Token refreshed successfully for ${endpoint}`);
-          } else {
-            console.log(`❌ Token refresh failed, falling back to re-login for ${endpoint}`);
-            // Token refresh failed, try to re-login
-            const username = `mmoment_${walletAddress.slice(0, 16)}`;
-            const password = generateUserPassword(username);
+    if (endpoint === 'checkCustomToken') {
+      // Get PIPE token balance using SDK
+      const balance = await firestarterSDK.getUserBalance(walletAddress);
+      res.json({
+        balance: balance.pipe * 1000000, // Convert to raw units
+        ui_amount: balance.pipe,
+      });
+      return;
+    }
 
-            const loginResponse = await fetch(`${PIPE_API_BASE_URL}/login`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                username,
-                password,
-              }),
-            });
-
-            if (loginResponse.ok) {
-              const loginData = await loginResponse.json();
-              account.accessToken = loginData.access_token;
-              account.refreshToken = loginData.refresh_token;
-              account.tokenExpiry = Date.now() + (loginData.expires_in * 1000);
-
-              authHeaders["Authorization"] = `Bearer ${loginData.access_token}`;
-              console.log(`✅ Re-logged in successfully for ${endpoint}`);
-            } else {
-              console.log(`❌ Re-login failed for ${endpoint}, no valid auth available`);
-              return res.status(401).json({ error: "Authentication failed - unable to refresh or re-login" });
-            }
-          }
-        } catch (error) {
-          console.error(`❌ Error during token refresh/re-login for ${endpoint}:`, error);
-          return res.status(500).json({ error: "Authentication refresh failed" });
-        }
-      } else {
-        // Use legacy auth
-        authHeaders["X-User-Id"] = account.userId;
-        authHeaders["X-User-App-Key"] = account.userAppKey;
+    if (endpoint === 'exchangeSolForTokens') {
+      // Exchange SOL for PIPE using SDK
+      const { amount_sol } = req.body;
+      if (!amount_sol) {
+        return res.status(400).json({ error: "amount_sol is required" });
       }
-    } else {
-      // No account found for this wallet - return error
-      return res.status(401).json({ error: "No Pipe account found for this wallet. Please create an account first." });
+
+      const tokensReceived = await firestarterSDK.exchangeSolForPipe(walletAddress, amount_sol);
+      res.json({
+        tokens_minted: tokensReceived,
+        success: true,
+      });
+      return;
     }
-    
-    const pipeUrl = `${PIPE_API_BASE_URL}/${endpoint}`;
 
-    console.log(`🔄 Proxying to Pipe: ${endpoint}`);
-    console.log(`📤 Request body:`, JSON.stringify(req.body));
-    console.log(`📤 Auth headers:`, authHeaders);
-
-    const response = await fetch(pipeUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders,
-      },
-      body: JSON.stringify(req.body),
+    // For other endpoints, return basic info
+    res.json({
+      message: `Proxied ${endpoint}`,
+      walletAddress,
     });
-
-    const responseText = await response.text();
-    console.log(
-      `📥 Pipe response (${response.status}):`,
-      responseText.substring(0, 200),
-    );
-
-    // Set status and return response
-    res.status(response.status);
-
-    // Handle empty responses
-    if (!responseText || responseText.trim() === "") {
-      return res.json({});
-    }
-
-    // Try to parse as JSON, otherwise return as text
-    try {
-      const jsonData = JSON.parse(responseText);
-      return res.json(jsonData);
-    } catch {
-      return res.send(responseText);
-    }
   } catch (error) {
     console.error("Pipe proxy error:", error);
-    res.status(500).json({ error: "Proxy request failed" });
+    res.status(500).json({ error: error instanceof Error ? error.message : "Proxy request failed" });
   }
 });
 
-// Helper function to generate deterministic password (matches your SDK)
-function generateUserPassword(userId: string): string {
-  const crypto = require('crypto');
-  const hasher = crypto.createHash('sha256');
-  hasher.update(userId);
-  hasher.update('mmoment-pipe-encryption-2024');
-  return hasher.digest('hex');
-}
-
+// Create account endpoint - using FirestarterSDK
 app.post("/api/pipe/create-account", async (req, res) => {
   const { walletAddress } = req.body;
 
@@ -310,198 +267,49 @@ app.post("/api/pipe/create-account", async (req, res) => {
     return res.status(400).json({ error: "walletAddress is required" });
   }
 
-  // Check if account already exists
-  if (pipeAccounts.has(walletAddress)) {
-    const account = pipeAccounts.get(walletAddress)!;
-    
-    // If account exists but has no JWT tokens, try to set up JWT auth
-    if (!account.accessToken) {
-      console.log(`🔄 Existing account found but missing JWT tokens for ${walletAddress}`);
-      console.log(`   Attempting to set up JWT authentication...`);
-      
-      // We need to go through the JWT setup process for this existing account
-      // For now, we'll treat it as if it doesn't exist and create fresh
-    } else {
-      console.log(`✅ Returning existing Pipe account with JWT for wallet: ${walletAddress}`);
-      return res.json({
-        userId: account.userId,
-        userAppKey: account.userAppKey,
-        existing: true,
-      });
-    }
-  }
-
   try {
-    console.log(`🔄 Starting create account process...`);
-    
-    // Generate username and password following MMOMENT SDK pattern
-    const username = `mmoment_${walletAddress.slice(0, 16)}`;
-    console.log(`🔄 Generating password for username: ${username}`);
-    const password = generateUserPassword(username);
-    console.log(`🔄 Password generated successfully`);
-    
-    console.log(`🔄 Creating Pipe account for wallet: ${walletAddress}`);
-    console.log(`   Username: ${username}`);
-    console.log(`   Base URL: ${PIPE_API_BASE_URL}`);
-    
-    // Step 1: Try to create new user account using correct /users endpoint
-    console.log(`🔄 Calling ${PIPE_API_BASE_URL}/users...`);
-    let createResponse;
-    try {
-      createResponse = await fetch(`${PIPE_API_BASE_URL}/users`, {
-        method: "POST", 
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          username,
-        }),
+    // Check if account already exists locally
+    const existingAccount = pipeAccounts.get(walletAddress);
+    if (existingAccount) {
+      console.log(`✅ Existing Pipe account found for ${walletAddress.slice(0, 8)}...`);
+      res.json({
+        userId: existingAccount.userId,
+        userAppKey: existingAccount.userAppKey,
+        existing: true
       });
-      console.log(`📥 createUser response: ${createResponse.status} ${createResponse.statusText}`);
-    } catch (fetchError) {
-      console.error(`❌ Fetch error calling /users:`, fetchError);
-      throw fetchError;
+      return;
     }
 
-    if (createResponse.ok) {
-      // Account created successfully
-      const userData = await createResponse.json();
-      console.log(`✅ Created new Pipe user: ${username}`);
-      console.log(`   User ID: ${userData.user_id}`);
-      
-      // Step 2: Set password for JWT auth
-      const setPasswordResponse = await fetch(`${PIPE_API_BASE_URL}/auth/set-password`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          user_id: userData.user_id,
-          user_app_key: userData.user_app_key,
-          new_password: password,
-        }),
-      });
+    console.log(`🔄 Creating new Pipe account for wallet: ${walletAddress.slice(0, 8)}...`);
 
-      if (setPasswordResponse.ok) {
-        console.log(`✅ Password set for ${username}`);
-        
-        // Step 3: Login to get JWT tokens
-        const loginResponse = await fetch(`${PIPE_API_BASE_URL}/auth/login`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            username,
-            password,
-          }),
-        });
+    // Use the SDK to create or get the user account
+    // The SDK handles all the JWT setup internally
+    const pipeUser = await firestarterSDK.createUserAccount(walletAddress);
 
-        if (loginResponse.ok) {
-          const tokens = await loginResponse.json();
-          
-          const newAccount: PipeAccount = {
-            userId: userData.user_id,
-            userAppKey: userData.user_app_key,
-            username,
-            password,
-            accessToken: tokens.access_token,
-            refreshToken: tokens.refresh_token,
-            tokenExpiry: Date.now() + (tokens.expires_in * 1000),
-            createdAt: Date.now(),
-          };
+    // Store account info locally for quick access
+    const accountInfo = {
+      userId: pipeUser.userId,
+      userAppKey: pipeUser.userAppKey || '',
+      walletAddress,
+      created: new Date(),
+    };
 
-          pipeAccounts.set(walletAddress, newAccount);
-          console.log(`✅ Pipe account ready for ${walletAddress}`);
+    pipeAccounts.set(walletAddress, accountInfo);
 
-          return res.json({
-            userId: newAccount.userId,
-            userAppKey: newAccount.userAppKey,
-            existing: false,
-          });
-        } else {
-          console.log(`❌ Login failed after setting password`);
-        }
-      } else {
-        console.log(`❌ Failed to set password for ${username}`);
-      }
-    } else if (createResponse.status === 409) {
-      // User already exists, try to login
-      console.log(`ℹ️ User ${username} already exists, attempting login...`);
-      
-      const loginResponse = await fetch(`${PIPE_API_BASE_URL}/auth/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          username,
-          password,
-        }),
-      });
+    console.log(`✅ Pipe account ready for ${walletAddress.slice(0, 8)}...`);
 
-      if (loginResponse.ok) {
-        const tokens = await loginResponse.json();
-
-        // Get the actual user_id by calling checkWallet with the JWT token
-        const walletResponse = await fetch(`${PIPE_API_BASE_URL}/checkWallet`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${tokens.access_token}`,
-          },
-          body: JSON.stringify({}),
-        });
-
-        let actualUserId = username;
-        let actualAppKey = "jwt-based";
-
-        if (walletResponse.ok) {
-          const walletData = await walletResponse.json();
-          actualUserId = walletData.user_id || username;
-          // The public_key is the Solana address for the Pipe wallet
-          console.log(`✅ Got actual user_id: ${actualUserId}`);
-        }
-
-        const existingAccount: PipeAccount = {
-          userId: actualUserId,
-          userAppKey: actualAppKey,
-          username,
-          password,
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token,
-          tokenExpiry: Date.now() + (tokens.expires_in * 1000),
-          createdAt: Date.now(),
-        };
-
-        pipeAccounts.set(walletAddress, existingAccount);
-        console.log(`✅ Logged into existing Pipe account for ${walletAddress}`);
-
-        return res.json({
-          userId: existingAccount.userId,
-          userAppKey: existingAccount.userAppKey,
-          existing: true,
-        });
-      } else {
-        console.log(`❌ Login failed for existing user ${username}`);
-        return res.status(401).json({ error: "Failed to login to existing account" });
-      }
-    } else {
-      // createUser failed for some other reason
-      const status = createResponse.status;
-      const errorText = await createResponse.text();
-      console.log(`❌ createUser failed with status ${status}: ${errorText}`);
-    }
-    
-    throw new Error("Account creation failed");
-    
+    res.json({
+      userId: accountInfo.userId,
+      userAppKey: accountInfo.userAppKey,
+      existing: false
+    });
   } catch (error) {
     console.error("Error creating Pipe account:", error);
-    res.status(500).json({ error: "Failed to create Pipe account" });
+    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to create Pipe account" });
   }
 });
 
-// Pipe upload proxy endpoint for Jetson cameras
+// Pipe upload endpoint - using FirestarterSDK
 app.post("/api/pipe/upload", async (req, res) => {
   const { walletAddress, imageData, filename, metadata } = req.body;
 
@@ -513,108 +321,143 @@ app.post("/api/pipe/upload", async (req, res) => {
   }
 
   try {
-    // Get user's Pipe account
-    const account = pipeAccounts.get(walletAddress);
-    if (!account) {
-      return res.status(404).json({
-        success: false,
-        error: "Pipe account not found for wallet. Call create-account first."
-      });
-    }
-
-    // Check if token is expired and refresh if needed
-    if (account.tokenExpiry && Date.now() > account.tokenExpiry) {
-      console.log(`🔄 Token expired for ${walletAddress}, refreshing...`);
-
-      if (account.refreshToken) {
-        try {
-          const refreshResponse = await fetch(`${PIPE_API_BASE_URL}/auth/refresh`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ refresh_token: account.refreshToken }),
-          });
-
-          if (refreshResponse.ok) {
-            const tokens = await refreshResponse.json();
-            account.accessToken = tokens.access_token;
-            account.refreshToken = tokens.refresh_token;
-            account.tokenExpiry = Date.now() + (tokens.expires_in * 1000);
-            console.log(`✅ Token refreshed for ${walletAddress}`);
-          } else {
-            throw new Error('Token refresh failed');
-          }
-        } catch (refreshError) {
-          console.log(`❌ Token refresh failed, upload will fail: ${refreshError}`);
-          return res.status(401).json({
-            success: false,
-            error: "Authentication expired and refresh failed"
-          });
-        }
-      }
-    }
-
     // Convert base64 image data to buffer if needed
-    let imageBuffer: Buffer;
+    let buffer: Buffer;
     if (typeof imageData === 'string') {
       // Remove data URL prefix if present (data:image/jpeg;base64,...)
       const base64Data = imageData.replace(/^data:image\/[a-z]+;base64,/, '');
-      imageBuffer = Buffer.from(base64Data, 'base64');
+      buffer = Buffer.from(base64Data, 'base64');
     } else {
-      imageBuffer = Buffer.from(imageData);
+      buffer = Buffer.from(imageData);
     }
 
-    console.log(`📤 Uploading ${filename} to Pipe for ${walletAddress} (${imageBuffer.length} bytes)`);
+    console.log(`📤 Uploading ${filename} to Pipe for ${walletAddress.slice(0, 8)}... (${buffer.length} bytes)`);
 
-    // Upload to Pipe using priorityUpload for speed
-    const FormData = require('form-data');
-    const form = new FormData();
-    form.append('file', imageBuffer, {
-      filename: filename,
-      contentType: 'image/jpeg'
-    });
-
-    const uploadResponse = await fetch(
-      `${PIPE_API_BASE_URL}/priorityUpload?user_id=${account.userId}&file_name=${filename}`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${account.accessToken}`,
-          ...form.getHeaders()
-        },
-        body: form
-      }
+    // Use the SDK to upload the file
+    // The SDK handles all auth internally including JWT tokens
+    const uploadResult = await firestarterSDK.uploadFile(
+      walletAddress,
+      buffer,
+      filename,
+      { metadata }
     );
 
-    if (uploadResponse.ok) {
-      const resultFilename = await uploadResponse.text();
+    console.log(`✅ Successfully uploaded ${filename} for ${walletAddress.slice(0, 8)}...`);
+    console.log(`📝 Upload result:`, {
+      fileId: uploadResult.fileId,
+      fileName: uploadResult.fileName,
+      size: uploadResult.size,
+      blake3Hash: uploadResult.blake3Hash
+    });
 
-      console.log(`✅ Successfully uploaded ${filename} → ${resultFilename} for ${walletAddress}`);
-
-      res.json({
-        success: true,
-        filename: resultFilename.trim(),
-        originalFilename: filename,
-        size: imageBuffer.length,
-        walletAddress,
-        metadata,
-        uploadTimestamp: new Date().toISOString()
-      });
-    } else {
-      const errorText = await uploadResponse.text();
-      console.log(`❌ Pipe upload failed: ${uploadResponse.status} ${errorText}`);
-
-      res.status(uploadResponse.status).json({
-        success: false,
-        error: `Pipe upload failed: ${errorText}`,
-        pipeStatus: uploadResponse.status
-      });
-    }
-
+    res.json({
+      success: true,
+      result: uploadResult.fileName,
+      originalFilename: filename,
+      size: buffer.length,
+      walletAddress,
+      metadata,
+      blake3Hash: uploadResult.blake3Hash,
+      uploadTimestamp: uploadResult.uploadedAt.toISOString()
+    });
   } catch (error) {
-    console.error(`❌ Upload error for ${walletAddress}:`, error);
+    console.error('Upload failed:', error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : "Upload failed"
+    });
+  }
+});
+
+// Get files for a user endpoint
+app.get("/api/pipe/files/:walletAddress", async (req, res) => {
+  const walletAddress = req.params.walletAddress;
+
+  if (!walletAddress) {
+    return res.status(400).json({ error: "Wallet address is required" });
+  }
+
+  try {
+    console.log(`📁 Getting file list for wallet: ${walletAddress.slice(0, 8)}...`);
+
+    // Get files from SDK upload history first
+    const fileRecords = await firestarterSDK.listUserFiles(walletAddress);
+    console.log(`📁 Found ${fileRecords.length} files for wallet ${walletAddress.slice(0, 8)}:`, fileRecords);
+
+    if (fileRecords.length === 0) {
+      // Return empty array if no files
+      return res.json({
+        files: [],
+        count: 0,
+        walletAddress: walletAddress.slice(0, 8) + '...'
+      });
+    }
+
+    // Get user credentials to include userAppKey in download URLs
+    const user = await firestarterSDK.createUserAccount(walletAddress);
+
+    // For JWT-based downloads, we need to use the SDK's download method instead of direct URLs
+    // Transform SDK FileRecord format to frontend PipeFile format
+    const files = fileRecords.map(record => ({
+      id: record.fileId,
+      name: record.originalFileName,
+      size: record.size,
+      contentType: record.mimeType || 'application/octet-stream',
+      uploadedAt: record.uploadedAt ? (record.uploadedAt instanceof Date ? record.uploadedAt.toISOString() : new Date(record.uploadedAt).toISOString()) : new Date().toISOString(),
+      // Create a backend proxy URL for downloads since we need JWT auth
+      url: `http://localhost:3001/api/pipe/download/${walletAddress}/${encodeURIComponent(record.fileId)}`,
+      metadata: record.metadata || {},
+      blake3Hash: record.blake3Hash
+    }));
+
+    res.json({
+      files,
+      count: files.length,
+      walletAddress: walletAddress.slice(0, 8) + '...'
+    });
+  } catch (error) {
+    console.error('❌ Failed to list files:', error);
+    console.error('❌ Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to list files"
+    });
+  }
+});
+
+// Download proxy endpoint for authenticated file downloads
+app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
+  const { walletAddress, fileId } = req.params;
+
+  if (!walletAddress || !fileId) {
+    return res.status(400).json({ error: "Wallet address and file ID are required" });
+  }
+
+  try {
+    console.log(`📥 Downloading file ${fileId} for wallet: ${walletAddress.slice(0, 8)}...`);
+
+    // Get user account with proper authentication
+    const user = await firestarterSDK.createUserAccount(walletAddress);
+
+    // Use SDK to download file with proper JWT authentication
+    const fileBuffer = await firestarterSDK.downloadFile(walletAddress, decodeURIComponent(fileId));
+
+    // Determine content type from file extension or default
+    const contentType = fileId.includes('.jpg') || fileId.includes('.jpeg') ? 'image/jpeg' :
+                       fileId.includes('.png') ? 'image/png' :
+                       fileId.includes('.gif') ? 'image/gif' :
+                       'application/octet-stream';
+
+    // Set appropriate headers
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', fileBuffer.length);
+    res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+
+    // Send the file
+    res.send(fileBuffer);
+  } catch (error) {
+    console.error('❌ Download failed:', error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Download failed"
     });
   }
 });
@@ -902,120 +745,12 @@ app.get("/api/device/:device_pubkey/config", (req, res) => {
   }
 });
 
-// Get user's files from Pipe storage
-app.get("/api/pipe/files/:walletAddress", async (req, res) => {
-  const { walletAddress } = req.params;
-
-  try {
-    const account = pipeAccounts.get(walletAddress);
-    if (!account || !account.accessToken) {
-      return res.status(404).json({ error: "Pipe account not found or not authenticated" });
-    }
-
-    // Check if token needs refresh
-    if (account.tokenExpiry && Date.now() >= account.tokenExpiry - 60000) {
-      console.log(`🔄 Token about to expire, refreshing for ${walletAddress}`);
-
-      const refreshResponse = await fetch(`${PIPE_API_BASE_URL}/auth/refresh`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          refresh_token: account.refreshToken,
-        }),
-      });
-
-      if (refreshResponse.ok) {
-        const tokenData = await refreshResponse.json();
-        account.accessToken = tokenData.access_token;
-        account.refreshToken = tokenData.refresh_token;
-        account.tokenExpiry = Date.now() + 3600 * 1000;
-        console.log(`✅ Token refreshed for ${walletAddress}`);
-      }
-    }
-
-    // List user's files
-    const filesResponse = await fetch(`${PIPE_API_BASE_URL}/files`, {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${account.accessToken}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!filesResponse.ok) {
-      console.error(`Failed to fetch files: ${filesResponse.status}`);
-      return res.status(filesResponse.status).json({
-        error: "Failed to fetch files from Pipe"
-      });
-    }
-
-    const filesData = await filesResponse.json();
-
-    // Transform files to include full URLs
-    const transformedFiles = filesData.files?.map((file: any) => ({
-      ...file,
-      url: `${PIPE_API_BASE_URL}/files/${file.id}/content`,
-      // Add a public URL if available
-      publicUrl: file.public ? `${PIPE_API_BASE_URL}/public/${file.id}` : null
-    })) || [];
-
-    res.json({
-      files: transformedFiles,
-      total: filesData.total || transformedFiles.length
-    });
-  } catch (error) {
-    console.error("Error fetching Pipe files:", error);
-    res.status(500).json({ error: "Failed to fetch files" });
-  }
-});
-
-// Get a specific file from Pipe storage
-app.get("/api/pipe/file/:walletAddress/:fileId", async (req, res) => {
-  const { walletAddress, fileId } = req.params;
-
-  try {
-    const account = pipeAccounts.get(walletAddress);
-    if (!account || !account.accessToken) {
-      return res.status(404).json({ error: "Pipe account not found or not authenticated" });
-    }
-
-    // Get file metadata
-    const fileResponse = await fetch(`${PIPE_API_BASE_URL}/files/${fileId}`, {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${account.accessToken}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!fileResponse.ok) {
-      return res.status(fileResponse.status).json({
-        error: "File not found"
-      });
-    }
-
-    const fileData = await fileResponse.json();
-
-    // Add URLs
-    const transformedFile = {
-      ...fileData,
-      url: `${PIPE_API_BASE_URL}/files/${fileId}/content`,
-      publicUrl: fileData.public ? `${PIPE_API_BASE_URL}/public/${fileId}` : null
-    };
-
-    res.json(transformedFile);
-  } catch (error) {
-    console.error("Error fetching Pipe file:", error);
-    res.status(500).json({ error: "Failed to fetch file" });
-  }
-});
-
 // Debug endpoint to clear Pipe accounts (for testing)
 app.post("/api/pipe/clear-accounts", (_req, res) => {
+  console.log(`🚨 WARNING: CLEARING ALL PIPE ACCOUNTS!`);
+  const clearedCount = pipeAccounts.size;
   pipeAccounts.clear();
-  res.json({ message: "All Pipe accounts cleared from memory" });
+  res.json({ message: `Cleared ${clearedCount} Pipe accounts` });
 });
 
 // 6. Cleanup endpoint to remove expired claims (optional, for debugging)

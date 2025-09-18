@@ -10,6 +10,7 @@
     "test": "jest"
   },
   "dependencies": {
+    "firestarter-sdk": "git+https://github.com/0xmigi/firestarter-sdk.git",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
