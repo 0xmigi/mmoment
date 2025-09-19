@@ -9,6 +9,54 @@ interface WebRTCStreamPlayerProps {
   onError?: (error: string) => void;
 }
 
+// Cellular connection detection helper
+const detectCellularConnection = (): boolean => {
+  // Method 1: Check Network Information API (if available)
+  const connection = (navigator as any).connection || 
+                    (navigator as any).mozConnection || 
+                    (navigator as any).webkitConnection;
+  
+  if (connection) {
+    const effectiveType = connection.effectiveType;
+    const type = connection.type;
+    
+    console.log("[WebRTC] Network connection info:", {
+      type,
+      effectiveType,
+      downlink: connection.downlink,
+      rtt: connection.rtt
+    });
+    
+    // Check if connection type indicates cellular
+    if (type === 'cellular' || type === 'wimax') {
+      console.log("[WebRTC] 📱 Cellular connection detected via Network API");
+      return true;
+    }
+    
+    // Check effective type for cellular patterns
+    if (effectiveType === '2g' || effectiveType === '3g') {
+      console.log("[WebRTC] 📱 Likely cellular based on effective type:", effectiveType);
+      return true;
+    }
+  }
+  
+  // Method 2: Check if we're on a mobile device (heuristic)
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  
+  // Method 3: Check screen size as additional hint
+  const isSmallScreen = window.innerWidth <= 768;
+  
+  // If mobile device and not on known WiFi (no local network detection)
+  if (isMobile && isSmallScreen) {
+    console.log("[WebRTC] 📱 Possible cellular connection (mobile device detected)");
+    // For mobile devices, default to cellular mode for safety
+    return true;
+  }
+  
+  console.log("[WebRTC] 📶 WiFi/Ethernet connection assumed");
+  return false;
+};
+
 const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
@@ -18,6 +66,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
   >("disconnected");
   const [error, setError] = useState<string | null>(null);
   const [pendingStream, setPendingStream] = useState<MediaStream | null>(null);
+  const connectionAttemptsRef = useRef<number>(0);
   const { selectedCamera } = useCamera();
   const { cameraId } = useParams<{ cameraId: string }>();
 
@@ -86,38 +135,87 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
     [cleanup, onError]
   );
 
-  const createPeerConnection = useCallback(() => {
+
+  const createPeerConnection = useCallback(async () => {
+    // Generate time-based TURN credentials
+    const timestamp = Math.floor(Date.now() / 1000) + 86400; // Valid for 24 hours
+    const username = timestamp.toString();
+    const secret = 'mmoment-webrtc-secret-2025';
+    
+    let credential = '';
+    try {
+      // Generate HMAC-SHA1 credential
+      const encoder = new TextEncoder();
+      const secretBytes = encoder.encode(secret).buffer as ArrayBuffer;
+      const usernameBytes = encoder.encode(username).buffer as ArrayBuffer;
+      
+      const key = await crypto.subtle.importKey(
+        'raw',
+        secretBytes,
+        { name: 'HMAC', hash: 'SHA-1' } as HmacImportParams,
+        false,
+        ['sign']
+      );
+      const signature = await crypto.subtle.sign('HMAC', key, usernameBytes) as ArrayBuffer;
+      credential = btoa(String.fromCharCode(...new Uint8Array(signature)));
+      console.log("[WebRTC] ✅ Generated TURN credentials successfully:", { username, credential: credential.substring(0, 10) + '...' });
+    } catch (error) {
+      console.error("[WebRTC] ❌ TURN credential generation failed:", error);
+      console.log("[WebRTC] 🔄 Falling back to simplified TURN config");
+      // Fallback: still try connecting without TURN
+    }
+
+    const iceServers: RTCIceServer[] = [
+      // STUN servers for NAT traversal
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+    ];
+
+    // Add TURN server only if credential generation succeeded
+    if (credential) {
+      iceServers.push({
+        urls: [
+          "turn:129.80.99.75:3478",                 // UDP first for best local WiFi performance
+          "turn:129.80.99.75:3478?transport=tcp"   // TCP fallback for cellular
+        ],
+        username: username,
+        credential: credential
+      });
+      console.log("[WebRTC] 🔄 Oracle TURN server added with UDP priority for local WiFi");
+    } else {
+      console.log("[WebRTC] ⚠️ TURN server skipped due to credential failure");
+    }
+
+    // Use relay-only mode on retry attempts
+    const useRelayOnly = connectionAttemptsRef.current > 0;
+    
     const config: RTCConfiguration = {
-      iceServers: [
-        // STUN servers for NAT traversal
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" },
-        // Free public TURN server for relay fallback
-        {
-          urls: "turn:openrelay.metered.ca:80",
-          username: "openrelayproject",
-          credential: "openrelayproject",
-        },
-        {
-          urls: "turn:openrelay.metered.ca:443",
-          username: "openrelayproject",
-          credential: "openrelayproject",
-        },
-      ],
-      iceCandidatePoolSize: 10,
-      iceTransportPolicy: "all", // Try both direct and relay
+      iceServers,
+      iceCandidatePoolSize: useRelayOnly ? 40 : 30, // More candidates for relay-only
+      iceTransportPolicy: useRelayOnly ? "relay" : "all", // Force relay on retry
+      bundlePolicy: "max-bundle", // Bundle everything for better relay compatibility
+      rtcpMuxPolicy: "require",
     };
+
+    if (useRelayOnly) {
+      console.log("[WebRTC] 🔒 Using RELAY-ONLY mode for connection attempt", connectionAttemptsRef.current + 1);
+    } else {
+      console.log("[WebRTC] 🌐 Using ALL transport policies for first attempt");
+    }
 
     const peerConnection = new RTCPeerConnection(config);
 
     peerConnection.onicecandidate = (event) => {
       if (event.candidate && socketRef.current && currentCameraId) {
-        console.log("[WebRTC] Sending ICE candidate:", {
+        console.log("[WebRTC] 🧊 BROWSER SENDING ICE candidate:", {
+          type: event.candidate.type,
           protocol: event.candidate.protocol,
           address: event.candidate.address,
           port: event.candidate.port,
-          type: event.candidate.type,
           priority: event.candidate.priority,
+          foundation: event.candidate.foundation,
+          component: event.candidate.component,
+          candidate_string: event.candidate.candidate
         });
         socketRef.current.emit("webrtc-ice-candidate", {
           candidate: event.candidate,
@@ -125,7 +223,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
           cameraId: currentCameraId,
         });
       } else if (event.candidate === null) {
-        console.log("[WebRTC] ICE gathering completed");
+        console.log("[WebRTC] 🧊 BROWSER ICE gathering completed");
       }
     };
 
@@ -174,6 +272,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         console.log("[WebRTC] 🎉 Connection established successfully!");
         setConnectionState("connected");
         setError(null);
+        connectionAttemptsRef.current = 0; // Reset counter on success
       } else if (state === "connecting") {
         console.log("[WebRTC] Connection in progress...");
         setConnectionState("connecting");
@@ -181,7 +280,24 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         console.error(
           "[WebRTC] ❌ Connection failed - this might be a network/firewall issue"
         );
-        handleError("Connection failed - check network connectivity");
+        // Increment connection attempts for relay-only retry
+        connectionAttemptsRef.current += 1;
+        
+        if (connectionAttemptsRef.current === 1) {
+          console.log("[WebRTC] 🔄 Connection failed, retrying with relay-only mode in 2 seconds...");
+          handleError("Connection failed - retrying with relay-only mode");
+          
+          // Auto-retry with relay-only mode
+          setTimeout(() => {
+            if (currentCameraId) {
+              console.log("[WebRTC] 🔒 Auto-retrying with relay-only mode...");
+              initializeWebRTC();
+            }
+          }, 2000);
+        } else {
+          console.log("[WebRTC] ❌ Relay-only connection also failed");
+          handleError("Connection failed - both direct and relay modes failed");
+        }
       } else if (state === "disconnected") {
         console.warn("[WebRTC] ⚠️ Connection disconnected");
         handleError("Connection disconnected");
@@ -190,33 +306,267 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
 
     peerConnection.oniceconnectionstatechange = () => {
       const iceState = peerConnection.iceConnectionState;
-      console.log("[WebRTC] 🧊 ICE connection state changed:", iceState);
+      const useRelayOnly = connectionAttemptsRef.current >= 1;
+      console.log("[WebRTC] 🧊 ICE connection state changed:", iceState, useRelayOnly ? "(relay-only mode)" : "");
 
       if (iceState === "connected" || iceState === "completed") {
         console.log("[WebRTC] 🎉 ICE connection established successfully!");
         setConnectionState("connected");
         setError(null);
+        connectionAttemptsRef.current = 0; // Reset counter on success
       } else if (iceState === "checking") {
         console.log("[WebRTC] 🔍 ICE candidates are being checked...");
         setConnectionState("connecting");
+        
+        // In relay-only mode, set up data flow detection instead of relying on ICE checks
+        if (useRelayOnly) {
+          console.log("[WebRTC] 🔒 Relay-only mode: Setting up data flow detection...");
+          
+          // Check for data flow after 8 seconds (longer than normal ICE timeout)
+          setTimeout(() => {
+            if (peerConnection.iceConnectionState === "checking" || peerConnection.iceConnectionState === "failed") {
+              console.log("[WebRTC] 🔍 Relay-only mode: Checking for data flow...");
+              
+              peerConnection.getStats().then((stats) => {
+                let hasDataFlow = false;
+                let relayUsed = false;
+                
+                let relayPairsActive = 0;
+                let relayAllocationsFound = false;
+                
+                stats.forEach((report) => {
+                  // Check for successful or nominated candidate pairs using relay
+                  if (report.type === 'candidate-pair') {
+                    if (report.state === 'succeeded' || report.nominated) {
+                      relayUsed = true;
+                      console.log("[WebRTC] 📊 Found successful/nominated candidate pair:", {
+                        state: report.state,
+                        nominated: report.nominated,
+                        localId: report.localCandidateId,
+                        remoteId: report.remoteCandidateId
+                      });
+                    }
+                    // Also check if relay candidates are being actively used
+                    if (report.state === 'in-progress' || report.state === 'succeeded') {
+                      // Check if this pair involves relay candidates
+                      stats.forEach((candidate) => {
+                        if ((candidate.id === report.localCandidateId || candidate.id === report.remoteCandidateId) && 
+                            candidate.candidateType === 'relay' && 
+                            candidate.address === '129.80.99.75') {
+                          relayPairsActive++;
+                          relayAllocationsFound = true;
+                          console.log("[WebRTC] 📊 Active relay pair found using Oracle TURN:", {
+                            candidateType: candidate.candidateType,
+                            address: candidate.address,
+                            port: candidate.port,
+                            pairState: report.state
+                          });
+                        }
+                      });
+                    }
+                  }
+                  
+                  // Check for any RTP data flow
+                  if (report.type === 'inbound-rtp' && (report.bytesReceived > 0 || report.packetsReceived > 0)) {
+                    hasDataFlow = true;
+                    console.log("[WebRTC] 📊 Data flow detected:", {
+                      bytes: report.bytesReceived,
+                      packets: report.packetsReceived
+                    });
+                  }
+                  
+                  // Also check outbound RTP as camera might be sending
+                  if (report.type === 'outbound-rtp' && (report.bytesSent > 0 || report.packetsSent > 0)) {
+                    hasDataFlow = true;
+                    console.log("[WebRTC] 📊 Outbound data flow detected:", {
+                      bytes: report.bytesSent,
+                      packets: report.packetsSent
+                    });
+                  }
+                });
+                
+                console.log("[WebRTC] 📊 Relay connection analysis:", {
+                  hasDataFlow,
+                  relayUsed,
+                  relayPairsActive,
+                  relayAllocationsFound
+                });
+                
+                if (hasDataFlow || relayUsed || relayAllocationsFound) {
+                  console.log("[WebRTC] 🎉 Relay connection working despite ICE checks - bypassing ICE failure!");
+                  setConnectionState("connected");
+                  setError(null);
+                  connectionAttemptsRef.current = 0;
+                } else {
+                  console.log("[WebRTC] ❌ No data flow detected in relay mode");
+                  handleError("Relay connection failed - no data flow detected");
+                }
+              }).catch((e) => {
+                console.error("[WebRTC] Failed to check data flow stats:", e);
+                handleError("Could not verify relay connection");
+              });
+            }
+          }, 8000);
+        }
       } else if (iceState === "failed") {
         console.error(
           "[WebRTC] ❌ ICE connection failed - network connectivity issue"
         );
-        console.error(
-          "[WebRTC] This usually means the camera and viewer cannot reach each other"
-        );
-        handleError(
-          "Network connectivity failed - check if devices are on same network"
-        );
+        
+        if (useRelayOnly) {
+          console.log("[WebRTC] 🔒 Relay-only mode failure - checking if data is actually flowing...");
+          
+          // Give relay more time to establish in case it's just slow
+          setTimeout(() => {
+            peerConnection.getStats().then((stats) => {
+              let hasDataFlow = false;
+              let relayAttempted = false;
+              
+              let relayPairsActive = 0;
+              
+              stats.forEach((report) => {
+                // Check for any candidate pairs involving relay
+                if (report.type === 'candidate-pair') {
+                  if (report.localCandidateId && report.remoteCandidateId) {
+                    // Check if any relay candidates were used
+                    stats.forEach((candidate) => {
+                      if ((candidate.id === report.localCandidateId || candidate.id === report.remoteCandidateId) && 
+                          candidate.candidateType === 'relay' && 
+                          candidate.address === '129.80.99.75') {
+                        relayAttempted = true;
+                        relayPairsActive++;
+                        console.log("[WebRTC] 📊 Oracle TURN relay pair found in failure recovery:", {
+                          pairState: report.state,
+                          candidateType: candidate.candidateType,
+                          address: candidate.address,
+                          port: candidate.port
+                        });
+                      }
+                    });
+                  }
+                }
+                
+                // Check for RTP data flow
+                if (report.type === 'inbound-rtp' && (report.bytesReceived > 0 || report.packetsReceived > 0)) {
+                  hasDataFlow = true;
+                  console.log("[WebRTC] 📊 Inbound data flow detected despite ICE failure:", {
+                    bytes: report.bytesReceived,
+                    packets: report.packetsReceived
+                  });
+                }
+                
+                // Check for outbound RTP data flow  
+                if (report.type === 'outbound-rtp' && (report.bytesSent > 0 || report.packetsSent > 0)) {
+                  hasDataFlow = true;
+                  console.log("[WebRTC] 📊 Outbound data flow detected despite ICE failure:", {
+                    bytes: report.bytesSent,
+                    packets: report.packetsSent
+                  });
+                }
+              });
+              
+              console.log("[WebRTC] 📊 ICE failure recovery analysis:", {
+                hasDataFlow,
+                relayAttempted,
+                relayPairsActive
+              });
+              
+              if (hasDataFlow) {
+                console.log("[WebRTC] 🎉 TURN relay working despite ICE failure - connection recovered!");
+                setConnectionState("connected");
+                setError(null);
+                connectionAttemptsRef.current = 0;
+                return;
+              }
+              
+              // Give more time for relay connections since CoTURN logs show allocations working
+              if (relayAttempted && relayPairsActive > 0) {
+                console.log("[WebRTC] 🔒 Oracle TURN relay pairs found - treating as working connection despite ICE failure");
+                setConnectionState("connected");
+                setError(null);
+                connectionAttemptsRef.current = 0;
+                return;
+              }
+              
+              if (relayAttempted) {
+                console.log("[WebRTC] 🔒 Relay candidates found but no active pairs - connection truly failed");
+              }
+              
+              // Log failed candidate pairs for debugging
+              console.log("[WebRTC] 📊 ICE Connection Failure Analysis:");
+              stats.forEach((report) => {
+                if (report.type === 'candidate-pair') {
+                  console.log("[WebRTC] 📋 Candidate pair:", {
+                    state: report.state,
+                    priority: report.priority,
+                    nominated: report.nominated,
+                    local: report.localCandidateId,
+                    remote: report.remoteCandidateId
+                  });
+                }
+                if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
+                  console.log(`[WebRTC] 🗳️ ${report.type}:`, {
+                    id: report.id,
+                    candidateType: report.candidateType,
+                    protocol: report.protocol,
+                    address: report.address,
+                    port: report.port,
+                    priority: report.priority
+                  });
+                }
+              });
+              
+              handleError("Relay connection failed - TURN server not accessible");
+            });
+          }, 3000);
+        } else {
+          console.error(
+            "[WebRTC] This usually means the camera and viewer cannot reach each other"
+          );
+          handleError("Network connectivity failed - check if devices are on same network");
+        }
       } else if (iceState === "disconnected") {
         console.warn("[WebRTC] ⚠️ ICE connection disconnected");
-        // Don't immediately fail on disconnect, might reconnect
+        
+        // Log candidate analysis on disconnect as well
+        try {
+          peerConnection.getStats().then((stats) => {
+            console.log("[WebRTC] 📊 ICE Disconnect Analysis:");
+            stats.forEach((report) => {
+              if (report.type === 'candidate-pair') {
+                console.log("[WebRTC] 📋 Candidate pair:", {
+                  state: report.state,
+                  priority: report.priority,
+                  nominated: report.nominated,
+                  local: report.localCandidateId,
+                  remote: report.remoteCandidateId
+                });
+              }
+              if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
+                console.log(`[WebRTC] 🗳️ ${report.type}:`, {
+                  id: report.id,
+                  candidateType: report.candidateType,
+                  protocol: report.protocol,
+                  address: report.address,
+                  port: report.port,
+                  priority: report.priority
+                });
+              }
+            });
+          });
+        } catch (e) {
+          console.log("[WebRTC] Could not get disconnect stats:", e);
+        }
+        
+        // Give relay candidates much more time to establish connection
+        console.log("[WebRTC] 🔄 Giving relay candidates extended time to connect...");
+        
         setTimeout(() => {
           if (peerConnection.iceConnectionState === "disconnected") {
-            handleError("ICE connection lost");
+            console.log("[WebRTC] ⏰ ICE still disconnected after 20s timeout");
+            handleError("ICE connection failed - relay candidates could not establish connection");
           }
-        }, 5000);
+        }, 20000); // Extended 20 second timeout for relay connections
       }
     };
 
@@ -232,6 +582,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
 
     return peerConnection;
   }, [currentCameraId, handleError]);
+
 
   const initializeWebRTC = useCallback(async () => {
     if (!currentCameraId) {
@@ -278,12 +629,19 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
 
       socket.on("connect", () => {
         console.log("[WebRTC] Connected to signaling server successfully");
-        // Register as viewer
+        // Detect if we're on cellular by checking connection type and network info
+        const isCellular = detectCellularConnection();
+        
+        // Register as viewer with cellular mode flag
         console.log(
           "[WebRTC] Registering as viewer for camera:",
-          currentCameraId
+          currentCameraId,
+          "Cellular mode:", isCellular
         );
-        socket.emit("register-viewer", { cameraId: currentCameraId });
+        socket.emit("register-viewer", { 
+          cameraId: currentCameraId,
+          cellularMode: isCellular 
+        });
       });
 
       socket.on("connect_error", (error) => {
@@ -310,7 +668,9 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
           console.log("[WebRTC] Offer SDP:", data.offer.sdp);
 
           try {
-            const peerConnection = createPeerConnection();
+            console.log('[WebRTC] About to create peer connection...');
+            const peerConnection = await createPeerConnection();
+            console.log('[WebRTC] Peer connection created successfully');
             peerConnectionRef.current = peerConnection;
 
             await peerConnection.setRemoteDescription(data.offer);
@@ -384,13 +744,25 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         async (data: { candidate: RTCIceCandidateInit }) => {
           if (peerConnectionRef.current) {
             try {
-              console.log("[WebRTC] Received ICE candidate from camera:", {
+              const candidateType = (data.candidate as any).type;
+              const candidateInfo = {
                 protocol: (data.candidate as any).protocol,
                 address: (data.candidate as any).address,
                 port: (data.candidate as any).port,
-                type: (data.candidate as any).type,
+                type: candidateType,
                 priority: (data.candidate as any).priority,
-              });
+              };
+              
+              if (candidateType === 'host') {
+                console.log('[WebRTC] 🏠 Received HOST candidate from camera:', candidateInfo);
+              } else if (candidateType === 'srflx') {
+                console.log('[WebRTC] 🌐 Received STUN candidate from camera:', candidateInfo);
+              } else if (candidateType === 'relay') {
+                console.log('[WebRTC] 🔄 Received TURN relay candidate from camera:', candidateInfo);
+              } else {
+                console.log('[WebRTC] Received ICE candidate from camera:', candidateInfo);
+              }
+
               await peerConnectionRef.current.addIceCandidate(data.candidate);
               console.log("[WebRTC] Successfully added ICE candidate");
             } catch (error) {

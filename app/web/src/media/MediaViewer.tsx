@@ -26,7 +26,6 @@ export default function MediaViewer({
   const [deleting, setDeleting] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [startY, setStartY] = useState(0);
-  const [, setCurrentY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState(0);
 
@@ -58,7 +57,6 @@ export default function MediaViewer({
     e: React.TouchEvent | React.MouseEvent
   ) => {
     setStartY(clientY);
-    setCurrentY(clientY);
     setIsDragging(true);
     setDragOffset(0);
     // Prevent default to stop bouncing
@@ -76,7 +74,6 @@ export default function MediaViewer({
 
     // Only handle downward swipes
     if (diff > 0) {
-      setCurrentY(clientY);
 
       // Apply resistance to the drag (40% of actual movement)
       const offset = Math.min(diff * 0.4, 250);
@@ -123,7 +120,6 @@ export default function MediaViewer({
 
     setIsDragging(false);
     setStartY(0);
-    setCurrentY(0);
   };
 
   // Reset on close

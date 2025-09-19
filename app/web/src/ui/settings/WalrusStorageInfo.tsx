@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { walrusSdkService, WalrusStorageQuota } from '../../storage/walrus/walrus-sdk-service';
+import { walrusService, WalrusStorageQuota } from '../../storage/walrus';
 
 interface WalrusStorageInfoProps {
   walletAddress: string;
@@ -15,7 +15,7 @@ export const WalrusStorageInfo: React.FC<WalrusStorageInfoProps> = ({ walletAddr
       try {
         setLoading(true);
         setError(null);
-        const quotaData = await walrusSdkService.getUserQuota(walletAddress);
+        const quotaData = await walrusService.getUserQuota(walletAddress);
         setQuota(quotaData);
       } catch (err) {
         console.error('Failed to fetch Walrus quota:', err);
@@ -91,7 +91,7 @@ export const WalrusStorageInfo: React.FC<WalrusStorageInfoProps> = ({ walletAddr
           </div>
           
           <div className="mt-4 text-xs text-gray-500">
-            <p>Using Walrus testnet SDK: {walrusSdkService.aggregator}</p>
+            <p>Using Walrus testnet: {walrusService.aggregator}</p>
           </div>
         </div>
       )}

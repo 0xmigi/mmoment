@@ -64,9 +64,9 @@ class GPUFaceService:
         self.recognition_count = 0
         self.last_recognition = None
         
-        # Detection settings
-        self._detection_interval = 0.5   # Face detection every 0.5s
-        self._recognition_interval = 1.0  # Face recognition every 1s
+        # Detection settings - REDUCED FREQUENCY TO PREVENT CPU OVERLOAD
+        self._detection_interval = 5.0   # Face detection every 5s (was 0.5s)
+        self._recognition_interval = 10.0  # Face recognition every 10s (was 1s)
         self._similarity_threshold = 0.6  # Higher threshold for GPU model
         self._last_detection_time = 0
         self._last_recognition_time = 0
@@ -539,8 +539,8 @@ class GPUFaceService:
                 if elapsed > 0:
                     self.fps = self.frame_count / elapsed
                 
-                # Small sleep to prevent excessive GPU usage
-                time.sleep(0.05)
+                # Increased sleep to prevent excessive CPU/GPU usage
+                time.sleep(0.5)
                 
             except Exception as e:
                 logger.error(f"Error in processing loop: {e}")

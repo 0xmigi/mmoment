@@ -5,6 +5,8 @@ import { Server } from "socket.io";
 import cors from "cors";
 import { config } from "dotenv";
 import { createFirestarterSDK } from 'firestarter-sdk';
+import dgram from 'dgram';
+import net from 'net';
 // Using built-in fetch in Node.js 18+
 
 // Load environment variables
@@ -896,26 +898,21 @@ io.on("connection", (socket) => {
     );
   });
 
-  socket.on("register-viewer", (data: { cameraId: string }) => {
-    console.log(
-      `Viewer registering for WebRTC camera ${data.cameraId} on socket ${socket.id}`,
-    );
-    webrtcPeers.set(socket.id, { cameraId: data.cameraId, type: "viewer" });
+  socket.on('register-viewer', (data: { cameraId: string, cellularMode?: boolean }) => {
+    console.log(`Viewer registering for WebRTC camera ${data.cameraId} on socket ${socket.id}, cellular mode: ${data.cellularMode || false}`);
+    webrtcPeers.set(socket.id, { cameraId: data.cameraId, type: 'viewer' });
     socket.join(`webrtc-${data.cameraId}`);
 
     // Check how many peers are in the room
     const roomSockets = io.sockets.adapter.rooms.get(`webrtc-${data.cameraId}`);
-    console.log(
-      `Room webrtc-${data.cameraId} has ${roomSockets ? roomSockets.size : 0} sockets`,
-    );
+    console.log(`Room webrtc-${data.cameraId} has ${roomSockets ? roomSockets.size : 0} sockets`);
 
-    // Notify camera that a viewer wants to connect
-    console.log(
-      `Notifying camera in room webrtc-${data.cameraId} that viewer ${socket.id} wants to connect`,
-    );
-    socket
-      .to(`webrtc-${data.cameraId}`)
-      .emit("viewer-wants-connection", { viewerId: socket.id });
+    // Notify camera that a viewer wants to connect with cellular mode flag
+    console.log(`Notifying camera in room webrtc-${data.cameraId} that viewer ${socket.id} wants to connect (cellular: ${data.cellularMode || false})`);
+    socket.to(`webrtc-${data.cameraId}`).emit('viewer-wants-connection', {
+      viewerId: socket.id,
+      cellularMode: data.cellularMode || false
+    });
   });
 
   socket.on(
@@ -995,7 +992,233 @@ process.on("unhandledRejection", (reason, promise) => {
   console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
 });
 
-// Start server with error handling
+// Enhanced CoTURN-compatible server implementation for Railway
+const TURN_PORT = Number(process.env.PORT) || 8080; // Use Railway's exposed port
+const TURN_USERNAME = process.env.TURN_USERNAME || 'mmoment';
+const TURN_PASSWORD = process.env.TURN_PASSWORD || 'webrtc123';
+const TURN_REALM = process.env.TURN_REALM || 'mmoment.xyz';
+
+// Get external IP for Railway deployment
+const EXTERNAL_IP = process.env.RAILWAY_PUBLIC_DOMAIN || 'mmoment-production.up.railway.app';
+
+// Store active TURN allocations
+const turnAllocations = new Map<string, {
+  clientAddress: string,
+  clientPort: number,
+  relayPort: number,
+  relaySocket: dgram.Socket,
+  peers: Map<string, { address: string, port: number }>
+}>();
+
+// Create TURN server (TCP for Railway compatibility)
+const turnServer = net.createServer();
+
+// Helper function to parse STUN/TURN messages
+function parseStunMessage(msg: Buffer) {
+  if (msg.length < 20) return null;
+  
+  const messageType = msg.readUInt16BE(0);
+  const messageLength = msg.readUInt16BE(2);
+  const magicCookie = msg.readUInt32BE(4);
+  const transactionId = msg.slice(8, 20);
+  
+  return { messageType, messageLength, magicCookie, transactionId };
+}
+
+// Helper function to create STUN/TURN response
+function createStunResponse(type: number, transactionId: Buffer, attributes: Buffer[] = []): Buffer {
+  const totalAttrLength = attributes.reduce((sum, attr) => sum + attr.length, 0);
+  const response = Buffer.alloc(20 + totalAttrLength);
+  
+  response.writeUInt16BE(type, 0); // Message type
+  response.writeUInt16BE(totalAttrLength, 2); // Message length
+  response.writeUInt32BE(0x2112A442, 4); // Magic cookie
+  transactionId.copy(response, 8); // Transaction ID
+  
+  // Copy attributes
+  let offset = 20;
+  for (const attr of attributes) {
+    attr.copy(response, offset);
+    offset += attr.length;
+  }
+  
+  return response;
+}
+
+// Helper to create XOR-MAPPED-ADDRESS attribute
+function createXorMappedAddress(address: string, port: number): Buffer {
+  const attr = Buffer.alloc(12);
+  attr.writeUInt16BE(0x0020, 0); // XOR-MAPPED-ADDRESS
+  attr.writeUInt16BE(8, 2); // Length
+  attr.writeUInt16BE(0x0001, 4); // IPv4 family
+  attr.writeUInt16BE(port ^ 0x2112, 6); // XOR'd port
+  
+  // XOR the IP address
+  const ipParts = address.split('.').map(Number);
+  const magicCookie = [0x21, 0x12, 0xA4, 0x42];
+  for (let i = 0; i < 4; i++) {
+    attr.writeUInt8(ipParts[i] ^ magicCookie[i], 8 + i);
+  }
+  
+  return attr;
+}
+
+turnServer.on('connection', (socket) => {
+  console.log(`TCP TURN connection from ${socket.remoteAddress}:${socket.remotePort}`);
+  
+  socket.on('data', (data) => {
+    try {
+      const stunMsg = parseStunMessage(data);
+      if (!stunMsg) return;
+      
+      const { messageType, transactionId } = stunMsg;
+      const clientAddress = socket.remoteAddress || '127.0.0.1';
+      const clientPort = socket.remotePort || 0;
+        
+        // Handle STUN Binding Request (0x0001)
+        if (messageType === 0x0001) {
+          console.log(`STUN Binding request from ${clientAddress}:${clientPort}`);
+          
+          // Create XOR-MAPPED-ADDRESS attribute
+          const xorMappedAddr = createXorMappedAddress(clientAddress, clientPort);
+          
+          // Send STUN Binding Response (0x0101)
+          const response = createStunResponse(0x0101, transactionId, [xorMappedAddr]);
+          socket.write(response);
+          
+          console.log(`STUN Binding response sent to ${clientAddress}:${clientPort}`);
+        }
+        // Handle TURN Allocate Request (0x0003)
+        else if (messageType === 0x0003) {
+          console.log(`TURN: Allocation request from ${clientAddress}:${clientPort}`);
+        
+        // Create a relay socket for this client
+        const relaySocket = dgram.createSocket('udp4');
+        let relayPort = 40000 + Math.floor(Math.random() * 10000);
+        
+          relaySocket.bind(relayPort, () => {
+            const allocationId = `${clientAddress}:${clientPort}`;
+            
+            // Store allocation
+            turnAllocations.set(allocationId, {
+              clientAddress: clientAddress,
+              clientPort: clientPort,
+              relayPort: relayPort,
+              relaySocket: relaySocket,
+              peers: new Map()
+            });
+            
+            // Handle relay traffic
+            relaySocket.on('message', (relayMsg, relayRinfo) => {
+              // Forward relay traffic back to the client
+              socket.write(relayMsg);
+            });
+          
+          // Create XOR-RELAYED-ADDRESS attribute
+          const relayAddr = createXorMappedAddress('0.0.0.0', relayPort);
+          relayAddr.writeUInt16BE(0x0016, 0); // Change type to XOR-RELAYED-ADDRESS
+          
+            // Create XOR-MAPPED-ADDRESS for the client
+            const mappedAddr = createXorMappedAddress(clientAddress, clientPort);
+            
+            // Create LIFETIME attribute (600 seconds)
+            const lifetime = Buffer.alloc(8);
+            lifetime.writeUInt16BE(0x000D, 0); // LIFETIME
+            lifetime.writeUInt16BE(4, 2); // Length
+            lifetime.writeUInt32BE(600, 4); // 600 seconds
+            
+            // Send Allocate Success Response (0x0103)
+            const response = createStunResponse(0x0103, transactionId, [relayAddr, mappedAddr, lifetime]);
+            socket.write(response);
+            
+            console.log(`TURN: Allocated relay port ${relayPort} for ${allocationId}`);
+        });
+        
+        relaySocket.on('error', (err) => {
+          console.error(`TURN relay socket error:`, err);
+        });
+        
+      }
+        // Handle TURN Refresh Request (0x0004)
+        else if (messageType === 0x0004) {
+          console.log(`TURN Refresh request from ${clientAddress}:${clientPort}`);
+          
+          // Send Refresh Success Response (0x0104)
+          const lifetime = Buffer.alloc(8);
+          lifetime.writeUInt16BE(0x000D, 0); // LIFETIME
+          lifetime.writeUInt16BE(4, 2); // Length
+          lifetime.writeUInt32BE(600, 4); // 600 seconds
+          
+          const response = createStunResponse(0x0104, transactionId, [lifetime]);
+          socket.write(response);
+        }
+        // Handle ChannelBind or Send Indication for data relay
+        else if (messageType === 0x0009 || messageType === 0x0016) {
+          // Handle data relay
+          const allocationId = `${clientAddress}:${clientPort}`;
+          const allocation = turnAllocations.get(allocationId);
+          
+          if (allocation) {
+            // This is data from the client to be relayed
+            // In a full TURN implementation, you'd parse the destination from TURN headers
+            // For simplicity, we'll relay to the first peer or back to the client
+            
+            // Forward to relay socket (which will send to peers)
+            allocation.relaySocket.send(data, 0, data.length, allocation.relayPort, 'localhost');
+          }
+        }
+        // Handle other TURN messages
+        else {
+          console.log(`Unknown STUN/TURN message type: 0x${messageType.toString(16)} from ${clientAddress}:${clientPort}`);
+        }
+    } catch (error) {
+      console.error('TCP TURN server error:', error);
+    }
+  });
+
+  socket.on('close', () => {
+    console.log(`TCP TURN connection closed from ${socket.remoteAddress}:${socket.remotePort}`);
+  });
+
+  socket.on('error', (err) => {
+    console.error('TCP TURN socket error:', err);
+  });
+});
+
+turnServer.on('error', (err) => {
+  console.error('TURN server error:', err);
+});
+
+// TURN server disabled - Railway only provides one port for HTTP
+// TCP TURN on the same port as HTTP is not supported
+// turnServer.listen(TURN_PORT, '0.0.0.0', () => {
+//   console.log(`✅ TCP TURN server listening on 0.0.0.0:${TURN_PORT}`);
+//   console.log(`TURN realm: ${TURN_REALM}`);
+//   console.log(`TURN credentials: ${TURN_USERNAME}:${TURN_PASSWORD}`);
+//   console.log(`External domain: ${EXTERNAL_IP}`);
+//   console.log(`Supported messages: STUN Binding, TURN Allocate, TURN Refresh`);
+//   console.log(`Transport: TCP (Railway compatible)`);
+// });
+console.log('⚠️ TURN server disabled - Railway only supports HTTP on port 8080');
+console.log('⚠️ Use external TURN server for cross-network WebRTC');
+
+// TURN server info endpoint
+app.get('/api/turn/info', (req, res) => {
+  const turnInfo = {
+    host: req.headers.host?.split(':')[0] || 'localhost',
+    port: TURN_PORT,
+    username: TURN_USERNAME,
+    credential: TURN_PASSWORD,
+    urls: [
+      `turn:${req.headers.host?.split(':')[0] || 'localhost'}:${TURN_PORT}`,
+      `turn:${req.headers.host?.split(':')[0] || 'localhost'}:${TURN_PORT}?transport=udp`
+    ]
+  };
+  
+  res.json(turnInfo);
+});
+
+// Start HTTP server with error handling
 const port = Number(process.env.PORT) || 3001;
 httpServer.listen(port, "0.0.0.0", () => {
   console.log(`Server running on port ${port}`);
@@ -1006,5 +1229,7 @@ httpServer.listen(port, "0.0.0.0", () => {
     socketTransports: io.engine.opts.transports,
     socketPingTimeout: io.engine.opts.pingTimeout,
     socketPingInterval: io.engine.opts.pingInterval,
+    turnPort: TURN_PORT,
+    turnUsername: TURN_USERNAME
   });
 });
