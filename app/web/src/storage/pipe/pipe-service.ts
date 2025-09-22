@@ -197,16 +197,44 @@ export class PipeService implements PipeStorageProvider {
       throw new Error("Pipe credentials not available");
     }
 
-    const downloadUrl = new URL(`${this.baseUrl}/download-stream`);
-    downloadUrl.searchParams.append("user_id", this.credentials.userId);
-    downloadUrl.searchParams.append(
-      "user_app_key",
-      this.credentials.userAppKey
-    );
-    downloadUrl.searchParams.append("file_name", _fileId);
+    console.log(`🔄 Downloading file directly from Pipe: ${_fileId.slice(0, 20)}...`);
 
-    const response = await fetch(downloadUrl.toString(), {
+    // Try POST method first (matches backend pattern)
+    try {
+      const response = await fetch(`${this.baseUrl}/download`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: this.credentials.userId,
+          user_app_key: this.credentials.userAppKey,
+          file_name: _fileId,
+        }),
+      });
+
+      if (response.ok) {
+        console.log(`✅ POST download successful, decoding base64...`);
+        const base64Data = await response.text();
+        // Convert base64 to blob
+        const binaryString = atob(base64Data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        return new Blob([bytes]);
+      }
+    } catch (postError) {
+      console.warn(`⚠️ POST download failed, trying fallback...`);
+    }
+
+    // Fallback to GET method with headers
+    const response = await fetch(`${this.baseUrl}/download-stream`, {
       method: "GET",
+      headers: {
+        "X-User-Id": this.credentials.userId,
+        "X-User-App-Key": this.credentials.userAppKey,
+      },
     });
 
     if (!response.ok) {
@@ -214,6 +242,7 @@ export class PipeService implements PipeStorageProvider {
       throw new Error(`Pipe download failed: ${error}`);
     }
 
+    console.log(`✅ GET download successful`);
     return response.blob();
   }
 

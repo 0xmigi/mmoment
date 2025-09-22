@@ -400,7 +400,7 @@ app.get("/api/pipe/files/:walletAddress", async (req, res) => {
 
     // For JWT-based downloads, we need to use the SDK's download method instead of direct URLs
     // Transform SDK FileRecord format to frontend PipeFile format
-    const files = fileRecords.map(record => ({
+    const files = fileRecords.map((record: any) => ({
       id: record.fileId,
       name: record.originalFileName,
       size: record.size,
