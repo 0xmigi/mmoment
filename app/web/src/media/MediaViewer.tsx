@@ -1,10 +1,10 @@
 import { IPFSMedia } from "../storage/ipfs/ipfs-service";
-import { PipeGalleryItem } from "../storage/pipe/pipe-gallery-service";
 import { unifiedIpfsService } from "../storage/ipfs/unified-ipfs-service";
+import { PipeGalleryItem } from "../storage/pipe/pipe-gallery-service";
 import { TimelineEvent } from "../timeline/timeline-types";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { Dialog } from "@headlessui/react";
-import { ArrowUpRight, Download, Trash2 } from "lucide-react";
+import { ArrowUpRight, Download, Trash2, X } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 
 interface MediaViewerProps {
@@ -25,10 +25,6 @@ export default function MediaViewer({
   const { user, primaryWallet } = useDynamicContext();
   const [deleting, setDeleting] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [startY, setStartY] = useState(0);
-  const [, setCurrentY] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragOffset, setDragOffset] = useState(0);
 
   // Scroll to show EXIF just barely peeking when modal opens
   useEffect(() => {
@@ -49,93 +45,6 @@ export default function MediaViewer({
           }
         }
       }, 50);
-    }
-  }, [isOpen]);
-
-  // Handle touch/mouse events for swipe down to close
-  const handleStart = (
-    clientY: number,
-    e: React.TouchEvent | React.MouseEvent
-  ) => {
-    setStartY(clientY);
-    setCurrentY(clientY);
-    setIsDragging(true);
-    setDragOffset(0);
-    // Prevent default to stop bouncing
-    e.preventDefault();
-  };
-
-  const handleMove = (
-    clientY: number,
-    e: React.TouchEvent | React.MouseEvent
-  ) => {
-    if (!isDragging) return;
-
-    e.preventDefault(); // Prevent scroll bounce
-    const diff = clientY - startY;
-
-    // Only handle downward swipes
-    if (diff > 0) {
-      setCurrentY(clientY);
-
-      // Apply resistance to the drag (40% of actual movement)
-      const offset = Math.min(diff * 0.4, 250);
-      setDragOffset(offset);
-
-      // Add opacity effect based on drag distance
-      if (scrollContainerRef.current) {
-        const opacity = Math.max(0.3, 1 - (offset / 250) * 0.7);
-        scrollContainerRef.current.style.opacity = opacity.toString();
-      }
-    }
-  };
-
-  const handleEnd = () => {
-    if (!isDragging) return;
-
-    // Close if swiped down more than 80px
-    if (dragOffset > 80) {
-      // Animate out before closing
-      if (scrollContainerRef.current) {
-        scrollContainerRef.current.style.transition =
-          "transform 0.2s ease-out, opacity 0.2s ease-out";
-        scrollContainerRef.current.style.transform = "translateY(100%)";
-        scrollContainerRef.current.style.opacity = "0";
-      }
-
-      setTimeout(() => {
-        onClose();
-        // Reset after close
-        setDragOffset(0);
-        if (scrollContainerRef.current) {
-          scrollContainerRef.current.style.transform = "";
-          scrollContainerRef.current.style.opacity = "";
-          scrollContainerRef.current.style.transition = "";
-        }
-      }, 200);
-    } else {
-      // Snap back if not enough swipe
-      setDragOffset(0);
-      if (scrollContainerRef.current) {
-        scrollContainerRef.current.style.opacity = "1";
-      }
-    }
-
-    setIsDragging(false);
-    setStartY(0);
-    setCurrentY(0);
-  };
-
-  // Reset on close
-  useEffect(() => {
-    if (!isOpen) {
-      setDragOffset(0);
-      setIsDragging(false);
-      if (scrollContainerRef.current) {
-        scrollContainerRef.current.style.transform = "";
-        scrollContainerRef.current.style.opacity = "";
-        scrollContainerRef.current.style.transition = "";
-      }
     }
   }, [isOpen]);
 
@@ -243,32 +152,22 @@ export default function MediaViewer({
 
   return (
     <Dialog open={isOpen} onClose={onClose} className="relative z-[100]">
-      {/* Full-screen container with prevent overscroll */}
-      <div
-        className="fixed inset-0 bg-black"
-        style={{ touchAction: isDragging ? "none" : "auto" }}
-      >
+      {/* Full-screen container */}
+      <div className="fixed inset-0 bg-black">
         <Dialog.Panel className="w-full h-full flex flex-col bg-white relative">
-          {/* Fixed swipe indicator at top - only visible on mobile */}
-          <div
-            className="fixed top-3 left-1/2 -translate-x-1/2 z-[110] md:hidden cursor-grab active:cursor-grabbing"
-            onTouchStart={(e) => handleStart(e.touches[0].clientY, e)}
-            onTouchMove={(e) => handleMove(e.touches[0].clientY, e)}
-            onTouchEnd={handleEnd}
-            style={{ touchAction: "none" }}
+          {/* Fixed close button at top right */}
+          <button
+            onClick={onClose}
+            className="fixed top-3 right-3 z-[110] p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
+            title="Close"
           >
-            <div className="w-12 h-1.5 bg-white/70 backdrop-blur-sm rounded-full shadow-lg" />
-          </div>
+            <X className="w-4 h-4 text-gray-700" />
+          </button>
 
-          {/* Scrollable Content with drag transform */}
+          {/* Scrollable Content */}
           <div
             ref={scrollContainerRef}
             className="flex-1 overflow-y-auto bg-white"
-            style={{
-              transform: `translateY(${dragOffset}px)`,
-              transition: isDragging ? "none" : "transform 0.3s ease-out",
-              touchAction: "pan-y",
-            }}
           >
             {/* Media Section */}
             <div className="w-full">
