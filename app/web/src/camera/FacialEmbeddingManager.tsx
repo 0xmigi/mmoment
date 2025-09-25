@@ -42,10 +42,13 @@ export function FacialEmbeddingManager({
     try {
       setIsChecking(true);
 
-      // Check if face embedding PDA exists
+      // Check if face NFT PDA exists
       const userPublicKey = new PublicKey(walletAddress);
       const [faceDataPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("face-embedding"), userPublicKey.toBuffer()],
+        [
+          Buffer.from("face-nft"), // MUST match the Solana program seed
+          userPublicKey.toBuffer(),
+        ],
         program.programId
       );
 

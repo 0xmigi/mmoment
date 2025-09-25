@@ -216,8 +216,16 @@ export function PhoneSelfieEnrollment({
       // Step 3: Store encrypted facial embedding on blockchain
       const userPublicKey = new PublicKey(walletAddress);
       const [faceDataPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("face-embedding"), userPublicKey.toBuffer()],
+        [
+          Buffer.from("face-nft"), // CRITICAL: Must be "face-nft" not "face-embedding"
+          userPublicKey.toBuffer(),
+        ],
         program.programId
+      );
+
+      console.log(
+        "[PhoneSelfieEnrollment] Face NFT PDA:",
+        faceDataPda.toString()
       );
 
       // Dynamic handles ALL wallet operations - just use RPC
