@@ -1,6 +1,5 @@
 import { useProgram } from "../anchor/setup";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
-import { isSolanaWallet } from "@dynamic-labs/solana";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { Camera, X, RotateCcw, Check } from "lucide-react";
 import { useState, useRef, useCallback, useEffect } from "react";
@@ -169,8 +168,28 @@ export function PhoneSelfieEnrollment({
   };
 
   const processAndEnroll = async () => {
-    if (!capturedImage || !walletAddress || !primaryWallet || !program) {
-      setError("Missing requirements for enrollment");
+    console.log("[PhoneSelfieEnrollment] Starting enrollment process...");
+    console.log("[PhoneSelfieEnrollment] Wallet address:", walletAddress);
+    console.log("[PhoneSelfieEnrollment] Primary wallet:", primaryWallet);
+    console.log("[PhoneSelfieEnrollment] Program available:", !!program);
+
+    if (!capturedImage) {
+      setError("No image captured");
+      return;
+    }
+
+    if (!walletAddress) {
+      setError("No wallet address found. Please connect your wallet.");
+      return;
+    }
+
+    if (!primaryWallet) {
+      setError("No wallet connected. Please connect your wallet.");
+      return;
+    }
+
+    if (!program) {
+      setError("Solana program not loaded. Please refresh and try again.");
       return;
     }
 
@@ -201,10 +220,14 @@ export function PhoneSelfieEnrollment({
         program.programId
       );
 
-      let txSignature: string;
+      // Dynamic handles ALL wallet operations - just use RPC
+      console.log(
+        "[PhoneSelfieEnrollment] Submitting transaction for user:",
+        userPublicKey.toString()
+      );
 
-      if (!isSolanaWallet(primaryWallet)) {
-        // Embedded wallet flow
+      let txSignature: string;
+      try {
         txSignature = await program.methods
           .enrollFace(embeddingBuffer)
           .accounts({
@@ -213,25 +236,26 @@ export function PhoneSelfieEnrollment({
             systemProgram: SystemProgram.programId,
           })
           .rpc();
-      } else {
-        // External Solana wallet flow
-        const transaction = await program.methods
-          .enrollFace(embeddingBuffer)
-          .accounts({
-            user: userPublicKey,
-            faceNft: faceDataPda,
-            systemProgram: SystemProgram.programId,
-          })
-          .transaction();
 
-        const signedTx = await (primaryWallet as any).signTransaction(
-          transaction
+        console.log(
+          "[PhoneSelfieEnrollment] Transaction successful:",
+          txSignature
         );
-        txSignature = await program.provider.connection.sendRawTransaction(
-          signedTx.serialize()
-        );
+      } catch (rpcError) {
+        console.error("[PhoneSelfieEnrollment] Transaction failed:", rpcError);
+        const errorMessage =
+          rpcError instanceof Error ? rpcError.message : "Unknown error";
 
-        await program.provider.connection.confirmTransaction(txSignature);
+        // Parse common Solana errors for better user feedback
+        if (errorMessage.includes("insufficient")) {
+          throw new Error(
+            "Insufficient SOL balance. Please add SOL to your wallet."
+          );
+        } else if (errorMessage.includes("already")) {
+          throw new Error("Face already enrolled. You can only enroll once.");
+        } else {
+          throw new Error(`Transaction failed: ${errorMessage}`);
+        }
       }
 
       setStep("complete");
@@ -320,6 +344,14 @@ export function PhoneSelfieEnrollment({
                   </div>
                 </div>
               </div>
+
+              {/* Hidden canvas for capture */}
+              <canvas
+                ref={canvasRef}
+                className="hidden"
+                width={640}
+                height={480}
+              />
 
               {error && (
                 <div className="text-red-600 text-sm bg-red-50 p-2 rounded">

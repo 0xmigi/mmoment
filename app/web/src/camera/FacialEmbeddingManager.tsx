@@ -1,19 +1,29 @@
-import { useState, useEffect } from 'react';
-import { User, Smartphone, Shield, CheckCircle } from 'lucide-react';
-import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { useProgram } from '../anchor/setup';
-import { PublicKey } from '@solana/web3.js';
-import { PhoneSelfieEnrollment } from './PhoneSelfieEnrollment';
+import { useProgram } from "../anchor/setup";
+import { PhoneSelfieEnrollment } from "./PhoneSelfieEnrollment";
+import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
+import { PublicKey } from "@solana/web3.js";
+import {
+  User,
+  Smartphone,
+  Shield,
+  CheckCircle,
+  AlertCircle,
+} from "lucide-react";
+import { useState, useEffect } from "react";
 
 interface FacialEmbeddingManagerProps {
   walletAddress?: string;
   onComplete?: () => void;
 }
 
-export function FacialEmbeddingManager({ walletAddress, onComplete }: FacialEmbeddingManagerProps) {
+export function FacialEmbeddingManager({
+  walletAddress,
+  onComplete,
+}: FacialEmbeddingManagerProps) {
   const [hasEmbedding, setHasEmbedding] = useState<boolean | null>(null);
   const [showEnrollment, setShowEnrollment] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const { primaryWallet } = useDynamicContext();
   const { program } = useProgram();
@@ -35,32 +45,37 @@ export function FacialEmbeddingManager({ walletAddress, onComplete }: FacialEmbe
       // Check if face embedding PDA exists
       const userPublicKey = new PublicKey(walletAddress);
       const [faceDataPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from('face-embedding'),
-          userPublicKey.toBuffer()
-        ],
+        [Buffer.from("face-embedding"), userPublicKey.toBuffer()],
         program.programId
       );
 
       // Try to fetch the account
-      const account = await program.provider.connection.getAccountInfo(faceDataPda);
+      const account = await program.provider.connection.getAccountInfo(
+        faceDataPda
+      );
       setHasEmbedding(account !== null);
-
     } catch (error) {
-      console.error('Error checking facial embedding:', error);
+      console.error("Error checking facial embedding:", error);
       setHasEmbedding(false);
     } finally {
       setIsChecking(false);
     }
   };
 
-  const handleEnrollmentComplete = (result: { success: boolean; error?: string; transactionId?: string }) => {
+  const handleEnrollmentComplete = (result: {
+    success: boolean;
+    error?: string;
+    transactionId?: string;
+  }) => {
     if (result.success) {
       setHasEmbedding(true);
       setShowEnrollment(false);
+      setError(null);
       if (onComplete) onComplete();
     } else {
-      console.error('Enrollment failed:', result.error);
+      console.error("Enrollment failed:", result.error);
+      setError(result.error || "Face enrollment failed");
+      setShowEnrollment(false);
     }
   };
 
@@ -83,7 +98,8 @@ export function FacialEmbeddingManager({ walletAddress, onComplete }: FacialEmbe
               Facial Embedding Ready
             </h3>
             <p className="text-green-700 mt-1">
-              Your encrypted facial embedding is stored on-chain. You can now use CV apps on mmoment cameras.
+              Your encrypted facial embedding is stored on-chain. You can now
+              use CV apps on mmoment cameras.
             </p>
             <div className="mt-4 flex items-center text-sm text-green-600">
               <Shield className="h-4 w-4 mr-2" />
@@ -106,47 +122,61 @@ export function FacialEmbeddingManager({ walletAddress, onComplete }: FacialEmbe
   }
 
   return (
-    <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-      <div className="flex items-start space-x-3">
-        <User className="h-6 w-6 text-blue-600 flex-shrink-0 mt-0.5" />
-        <div>
-          <h3 className="text-lg font-semibold text-blue-800">
-            Create Facial Embedding
-          </h3>
-          <p className="text-blue-700 mt-1">
-            Create a secure facial embedding to use CV apps on mmoment cameras.
-            This only needs to be done once.
-          </p>
-
-          <div className="mt-4 space-y-2 text-sm text-blue-600">
-            <div className="flex items-center">
-              <Smartphone className="h-4 w-4 mr-2" />
-              <span>Uses your phone's front camera (private)</span>
-            </div>
-            <div className="flex items-center">
-              <Shield className="h-4 w-4 mr-2" />
-              <span>Encrypted and stored on Solana blockchain</span>
-            </div>
-            <div className="flex items-center">
-              <CheckCircle className="h-4 w-4 mr-2" />
-              <span>Compatible with all mmoment cameras</span>
+    <div>
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+          <div className="flex items-start space-x-3">
+            <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <h4 className="font-semibold text-red-800">Enrollment Failed</h4>
+              <p className="text-red-700 text-sm mt-1">{error}</p>
             </div>
           </div>
+        </div>
+      )}
 
-          <button
-            onClick={() => setShowEnrollment(true)}
-            disabled={!primaryWallet}
-            className="mt-6 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2"
-          >
-            <Smartphone className="h-5 w-5" />
-            <span>Create Facial Embedding</span>
-          </button>
-
-          {!primaryWallet && (
-            <p className="mt-2 text-sm text-gray-600">
-              Please connect your wallet first
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+        <div className="flex items-start space-x-3">
+          <User className="h-6 w-6 text-blue-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <h3 className="text-lg font-semibold text-blue-800">
+              Create Facial Embedding
+            </h3>
+            <p className="text-blue-700 mt-1">
+              Create a secure facial embedding to use CV apps on mmoment
+              cameras. This only needs to be done once.
             </p>
-          )}
+
+            <div className="mt-4 space-y-2 text-sm text-blue-600">
+              <div className="flex items-center">
+                <Smartphone className="h-4 w-4 mr-2" />
+                <span>Uses your phone's front camera (private)</span>
+              </div>
+              <div className="flex items-center">
+                <Shield className="h-4 w-4 mr-2" />
+                <span>Encrypted and stored on Solana blockchain</span>
+              </div>
+              <div className="flex items-center">
+                <CheckCircle className="h-4 w-4 mr-2" />
+                <span>Compatible with all mmoment cameras</span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowEnrollment(true)}
+              disabled={!primaryWallet}
+              className="mt-6 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2"
+            >
+              <Smartphone className="h-5 w-5" />
+              <span>Create Facial Embedding</span>
+            </button>
+
+            {!primaryWallet && (
+              <p className="mt-2 text-sm text-gray-600">
+                Please connect your wallet first
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>
