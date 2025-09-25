@@ -1,7 +1,10 @@
 import { useProgram } from "../anchor/setup";
+import { useCamera } from "./CameraProvider";
+import { faceProcessingService } from "./face-processing";
+import { UnifiedCameraService } from "./unified-camera-service";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
-import { Camera, X, RotateCcw, Check } from "lucide-react";
+import { Camera, X, RotateCcw, Check, AlertCircle, Wifi } from "lucide-react";
 import { useState, useRef, useCallback, useEffect } from "react";
 
 interface PhoneSelfieEnrollmentProps {
@@ -15,34 +18,71 @@ interface PhoneSelfieEnrollmentProps {
 }
 
 export function PhoneSelfieEnrollment({
-  walletAddress,
   onEnrollmentComplete,
   onCancel,
 }: PhoneSelfieEnrollmentProps) {
   const [step, setStep] = useState<
-    "camera" | "preview" | "processing" | "complete"
-  >("camera");
+    "check-connection" | "camera" | "preview" | "processing" | "complete"
+  >("check-connection");
   const [isCapturing, setIsCapturing] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState("");
+  const [qualityIssues, setQualityIssues] = useState<string[]>([]);
+  const [connectedCameraUrl, setConnectedCameraUrl] = useState<string | null>(
+    null
+  );
+  const [connectedCameraId, setConnectedCameraId] = useState<string | null>(
+    null
+  );
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const { primaryWallet } = useDynamicContext();
   const { program } = useProgram();
+  const { selectedCamera } = useCamera();
+
+  // Check for camera connection on mount
+  useEffect(() => {
+    checkCameraConnection();
+  }, [selectedCamera]);
+
+  const checkCameraConnection = async () => {
+    if (!selectedCamera) {
+      setError("Please connect to a camera first to enroll your face");
+      return;
+    }
+
+    // For now, we'll assume the camera has a URL property or we can construct it
+    // This will need to be adjusted based on your actual camera data structure
+    const cameraId = selectedCamera.owner.toString();
+    const cameraUrl = `https://${cameraId}.mmoment.xyz`;
+
+    // Check if it's a Jetson camera type
+    const cameraService = UnifiedCameraService.getInstance();
+    if (cameraService.hasCamera(`jetson_${cameraUrl}`)) {
+      setConnectedCameraUrl(cameraUrl);
+      setConnectedCameraId(`jetson_${cameraUrl}`);
+      setStep("camera");
+      setError(null);
+    } else {
+      setError("Face enrollment requires connection to a Jetson camera");
+    }
+  };
 
   // Initialize camera
   useEffect(() => {
-    initializeCamera();
+    if (step === "camera") {
+      initializeCamera();
+    }
     return () => {
       if (stream) {
         stream.getTracks().forEach((track) => track.stop());
       }
     };
-  }, []);
+  }, [step]);
 
   const initializeCamera = async () => {
     try {
@@ -98,123 +138,105 @@ export function PhoneSelfieEnrollment({
         ) {
           errorMessage =
             "No camera found. Please ensure your device has a camera.";
-        } else if (
-          err.name === "NotReadableError" ||
-          err.name === "TrackStartError"
-        ) {
+        } else if (err.name === "NotReadableError") {
           errorMessage =
-            "Camera is already in use by another app. Please close other apps using the camera.";
+            "Camera is already in use by another application. Please close other camera apps.";
         } else if (err.name === "OverconstrainedError") {
           errorMessage =
-            "Camera does not support the required settings. Trying default settings...";
-          // Try again with basic constraints
-          try {
-            const basicStream = await navigator.mediaDevices.getUserMedia({
-              video: { facingMode: "user" },
-              audio: false,
-            });
-            setStream(basicStream);
-            if (videoRef.current) {
-              videoRef.current.srcObject = basicStream;
-              videoRef.current.setAttribute("playsinline", "true");
-              videoRef.current.setAttribute("autoplay", "true");
-              videoRef.current.muted = true;
-            }
-            return; // Success with basic settings
-          } catch {
-            errorMessage = "Unable to access camera even with basic settings.";
-          }
+            "Camera doesn't support required settings. Try refreshing the page.";
         }
       }
+
       setError(errorMessage);
     }
   };
 
-  const capturePhoto = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current) return;
+  const capturePhoto = useCallback(async () => {
+    if (!videoRef.current || !canvasRef.current) {
+      setError("Camera not ready");
+      return;
+    }
 
     setIsCapturing(true);
+    setQualityIssues([]);
 
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const context = canvas.getContext("2d");
+    try {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
 
-    if (!context) return;
+      // Set canvas dimensions to match video
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
 
-    // Set canvas size to match video
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        throw new Error("Failed to get canvas context");
+      }
 
-    // Draw video frame to canvas
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      // Draw video frame to canvas
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    // Convert to base64
-    const imageData = canvas.toDataURL("image/jpeg", 0.9);
-    setCapturedImage(imageData);
-    setStep("preview");
-    setIsCapturing(false);
+      // Convert to base64
+      const imageData = canvas.toDataURL("image/jpeg", 0.95);
 
-    // Stop video stream
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-      setStream(null);
+      // Perform quality check
+      setProgress("Checking image quality...");
+      const quality = await faceProcessingService.analyzeImageQuality(
+        imageData
+      );
+
+      if (quality.issues.length > 0) {
+        setQualityIssues(quality.issues);
+        // Don't prevent capture, but show warnings
+      }
+
+      setCapturedImage(imageData);
+      setStep("preview");
+    } catch (err) {
+      console.error("Capture error:", err);
+      setError("Failed to capture photo. Please try again.");
+    } finally {
+      setIsCapturing(false);
     }
-  }, [stream]);
+  }, []);
 
-  const retakePhoto = () => {
+  const retakePhoto = useCallback(() => {
     setCapturedImage(null);
+    setQualityIssues([]);
     setStep("camera");
-    initializeCamera();
-  };
+    setError(null);
+  }, []);
 
-  const processAndEnroll = async () => {
-    console.log("[PhoneSelfieEnrollment] Starting enrollment process...");
-    console.log("[PhoneSelfieEnrollment] Wallet address:", walletAddress);
-    console.log("[PhoneSelfieEnrollment] Primary wallet:", primaryWallet);
-    console.log("[PhoneSelfieEnrollment] Program available:", !!program);
-
-    if (!capturedImage) {
-      setError("No image captured");
-      return;
-    }
-
-    if (!walletAddress) {
-      setError("No wallet address found. Please connect your wallet.");
-      return;
-    }
-
-    if (!primaryWallet) {
-      setError("No wallet connected. Please connect your wallet.");
-      return;
-    }
-
-    if (!program) {
-      setError("Solana program not loaded. Please refresh and try again.");
+  const processFaceEnrollment = useCallback(async () => {
+    if (!capturedImage || !primaryWallet || !program || !connectedCameraUrl) {
+      setError("Missing requirements for enrollment");
       return;
     }
 
     setStep("processing");
-    setProgress("Processing facial features...");
+    setProgress("Sending image to camera for processing...");
 
     try {
-      // Step 1: Process image to extract facial embedding
-      const embedding = await processFacialEmbedding(capturedImage);
+      // Send image to Jetson camera for facial embedding extraction
+      const result = await faceProcessingService.processFacialEmbedding(
+        capturedImage,
+        connectedCameraUrl
+      );
 
-      setProgress("Preparing blockchain transaction...");
+      if (!result.success) {
+        throw new Error(result.error || "Failed to process facial features");
+      }
 
-      // Step 2: Create embedding buffer for Solana
-      const embeddingBuffer = Buffer.from(embedding);
-
-      if (embeddingBuffer.length > 1024) {
-        throw new Error(
-          `Face embedding too large (${embeddingBuffer.length} bytes). Max allowed: 1024 bytes.`
-        );
+      if (!result.embedding || result.embedding.length !== 512) {
+        throw new Error("Invalid facial embedding received from camera");
       }
 
       setProgress("Storing encrypted facial embedding on blockchain...");
 
-      // Step 3: Store encrypted facial embedding on blockchain
-      const userPublicKey = new PublicKey(walletAddress);
+      // Get user's public key
+      const userPublicKey = new PublicKey(primaryWallet.address);
+
+      // Derive the PDA for face data storage
       const [faceDataPda] = PublicKey.findProgramAddressSync(
         [
           Buffer.from("face-nft"), // CRITICAL: Must be "face-nft" not "face-embedding"
@@ -223,221 +245,312 @@ export function PhoneSelfieEnrollment({
         program.programId
       );
 
-      console.log(
-        "[PhoneSelfieEnrollment] Face NFT PDA:",
-        faceDataPda.toString()
+      // Create the instruction to enroll the face
+      // Convert embedding to Buffer format expected by the program
+      const embeddingBuffer = Buffer.from(
+        new Float32Array(result.embedding).buffer
       );
 
-      // Dynamic handles ALL wallet operations - just use RPC
-      console.log(
-        "[PhoneSelfieEnrollment] Submitting transaction for user:",
-        userPublicKey.toString()
-      );
+      const enrollInstruction = await program.methods
+        .enrollFace(embeddingBuffer)
+        .accounts({
+          faceNft: faceDataPda,
+          user: userPublicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .instruction();
 
-      let txSignature: string;
-      try {
-        txSignature = await program.methods
-          .enrollFace(embeddingBuffer)
-          .accounts({
-            user: userPublicKey,
-            faceNft: faceDataPda,
-            systemProgram: SystemProgram.programId,
-          })
-          .rpc();
+      // Use Dynamic wallet's RPC method to send transaction
+      const wallet = primaryWallet as any;
+      const { signature } = await wallet.rpc.sendTransaction([
+        enrollInstruction,
+      ]);
 
-        console.log(
-          "[PhoneSelfieEnrollment] Transaction successful:",
-          txSignature
-        );
-      } catch (rpcError) {
-        console.error("[PhoneSelfieEnrollment] Transaction failed:", rpcError);
-        const errorMessage =
-          rpcError instanceof Error ? rpcError.message : "Unknown error";
+      setProgress("Confirming blockchain transaction...");
 
-        // Parse common Solana errors for better user feedback
-        if (errorMessage.includes("insufficient")) {
-          throw new Error(
-            "Insufficient SOL balance. Please add SOL to your wallet."
-          );
-        } else if (errorMessage.includes("already")) {
-          throw new Error("Face already enrolled. You can only enroll once.");
+      // Wait for confirmation
+      const rpcUrl = program.provider.connection.rpcEndpoint;
+      const response = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "getSignatureStatuses",
+          params: [[signature]],
+        }),
+      });
+
+      const data = await response.json();
+      const status = data.result?.value?.[0];
+
+      if (
+        status?.confirmationStatus === "confirmed" ||
+        status?.confirmationStatus === "finalized"
+      ) {
+        setStep("complete");
+        setProgress("Facial embedding successfully stored!");
+
+        setTimeout(() => {
+          onEnrollmentComplete?.({
+            success: true,
+            transactionId: signature,
+          });
+        }, 2000);
+      } else {
+        throw new Error("Transaction failed to confirm");
+      }
+    } catch (err) {
+      console.error("Enrollment error:", err);
+      let errorMessage = "Failed to enroll facial embedding.";
+
+      if (err instanceof Error) {
+        if (err.message.includes("already exists")) {
+          errorMessage = "You already have a facial embedding stored.";
+        } else if (err.message.includes("insufficient funds")) {
+          errorMessage = "Insufficient SOL balance for transaction.";
         } else {
-          throw new Error(`Transaction failed: ${errorMessage}`);
+          errorMessage = err.message;
         }
       }
 
-      setStep("complete");
-      console.log("Face enrollment successful! Transaction:", txSignature);
-
-      if (onEnrollmentComplete) {
-        onEnrollmentComplete({
-          success: true,
-          transactionId: txSignature,
-        });
-      }
-    } catch (err) {
-      console.error("Face enrollment failed:", err);
-      setError(err instanceof Error ? err.message : "Face enrollment failed");
-
-      if (onEnrollmentComplete) {
-        onEnrollmentComplete({
-          success: false,
-          error: err instanceof Error ? err.message : "Face enrollment failed",
-        });
-      }
+      setError(errorMessage);
+      setStep("preview");
+      onEnrollmentComplete?.({
+        success: false,
+        error: errorMessage,
+      });
     }
-  };
+  }, [
+    capturedImage,
+    primaryWallet,
+    program,
+    connectedCameraUrl,
+    onEnrollmentComplete,
+  ]);
 
-  const processFacialEmbedding = async (
-    imageData: string
-  ): Promise<number[]> => {
-    // Import the face processing service
-    const { faceProcessingService } = await import("./face-processing");
+  // Render based on current step
+  if (step === "check-connection") {
+    return (
+      <div className="bg-gray-100 rounded-xl p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">Face Enrollment</h3>
+          {onCancel && (
+            <button
+              onClick={onCancel}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          )}
+        </div>
 
-    const result = await faceProcessingService.processFacialEmbedding(
-      imageData
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+          <div className="flex items-start">
+            <Wifi className="h-5 w-5 text-yellow-600 mt-1 mr-3 flex-shrink-0" />
+            <div>
+              <p className="text-sm text-yellow-800 font-medium">
+                Camera Connection Required
+              </p>
+              <p className="text-sm text-yellow-700 mt-1">
+                To ensure compatibility, face enrollment must be done through a
+                connected camera. Please connect to a camera first, then try
+                again.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+            <p className="text-sm text-red-700">{error}</p>
+          </div>
+        )}
+
+        <button
+          onClick={checkCameraConnection}
+          className="w-full bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors"
+        >
+          Check Connection Again
+        </button>
+      </div>
     );
+  }
 
-    if (!result.success || !result.embedding) {
-      throw new Error(result.error || "Face processing failed");
-    }
+  if (step === "camera") {
+    return (
+      <div className="bg-gray-100 rounded-xl p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">Capture Your Face</h3>
+          {onCancel && (
+            <button
+              onClick={onCancel}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          )}
+        </div>
 
-    return result.embedding;
-  };
+        <div className="relative bg-black rounded-lg overflow-hidden mb-4">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="w-full h-auto"
+            style={{
+              transform: "scaleX(-1)", // Mirror the video for selfie mode
+              maxHeight: "400px",
+              objectFit: "cover",
+            }}
+          />
+          <canvas ref={canvasRef} className="hidden" />
 
-  const handleCancel = () => {
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-    }
-    if (onCancel) onCancel();
-  };
+          {/* Face guide overlay */}
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+              <div className="w-48 h-64 border-2 border-white/50 rounded-full" />
+            </div>
+            <p className="absolute bottom-4 left-0 right-0 text-center text-white text-sm">
+              Position your face within the oval
+            </p>
+          </div>
+        </div>
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-95 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="sticky top-0 bg-white flex items-center justify-between p-4 border-b">
-          <h3 className="text-lg font-semibold">Create Face ID</h3>
+        <p className="text-sm text-gray-600 mb-3 text-center">
+          Connected to: {connectedCameraId?.replace("jetson_", "")}
+        </p>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+            <p className="text-sm text-red-700">{error}</p>
+          </div>
+        )}
+
+        <button
+          onClick={capturePhoto}
+          disabled={isCapturing}
+          className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center justify-center"
+        >
+          {isCapturing ? (
+            "Capturing..."
+          ) : (
+            <>
+              <Camera className="h-5 w-5 mr-2" />
+              Take Photo
+            </>
+          )}
+        </button>
+      </div>
+    );
+  }
+
+  if (step === "preview") {
+    return (
+      <div className="bg-gray-100 rounded-xl p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">Review Your Photo</h3>
+          {onCancel && (
+            <button
+              onClick={onCancel}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          )}
+        </div>
+
+        {capturedImage && (
+          <div className="mb-4">
+            <img
+              src={capturedImage}
+              alt="Captured selfie"
+              className="w-full rounded-lg"
+              style={{
+                transform: "scaleX(-1)", // Mirror the image for selfie mode
+                maxHeight: "400px",
+                objectFit: "cover",
+              }}
+            />
+          </div>
+        )}
+
+        {qualityIssues.length > 0 && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+            <div className="flex items-start">
+              <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5 mr-2 flex-shrink-0" />
+              <div>
+                <p className="text-sm text-yellow-800 font-medium">
+                  Quality Issues Detected
+                </p>
+                <ul className="text-sm text-yellow-700 mt-1 list-disc list-inside">
+                  {qualityIssues.map((issue, idx) => (
+                    <li key={idx}>{issue}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+            <p className="text-sm text-red-700">{error}</p>
+          </div>
+        )}
+
+        <div className="flex gap-3">
           <button
-            onClick={handleCancel}
-            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            onClick={retakePhoto}
+            className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors flex items-center justify-center"
           >
-            <X className="h-5 w-5" />
+            <RotateCcw className="h-5 w-5 mr-2" />
+            Retake
+          </button>
+          <button
+            onClick={processFaceEnrollment}
+            disabled={!!error}
+            className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center justify-center"
+          >
+            <Check className="h-5 w-5 mr-2" />
+            Use This Photo
           </button>
         </div>
-
-        {/* Content */}
-        <div className="p-4">
-          {step === "camera" && (
-            <div className="space-y-4">
-              <p className="text-sm text-gray-600">
-                Position your face in the frame and tap capture when ready.
-              </p>
-
-              <div className="relative aspect-[3/4] bg-black rounded-lg overflow-hidden">
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="absolute inset-0 w-full h-full object-cover mirror"
-                  style={{ transform: "scaleX(-1)" }} // Mirror for selfie camera
-                />
-
-                {/* Face guide overlay */}
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="w-48 h-48 border-2 border-white rounded-full opacity-50 shadow-lg" />
-                  <div className="absolute text-white text-xs bottom-4 text-center">
-                    <p>Position your face within the circle</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Hidden canvas for capture */}
-              <canvas
-                ref={canvasRef}
-                className="hidden"
-                width={640}
-                height={480}
-              />
-
-              {error && (
-                <div className="text-red-600 text-sm bg-red-50 p-2 rounded">
-                  {error}
-                </div>
-              )}
-
-              <button
-                onClick={capturePhoto}
-                disabled={isCapturing || !stream}
-                className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center space-x-2"
-              >
-                <Camera className="h-5 w-5" />
-                <span>{isCapturing ? "Capturing..." : "Capture Photo"}</span>
-              </button>
-            </div>
-          )}
-
-          {step === "preview" && capturedImage && (
-            <div className="space-y-4">
-              <p className="text-sm text-gray-600">
-                Review your photo. Does it look good?
-              </p>
-
-              <img
-                src={capturedImage}
-                alt="Captured selfie"
-                className="w-full h-64 object-cover rounded-lg"
-              />
-
-              <div className="flex space-x-2">
-                <button
-                  onClick={retakePhoto}
-                  className="flex-1 bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300 flex items-center justify-center space-x-2"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  <span>Retake</span>
-                </button>
-
-                <button
-                  onClick={processAndEnroll}
-                  className="flex-1 bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 flex items-center justify-center space-x-2"
-                >
-                  <Check className="h-4 w-4" />
-                  <span>Use Photo</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {step === "processing" && (
-            <div className="space-y-4 text-center">
-              <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
-              <p className="text-sm text-gray-600">{progress}</p>
-            </div>
-          )}
-
-          {step === "complete" && (
-            <div className="space-y-4 text-center">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
-                <Check className="h-8 w-8 text-green-600" />
-              </div>
-              <div>
-                <h4 className="text-lg font-semibold text-green-600">
-                  Facial Embedding Created!
-                </h4>
-                <p className="text-sm text-gray-600 mt-1">
-                  Your encrypted facial embedding has been securely stored
-                  on-chain. You can now use CV apps on mmoment cameras.
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Canvas for image processing (hidden) */}
-        <canvas ref={canvasRef} className="hidden" />
       </div>
-    </div>
-  );
+    );
+  }
+
+  if (step === "processing") {
+    return (
+      <div className="bg-gray-100 rounded-xl p-6">
+        <div className="flex flex-col items-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4" />
+          <p className="text-gray-700 font-medium mb-2">Processing</p>
+          <p className="text-sm text-gray-500 text-center">{progress}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (step === "complete") {
+    return (
+      <div className="bg-green-50 rounded-xl p-6">
+        <div className="flex flex-col items-center">
+          <div className="bg-green-100 rounded-full p-3 mb-4">
+            <Check className="h-8 w-8 text-green-600" />
+          </div>
+          <p className="text-green-800 font-medium mb-2">
+            Enrollment Complete!
+          </p>
+          <p className="text-sm text-green-700 text-center">
+            Your facial embedding has been securely stored on the blockchain.
+            You can now be recognized at any camera in the network.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }
