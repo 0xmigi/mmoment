@@ -1,21 +1,26 @@
-import { FacialEmbeddingManager } from "../../camera/FacialEmbeddingManager";
 import { PipeStorageSection } from "./PipeStorageSection";
+import { RecognitionTokenModal } from "./RecognitionTokenModal";
+import { WalletBalanceModal } from "./WalletBalanceModal";
 import {
   useDynamicContext,
   useEmbeddedWallet,
 } from "@dynamic-labs/sdk-react-core";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import {
-  Copy,
   User,
   LogOut,
   KeyRound,
-  Check,
   Globe,
   Lock,
-  ScanFace,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+  ChevronRight,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useFacialEmbeddingStatus } from "../../hooks/useFacialEmbeddingStatus";
 
 // Define interfaces
 interface SocialCredential {
@@ -34,15 +39,40 @@ interface StatusMessage {
 export function AccountPage() {
   const { primaryWallet, handleLogOut, user } = useDynamicContext();
   const { revealWalletKey } = useEmbeddedWallet();
+  const { connection } = useConnection();
   const navigate = useNavigate();
   const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(
     null
   );
-  const [copied, setCopied] = useState(false);
   const [showBackupOptions, setShowBackupOptions] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [showFaceEnrollment, setShowFaceEnrollment] = useState(false);
+  const [showRecognitionModal, setShowRecognitionModal] = useState(false);
+  const [showWalletModal, setShowWalletModal] = useState(false);
+  const [solBalance, setSolBalance] = useState<number | null>(null);
+
+  // Get facial embedding status from blockchain
+  const facialEmbeddingStatus = useFacialEmbeddingStatus();
+
+  // Fetch SOL balance
+  useEffect(() => {
+    const fetchBalance = async () => {
+      if (!primaryWallet?.address || !connection) return;
+
+      try {
+        const publicKey = new PublicKey(primaryWallet.address);
+        const balance = await connection.getBalance(publicKey);
+        setSolBalance(balance / LAMPORTS_PER_SOL);
+      } catch (error) {
+        console.error('Error fetching balance:', error);
+      }
+    };
+
+    fetchBalance();
+    // Refresh balance every 30 seconds
+    const interval = setInterval(fetchBalance, 30000);
+    return () => clearInterval(interval);
+  }, [primaryWallet?.address, connection]);
 
   const handleSignOut = async () => {
     try {
@@ -53,21 +83,6 @@ export function AccountPage() {
     }
   };
 
-  const handleCopyAddress = async () => {
-    if (!primaryWallet?.address) return;
-
-    try {
-      await navigator.clipboard.writeText(primaryWallet.address);
-      setCopied(true);
-      setStatusMessage({ type: "info", message: "Wallet address copied!" });
-      setTimeout(() => {
-        setCopied(false);
-        setStatusMessage(null);
-      }, 2000);
-    } catch (err) {
-      console.error("Failed to copy address:", err);
-    }
-  };
 
   const handleExportWallet = async (type: "recoveryPhrase" | "privateKey") => {
     setIsExporting(true);
@@ -159,6 +174,20 @@ export function AccountPage() {
       icon: <Lock className="w-3 h-3 mr-1" />,
     },
     {
+      id: "recognition",
+      label: "Recognition Token",
+      value: facialEmbeddingStatus.hasEmbedding ? "Active" : "Not Enrolled",
+      connected: facialEmbeddingStatus.hasEmbedding,
+      isPublic: false,
+      isRecognition: true,
+      status: facialEmbeddingStatus,
+      icon: facialEmbeddingStatus.isLoading
+        ? <Loader2 className="w-3 h-3 mr-1 animate-spin text-blue-500" />
+        : facialEmbeddingStatus.hasEmbedding
+        ? <CheckCircle className="w-3 h-3 mr-1 text-green-500" />
+        : <AlertCircle className="w-3 h-3 mr-1 text-orange-500" />,
+    },
+    {
       id: "wallet",
       label: "Solana Wallet",
       value: primaryWallet.address,
@@ -173,7 +202,7 @@ export function AccountPage() {
     },
   ].filter(
     (item) =>
-      item.connected || ["farcaster", "email", "twitter"].includes(item.id)
+      item.connected || ["farcaster", "email", "twitter", "recognition"].includes(item.id)
   );
 
   return (
@@ -200,98 +229,104 @@ export function AccountPage() {
 
         {/* Identity Section */}
         <div className="bg-gray-50 rounded-xl p-4 sm:p-6 mb-6">
-          <h2 className="text-lg font-medium mb-6 sm:mb-8">Identity</h2>
+          <div className="flex items-baseline justify-between mb-6">
+            <h2 className="text-lg font-medium">Identity</h2>
+            {solBalance !== null && (
+              <div className="text-sm font-medium text-gray-700">
+                {solBalance.toFixed(2)} SOL
+                <span className="text-xs text-gray-500 ml-2">
+                  ${(solBalance * 150).toFixed(0)}
+                </span>
+              </div>
+            )}
+          </div>
 
-          {/* Profile Picture & Identity Tree - RIGHT ALIGNED, mobile responsive */}
-          <div className="relative mb-10">
-            {/* Profile Container - right-aligned on ALL screen sizes */}
-            <div className="flex justify-end mb-8">
-              <div className="relative">
-                {/* Profile Avatar */}
-                {profileImageUrl ? (
-                  <img
-                    src={profileImageUrl}
-                    alt={displayName}
-                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-gray-200"
-                  />
-                ) : (
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gray-200 flex items-center justify-center">
-                    <User className="w-8 h-8 sm:w-10 sm:h-10 text-gray-400" />
-                  </div>
-                )}
+          {/* Profile Container */}
+          <div className="mb-6">
+            <div className="flex items-center mb-6">
+              {/* Profile Avatar */}
+              {profileImageUrl ? (
+                <img
+                  src={profileImageUrl}
+                  alt={displayName}
+                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-gray-200"
+                />
+              ) : (
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gray-200 flex items-center justify-center">
+                  <User className="w-8 h-8 sm:w-10 sm:h-10 text-gray-400" />
+                </div>
+              )}
 
-                {/* Vertical line coming down from profile - centered and extended */}
-                <div className="absolute left-1/2 top-full w-0.5 h-[350px] bg-gray-300 transform -translate-x-1/2"></div>
+              {/* Profile name */}
+              <div className="ml-4">
+                <div className="font-medium text-gray-800">{displayName}</div>
+                <div className="text-sm text-gray-600">
+                  {primarySocialProvider || "Wallet Address"}
+                </div>
               </div>
             </div>
 
-            {/* Profile name - now left-aligned like other identity items */}
-            <div className="mb-6 mr-[100px] sm:mr-[135px]">
-              <div className="font-medium text-gray-800">{displayName}</div>
-              <div className="text-sm text-gray-600">
-                {primarySocialProvider || "Wallet Address"}
-              </div>
-            </div>
+            {/* Identity List */}
+            <div className="space-y-3">
+              {identities.map((identity, idx) => {
+                const isClickable = identity.isWallet || identity.isRecognition;
+                const handleClick = () => {
+                  if (identity.isWallet) {
+                    setShowWalletModal(true);
+                  } else if (identity.isRecognition) {
+                    setShowRecognitionModal(true);
+                  }
+                };
 
-            {/* Identity Tree Structure - styled to match the profile popup */}
-            <div className="flex flex-col relative">
-              {/* Identity Items - adjusted for mobile while maintaining alignment */}
-              <div className="space-y-6 sm:space-y-7">
-                {identities.map((identity, idx) => (
-                  <div key={idx} className="relative mr-[100px] sm:mr-[135px]">
-                    {/* Horizontal connector to main stem */}
-                    <div className="absolute right-[-40px] sm:right-[-68px] top-[12px] w-[40px] sm:w-[68px] h-0.5 bg-gray-300"></div>
-
-                    {/* Identity Content - matching popup style */}
-                    <div className="flex justify-between items-start pr-3 sm:pr-8">
-                      {/* Identity Info - LEFT ALIGNED - matching popup style */}
-                      <div className="pl-0">
-                        <div className="font-medium text-gray-800">
+                return (
+                  <div
+                    key={idx}
+                    className={`flex justify-between items-center py-3 px-3 -mx-3 rounded-lg ${
+                      isClickable
+                        ? 'cursor-pointer hover:bg-white/60 transition-colors'
+                        : ''
+                    }`}
+                    onClick={isClickable ? handleClick : undefined}
+                  >
+                    {/* Identity Info */}
+                    <div className="flex items-center flex-1">
+                      <div className="flex items-center justify-center w-8 h-8 mr-3">
+                        {identity.icon}
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-800 text-sm">
                           {identity.label}
                         </div>
-                        {identity.connected ? (
-                          identity.isWallet ? (
-                            <div className="text-sm text-gray-600 font-mono">
-                              {identity.shortValue}
-                            </div>
-                          ) : (
-                            <>
-                              <div className="text-sm text-gray-600">
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          {identity.connected ? (
+                            identity.isWallet ? (
+                              <span className="font-mono">{identity.shortValue}</span>
+                            ) : identity.isRecognition ? (
+                              <span className={identity.status.hasEmbedding ? 'text-green-600' : 'text-orange-600'}>
+                                {identity.value}
+                              </span>
+                            ) : (
+                              <>
                                 {identity.id === "twitter" && "@"}
                                 {identity.value}
-                              </div>
-                              <div className="text-xs text-gray-400 mt-1">
-                                {identity.isPublic ? "Public" : "Private"}
-                              </div>
-                            </>
-                          )
-                        ) : (
-                          <div className="text-sm text-gray-500">
-                            Not connected
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Action Button - RIGHT ALIGNED - Removed Connect buttons, kept only Copy for wallet */}
-                      <div className="ml-auto">
-                        {identity.connected && identity.isWallet && (
-                          <button
-                            onClick={handleCopyAddress}
-                            className="text-gray-400 hover:text-gray-600 transition-colors p-1"
-                            title="Copy address"
-                          >
-                            {copied ? (
-                              <Check className="w-4 h-4 sm:w-5 sm:h-5 text-green-500" />
-                            ) : (
-                              <Copy className="w-4 h-4 sm:w-5 sm:h-5" />
-                            )}
-                          </button>
-                        )}
+                                {identity.isPublic && <span className="ml-2 text-gray-400">• Public</span>}
+                                {!identity.isPublic && identity.value && <span className="ml-2 text-gray-400">• Private</span>}
+                              </>
+                            )
+                          ) : (
+                            <span className="text-gray-400">Not connected</span>
+                          )}
+                        </div>
                       </div>
                     </div>
+
+                    {/* Action Indicator */}
+                    {isClickable && (
+                      <ChevronRight className="w-4 h-4 text-gray-400 ml-2" />
+                    )}
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -299,40 +334,6 @@ export function AccountPage() {
         {/* Pipe Storage Section */}
         <PipeStorageSection />
 
-        {/* Face Recognition Section */}
-        <div className="bg-gray-50 rounded-xl px-4 py-4 mb-4">
-          <div className="text-sm">
-            <div className="font-medium mb-3">Face Recognition</div>
-            <p className="text-gray-600 mb-3">
-              Enroll your face for seamless camera authentication
-            </p>
-            <button
-              onClick={() => setShowFaceEnrollment(!showFaceEnrollment)}
-              className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors"
-            >
-              <ScanFace className="w-4 h-4" />
-              {showFaceEnrollment
-                ? "Hide Face Enrollment"
-                : "Setup Face Recognition"}
-            </button>
-
-            {showFaceEnrollment && (
-              <div className="mt-4">
-                <FacialEmbeddingManager
-                  walletAddress={primaryWallet.address}
-                  onComplete={() => {
-                    setShowFaceEnrollment(false);
-                    setStatusMessage({
-                      type: "success",
-                      message: "Face recognition setup complete!",
-                    });
-                    setTimeout(() => setStatusMessage(null), 3000);
-                  }}
-                />
-              </div>
-            )}
-          </div>
-        </div>
 
         {/* Wallet Backup Section - responsive padding */}
         {isEmbeddedWallet && (
@@ -385,6 +386,22 @@ export function AccountPage() {
             Sign Out
           </button>
         </div>
+
+        {/* Modals */}
+        <RecognitionTokenModal
+          isOpen={showRecognitionModal}
+          onClose={() => setShowRecognitionModal(false)}
+          status={facialEmbeddingStatus}
+          onStatusUpdate={() => {
+            // Force refresh of facial embedding status
+            // The hook will automatically refresh
+          }}
+        />
+
+        <WalletBalanceModal
+          isOpen={showWalletModal}
+          onClose={() => setShowWalletModal(false)}
+        />
       </div>
     </div>
   );
