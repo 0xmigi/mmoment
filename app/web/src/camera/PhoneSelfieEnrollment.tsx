@@ -1,7 +1,7 @@
 import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from "../anchor/setup";
 import { faceProcessingService } from "./face-processing";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
-import { PublicKey, SystemProgram } from "@solana/web3.js";
+import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { Camera, X, RotateCcw, Check, AlertCircle, Wifi } from "lucide-react";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useConnection } from "@solana/wallet-adapter-react";
@@ -345,15 +345,24 @@ export function PhoneSelfieEnrollment({
         })
         .instruction();
 
-      // Use Dynamic wallet's RPC method to send transaction
-      const wallet = primaryWallet as any;
-      const { signature } = await wallet.rpc.sendTransaction([
-        enrollInstruction,
-      ]);
+      // Create and send transaction using Dynamic wallet pattern
+      const tx = new Transaction();
+      tx.add(enrollInstruction);
+
+      // Get recent blockhash
+      const { blockhash } = await connection.getLatestBlockhash();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = userPublicKey;
+
+      // Sign and send the transaction using Dynamic wallet
+      const signer = await (primaryWallet as any).getSigner();
+      const signedTx = await signer.signTransaction(tx);
+      const signature = await connection.sendRawTransaction(signedTx.serialize());
 
       setProgress("Confirming blockchain transaction...");
 
       // Wait for confirmation
+      await connection.confirmTransaction({ signature, ...(await connection.getLatestBlockhash()) }, "confirmed");
       const rpcUrl = program.provider.connection.rpcEndpoint;
       const response = await fetch(rpcUrl, {
         method: "POST",
