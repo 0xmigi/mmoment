@@ -58,19 +58,47 @@ export function PhoneSelfieEnrollment({
       return;
     }
 
-    // For now, we'll assume the camera has a URL property or we can construct it
-    // This will need to be adjusted based on your actual camera data structure
+    console.log('[PhoneSelfieEnrollment] 🔍 Checking camera connection...', {
+      selectedCamera: selectedCamera,
+      owner: selectedCamera.owner.toString()
+    });
+
+    // Get camera info from selectedCamera
     const cameraId = selectedCamera.owner.toString();
     const cameraUrl = `https://${cameraId}.mmoment.xyz`;
 
-    // Check if it's a Jetson camera type
+    console.log('[PhoneSelfieEnrollment] 📡 Camera details:', {
+      cameraId,
+      cameraUrl,
+    });
+
+    // Check if it's a Jetson camera type - try different camera ID formats
     const cameraService = UnifiedCameraService.getInstance();
-    if (cameraService.hasCamera(`jetson_${cameraUrl}`)) {
-      setConnectedCameraUrl(cameraUrl);
-      setConnectedCameraId(`jetson_${cameraUrl}`);
-      setStep("camera");
-      setError(null);
-    } else {
+    const possibleCameraIds = [
+      `jetson_${cameraUrl}`,
+      cameraId,
+      `jetson_${cameraId}`,
+      cameraUrl
+    ];
+
+    console.log('[PhoneSelfieEnrollment] 🔍 Checking camera registration with IDs:', possibleCameraIds);
+
+    let foundCamera = false;
+    for (const testId of possibleCameraIds) {
+      if (cameraService.hasCamera(testId)) {
+        console.log('[PhoneSelfieEnrollment] ✅ Found camera with ID:', testId);
+        setConnectedCameraUrl(cameraUrl);
+        setConnectedCameraId(testId);
+        setStep("camera");
+        setError(null);
+        foundCamera = true;
+        break;
+      }
+    }
+
+    if (!foundCamera) {
+      console.log('[PhoneSelfieEnrollment] ❌ Camera not found in registry');
+      console.log('[PhoneSelfieEnrollment] 📋 Available cameras:', cameraService.getAllCameras());
       setError("Face enrollment requires connection to a Jetson camera");
     }
   };
