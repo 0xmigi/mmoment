@@ -4,9 +4,9 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import { config } from "dotenv";
-import { createFirestarterSDK } from 'firestarter-sdk';
-import dgram from 'dgram';
-import net from 'net';
+import { createFirestarterSDK } from "firestarter-sdk";
+import dgram from "dgram";
+import net from "net";
 // Using built-in fetch in Node.js 18+
 
 // Load environment variables
@@ -14,17 +14,20 @@ config();
 
 // Initialize the Firestarter SDK
 const firestarterSDK = createFirestarterSDK({
-  baseUrl: 'https://us-west-00-firestarter.pipenetwork.com'
+  baseUrl: "https://us-west-00-firestarter.pipenetwork.com",
 });
 
 // In-memory storage for pipe accounts (simple key-value store)
 // The SDK handles auth, we just store the mapping
-const pipeAccounts = new Map<string, {
-  userId: string;
-  userAppKey: string;
-  walletAddress: string;
-  created: Date;
-}>();
+const pipeAccounts = new Map<
+  string,
+  {
+    userId: string;
+    userAppKey: string;
+    walletAddress: string;
+    created: Date;
+  }
+>();
 
 const app = express();
 
@@ -161,17 +164,19 @@ app.get("/api/pipe/credentials", async (req, res) => {
     // Check if we have existing Pipe account for this wallet
     const account = pipeAccounts.get(walletAddress);
     if (account) {
-      console.log(`Found existing Pipe account for wallet: ${walletAddress.slice(0, 8)}...`);
+      console.log(
+        `Found existing Pipe account for wallet: ${walletAddress.slice(0, 8)}...`,
+      );
       res.json({
         userId: account.userId,
-        userAppKey: account.userAppKey
+        userAppKey: account.userAppKey,
       });
     } else {
       res.status(404).json({ error: "No Pipe account found for this wallet" });
     }
   } catch (error) {
-    console.error('Error checking credentials:', error);
-    res.status(500).json({ error: 'Failed to check credentials' });
+    console.error("Error checking credentials:", error);
+    res.status(500).json({ error: "Failed to check credentials" });
   }
 });
 
@@ -194,11 +199,15 @@ app.get("/api/pipe/debug-user/:walletAddress", async (req, res) => {
       walletAddress,
       sdkUser: user,
       storedAccount: account,
-      expectedUsername: `mmoment_${walletAddress.slice(0, 16)}`
+      expectedUsername: `mmoment_${walletAddress.slice(0, 16)}`,
     });
   } catch (error) {
-    console.error('Debug user error:', error);
-    res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    console.error("Debug user error:", error);
+    res
+      .status(500)
+      .json({
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
   }
 });
 
@@ -208,14 +217,18 @@ app.post("/api/pipe/proxy/*", async (req: any, res) => {
   const walletAddress = req.headers["x-wallet-address"] as string;
 
   if (!walletAddress) {
-    return res.status(400).json({ error: "x-wallet-address header is required" });
+    return res
+      .status(400)
+      .json({ error: "x-wallet-address header is required" });
   }
 
   try {
-    console.log(`🔄 Proxying to Pipe: ${endpoint} for wallet: ${walletAddress.slice(0, 8)}...`);
+    console.log(
+      `🔄 Proxying to Pipe: ${endpoint} for wallet: ${walletAddress.slice(0, 8)}...`,
+    );
 
     // Handle specific endpoints that frontend expects
-    if (endpoint === 'checkWallet') {
+    if (endpoint === "checkWallet") {
       // Get balance using SDK
       const balance = await firestarterSDK.getUserBalance(walletAddress);
       res.json({
@@ -225,7 +238,7 @@ app.post("/api/pipe/proxy/*", async (req: any, res) => {
       return;
     }
 
-    if (endpoint === 'checkCustomToken') {
+    if (endpoint === "checkCustomToken") {
       // Get PIPE token balance using SDK
       const balance = await firestarterSDK.getUserBalance(walletAddress);
       res.json({
@@ -235,14 +248,17 @@ app.post("/api/pipe/proxy/*", async (req: any, res) => {
       return;
     }
 
-    if (endpoint === 'exchangeSolForTokens') {
+    if (endpoint === "exchangeSolForTokens") {
       // Exchange SOL for PIPE using SDK
       const { amount_sol } = req.body;
       if (!amount_sol) {
         return res.status(400).json({ error: "amount_sol is required" });
       }
 
-      const tokensReceived = await firestarterSDK.exchangeSolForPipe(walletAddress, amount_sol);
+      const tokensReceived = await firestarterSDK.exchangeSolForPipe(
+        walletAddress,
+        amount_sol,
+      );
       res.json({
         tokens_minted: tokensReceived,
         success: true,
@@ -257,7 +273,11 @@ app.post("/api/pipe/proxy/*", async (req: any, res) => {
     });
   } catch (error) {
     console.error("Pipe proxy error:", error);
-    res.status(500).json({ error: error instanceof Error ? error.message : "Proxy request failed" });
+    res
+      .status(500)
+      .json({
+        error: error instanceof Error ? error.message : "Proxy request failed",
+      });
   }
 });
 
@@ -273,16 +293,20 @@ app.post("/api/pipe/create-account", async (req, res) => {
     // Check if account already exists locally
     const existingAccount = pipeAccounts.get(walletAddress);
     if (existingAccount) {
-      console.log(`✅ Existing Pipe account found for ${walletAddress.slice(0, 8)}...`);
+      console.log(
+        `✅ Existing Pipe account found for ${walletAddress.slice(0, 8)}...`,
+      );
       res.json({
         userId: existingAccount.userId,
         userAppKey: existingAccount.userAppKey,
-        existing: true
+        existing: true,
       });
       return;
     }
 
-    console.log(`🔄 Creating new Pipe account for wallet: ${walletAddress.slice(0, 8)}...`);
+    console.log(
+      `🔄 Creating new Pipe account for wallet: ${walletAddress.slice(0, 8)}...`,
+    );
 
     // Use the SDK to create or get the user account
     // The SDK handles all the JWT setup internally
@@ -291,7 +315,7 @@ app.post("/api/pipe/create-account", async (req, res) => {
     // Store account info locally for quick access
     const accountInfo = {
       userId: pipeUser.userId,
-      userAppKey: pipeUser.userAppKey || '',
+      userAppKey: pipeUser.userAppKey || "",
       walletAddress,
       created: new Date(),
     };
@@ -303,11 +327,18 @@ app.post("/api/pipe/create-account", async (req, res) => {
     res.json({
       userId: accountInfo.userId,
       userAppKey: accountInfo.userAppKey,
-      existing: false
+      existing: false,
     });
   } catch (error) {
     console.error("Error creating Pipe account:", error);
-    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to create Pipe account" });
+    res
+      .status(500)
+      .json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to create Pipe account",
+      });
   }
 });
 
@@ -318,22 +349,24 @@ app.post("/api/pipe/upload", async (req, res) => {
   if (!walletAddress || !imageData || !filename) {
     return res.status(400).json({
       success: false,
-      error: "walletAddress, imageData, and filename are required"
+      error: "walletAddress, imageData, and filename are required",
     });
   }
 
   try {
     // Convert base64 image data to buffer if needed
     let buffer: Buffer;
-    if (typeof imageData === 'string') {
+    if (typeof imageData === "string") {
       // Remove data URL prefix if present (data:image/jpeg;base64,...)
-      const base64Data = imageData.replace(/^data:image\/[a-z]+;base64,/, '');
-      buffer = Buffer.from(base64Data, 'base64');
+      const base64Data = imageData.replace(/^data:image\/[a-z]+;base64,/, "");
+      buffer = Buffer.from(base64Data, "base64");
     } else {
       buffer = Buffer.from(imageData);
     }
 
-    console.log(`📤 Uploading ${filename} to Pipe for ${walletAddress.slice(0, 8)}... (${buffer.length} bytes)`);
+    console.log(
+      `📤 Uploading ${filename} to Pipe for ${walletAddress.slice(0, 8)}... (${buffer.length} bytes)`,
+    );
 
     // Use the SDK to upload the file
     // The SDK handles all auth internally including JWT tokens
@@ -341,15 +374,17 @@ app.post("/api/pipe/upload", async (req, res) => {
       walletAddress,
       buffer,
       filename,
-      { metadata }
+      { metadata },
     );
 
-    console.log(`✅ Successfully uploaded ${filename} for ${walletAddress.slice(0, 8)}...`);
+    console.log(
+      `✅ Successfully uploaded ${filename} for ${walletAddress.slice(0, 8)}...`,
+    );
     console.log(`📝 Upload result:`, {
       fileId: uploadResult.fileId,
       fileName: uploadResult.fileName,
       size: uploadResult.size,
-      blake3Hash: uploadResult.blake3Hash
+      blake3Hash: uploadResult.blake3Hash,
     });
 
     res.json({
@@ -360,13 +395,13 @@ app.post("/api/pipe/upload", async (req, res) => {
       walletAddress,
       metadata,
       blake3Hash: uploadResult.blake3Hash,
-      uploadTimestamp: uploadResult.uploadedAt.toISOString()
+      uploadTimestamp: uploadResult.uploadedAt.toISOString(),
     });
   } catch (error) {
-    console.error('Upload failed:', error);
+    console.error("Upload failed:", error);
     res.status(500).json({
       success: false,
-      error: error instanceof Error ? error.message : "Upload failed"
+      error: error instanceof Error ? error.message : "Upload failed",
     });
   }
 });
@@ -380,18 +415,23 @@ app.get("/api/pipe/files/:walletAddress", async (req, res) => {
   }
 
   try {
-    console.log(`📁 Getting file list for wallet: ${walletAddress.slice(0, 8)}...`);
+    console.log(
+      `📁 Getting file list for wallet: ${walletAddress.slice(0, 8)}...`,
+    );
 
     // Get files from SDK upload history first
     const fileRecords = await firestarterSDK.listUserFiles(walletAddress);
-    console.log(`📁 Found ${fileRecords.length} files for wallet ${walletAddress.slice(0, 8)}:`, fileRecords);
+    console.log(
+      `📁 Found ${fileRecords.length} files for wallet ${walletAddress.slice(0, 8)}:`,
+      fileRecords,
+    );
 
     if (fileRecords.length === 0) {
       // Return empty array if no files
       return res.json({
         files: [],
         count: 0,
-        walletAddress: walletAddress.slice(0, 8) + '...'
+        walletAddress: walletAddress.slice(0, 8) + "...",
       });
     }
 
@@ -404,24 +444,31 @@ app.get("/api/pipe/files/:walletAddress", async (req, res) => {
       id: record.fileId,
       name: record.originalFileName,
       size: record.size,
-      contentType: record.mimeType || 'application/octet-stream',
-      uploadedAt: record.uploadedAt ? (record.uploadedAt instanceof Date ? record.uploadedAt.toISOString() : new Date(record.uploadedAt).toISOString()) : new Date().toISOString(),
+      contentType: record.mimeType || "application/octet-stream",
+      uploadedAt: record.uploadedAt
+        ? record.uploadedAt instanceof Date
+          ? record.uploadedAt.toISOString()
+          : new Date(record.uploadedAt).toISOString()
+        : new Date().toISOString(),
       // Create a backend proxy URL for downloads since we need JWT auth
       url: `http://localhost:3001/api/pipe/download/${walletAddress}/${encodeURIComponent(record.fileId)}`,
       metadata: record.metadata || {},
-      blake3Hash: record.blake3Hash
+      blake3Hash: record.blake3Hash,
     }));
 
     res.json({
       files,
       count: files.length,
-      walletAddress: walletAddress.slice(0, 8) + '...'
+      walletAddress: walletAddress.slice(0, 8) + "...",
     });
   } catch (error) {
-    console.error('❌ Failed to list files:', error);
-    console.error('❌ Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
+    console.error("❌ Failed to list files:", error);
+    console.error(
+      "❌ Stack trace:",
+      error instanceof Error ? error.stack : "No stack trace",
+    );
     res.status(500).json({
-      error: error instanceof Error ? error.message : "Failed to list files"
+      error: error instanceof Error ? error.message : "Failed to list files",
     });
   }
 });
@@ -431,35 +478,46 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
   const { walletAddress, fileId } = req.params;
 
   if (!walletAddress || !fileId) {
-    return res.status(400).json({ error: "Wallet address and file ID are required" });
+    return res
+      .status(400)
+      .json({ error: "Wallet address and file ID are required" });
   }
 
   try {
-    console.log(`📥 Downloading file ${fileId} for wallet: ${walletAddress.slice(0, 8)}...`);
+    console.log(
+      `📥 Downloading file ${fileId} for wallet: ${walletAddress.slice(0, 8)}...`,
+    );
 
     // Get user account with proper authentication
     const user = await firestarterSDK.createUserAccount(walletAddress);
 
     // Use SDK to download file with proper JWT authentication
-    const fileBuffer = await firestarterSDK.downloadFile(walletAddress, decodeURIComponent(fileId));
+    const fileBuffer = await firestarterSDK.downloadFile(
+      walletAddress,
+      decodeURIComponent(fileId),
+    );
 
     // Determine content type from file extension or default
-    const contentType = fileId.includes('.jpg') || fileId.includes('.jpeg') ? 'image/jpeg' :
-                       fileId.includes('.png') ? 'image/png' :
-                       fileId.includes('.gif') ? 'image/gif' :
-                       'application/octet-stream';
+    const contentType =
+      fileId.includes(".jpg") || fileId.includes(".jpeg")
+        ? "image/jpeg"
+        : fileId.includes(".png")
+          ? "image/png"
+          : fileId.includes(".gif")
+            ? "image/gif"
+            : "application/octet-stream";
 
     // Set appropriate headers
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Length', fileBuffer.length);
-    res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Length", fileBuffer.length);
+    res.setHeader("Cache-Control", "public, max-age=31536000"); // Cache for 1 year
 
     // Send the file
     res.send(fileBuffer);
   } catch (error) {
-    console.error('❌ Download failed:', error);
+    console.error("❌ Download failed:", error);
     res.status(500).json({
-      error: error instanceof Error ? error.message : "Download failed"
+      error: error instanceof Error ? error.message : "Download failed",
     });
   }
 });
@@ -898,22 +956,33 @@ io.on("connection", (socket) => {
     );
   });
 
-  socket.on('register-viewer', (data: { cameraId: string, cellularMode?: boolean }) => {
-    console.log(`Viewer registering for WebRTC camera ${data.cameraId} on socket ${socket.id}, cellular mode: ${data.cellularMode || false}`);
-    webrtcPeers.set(socket.id, { cameraId: data.cameraId, type: 'viewer' });
-    socket.join(`webrtc-${data.cameraId}`);
+  socket.on(
+    "register-viewer",
+    (data: { cameraId: string; cellularMode?: boolean }) => {
+      console.log(
+        `Viewer registering for WebRTC camera ${data.cameraId} on socket ${socket.id}, cellular mode: ${data.cellularMode || false}`,
+      );
+      webrtcPeers.set(socket.id, { cameraId: data.cameraId, type: "viewer" });
+      socket.join(`webrtc-${data.cameraId}`);
 
-    // Check how many peers are in the room
-    const roomSockets = io.sockets.adapter.rooms.get(`webrtc-${data.cameraId}`);
-    console.log(`Room webrtc-${data.cameraId} has ${roomSockets ? roomSockets.size : 0} sockets`);
+      // Check how many peers are in the room
+      const roomSockets = io.sockets.adapter.rooms.get(
+        `webrtc-${data.cameraId}`,
+      );
+      console.log(
+        `Room webrtc-${data.cameraId} has ${roomSockets ? roomSockets.size : 0} sockets`,
+      );
 
-    // Notify camera that a viewer wants to connect with cellular mode flag
-    console.log(`Notifying camera in room webrtc-${data.cameraId} that viewer ${socket.id} wants to connect (cellular: ${data.cellularMode || false})`);
-    socket.to(`webrtc-${data.cameraId}`).emit('viewer-wants-connection', {
-      viewerId: socket.id,
-      cellularMode: data.cellularMode || false
-    });
-  });
+      // Notify camera that a viewer wants to connect with cellular mode flag
+      console.log(
+        `Notifying camera in room webrtc-${data.cameraId} that viewer ${socket.id} wants to connect (cellular: ${data.cellularMode || false})`,
+      );
+      socket.to(`webrtc-${data.cameraId}`).emit("viewer-wants-connection", {
+        viewerId: socket.id,
+        cellularMode: data.cellularMode || false,
+      });
+    },
+  );
 
   socket.on(
     "webrtc-offer",
@@ -994,21 +1063,25 @@ process.on("unhandledRejection", (reason, promise) => {
 
 // Enhanced CoTURN-compatible server implementation for Railway
 const TURN_PORT = Number(process.env.PORT) || 8080; // Use Railway's exposed port
-const TURN_USERNAME = process.env.TURN_USERNAME || 'mmoment';
-const TURN_PASSWORD = process.env.TURN_PASSWORD || 'webrtc123';
-const TURN_REALM = process.env.TURN_REALM || 'mmoment.xyz';
+const TURN_USERNAME = process.env.TURN_USERNAME || "mmoment";
+const TURN_PASSWORD = process.env.TURN_PASSWORD || "webrtc123";
+const TURN_REALM = process.env.TURN_REALM || "mmoment.xyz";
 
 // Get external IP for Railway deployment
-const EXTERNAL_IP = process.env.RAILWAY_PUBLIC_DOMAIN || 'mmoment-production.up.railway.app';
+const EXTERNAL_IP =
+  process.env.RAILWAY_PUBLIC_DOMAIN || "mmoment-production.up.railway.app";
 
 // Store active TURN allocations
-const turnAllocations = new Map<string, {
-  clientAddress: string,
-  clientPort: number,
-  relayPort: number,
-  relaySocket: dgram.Socket,
-  peers: Map<string, { address: string, port: number }>
-}>();
+const turnAllocations = new Map<
+  string,
+  {
+    clientAddress: string;
+    clientPort: number;
+    relayPort: number;
+    relaySocket: dgram.Socket;
+    peers: Map<string, { address: string; port: number }>;
+  }
+>();
 
 // Create TURN server (TCP for Railway compatibility)
 const turnServer = net.createServer();
@@ -1016,32 +1089,39 @@ const turnServer = net.createServer();
 // Helper function to parse STUN/TURN messages
 function parseStunMessage(msg: Buffer) {
   if (msg.length < 20) return null;
-  
+
   const messageType = msg.readUInt16BE(0);
   const messageLength = msg.readUInt16BE(2);
   const magicCookie = msg.readUInt32BE(4);
   const transactionId = msg.slice(8, 20);
-  
+
   return { messageType, messageLength, magicCookie, transactionId };
 }
 
 // Helper function to create STUN/TURN response
-function createStunResponse(type: number, transactionId: Buffer, attributes: Buffer[] = []): Buffer {
-  const totalAttrLength = attributes.reduce((sum, attr) => sum + attr.length, 0);
+function createStunResponse(
+  type: number,
+  transactionId: Buffer,
+  attributes: Buffer[] = [],
+): Buffer {
+  const totalAttrLength = attributes.reduce(
+    (sum, attr) => sum + attr.length,
+    0,
+  );
   const response = Buffer.alloc(20 + totalAttrLength);
-  
+
   response.writeUInt16BE(type, 0); // Message type
   response.writeUInt16BE(totalAttrLength, 2); // Message length
-  response.writeUInt32BE(0x2112A442, 4); // Magic cookie
+  response.writeUInt32BE(0x2112a442, 4); // Magic cookie
   transactionId.copy(response, 8); // Transaction ID
-  
+
   // Copy attributes
   let offset = 20;
   for (const attr of attributes) {
     attr.copy(response, offset);
     offset += attr.length;
   }
-  
+
   return response;
 }
 
@@ -1052,141 +1132,164 @@ function createXorMappedAddress(address: string, port: number): Buffer {
   attr.writeUInt16BE(8, 2); // Length
   attr.writeUInt16BE(0x0001, 4); // IPv4 family
   attr.writeUInt16BE(port ^ 0x2112, 6); // XOR'd port
-  
+
   // XOR the IP address
-  const ipParts = address.split('.').map(Number);
-  const magicCookie = [0x21, 0x12, 0xA4, 0x42];
+  const ipParts = address.split(".").map(Number);
+  const magicCookie = [0x21, 0x12, 0xa4, 0x42];
   for (let i = 0; i < 4; i++) {
     attr.writeUInt8(ipParts[i] ^ magicCookie[i], 8 + i);
   }
-  
+
   return attr;
 }
 
-turnServer.on('connection', (socket) => {
-  console.log(`TCP TURN connection from ${socket.remoteAddress}:${socket.remotePort}`);
-  
-  socket.on('data', (data) => {
+turnServer.on("connection", (socket) => {
+  console.log(
+    `TCP TURN connection from ${socket.remoteAddress}:${socket.remotePort}`,
+  );
+
+  socket.on("data", (data) => {
     try {
       const stunMsg = parseStunMessage(data);
       if (!stunMsg) return;
-      
+
       const { messageType, transactionId } = stunMsg;
-      const clientAddress = socket.remoteAddress || '127.0.0.1';
+      const clientAddress = socket.remoteAddress || "127.0.0.1";
       const clientPort = socket.remotePort || 0;
-        
-        // Handle STUN Binding Request (0x0001)
-        if (messageType === 0x0001) {
-          console.log(`STUN Binding request from ${clientAddress}:${clientPort}`);
-          
-          // Create XOR-MAPPED-ADDRESS attribute
-          const xorMappedAddr = createXorMappedAddress(clientAddress, clientPort);
-          
-          // Send STUN Binding Response (0x0101)
-          const response = createStunResponse(0x0101, transactionId, [xorMappedAddr]);
-          socket.write(response);
-          
-          console.log(`STUN Binding response sent to ${clientAddress}:${clientPort}`);
-        }
-        // Handle TURN Allocate Request (0x0003)
-        else if (messageType === 0x0003) {
-          console.log(`TURN: Allocation request from ${clientAddress}:${clientPort}`);
-        
-        // Create a relay socket for this client
-        const relaySocket = dgram.createSocket('udp4');
-        let relayPort = 40000 + Math.floor(Math.random() * 10000);
-        
-          relaySocket.bind(relayPort, () => {
-            const allocationId = `${clientAddress}:${clientPort}`;
-            
-            // Store allocation
-            turnAllocations.set(allocationId, {
-              clientAddress: clientAddress,
-              clientPort: clientPort,
-              relayPort: relayPort,
-              relaySocket: relaySocket,
-              peers: new Map()
-            });
-            
-            // Handle relay traffic
-            relaySocket.on('message', (relayMsg, relayRinfo) => {
-              // Forward relay traffic back to the client
-              socket.write(relayMsg);
-            });
-          
-          // Create XOR-RELAYED-ADDRESS attribute
-          const relayAddr = createXorMappedAddress('0.0.0.0', relayPort);
-          relayAddr.writeUInt16BE(0x0016, 0); // Change type to XOR-RELAYED-ADDRESS
-          
-            // Create XOR-MAPPED-ADDRESS for the client
-            const mappedAddr = createXorMappedAddress(clientAddress, clientPort);
-            
-            // Create LIFETIME attribute (600 seconds)
-            const lifetime = Buffer.alloc(8);
-            lifetime.writeUInt16BE(0x000D, 0); // LIFETIME
-            lifetime.writeUInt16BE(4, 2); // Length
-            lifetime.writeUInt32BE(600, 4); // 600 seconds
-            
-            // Send Allocate Success Response (0x0103)
-            const response = createStunResponse(0x0103, transactionId, [relayAddr, mappedAddr, lifetime]);
-            socket.write(response);
-            
-            console.log(`TURN: Allocated relay port ${relayPort} for ${allocationId}`);
-        });
-        
-        relaySocket.on('error', (err) => {
-          console.error(`TURN relay socket error:`, err);
-        });
-        
+
+      // Handle STUN Binding Request (0x0001)
+      if (messageType === 0x0001) {
+        console.log(`STUN Binding request from ${clientAddress}:${clientPort}`);
+
+        // Create XOR-MAPPED-ADDRESS attribute
+        const xorMappedAddr = createXorMappedAddress(clientAddress, clientPort);
+
+        // Send STUN Binding Response (0x0101)
+        const response = createStunResponse(0x0101, transactionId, [
+          xorMappedAddr,
+        ]);
+        socket.write(response);
+
+        console.log(
+          `STUN Binding response sent to ${clientAddress}:${clientPort}`,
+        );
       }
-        // Handle TURN Refresh Request (0x0004)
-        else if (messageType === 0x0004) {
-          console.log(`TURN Refresh request from ${clientAddress}:${clientPort}`);
-          
-          // Send Refresh Success Response (0x0104)
+      // Handle TURN Allocate Request (0x0003)
+      else if (messageType === 0x0003) {
+        console.log(
+          `TURN: Allocation request from ${clientAddress}:${clientPort}`,
+        );
+
+        // Create a relay socket for this client
+        const relaySocket = dgram.createSocket("udp4");
+        let relayPort = 40000 + Math.floor(Math.random() * 10000);
+
+        relaySocket.bind(relayPort, () => {
+          const allocationId = `${clientAddress}:${clientPort}`;
+
+          // Store allocation
+          turnAllocations.set(allocationId, {
+            clientAddress: clientAddress,
+            clientPort: clientPort,
+            relayPort: relayPort,
+            relaySocket: relaySocket,
+            peers: new Map(),
+          });
+
+          // Handle relay traffic
+          relaySocket.on("message", (relayMsg, relayRinfo) => {
+            // Forward relay traffic back to the client
+            socket.write(relayMsg);
+          });
+
+          // Create XOR-RELAYED-ADDRESS attribute
+          const relayAddr = createXorMappedAddress("0.0.0.0", relayPort);
+          relayAddr.writeUInt16BE(0x0016, 0); // Change type to XOR-RELAYED-ADDRESS
+
+          // Create XOR-MAPPED-ADDRESS for the client
+          const mappedAddr = createXorMappedAddress(clientAddress, clientPort);
+
+          // Create LIFETIME attribute (600 seconds)
           const lifetime = Buffer.alloc(8);
-          lifetime.writeUInt16BE(0x000D, 0); // LIFETIME
+          lifetime.writeUInt16BE(0x000d, 0); // LIFETIME
           lifetime.writeUInt16BE(4, 2); // Length
           lifetime.writeUInt32BE(600, 4); // 600 seconds
-          
-          const response = createStunResponse(0x0104, transactionId, [lifetime]);
+
+          // Send Allocate Success Response (0x0103)
+          const response = createStunResponse(0x0103, transactionId, [
+            relayAddr,
+            mappedAddr,
+            lifetime,
+          ]);
           socket.write(response);
+
+          console.log(
+            `TURN: Allocated relay port ${relayPort} for ${allocationId}`,
+          );
+        });
+
+        relaySocket.on("error", (err) => {
+          console.error(`TURN relay socket error:`, err);
+        });
+      }
+      // Handle TURN Refresh Request (0x0004)
+      else if (messageType === 0x0004) {
+        console.log(`TURN Refresh request from ${clientAddress}:${clientPort}`);
+
+        // Send Refresh Success Response (0x0104)
+        const lifetime = Buffer.alloc(8);
+        lifetime.writeUInt16BE(0x000d, 0); // LIFETIME
+        lifetime.writeUInt16BE(4, 2); // Length
+        lifetime.writeUInt32BE(600, 4); // 600 seconds
+
+        const response = createStunResponse(0x0104, transactionId, [lifetime]);
+        socket.write(response);
+      }
+      // Handle ChannelBind or Send Indication for data relay
+      else if (messageType === 0x0009 || messageType === 0x0016) {
+        // Handle data relay
+        const allocationId = `${clientAddress}:${clientPort}`;
+        const allocation = turnAllocations.get(allocationId);
+
+        if (allocation) {
+          // This is data from the client to be relayed
+          // In a full TURN implementation, you'd parse the destination from TURN headers
+          // For simplicity, we'll relay to the first peer or back to the client
+
+          // Forward to relay socket (which will send to peers)
+          allocation.relaySocket.send(
+            data,
+            0,
+            data.length,
+            allocation.relayPort,
+            "localhost",
+          );
         }
-        // Handle ChannelBind or Send Indication for data relay
-        else if (messageType === 0x0009 || messageType === 0x0016) {
-          // Handle data relay
-          const allocationId = `${clientAddress}:${clientPort}`;
-          const allocation = turnAllocations.get(allocationId);
-          
-          if (allocation) {
-            // This is data from the client to be relayed
-            // In a full TURN implementation, you'd parse the destination from TURN headers
-            // For simplicity, we'll relay to the first peer or back to the client
-            
-            // Forward to relay socket (which will send to peers)
-            allocation.relaySocket.send(data, 0, data.length, allocation.relayPort, 'localhost');
-          }
-        }
-        // Handle other TURN messages
-        else {
-          console.log(`Unknown STUN/TURN message type: 0x${messageType.toString(16)} from ${clientAddress}:${clientPort}`);
-        }
+      }
+      // Handle other TURN messages
+      else {
+        console.log(
+          `Unknown STUN/TURN message type: 0x${messageType.toString(16)} from ${clientAddress}:${clientPort}`,
+        );
+      }
     } catch (error) {
-      console.error('TCP TURN server error:', error);
+      console.error("TCP TURN server error:", error);
     }
   });
 
-  socket.on('close', () => {
-    console.log(`TCP TURN connection closed from ${socket.remoteAddress}:${socket.remotePort}`);
+  socket.on("close", () => {
+    console.log(
+      `TCP TURN connection closed from ${socket.remoteAddress}:${socket.remotePort}`,
+    );
   });
 
-  socket.on('error', (err) => {
-    console.error('TCP TURN socket error:', err);
+  socket.on("error", (err) => {
+    console.error("TCP TURN socket error:", err);
   });
 });
 
-turnServer.on('error', (err) => {
-  console.error('TURN server error:', err);
+turnServer.on("error", (err) => {
+  console.error("TURN server error:", err);
 });
 
 // TURN server disabled - Railway only provides one port for HTTP
@@ -1199,22 +1302,24 @@ turnServer.on('error', (err) => {
 //   console.log(`Supported messages: STUN Binding, TURN Allocate, TURN Refresh`);
 //   console.log(`Transport: TCP (Railway compatible)`);
 // });
-console.log('⚠️ TURN server disabled - Railway only supports HTTP on port 8080');
-console.log('⚠️ Use external TURN server for cross-network WebRTC');
+console.log(
+  "⚠️ TURN server disabled - Railway only supports HTTP on port 8080",
+);
+console.log("⚠️ Use external TURN server for cross-network WebRTC");
 
 // TURN server info endpoint
-app.get('/api/turn/info', (req, res) => {
+app.get("/api/turn/info", (req, res) => {
   const turnInfo = {
-    host: req.headers.host?.split(':')[0] || 'localhost',
+    host: req.headers.host?.split(":")[0] || "localhost",
     port: TURN_PORT,
     username: TURN_USERNAME,
     credential: TURN_PASSWORD,
     urls: [
-      `turn:${req.headers.host?.split(':')[0] || 'localhost'}:${TURN_PORT}`,
-      `turn:${req.headers.host?.split(':')[0] || 'localhost'}:${TURN_PORT}?transport=udp`
-    ]
+      `turn:${req.headers.host?.split(":")[0] || "localhost"}:${TURN_PORT}`,
+      `turn:${req.headers.host?.split(":")[0] || "localhost"}:${TURN_PORT}?transport=udp`,
+    ],
   };
-  
+
   res.json(turnInfo);
 });
 
@@ -1230,6 +1335,6 @@ httpServer.listen(port, "0.0.0.0", () => {
     socketPingTimeout: io.engine.opts.pingTimeout,
     socketPingInterval: io.engine.opts.pingInterval,
     turnPort: TURN_PORT,
-    turnUsername: TURN_USERNAME
+    turnUsername: TURN_USERNAME,
   });
 });
