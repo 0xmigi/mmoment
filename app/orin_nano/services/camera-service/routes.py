@@ -19,6 +19,12 @@ import cv2
 # Import device signer for DePIN authentication
 from services.device_signer import DeviceSigner
 
+# Import GPU face service for identity tracking
+try:
+    from services.gpu_face_service import get_gpu_face_service
+except ImportError:
+    get_gpu_face_service = None
+
 # Set up logging
 logger = logging.getLogger("CameraRoutes")
 
@@ -136,6 +142,7 @@ def register_routes(app):
                 'session_connect': '/api/session/connect',
                 'session_disconnect': '/api/session/disconnect',
                 'face_enroll': '/api/face/enroll',
+                'face_extract_embedding': '/api/face/extract-embedding',
                 'face_recognize': '/api/face/recognize',
                 'gesture_current': '/api/gesture/current',
                 'visualization_face': '/api/visualization/face',
@@ -947,6 +954,288 @@ def register_routes(app):
                 'error': f"Failed to confirm enrollment: {str(e)}"
             }), 500
     
+    @app.route('/api/face/extract-embedding', methods=['POST'])
+    def api_face_extract_embedding():
+        """
+        Extract face embedding from base64 image for phone-based enrollment.
+        Includes quality scoring and optional encryption for security.
+        """
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({
+                    'success': False,
+                    'error': 'No data provided'
+                }), 400
+
+            image_data = data.get('image')
+            wallet_address = data.get('wallet_address')  # Optional for encryption
+            encrypt = data.get('encrypt', False)  # Whether to encrypt the embedding
+
+            if not image_data:
+                return jsonify({
+                    'success': False,
+                    'error': 'Missing image data'
+                }), 400
+
+            # Decode base64 image
+            try:
+                if image_data.startswith('data:image'):
+                    # Remove data URL prefix (data:image/jpeg;base64,)
+                    image_data = image_data.split(',')[1]
+
+                # Decode base64 to bytes
+                import base64
+                image_bytes = base64.b64decode(image_data)
+
+                # Convert to numpy array
+                import numpy as np
+                nparr = np.frombuffer(image_bytes, np.uint8)
+
+                # Decode image
+                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+                if frame is None:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Invalid image data - could not decode image'
+                    }), 400
+
+            except Exception as e:
+                logger.error(f"Error decoding image: {e}")
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to decode base64 image'
+                }), 400
+
+            # Get GPU face service
+            services = get_services()
+            if 'gpu_face' not in services:
+                return jsonify({
+                    'success': False,
+                    'error': 'GPU face service not available'
+                }), 503
+
+            gpu_face_service = services['gpu_face']
+
+            # Check if models are loaded
+            if not gpu_face_service._models_loaded:
+                return jsonify({
+                    'success': False,
+                    'error': 'Face recognition models not loaded'
+                }), 503
+
+            # Use InsightFace to detect and analyze faces for quality
+            quality_score = 0
+            quality_factors = {}
+
+            try:
+                # Convert BGR to RGB for InsightFace
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                # Get all faces detected by InsightFace
+                faces = gpu_face_service.face_embedder.get(frame_rgb)
+
+                if len(faces) == 0:
+                    return jsonify({
+                        'success': False,
+                        'error': 'No face detected in image - please ensure your face is clearly visible',
+                        'quality_score': 0,
+                        'quality_factors': {
+                            'face_detected': False
+                        }
+                    }), 400
+
+                # Get the largest/best face
+                face = max(faces, key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]))
+
+                # Calculate quality score based on multiple factors
+                bbox = face.bbox
+                face_width = bbox[2] - bbox[0]
+                face_height = bbox[3] - bbox[1]
+                image_height, image_width = frame.shape[:2]
+
+                # 1. Face size score (larger faces are better)
+                face_area_ratio = (face_width * face_height) / (image_width * image_height)
+                size_score = min(face_area_ratio * 200, 100)  # 0-100 scale
+                quality_factors['face_size'] = round(size_score, 1)
+
+                # 2. Face position score (centered faces are better)
+                face_center_x = (bbox[0] + bbox[2]) / 2
+                face_center_y = (bbox[1] + bbox[3]) / 2
+                center_offset_x = abs(face_center_x - image_width/2) / (image_width/2)
+                center_offset_y = abs(face_center_y - image_height/2) / (image_height/2)
+                position_score = 100 - (center_offset_x + center_offset_y) * 50
+                quality_factors['face_position'] = round(max(position_score, 0), 1)
+
+                # 3. Detection confidence (from InsightFace)
+                det_score = float(face.det_score) if hasattr(face, 'det_score') else 0.9
+                confidence_score = det_score * 100
+                quality_factors['detection_confidence'] = round(confidence_score, 1)
+
+                # 4. Image sharpness (using Laplacian variance)
+                face_region = frame[int(bbox[1]):int(bbox[3]), int(bbox[0]):int(bbox[2])]
+                if face_region.size > 0:
+                    gray_face = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+                    laplacian_var = cv2.Laplacian(gray_face, cv2.CV_64F).var()
+                    sharpness_score = min(laplacian_var / 10, 100)  # Normalize to 0-100
+                    quality_factors['image_sharpness'] = round(sharpness_score, 1)
+                else:
+                    quality_factors['image_sharpness'] = 50
+
+                # 5. Lighting quality (check histogram distribution)
+                if face_region.size > 0:
+                    hist = cv2.calcHist([gray_face], [0], None, [256], [0, 256])
+                    hist_normalized = hist.ravel() / hist.sum()
+                    # Check for good distribution (not too dark or bright)
+                    low_light = hist_normalized[:50].sum()
+                    high_light = hist_normalized[200:].sum()
+                    lighting_score = 100 - (low_light + high_light) * 100
+                    quality_factors['lighting_quality'] = round(max(lighting_score, 0), 1)
+                else:
+                    quality_factors['lighting_quality'] = 50
+
+                # Calculate overall quality score (weighted average)
+                quality_score = (
+                    size_score * 0.25 +
+                    position_score * 0.15 +
+                    confidence_score * 0.30 +
+                    quality_factors['image_sharpness'] * 0.15 +
+                    quality_factors['lighting_quality'] * 0.15
+                )
+                quality_score = round(quality_score, 1)
+
+                # Extract embedding
+                embedding = face.normed_embedding
+                embedding_list = embedding.tolist()
+
+                logger.info(f"Extracted embedding with quality score: {quality_score}%")
+
+                # If encryption is requested and wallet address provided
+                if encrypt and wallet_address:
+                    try:
+                        # Create biometric session for encryption
+                        biometric_response = requests.post(
+                            'http://biometric-security:5003/api/biometric/create-session',
+                            json={
+                                'wallet_address': wallet_address,
+                                'session_duration': 300  # 5 minutes for enrollment
+                            },
+                            timeout=10
+                        )
+
+                        if biometric_response.status_code == 200:
+                            biometric_session = biometric_response.json()
+                            session_id = biometric_session['session_id']
+
+                            # Encrypt the embedding
+                            encrypt_response = requests.post(
+                                'http://biometric-security:5003/api/biometric/encrypt-embedding',
+                                json={
+                                    'embedding': embedding_list,
+                                    'wallet_address': wallet_address,
+                                    'session_id': session_id,
+                                    'metadata': {
+                                        'quality_score': quality_score,
+                                        'timestamp': int(time.time()),
+                                        'source': 'phone_camera'
+                                    }
+                                },
+                                timeout=15
+                            )
+
+                            if encrypt_response.status_code == 200:
+                                encrypted_data = encrypt_response.json()
+
+                                logger.info(f"Successfully encrypted embedding for {wallet_address[:8]}...")
+
+                                return jsonify({
+                                    'success': True,
+                                    'embedding': encrypted_data['nft_package'],  # Encrypted package
+                                    'encrypted': True,
+                                    'encryption_method': 'AES-256-PBKDF2',
+                                    'session_id': session_id,
+                                    'quality_score': quality_score,
+                                    'quality_factors': quality_factors,
+                                    'quality_rating': api_face_extract_embedding.get_quality_rating(quality_score),
+                                    'recommendations': api_face_extract_embedding.get_quality_recommendations(quality_score, quality_factors)
+                                })
+                    except Exception as encrypt_error:
+                        logger.warning(f"Encryption failed, returning unencrypted: {encrypt_error}")
+                        # Fall through to return unencrypted
+
+                # Return unencrypted embedding with quality metrics
+                return jsonify({
+                    'success': True,
+                    'embedding': embedding_list,
+                    'encrypted': False,
+                    'quality_score': quality_score,
+                    'quality_factors': quality_factors,
+                    'quality_rating': api_face_extract_embedding.get_quality_rating(quality_score),
+                    'recommendations': api_face_extract_embedding.get_quality_recommendations(quality_score, quality_factors)
+                })
+
+            except Exception as analysis_error:
+                logger.error(f"Face analysis error: {analysis_error}")
+                # Try basic extraction without quality scoring
+                full_embedding = gpu_face_service.extract_face_embedding(frame)
+
+                if full_embedding is None:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Face detection failed',
+                        'quality_score': 0
+                    }), 400
+
+                return jsonify({
+                    'success': True,
+                    'embedding': full_embedding.tolist(),
+                    'encrypted': False,
+                    'quality_score': 50,  # Unknown quality
+                    'quality_rating': 'unknown',
+                    'warning': 'Quality assessment unavailable'
+                })
+
+        except Exception as e:
+            logger.error(f"Error in face embedding extraction: {e}")
+            return jsonify({
+                'success': False,
+                'error': f'Face embedding extraction failed: {str(e)}'
+            }), 500
+
+    # Helper functions for quality assessment
+    api_face_extract_embedding.get_quality_rating = lambda score: (
+        'excellent' if score >= 90 else
+        'good' if score >= 80 else
+        'acceptable' if score >= 70 else
+        'poor' if score >= 60 else
+        'very_poor'
+    )
+
+    api_face_extract_embedding.get_quality_recommendations = lambda score, factors: (
+        ["Excellent quality! Your facial embedding is optimal for recognition."] if score >= 90 else
+        [
+            "Move closer to the camera for a larger face image" if factors.get('face_size', 100) < 70 else None,
+            "Center your face in the frame" if factors.get('face_position', 100) < 70 else None,
+            "Hold the camera steady to reduce blur" if factors.get('image_sharpness', 100) < 70 else None,
+            "Improve lighting - avoid shadows and extreme brightness" if factors.get('lighting_quality', 100) < 70 else None,
+            "Ensure your face is fully visible and unobstructed" if factors.get('detection_confidence', 100) < 80 else None
+        ] if score < 90 else []
+    )
+    # Filter out None values from recommendations
+    api_face_extract_embedding.get_quality_recommendations = lambda score, factors: [
+        rec for rec in api_face_extract_embedding.get_quality_recommendations.__wrapped__(score, factors) if rec
+    ] if hasattr(api_face_extract_embedding.get_quality_recommendations, '__wrapped__') else (
+        ["Excellent quality! Your facial embedding is optimal for recognition."] if score >= 90 else
+        [rec for rec in [
+            "Move closer to the camera for a larger face image" if factors.get('face_size', 100) < 70 else None,
+            "Center your face in the frame" if factors.get('face_position', 100) < 70 else None,
+            "Hold the camera steady to reduce blur" if factors.get('image_sharpness', 100) < 70 else None,
+            "Improve lighting - avoid shadows and extreme brightness" if factors.get('lighting_quality', 100) < 70 else None,
+            "Ensure your face is fully visible and unobstructed" if factors.get('detection_confidence', 100) < 80 else None
+        ] if rec] or ["Consider retaking for better quality"]
+    )
+
     @app.route('/api/face/recognize', methods=['POST'])
     def api_face_recognize():
         """Standardized face recognition endpoint"""

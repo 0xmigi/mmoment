@@ -19,6 +19,7 @@ import os
 import logging
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
+from .identity_tracker import IdentityTracker
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -64,9 +65,9 @@ class GPUFaceService:
         self.recognition_count = 0
         self.last_recognition = None
         
-        # Detection settings - REDUCED FREQUENCY TO PREVENT CPU OVERLOAD
-        self._detection_interval = 5.0   # Face detection every 5s (was 0.5s)
-        self._recognition_interval = 10.0  # Face recognition every 10s (was 1s)
+        # Detection settings - Restored to original performance
+        self._detection_interval = 0.5   # Face detection every 0.5s (restored from 5s)
+        self._recognition_interval = 1.0  # Face recognition every 1s (restored from 10s)
         self._similarity_threshold = 0.6  # Higher threshold for GPU model
         self._last_detection_time = 0
         self._last_recognition_time = 0
@@ -86,7 +87,10 @@ class GPUFaceService:
         # Database paths
         self._faces_dir = os.path.expanduser("~/mmoment/app/orin_nano/camera_service/faces")
         Path(self._faces_dir).mkdir(parents=True, exist_ok=True)
-        
+
+        # Initialize identity tracker for persistent tracking
+        self.identity_tracker = IdentityTracker(face_service=self)
+
         # Initialize GPU and models
         self.initialize_models()
         self.load_face_database()
@@ -270,48 +274,107 @@ class GPUFaceService:
             
             # CRITICAL FIX: Force YOLOv8 to use GPU for inference
             # YOLOv8 bug: ignores .to('cuda') without explicit device parameter!
+            # Enable tracking with persist=True for identity tracking
             with torch.cuda.nvtx.range("YOLOv8_inference"):  # GPU profiling marker
-                results = self.face_detector.predict(frame, device=0, verbose=False)  # device=0 forces GPU!
+                results = self.face_detector.track(frame, device=0, verbose=False, persist=True)  # device=0 forces GPU, persist enables tracking!
             
             logger.info(f"✅ GPU INFERENCE COMPLETE: {len(results)} detections on {device}")
             
             for result in results:
                 if result.boxes is not None:
-                    for box in result.boxes:
+                    for i, box in enumerate(result.boxes):
                         # Filter for person class (class 0 in COCO)
                         if int(box.cls) == 0 and float(box.conf) > 0.5:
                             # Get bounding box coordinates
                             x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                             confidence = float(box.conf)
-                            
+
+                            # Get track ID if available (from tracking)
+                            track_id = None
+                            if hasattr(box, 'id') and box.id is not None:
+                                track_id = int(box.id[0]) if hasattr(box.id, '__iter__') else int(box.id)
+
                             # Extract face region with some padding
                             padding = 20
                             y1_padded = max(0, y1 - padding)
                             y2_padded = min(frame.shape[0], y2 + padding)
                             x1_padded = max(0, x1 - padding)
                             x2_padded = min(frame.shape[1], x2 + padding)
-                            
+
                             # Extract face region
                             face_region = frame[y1_padded:y2_padded, x1_padded:x2_padded]
-                            
+
                             if face_region.size > 0:
                                 # Attempt face recognition
                                 recognized_name, similarity = self.recognize_face(face_region)
-                                
+
                                 face_data = {
                                     'box': (x1, y1, x2, y2),
                                     'confidence': confidence,
+                                    'track_id': track_id,  # Add track ID for identity tracking
                                     'recognized_name': recognized_name,
                                     'similarity': similarity,
                                     'face_region': face_region
                                 }
-                                
+
                                 faces.append(face_data)
         
         except Exception as e:
             logger.error(f"Error in face detection: {e}")
-        
+
         return faces
+
+    def detect_and_track_identities(self, frame: np.ndarray) -> List[Dict]:
+        """
+        Detect persons and maintain persistent identity tracking.
+        This is the main method for CV apps that need continuous identity tracking.
+        """
+        if not self._models_loaded:
+            return []
+
+        # Get detections with track IDs
+        detections = self.detect_and_recognize_faces(frame)
+
+        # Convert to format for identity tracker
+        tracker_detections = []
+        for det in detections:
+            tracker_det = {
+                'class': 'person',
+                'x1': det['box'][0],
+                'y1': det['box'][1],
+                'x2': det['box'][2],
+                'y2': det['box'][3],
+                'confidence': det['confidence'],
+                'track_id': det.get('track_id')
+            }
+            tracker_detections.append(tracker_det)
+
+        # Process through identity tracker for persistent tracking
+        enhanced_detections = self.identity_tracker.process_frame_detections(
+            tracker_detections, frame
+        )
+
+        # Merge back face recognition data
+        final_detections = []
+        for enhanced, original in zip(enhanced_detections, detections):
+            enhanced['face_data'] = {
+                'recognized_name': original['recognized_name'],
+                'similarity': original['similarity']
+            }
+            # If identity tracker found wallet, use that over face recognition
+            if 'wallet_address' in enhanced:
+                enhanced['identity'] = enhanced['wallet_address']
+                enhanced['tracking_method'] = 'persistent_tracking'
+            elif original['recognized_name']:
+                enhanced['identity'] = original['recognized_name']
+                enhanced['tracking_method'] = 'face_recognition'
+            else:
+                enhanced['identity'] = None
+                enhanced['tracking_method'] = None
+
+            final_detections.append(enhanced)
+
+        return final_detections
 
     def recognize_face(self, face_img: np.ndarray) -> Tuple[Optional[str], float]:
         """Recognize a face by comparing embeddings"""
