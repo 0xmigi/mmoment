@@ -11,6 +11,19 @@ interface FaceProcessingResult {
   error?: string;
 }
 
+interface ImageQualityResult {
+  score: number;
+  rating: 'excellent' | 'good' | 'acceptable' | 'poor' | 'very_poor';
+  issues: string[];
+  recommendations: string[];
+}
+
+interface EnhancedFaceProcessingResult extends FaceProcessingResult {
+  quality?: ImageQualityResult;
+  encrypted?: boolean;
+  sessionId?: string;
+}
+
 // Note: ONNX Runtime integration will be added later
 // For now, we use simplified face processing
 
@@ -25,15 +38,234 @@ class FaceProcessingService {
   }
 
   /**
-   * Process a selfie image and extract facial embedding
+   * Analyze image quality using local assessment
    *
    * @param imageData Base64 encoded image data
-   * @returns Promise resolving to facial embedding
+   * @returns Promise resolving to quality assessment
    */
-  async processFacialEmbedding(imageData: string): Promise<FaceProcessingResult> {
+  async analyzeImageQuality(imageData: string): Promise<ImageQualityResult> {
     try {
-      // Using simplified face processing for now
-      // TODO: Add ONNX Runtime + InsightFace models later
+      // Load image for analysis
+      const image = await this.loadImage(imageData);
+
+      // Basic quality assessment (this would be enhanced with proper computer vision)
+      const issues: string[] = [];
+      const recommendations: string[] = [];
+
+      let score = 100;
+
+      // Check image dimensions
+      if (image.width < 320 || image.height < 240) {
+        issues.push('Image resolution too low');
+        recommendations.push('Use a higher resolution camera');
+        score -= 30;
+      }
+
+      // Basic brightness check (simplified)
+      if (!this.canvas || !this.context) {
+        throw new Error('Canvas not initialized');
+      }
+
+      this.canvas.width = image.width;
+      this.canvas.height = image.height;
+      this.context.drawImage(image, 0, 0);
+
+      const imagePixelData = this.context.getImageData(0, 0, image.width, image.height);
+      const avgBrightness = this.calculateAverageBrightness(imagePixelData);
+
+      if (avgBrightness < 50) {
+        issues.push('Image too dark');
+        recommendations.push('Improve lighting or move to a brighter area');
+        score -= 20;
+      } else if (avgBrightness > 200) {
+        issues.push('Image too bright');
+        recommendations.push('Reduce lighting or move away from bright lights');
+        score -= 15;
+      }
+
+      // Face detection check
+      const faceRegion = this.detectFaceRegion(imagePixelData);
+      if (!faceRegion) {
+        issues.push('No clear face detected');
+        recommendations.push('Ensure your face is clearly visible and centered');
+        score -= 40;
+      } else {
+        // Check face size
+        const faceArea = faceRegion.width * faceRegion.height;
+        const imageArea = image.width * image.height;
+        const faceRatio = faceArea / imageArea;
+
+        if (faceRatio < 0.1) {
+          issues.push('Face too small in frame');
+          recommendations.push('Move closer to the camera');
+          score -= 25;
+        }
+
+        // Check face centering
+        const centerX = image.width / 2;
+        const centerY = image.height / 2;
+        const faceCenterX = faceRegion.x + faceRegion.width / 2;
+        const faceCenterY = faceRegion.y + faceRegion.height / 2;
+
+        const centerDistance = Math.sqrt(
+          Math.pow(faceCenterX - centerX, 2) + Math.pow(faceCenterY - centerY, 2)
+        );
+        const maxDistance = Math.sqrt(Math.pow(image.width / 4, 2) + Math.pow(image.height / 4, 2));
+
+        if (centerDistance > maxDistance) {
+          issues.push('Face not centered');
+          recommendations.push('Center your face in the frame');
+          score -= 15;
+        }
+      }
+
+      // Determine rating
+      let rating: ImageQualityResult['rating'];
+      if (score >= 90) rating = 'excellent';
+      else if (score >= 80) rating = 'good';
+      else if (score >= 70) rating = 'acceptable';
+      else if (score >= 60) rating = 'poor';
+      else rating = 'very_poor';
+
+      return {
+        score: Math.max(0, score),
+        rating,
+        issues,
+        recommendations
+      };
+
+    } catch (error) {
+      console.error('Quality analysis error:', error);
+      return {
+        score: 0,
+        rating: 'very_poor',
+        issues: ['Failed to analyze image quality'],
+        recommendations: ['Please try taking the photo again']
+      };
+    }
+  }
+
+  /**
+   * Process a selfie image and extract facial embedding using enhanced Jetson endpoint
+   *
+   * @param imageData Base64 encoded image data
+   * @param cameraUrl Optional Jetson camera URL for enhanced processing
+   * @param options Processing options
+   * @returns Promise resolving to facial embedding with quality assessment
+   */
+  async processFacialEmbedding(
+    imageData: string,
+    cameraUrl?: string,
+    options: { encrypt?: boolean; requestQuality?: boolean } = {}
+  ): Promise<EnhancedFaceProcessingResult> {
+    try {
+      // If we have a Jetson camera URL, use the enhanced endpoint
+      if (cameraUrl) {
+        return await this.processWithJetsonEndpoint(imageData, cameraUrl, options);
+      }
+
+      // Fallback to local processing
+      return await this.processLocally(imageData, options);
+
+    } catch (error) {
+      console.error('Face processing error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Face processing failed'
+      };
+    }
+  }
+
+  /**
+   * Process facial embedding using the enhanced Jetson /api/face/extract-embedding endpoint
+   */
+  private async processWithJetsonEndpoint(
+    imageData: string,
+    cameraUrl: string,
+    options: { encrypt?: boolean; requestQuality?: boolean } = {}
+  ): Promise<EnhancedFaceProcessingResult> {
+    try {
+      console.log('[FaceProcessing] Using enhanced Jetson endpoint:', cameraUrl);
+
+      // Prepare the request payload
+      const payload: any = {
+        image_data: imageData.split(',')[1] || imageData, // Remove data:image/jpeg;base64, prefix if present
+        quality_assessment: options.requestQuality !== false, // Default to true unless explicitly false
+      };
+
+      // Add encryption option if requested
+      if (options.encrypt) {
+        payload.encrypt = true;
+      }
+
+      // Call the enhanced Jetson endpoint
+      const response = await fetch(`${cameraUrl}/api/face/extract-embedding`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        mode: 'cors',
+        credentials: 'omit',
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Jetson endpoint error (${response.status}): ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('[FaceProcessing] Jetson response:', result);
+
+      if (!result.success) {
+        throw new Error(result.error || 'Jetson processing failed');
+      }
+
+      // Extract the enhanced response data
+      const enhancedResult: EnhancedFaceProcessingResult = {
+        success: true,
+        embedding: result.embedding || result.face_embedding,
+        encrypted: result.encrypted || false,
+        sessionId: result.biometric_session_id || result.session_id
+      };
+
+      // Add quality assessment if available
+      if (result.quality_score !== undefined) {
+        enhancedResult.quality = {
+          score: result.quality_score,
+          rating: result.quality_rating || this.scoreToRating(result.quality_score),
+          issues: result.quality_issues || [],
+          recommendations: result.recommendations || []
+        };
+      }
+
+      console.log('[FaceProcessing] ✅ Enhanced processing successful:', {
+        hasEmbedding: !!enhancedResult.embedding,
+        embeddingLength: enhancedResult.embedding?.length,
+        qualityScore: enhancedResult.quality?.score,
+        encrypted: enhancedResult.encrypted
+      });
+
+      return enhancedResult;
+
+    } catch (error) {
+      console.error('[FaceProcessing] Jetson endpoint error:', error);
+
+      // Fallback to local processing if Jetson fails
+      console.log('[FaceProcessing] Falling back to local processing...');
+      return await this.processLocally(imageData, options);
+    }
+  }
+
+  /**
+   * Process facial embedding using local browser-based methods (fallback)
+   */
+  private async processLocally(
+    imageData: string,
+    options: { encrypt?: boolean; requestQuality?: boolean } = {}
+  ): Promise<EnhancedFaceProcessingResult> {
+    try {
+      console.log('[FaceProcessing] Using local processing fallback');
 
       // Load image
       const image = await this.loadImage(imageData);
@@ -51,13 +283,21 @@ class FaceProcessingService {
       // Convert to embedding format (128 dimensions for now, will be 512 with InsightFace)
       const embedding = this.createEmbedding(features);
 
-      return {
+      const result: EnhancedFaceProcessingResult = {
         success: true,
-        embedding
+        embedding,
+        encrypted: false // Local processing doesn't support encryption
       };
 
+      // Add quality assessment if requested
+      if (options.requestQuality !== false) {
+        result.quality = await this.analyzeImageQuality(imageData);
+      }
+
+      return result;
+
     } catch (error) {
-      console.error('Face processing error:', error);
+      console.error('[FaceProcessing] Local processing error:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Face processing failed'
@@ -249,6 +489,34 @@ class FaceProcessingService {
   private createEmbedding(features: number[]): number[] {
     // Normalize features to 0-255 range for blockchain storage
     return features.map(feature => Math.round(feature * 255));
+  }
+
+  private calculateAverageBrightness(imageData: ImageData): number {
+    const data = imageData.data;
+    let totalBrightness = 0;
+    let pixelCount = 0;
+
+    // Sample every 4th pixel for performance
+    for (let i = 0; i < data.length; i += 16) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      // Calculate brightness using standard formula
+      const brightness = (r * 0.299 + g * 0.587 + b * 0.114);
+      totalBrightness += brightness;
+      pixelCount++;
+    }
+
+    return pixelCount > 0 ? totalBrightness / pixelCount : 0;
+  }
+
+  private scoreToRating(score: number): ImageQualityResult['rating'] {
+    if (score >= 90) return 'excellent';
+    if (score >= 80) return 'good';
+    if (score >= 70) return 'acceptable';
+    if (score >= 60) return 'poor';
+    return 'very_poor';
   }
 }
 

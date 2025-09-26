@@ -1334,4 +1334,122 @@ export class JetsonCamera implements ICamera {
       };
     }
   }
+
+  /**
+   * Extract facial embedding using the enhanced /api/face/extract-embedding endpoint
+   * This method supports quality assessment, encryption, and personalized recommendations
+   */
+  async extractEmbedding(
+    imageData: string,
+    options: {
+      encrypt?: boolean;
+      qualityAssessment?: boolean;
+    } = {}
+  ): Promise<CameraActionResponse<{
+    embedding: number[];
+    quality?: {
+      score: number;
+      rating: 'excellent' | 'good' | 'acceptable' | 'poor' | 'very_poor';
+      issues: string[];
+      recommendations: string[];
+    };
+    encrypted?: boolean;
+    sessionId?: string;
+  }>> {
+    try {
+      this.log('Extracting facial embedding with enhanced endpoint');
+
+      // Prepare the request payload
+      const payload: any = {
+        image_data: imageData.includes(',') ? imageData.split(',')[1] : imageData, // Remove data:image/jpeg;base64, prefix if present
+        quality_assessment: options.qualityAssessment !== false, // Default to true unless explicitly false
+      };
+
+      // Add encryption option if requested
+      if (options.encrypt) {
+        payload.encrypt = true;
+      }
+
+      console.log('[JetsonCamera] Calling enhanced face embedding endpoint with options:', {
+        hasImageData: !!payload.image_data,
+        imageDataLength: payload.image_data?.length,
+        qualityAssessment: payload.quality_assessment,
+        encrypt: payload.encrypt
+      });
+
+      // Call the enhanced face embedding extraction endpoint
+      const response = await this.makeApiCall('/api/face/extract-embedding', 'POST', payload);
+
+      const data = await response.json();
+      console.log('[JetsonCamera] Enhanced face embedding response:', data);
+      console.log('[JetsonCamera] Response status:', response.status, response.statusText);
+
+      if (response.ok && data.success) {
+        this.log('✅ Enhanced face embedding extraction successful:', data);
+
+        // Extract the response data
+        const result: any = {
+          embedding: data.embedding || data.face_embedding
+        };
+
+        // Add quality assessment if available
+        if (data.quality_score !== undefined) {
+          result.quality = {
+            score: data.quality_score,
+            rating: data.quality_rating || this.scoreToRating(data.quality_score),
+            issues: data.quality_issues || [],
+            recommendations: data.recommendations || []
+          };
+        }
+
+        // Add encryption info if available
+        if (data.encrypted !== undefined) {
+          result.encrypted = data.encrypted;
+        }
+
+        // Add session ID if available
+        if (data.biometric_session_id || data.session_id) {
+          result.sessionId = data.biometric_session_id || data.session_id;
+        }
+
+        console.log('[JetsonCamera] Extracted embedding details:', {
+          hasEmbedding: !!result.embedding,
+          embeddingLength: result.embedding?.length,
+          qualityScore: result.quality?.score,
+          qualityRating: result.quality?.rating,
+          encrypted: result.encrypted,
+          hasSessionId: !!result.sessionId
+        });
+
+        return {
+          success: true,
+          data: result
+        };
+      } else {
+        console.error('[JetsonCamera] Enhanced face embedding extraction failed:', {
+          status: response.status,
+          statusText: response.statusText,
+          responseData: data
+        });
+        throw new Error(data.error || `HTTP ${response.status}: Failed to extract facial embedding`);
+      }
+    } catch (error) {
+      this.log('Enhanced face embedding extraction error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to extract facial embedding'
+      };
+    }
+  }
+
+  /**
+   * Helper method to convert quality score to rating
+   */
+  private scoreToRating(score: number): 'excellent' | 'good' | 'acceptable' | 'poor' | 'very_poor' {
+    if (score >= 90) return 'excellent';
+    if (score >= 80) return 'good';
+    if (score >= 70) return 'acceptable';
+    if (score >= 60) return 'poor';
+    return 'very_poor';
+  }
 } 

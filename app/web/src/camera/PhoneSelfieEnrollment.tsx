@@ -30,6 +30,9 @@ export function PhoneSelfieEnrollment({
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState("");
   const [qualityIssues, setQualityIssues] = useState<string[]>([]);
+  const [qualityRecommendations, setQualityRecommendations] = useState<string[]>([]);
+  const [qualityScore, setQualityScore] = useState<number | null>(null);
+  const [qualityRating, setQualityRating] = useState<string | null>(null);
   const [connectedCameraUrl, setConnectedCameraUrl] = useState<string | null>(
     null
   );
@@ -179,16 +182,35 @@ export function PhoneSelfieEnrollment({
       // Convert to base64
       const imageData = canvas.toDataURL("image/jpeg", 0.95);
 
-      // Perform quality check
+      // Perform quality check using enhanced processing if camera is available
       setProgress("Checking image quality...");
-      const quality = await faceProcessingService.analyzeImageQuality(
-        imageData
-      );
+      let quality;
 
-      if (quality.issues.length > 0) {
-        setQualityIssues(quality.issues);
-        // Don't prevent capture, but show warnings
+      if (connectedCameraUrl) {
+        // Use enhanced Jetson quality assessment
+        const result = await faceProcessingService.processFacialEmbedding(
+          imageData,
+          connectedCameraUrl,
+          { requestQuality: true, encrypt: false }
+        );
+
+        if (result.success && result.quality) {
+          quality = result.quality;
+          console.log('[PhoneSelfieEnrollment] Enhanced quality assessment:', quality);
+        } else {
+          // Fallback to local quality check
+          quality = await faceProcessingService.analyzeImageQuality(imageData);
+        }
+      } else {
+        // Use local quality assessment as fallback
+        quality = await faceProcessingService.analyzeImageQuality(imageData);
       }
+
+      // Store quality information
+      setQualityScore(quality.score);
+      setQualityRating(quality.rating);
+      setQualityIssues(quality.issues || []);
+      setQualityRecommendations(quality.recommendations || []);
 
       setCapturedImage(imageData);
       setStep("preview");
@@ -203,6 +225,9 @@ export function PhoneSelfieEnrollment({
   const retakePhoto = useCallback(() => {
     setCapturedImage(null);
     setQualityIssues([]);
+    setQualityRecommendations([]);
+    setQualityScore(null);
+    setQualityRating(null);
     setStep("camera");
     setError(null);
   }, []);
@@ -217,18 +242,38 @@ export function PhoneSelfieEnrollment({
     setProgress("Sending image to camera for processing...");
 
     try {
-      // Send image to Jetson camera for facial embedding extraction
+      // Send image to Jetson camera for enhanced facial embedding extraction with encryption
       const result = await faceProcessingService.processFacialEmbedding(
         capturedImage,
-        connectedCameraUrl
+        connectedCameraUrl,
+        { encrypt: true, requestQuality: true }
       );
 
       if (!result.success) {
         throw new Error(result.error || "Failed to process facial features");
       }
 
-      if (!result.embedding || result.embedding.length !== 512) {
-        throw new Error("Invalid facial embedding received from camera");
+      if (!result.embedding) {
+        throw new Error("No facial embedding received from camera");
+      }
+
+      console.log('[PhoneSelfieEnrollment] Enhanced processing result:', {
+        hasEmbedding: !!result.embedding,
+        embeddingLength: result.embedding.length,
+        encrypted: result.encrypted,
+        qualityScore: result.quality?.score,
+        qualityRating: result.quality?.rating
+      });
+
+      // Log quality information if available
+      if (result.quality) {
+        console.log('[PhoneSelfieEnrollment] Quality assessment:', result.quality);
+        setProgress(`Quality: ${result.quality.rating} (${result.quality.score}%) - Processing...`);
+      }
+
+      // Validate embedding length (can be 512 for high-quality or other sizes for compressed)
+      if (result.embedding.length === 0) {
+        throw new Error("Empty facial embedding received from camera");
       }
 
       setProgress("Storing encrypted facial embedding on blockchain...");
@@ -476,6 +521,58 @@ export function PhoneSelfieEnrollment({
           </div>
         )}
 
+        {/* Enhanced Quality Score Display */}
+        {qualityScore !== null && qualityRating && (
+          <div className={`rounded-lg p-3 mb-4 ${
+            qualityRating === 'excellent' ? 'bg-green-50 border border-green-200' :
+            qualityRating === 'good' ? 'bg-blue-50 border border-blue-200' :
+            qualityRating === 'acceptable' ? 'bg-yellow-50 border border-yellow-200' :
+            qualityRating === 'poor' ? 'bg-orange-50 border border-orange-200' :
+            'bg-red-50 border border-red-200'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <div className={`w-3 h-3 rounded-full mr-2 ${
+                  qualityRating === 'excellent' ? 'bg-green-500' :
+                  qualityRating === 'good' ? 'bg-blue-500' :
+                  qualityRating === 'acceptable' ? 'bg-yellow-500' :
+                  qualityRating === 'poor' ? 'bg-orange-500' :
+                  'bg-red-500'
+                }`} />
+                <span className={`text-sm font-medium capitalize ${
+                  qualityRating === 'excellent' ? 'text-green-800' :
+                  qualityRating === 'good' ? 'text-blue-800' :
+                  qualityRating === 'acceptable' ? 'text-yellow-800' :
+                  qualityRating === 'poor' ? 'text-orange-800' :
+                  'text-red-800'
+                }`}>
+                  {qualityRating.replace('_', ' ')} Quality
+                </span>
+              </div>
+              <span className={`text-sm font-semibold ${
+                qualityRating === 'excellent' ? 'text-green-700' :
+                qualityRating === 'good' ? 'text-blue-700' :
+                qualityRating === 'acceptable' ? 'text-yellow-700' :
+                qualityRating === 'poor' ? 'text-orange-700' :
+                'text-red-700'
+              }`}>
+                {qualityScore}%
+              </span>
+            </div>
+            {connectedCameraUrl && (
+              <p className={`text-xs mt-1 ${
+                qualityRating === 'excellent' ? 'text-green-600' :
+                qualityRating === 'good' ? 'text-blue-600' :
+                qualityRating === 'acceptable' ? 'text-yellow-600' :
+                qualityRating === 'poor' ? 'text-orange-600' :
+                'text-red-600'
+              }`}>
+                ✨ Enhanced assessment by Jetson camera
+              </p>
+            )}
+          </div>
+        )}
+
         {qualityIssues.length > 0 && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
             <div className="flex items-start">
@@ -487,6 +584,26 @@ export function PhoneSelfieEnrollment({
                 <ul className="text-sm text-yellow-700 mt-1 list-disc list-inside">
                   {qualityIssues.map((issue, idx) => (
                     <li key={idx}>{issue}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {qualityRecommendations.length > 0 && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+            <div className="flex items-start">
+              <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center mt-0.5 mr-2 flex-shrink-0">
+                <span className="text-white text-xs font-bold">💡</span>
+              </div>
+              <div>
+                <p className="text-sm text-blue-800 font-medium">
+                  Recommendations for Better Quality
+                </p>
+                <ul className="text-sm text-blue-700 mt-1 list-disc list-inside">
+                  {qualityRecommendations.map((rec, idx) => (
+                    <li key={idx}>{rec}</li>
                   ))}
                 </ul>
               </div>
