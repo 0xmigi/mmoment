@@ -1,11 +1,10 @@
-import { useProgram } from "../anchor/setup";
-import { useCamera } from "./CameraProvider";
+import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from "../anchor/setup";
 import { faceProcessingService } from "./face-processing";
-import { UnifiedCameraService } from "./unified-camera-service";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { Camera, X, RotateCcw, Check, AlertCircle, Wifi } from "lucide-react";
 import { useState, useRef, useCallback, useEffect } from "react";
+import { useConnection } from "@solana/wallet-adapter-react";
 
 interface PhoneSelfieEnrollmentProps {
   walletAddress?: string;
@@ -45,61 +44,74 @@ export function PhoneSelfieEnrollment({
 
   const { primaryWallet } = useDynamicContext();
   const { program } = useProgram();
-  const { selectedCamera } = useCamera();
+  const { connection } = useConnection();
 
-  // Check for camera connection on mount
+  // Check for user session on mount
   useEffect(() => {
-    checkCameraConnection();
-  }, [selectedCamera]);
+    findUserCurrentSession();
+  }, [primaryWallet, program]);
 
-  const checkCameraConnection = async () => {
-    if (!selectedCamera) {
-      setError("Please connect to a camera first to enroll your face");
+  const findUserCurrentSession = async () => {
+    if (!primaryWallet?.address || !program || !connection) {
+      setError("Please connect your wallet to enroll your face");
       return;
     }
 
-    console.log('[PhoneSelfieEnrollment] 🔍 Checking camera connection...', {
-      selectedCamera: selectedCamera,
-      owner: selectedCamera.owner.toString()
-    });
+    try {
+      console.log('[PhoneSelfieEnrollment] 🔍 Checking for active user sessions...');
 
-    // Get camera info from selectedCamera
-    const cameraId = selectedCamera.owner.toString();
-    const cameraUrl = `https://${cameraId}.mmoment.xyz`;
+      const userPublicKey = new PublicKey(primaryWallet.address);
 
-    console.log('[PhoneSelfieEnrollment] 📡 Camera details:', {
-      cameraId,
-      cameraUrl,
-    });
+      // Get all camera accounts from the program to check sessions
+      const allCameras = await program.account.cameraAccount.all();
+      console.log('[PhoneSelfieEnrollment] 📋 Found cameras to check:', allCameras.length);
 
-    // Check if it's a Jetson camera type - try different camera ID formats
-    const cameraService = UnifiedCameraService.getInstance();
-    const possibleCameraIds = [
-      `jetson_${cameraUrl}`,
-      cameraId,
-      `jetson_${cameraId}`,
-      cameraUrl
-    ];
+      let activeSession = null;
+      let activeCameraPda = null;
 
-    console.log('[PhoneSelfieEnrollment] 🔍 Checking camera registration with IDs:', possibleCameraIds);
+      // Check each camera for an active session with this user
+      for (const cameraAccount of allCameras) {
+        const cameraPublicKey = cameraAccount.publicKey;
 
-    let foundCamera = false;
-    for (const testId of possibleCameraIds) {
-      if (cameraService.hasCamera(testId)) {
-        console.log('[PhoneSelfieEnrollment] ✅ Found camera with ID:', testId);
+        // Find the session PDA for this user + camera combination
+        const [sessionPda] = PublicKey.findProgramAddressSync(
+          [
+            Buffer.from("session"),
+            userPublicKey.toBuffer(),
+            cameraPublicKey.toBuffer(),
+          ],
+          CAMERA_ACTIVATION_PROGRAM_ID
+        );
+
+        try {
+          // Try to fetch the session account
+          const sessionAccount = await program.account.userSession.fetch(sessionPda);
+          if (sessionAccount) {
+            console.log('[PhoneSelfieEnrollment] ✅ Found active session with camera:', cameraPublicKey.toString());
+            activeSession = sessionAccount;
+            activeCameraPda = cameraPublicKey.toString();
+            break; // Found an active session, use this camera
+          }
+        } catch (err) {
+          // No session with this camera, continue checking others
+          continue;
+        }
+      }
+
+      if (activeSession && activeCameraPda) {
+        console.log('[PhoneSelfieEnrollment] ✅ User is checked into camera:', activeCameraPda);
+        const cameraUrl = `https://${activeCameraPda}.mmoment.xyz`;
         setConnectedCameraUrl(cameraUrl);
-        setConnectedCameraId(testId);
+        setConnectedCameraId(activeCameraPda);
         setStep("camera");
         setError(null);
-        foundCamera = true;
-        break;
+      } else {
+        console.log('[PhoneSelfieEnrollment] ❌ No active sessions found');
+        setError("Please check into a camera first to enroll your face. Visit a camera page and complete the check-in process.");
       }
-    }
-
-    if (!foundCamera) {
-      console.log('[PhoneSelfieEnrollment] ❌ Camera not found in registry');
-      console.log('[PhoneSelfieEnrollment] 📋 Available cameras:', cameraService.getAllCameras());
-      setError("Face enrollment requires connection to a Jetson camera");
+    } catch (error) {
+      console.error('[PhoneSelfieEnrollment] Error checking user sessions:', error);
+      setError("Unable to verify camera session. Please ensure you're checked into a camera.");
     }
   };
 
@@ -441,10 +453,10 @@ export function PhoneSelfieEnrollment({
         )}
 
         <button
-          onClick={checkCameraConnection}
-          className="w-full bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors"
+          onClick={findUserCurrentSession}
+          className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
         >
-          Check Connection Again
+          Check Session Again
         </button>
       </div>
     );
