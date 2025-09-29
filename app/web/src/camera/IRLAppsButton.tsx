@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Eye, Video, Users, Lock, Zap, X } from 'lucide-react';
 import { useFacialEmbeddingStatus } from '../hooks/useFacialEmbeddingStatus';
 import { PhoneSelfieEnrollment } from './PhoneSelfieEnrollment';
-import { useParams } from 'react-router-dom';
 
 interface IRLAppsButtonProps {
   cameraId: string;
@@ -15,11 +14,6 @@ export function IRLAppsButton({ walletAddress, onEnrollmentComplete }: IRLAppsBu
   const [showEnrollment, setShowEnrollment] = useState(false);
   const facialEmbeddingStatus = useFacialEmbeddingStatus();
 
-  // Store the camera PDA in localStorage when this component mounts
-  const { cameraId: cameraIdFromUrl } = useParams<{ cameraId: string }>();
-  if (cameraIdFromUrl && typeof window !== 'undefined') {
-    localStorage.setItem('lastAccessedCameraPDA', cameraIdFromUrl);
-  }
 
   const handleIRLAppsClick = () => {
     // Always show the app store first - users can see what's available
@@ -75,13 +69,13 @@ export function IRLAppsButton({ walletAddress, onEnrollmentComplete }: IRLAppsBu
         <>
           {/* Backdrop */}
           <div
-            className="fixed inset-0 bg-black/50 z-[199]"
+            className="fixed inset-0 bg-black/50 z-[999]"
             style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
             onClick={() => setShowAppsModal(false)}
           />
 
           {/* Drawer */}
-          <div className="fixed inset-x-0 top-16 bottom-0 bg-white rounded-t-2xl shadow-2xl z-[200]">
+          <div className="fixed inset-x-0 top-16 bottom-0 bg-white rounded-t-2xl shadow-2xl z-[1000]">
             {/* Header - Mobile sized like CameraModal */}
             <div className="flex items-center justify-between p-3 border-b border-gray-100">
               <h3 className="text-base font-medium">IRL Apps</h3>
@@ -160,13 +154,13 @@ export function IRLAppsButton({ walletAddress, onEnrollmentComplete }: IRLAppsBu
         <>
           {/* Backdrop */}
           <div
-            className="fixed inset-0 bg-black/50 z-[199]"
+            className="fixed inset-0 bg-black/50 z-[999]"
             style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
             onClick={() => setShowEnrollment(false)}
           />
 
           {/* Drawer */}
-          <div className="fixed inset-x-0 top-16 bottom-0 bg-white rounded-t-2xl shadow-2xl z-[200]">
+          <div className="fixed inset-x-0 top-16 bottom-0 bg-white rounded-t-2xl shadow-2xl z-[1000]">
             {/* Header - Mobile sized like CameraModal */}
             <div className="flex items-center justify-between p-3 border-b border-gray-100">
               <h3 className="text-base font-medium">Create Recognition Token</h3>

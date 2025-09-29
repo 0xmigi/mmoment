@@ -5,6 +5,7 @@ import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { Camera, X, RotateCcw, Check, Wifi } from "lucide-react";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useConnection } from "@solana/wallet-adapter-react";
+import { useParams } from "react-router-dom";
 
 interface PhoneSelfieEnrollmentProps {
   walletAddress?: string;
@@ -42,6 +43,7 @@ export function PhoneSelfieEnrollment({
   const { primaryWallet } = useDynamicContext();
   const { program } = useProgram();
   const { connection } = useConnection();
+  const { cameraId } = useParams<{ cameraId: string }>();
 
   // Check for user session on mount
   useEffect(() => {
@@ -54,51 +56,35 @@ export function PhoneSelfieEnrollment({
       return;
     }
 
+    if (!cameraId) {
+      setError("No camera specified. Please access this from a camera page.");
+      return;
+    }
+
     try {
-      // Get the camera PDA from localStorage (set by IRLAppsButton)
-      const storedCameraPda = localStorage.getItem('lastAccessedCameraPDA');
+      // Use the camera ID from route params to build the camera URL (same as other camera components)
+      const cameraUrl = `https://${cameraId}.mmoment.xyz`;
+      console.log('[PhoneSelfieEnrollment] Using camera from route params:', cameraUrl);
 
-      if (storedCameraPda) {
-        const cameraUrl = `https://${storedCameraPda}.mmoment.xyz`;
-
-        // Test if the camera is accessible
-        try {
-          const testResponse = await fetch(`${cameraUrl}/api/status`, {
-            method: 'GET',
-            mode: 'cors'
-          });
-
-          if (testResponse.ok) {
-            setConnectedCameraUrl(cameraUrl);
-            setStep("camera");
-            setError(null);
-            return;
-          }
-        } catch (fetchError) {
-          // Camera not accessible, continue to fallback
-          console.log('[PhoneSelfieEnrollment] Stored camera not accessible:', fetchError);
-        }
-      }
-
-      // Fallback: Use your main Jetson camera directly
-      const mainJetsonUrl = "https://h1wonbkwjgncepeyr65xeewjfggdbospl5ubjan5vyhg.mmoment.xyz";
+      // Test if the camera is accessible
       try {
-        const testResponse = await fetch(`${mainJetsonUrl}/api/status`, {
+        const testResponse = await fetch(`${cameraUrl}/api/status`, {
           method: 'GET',
           mode: 'cors'
         });
 
         if (testResponse.ok) {
-          setConnectedCameraUrl(mainJetsonUrl);
+          console.log('[PhoneSelfieEnrollment] Camera accessible, using:', cameraUrl);
+          setConnectedCameraUrl(cameraUrl);
           setStep("camera");
           setError(null);
           return;
         }
       } catch (fetchError) {
-        console.log('[PhoneSelfieEnrollment] Main camera not accessible:', fetchError);
+        console.log('[PhoneSelfieEnrollment] Camera not accessible:', fetchError);
       }
 
-      setError("No accessible camera found. Please visit a camera page first or ensure the camera is online.");
+      setError("Camera is not accessible. Please ensure the camera is online.");
     } catch (error) {
       setError("Unable to connect to camera. Please try again later.");
     }
