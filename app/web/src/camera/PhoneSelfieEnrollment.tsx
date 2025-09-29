@@ -45,59 +45,28 @@ export function PhoneSelfieEnrollment({
   const { program } = useProgram();
   const { connection } = useConnection();
 
-  // Debug logging for state changes
-  useEffect(() => {
-    console.log('[PhoneSelfieEnrollment] 🔄 State update - connectedCameraUrl:', connectedCameraUrl);
-  }, [connectedCameraUrl]);
-
-  useEffect(() => {
-    console.log('[PhoneSelfieEnrollment] 🔄 State update - step:', step);
-  }, [step]);
-
-  useEffect(() => {
-    console.log('[PhoneSelfieEnrollment] 🔄 Prop update - cameraId:', cameraId);
-  }, [cameraId]);
-
   // Check for user session on mount
   useEffect(() => {
-    console.log('[PhoneSelfieEnrollment] 🎯 Main useEffect triggered - dependencies:', {
-      primaryWallet: !!primaryWallet,
-      program: !!program,
-      cameraId: cameraId
-    });
     findUserCurrentSession();
   }, [primaryWallet, program, cameraId]);
 
   const findUserCurrentSession = async () => {
-    console.log('[PhoneSelfieEnrollment] 🔍 findUserCurrentSession called');
-    console.log('[PhoneSelfieEnrollment] 🔍 primaryWallet?.address:', primaryWallet?.address);
-    console.log('[PhoneSelfieEnrollment] 🔍 cameraId:', cameraId);
-
     if (!primaryWallet?.address) {
-      console.log('[PhoneSelfieEnrollment] ❌ No wallet address');
       setError("Please connect your wallet to enroll your face");
       return;
     }
 
     if (!cameraId) {
-      console.log('[PhoneSelfieEnrollment] ❌ No cameraId from route params');
       setError("No camera specified. Please access this from a camera page.");
       return;
     }
 
     try {
-      // Use the camera ID from route params to build the camera URL (same as other camera components)
       const cameraUrl = `https://${cameraId}.mmoment.xyz`;
-      console.log('[PhoneSelfieEnrollment] ✅ Building camera URL:', cameraUrl);
-
-      // Set the camera URL directly - if user is on camera page, assume camera is accessible
       setConnectedCameraUrl(cameraUrl);
       setStep("camera");
       setError(null);
-      console.log('[PhoneSelfieEnrollment] ✅ Camera URL set successfully, step set to camera');
-      console.log('[PhoneSelfieEnrollment] ✅ connectedCameraUrl should now be:', cameraUrl);
     } catch (error) {
-      console.log('[PhoneSelfieEnrollment] ❌ Error in try block:', error);
       setError("Unable to initialize camera connection.");
     }
   };
@@ -209,18 +178,10 @@ export function PhoneSelfieEnrollment({
       // Convert to base64
       const imageData = canvas.toDataURL("image/jpeg", 0.95);
 
-      console.log('[PhoneSelfieEnrollment] Captured image data length:', imageData.length);
-      console.log('[PhoneSelfieEnrollment] Image data prefix:', imageData.substring(0, 50));
-      console.log('[PhoneSelfieEnrollment] Canvas dimensions:', canvas.width, 'x', canvas.height);
-
       // MUST use Jetson for quality check - no fake local assessment
       setProgress("Checking image quality...");
 
-      console.log('[PhoneSelfieEnrollment] 🚨 CRITICAL: connectedCameraUrl =', connectedCameraUrl);
-      console.log('[PhoneSelfieEnrollment] 🚨 CRITICAL: typeof connectedCameraUrl =', typeof connectedCameraUrl);
-
       if (!connectedCameraUrl) {
-        console.log('[PhoneSelfieEnrollment] 🚨 CRITICAL: connectedCameraUrl is null/undefined - THIS IS THE BUG!');
         setError("No camera connection - cannot assess image quality");
         return;
       }
@@ -253,7 +214,7 @@ export function PhoneSelfieEnrollment({
     } finally {
       setIsCapturing(false);
     }
-  }, []);
+  }, [connectedCameraUrl, cameraId]);
 
   const retakePhoto = useCallback(() => {
     setCapturedImage(null);
@@ -274,14 +235,8 @@ export function PhoneSelfieEnrollment({
     setStep("processing");
     setProgress("Sending image to camera for processing...");
 
-    console.log('[PhoneSelfieEnrollment] Starting face enrollment processing...');
-    console.log('[PhoneSelfieEnrollment] Connected camera URL:', connectedCameraUrl);
-    console.log('[PhoneSelfieEnrollment] Wallet address:', primaryWallet.address);
-    console.log('[PhoneSelfieEnrollment] Image data available:', !!capturedImage);
-
     try {
       // Send image to Jetson camera for enhanced facial embedding extraction with encryption
-      console.log('[PhoneSelfieEnrollment] Calling processFacialEmbedding...');
       const result = await faceProcessingService.processFacialEmbedding(
         capturedImage,
         connectedCameraUrl,
