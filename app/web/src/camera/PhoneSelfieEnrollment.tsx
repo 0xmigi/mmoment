@@ -48,7 +48,7 @@ export function PhoneSelfieEnrollment({
   // Check for user session on mount
   useEffect(() => {
     findUserCurrentSession();
-  }, [primaryWallet, program]);
+  }, [primaryWallet, program, cameraId]);
 
   const findUserCurrentSession = async () => {
     if (!primaryWallet?.address) {
