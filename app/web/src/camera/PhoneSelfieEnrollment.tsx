@@ -227,7 +227,16 @@ export function PhoneSelfieEnrollment({
   }, []);
 
   const processFaceEnrollment = useCallback(async () => {
+    console.log('[PhoneSelfieEnrollment] 🚀 processFaceEnrollment called');
+    console.log('[PhoneSelfieEnrollment] 🚀 Requirements check:', {
+      capturedImage: !!capturedImage,
+      primaryWallet: !!primaryWallet,
+      program: !!program,
+      connectedCameraUrl: !!connectedCameraUrl
+    });
+
     if (!capturedImage || !primaryWallet || !program || !connectedCameraUrl) {
+      console.log('[PhoneSelfieEnrollment] ❌ Missing requirements for enrollment');
       setError("Missing requirements for enrollment");
       return;
     }
