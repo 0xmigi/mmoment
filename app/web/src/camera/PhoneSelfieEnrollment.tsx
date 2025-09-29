@@ -280,9 +280,12 @@ export function PhoneSelfieEnrollment({
         setProgress(`Quality: ${result.quality.rating} (${result.quality.score}%) - Processing...`);
       }
 
-      // Validate embedding length (can be 512 for high-quality or other sizes for compressed)
-      if (result.embedding.length === 0) {
-        throw new Error("Empty facial embedding received from camera");
+      // Validate embedding exists (encrypted embedding is an object, not array)
+      console.log('[PhoneSelfieEnrollment] Embedding type:', typeof result.embedding);
+      console.log('[PhoneSelfieEnrollment] Embedding:', result.embedding);
+
+      if (!result.embedding) {
+        throw new Error("No facial embedding received from camera");
       }
 
       setProgress("Storing encrypted facial embedding on blockchain...");
