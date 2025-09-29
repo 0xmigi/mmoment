@@ -480,9 +480,9 @@ export function PhoneSelfieEnrollment({
           />
           <canvas ref={canvasRef} className="hidden" />
 
-          {/* Face guide overlay - smaller and more subtle */}
+          {/* Face guide overlay - centered */}
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-            <div className="w-40 h-52 border-2 border-white/50 rounded-full">
+            <div className="relative w-40 h-52 border-2 border-white/50 rounded-full">
               <div className="absolute inset-4 border border-white/20 rounded-full" />
             </div>
           </div>
@@ -512,8 +512,8 @@ export function PhoneSelfieEnrollment({
           )}
         </div>
 
-        {/* Floating button over camera */}
-        <div className="absolute bottom-6 left-6 right-6">
+        {/* Floating button over camera - with bottom spacing */}
+        <div className="absolute bottom-0 left-0 right-0 p-4 bg-white/10 backdrop-blur-sm">
           <button
             onClick={capturePhoto}
             disabled={isCapturing}
@@ -604,8 +604,8 @@ export function PhoneSelfieEnrollment({
           )}
         </div>
 
-        {/* Floating buttons over preview */}
-        <div className="absolute bottom-6 left-6 right-6">
+        {/* Floating buttons over preview - with bottom spacing */}
+        <div className="absolute bottom-0 left-0 right-0 p-4 bg-white/10 backdrop-blur-sm">
           <div className="flex gap-3">
             <button
               onClick={retakePhoto}
