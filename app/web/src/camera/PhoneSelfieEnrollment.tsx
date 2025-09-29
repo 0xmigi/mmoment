@@ -2,7 +2,7 @@ import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from "../anchor/setup";
 import { faceProcessingService } from "./face-processing";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
-import { Camera, X, RotateCcw, Check, AlertCircle, Wifi } from "lucide-react";
+import { Camera, X, RotateCcw, Check, Wifi } from "lucide-react";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useConnection } from "@solana/wallet-adapter-react";
 
@@ -33,9 +33,6 @@ export function PhoneSelfieEnrollment({
   const [qualityScore, setQualityScore] = useState<number | null>(null);
   const [qualityRating, setQualityRating] = useState<string | null>(null);
   const [connectedCameraUrl, setConnectedCameraUrl] = useState<string | null>(
-    null
-  );
-  const [connectedCameraId, setConnectedCameraId] = useState<string | null>(
     null
   );
 
@@ -102,7 +99,6 @@ export function PhoneSelfieEnrollment({
         console.log('[PhoneSelfieEnrollment] ✅ User is checked into camera:', activeCameraPda);
         const cameraUrl = `https://${activeCameraPda}.mmoment.xyz`;
         setConnectedCameraUrl(cameraUrl);
-        setConnectedCameraId(activeCameraPda);
         setStep("camera");
         setError(null);
       } else {
