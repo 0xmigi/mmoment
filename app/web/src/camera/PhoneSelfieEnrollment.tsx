@@ -218,6 +218,10 @@ export function PhoneSelfieEnrollment({
       // Convert to base64
       const imageData = canvas.toDataURL("image/jpeg", 0.95);
 
+      console.log('[PhoneSelfieEnrollment] Captured image data length:', imageData.length);
+      console.log('[PhoneSelfieEnrollment] Image data prefix:', imageData.substring(0, 50));
+      console.log('[PhoneSelfieEnrollment] Canvas dimensions:', canvas.width, 'x', canvas.height);
+
       // Perform quality check using enhanced processing if camera is available
       setProgress("Checking image quality...");
       let quality;
@@ -277,13 +281,25 @@ export function PhoneSelfieEnrollment({
     setStep("processing");
     setProgress("Sending image to camera for processing...");
 
+    console.log('[PhoneSelfieEnrollment] Starting face enrollment processing...');
+    console.log('[PhoneSelfieEnrollment] Connected camera URL:', connectedCameraUrl);
+    console.log('[PhoneSelfieEnrollment] Wallet address:', primaryWallet.address);
+    console.log('[PhoneSelfieEnrollment] Image data available:', !!capturedImage);
+
     try {
       // Send image to Jetson camera for enhanced facial embedding extraction with encryption
+      console.log('[PhoneSelfieEnrollment] Calling processFacialEmbedding...');
       const result = await faceProcessingService.processFacialEmbedding(
         capturedImage,
         connectedCameraUrl,
         { encrypt: true, requestQuality: true, walletAddress: primaryWallet.address }
       );
+
+      console.log('[PhoneSelfieEnrollment] Processing result:', {
+        success: result.success,
+        hasEmbedding: !!result.embedding,
+        error: result.error
+      });
 
       if (!result.success) {
         throw new Error(result.error || "Failed to process facial features");

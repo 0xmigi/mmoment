@@ -159,13 +159,15 @@ class FaceProcessingService {
     options: { encrypt?: boolean; requestQuality?: boolean; walletAddress?: string } = {}
   ): Promise<EnhancedFaceProcessingResult> {
     try {
-      // If we have a Jetson camera URL, use the enhanced endpoint
-      if (cameraUrl) {
-        return await this.processWithJetsonEndpoint(imageData, cameraUrl, options);
+      // MUST have a Jetson camera URL - no fake local processing
+      if (!cameraUrl) {
+        return {
+          success: false,
+          error: 'No camera URL provided - face processing requires Jetson camera connection'
+        };
       }
 
-      // Fallback to local processing
-      return await this.processLocally(imageData, options);
+      return await this.processWithJetsonEndpoint(imageData, cameraUrl, options);
 
     } catch (error) {
       console.error('Face processing error:', error);
@@ -186,11 +188,28 @@ class FaceProcessingService {
   ): Promise<EnhancedFaceProcessingResult> {
     try {
       console.log('[FaceProcessing] Using enhanced Jetson endpoint:', cameraUrl);
+      console.log('[FaceProcessing] Raw image data length:', imageData.length);
+      console.log('[FaceProcessing] Image data prefix:', imageData.substring(0, 50));
 
-      // Prepare the request payload
+      // The Jetson expects raw base64 without data:image prefix
+      let processedImageData = imageData;
+
+      // Remove data:image/jpeg;base64, prefix if present
+      if (imageData.includes(',')) {
+        processedImageData = imageData.split(',')[1];
+      }
+
+      // Validate we have actual image data
+      if (!processedImageData || processedImageData.length < 100) {
+        throw new Error('Invalid image data - too short or empty');
+      }
+
+      console.log('[FaceProcessing] Image data length after processing:', processedImageData.length);
+      console.log('[FaceProcessing] Image data starts with:', processedImageData.substring(0, 20));
+
       const payload: any = {
-        image_data: imageData.split(',')[1] || imageData, // Remove data:image/jpeg;base64, prefix if present
-        quality_assessment: options.requestQuality !== false, // Default to true unless explicitly false
+        image_data: processedImageData,
+        quality_assessment: options.requestQuality !== false,
       };
 
       // Add wallet address if provided (needed for local enrollment)
@@ -205,19 +224,55 @@ class FaceProcessingService {
       }
 
       // Call the enhanced Jetson endpoint
-      const response = await fetch(`${cameraUrl}/api/face/extract-embedding`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        mode: 'cors',
-        credentials: 'omit',
-        body: JSON.stringify(payload)
-      });
+      const endpoint = `${cameraUrl}/api/face/extract-embedding`;
+      console.log('[FaceProcessing] Making request to:', endpoint);
+      console.log('[FaceProcessing] Request payload size:', JSON.stringify(payload).length, 'bytes');
+
+      let response;
+      try {
+        response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          mode: 'cors',
+          credentials: 'omit',
+          body: JSON.stringify(payload)
+        });
+      } catch (fetchError) {
+        console.error('[FaceProcessing] Network request failed:', fetchError);
+
+        // Check if it's a CORS error
+        if (fetchError instanceof TypeError && fetchError.message.includes('CORS')) {
+          throw new Error(`CORS error - camera may not allow cross-origin requests`);
+        }
+
+        throw new Error(`Network error: ${fetchError instanceof Error ? fetchError.message : 'Failed to connect to Jetson'}`);
+      }
+
+      console.log('[FaceProcessing] Response status:', response.status);
+      console.log('[FaceProcessing] Response headers:', [...response.headers.entries()]);
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Jetson endpoint error (${response.status}): ${errorText}`);
+        console.error('[FaceProcessing] Jetson error response:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorText,
+          url: endpoint
+        });
+
+        // Provide specific error messages based on status
+        if (response.status === 400) {
+          throw new Error(`Image validation failed: ${errorText}`);
+        } else if (response.status === 500) {
+          throw new Error(`Jetson processing error: ${errorText}`);
+        } else if (response.status === 404) {
+          throw new Error(`Jetson endpoint not found - camera may be offline`);
+        } else {
+          throw new Error(`Jetson communication failed (${response.status}): ${errorText}`);
+        }
       }
 
       const result = await response.json();
@@ -257,59 +312,14 @@ class FaceProcessingService {
     } catch (error) {
       console.error('[FaceProcessing] Jetson endpoint error:', error);
 
-      // Fallback to local processing if Jetson fails
-      console.log('[FaceProcessing] Falling back to local processing...');
-      return await this.processLocally(imageData, options);
-    }
-  }
-
-  /**
-   * Process facial embedding using local browser-based methods (fallback)
-   */
-  private async processLocally(
-    imageData: string,
-    options: { encrypt?: boolean; requestQuality?: boolean } = {}
-  ): Promise<EnhancedFaceProcessingResult> {
-    try {
-      console.log('[FaceProcessing] Using local processing fallback');
-
-      // Load image
-      const image = await this.loadImage(imageData);
-
-      // Basic face detection and feature extraction
-      const features = await this.extractFacialFeatures(image);
-
-      if (!features) {
-        return {
-          success: false,
-          error: 'No face detected in image. Please ensure your face is clearly visible and well-lit.'
-        };
-      }
-
-      // Convert to embedding format (128 dimensions for now, will be 512 with InsightFace)
-      const embedding = this.createEmbedding(features);
-
-      const result: EnhancedFaceProcessingResult = {
-        success: true,
-        embedding,
-        encrypted: false // Local processing doesn't support encryption
-      };
-
-      // Add quality assessment if requested
-      if (options.requestQuality !== false) {
-        result.quality = await this.analyzeImageQuality(imageData);
-      }
-
-      return result;
-
-    } catch (error) {
-      console.error('[FaceProcessing] Local processing error:', error);
+      // NO FALLBACK - if Jetson fails, the enrollment fails
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Face processing failed'
+        error: error instanceof Error ? error.message : 'Failed to connect to Jetson camera'
       };
     }
   }
+
 
   private loadImage(imageData: string): Promise<HTMLImageElement> {
     return new Promise((resolve, reject) => {
@@ -320,33 +330,6 @@ class FaceProcessingService {
     });
   }
 
-  private async extractFacialFeatures(image: HTMLImageElement): Promise<number[] | null> {
-    if (!this.canvas || !this.context) {
-      throw new Error('Canvas not initialized');
-    }
-
-    // Set canvas size to image size
-    this.canvas.width = image.width;
-    this.canvas.height = image.height;
-
-    // Draw image to canvas
-    this.context.drawImage(image, 0, 0);
-
-    // Get image data
-    const imageData = this.context.getImageData(0, 0, this.canvas.width, this.canvas.height);
-
-    // Basic face detection using skin tone and contrast analysis
-    const faceRegion = this.detectFaceRegion(imageData);
-
-    if (!faceRegion) {
-      return null;
-    }
-
-    // Extract features from face region
-    const features = this.extractFeatures(imageData, faceRegion);
-
-    return features;
-  }
 
   private detectFaceRegion(imageData: ImageData): { x: number; y: number; width: number; height: number } | null {
     // Simplified face detection using center region assumption
@@ -422,80 +405,7 @@ class FaceProcessingService {
     return avgBrightness > 50 && avgBrightness < 220 && contrastRatio > 0.1;
   }
 
-  private extractFeatures(
-    imageData: ImageData,
-    faceRegion: { x: number; y: number; width: number; height: number }
-  ): number[] {
-    const data = imageData.data;
-    const imageWidth = imageData.width;
-    const features: number[] = [];
 
-    // Extract simplified features from different regions of the face
-    const regions = [
-      { name: 'forehead', x: 0.2, y: 0.1, w: 0.6, h: 0.3 },
-      { name: 'left_eye', x: 0.2, y: 0.3, w: 0.25, h: 0.2 },
-      { name: 'right_eye', x: 0.55, y: 0.3, w: 0.25, h: 0.2 },
-      { name: 'nose', x: 0.4, y: 0.4, w: 0.2, h: 0.3 },
-      { name: 'mouth', x: 0.3, y: 0.65, w: 0.4, h: 0.25 },
-      { name: 'left_cheek', x: 0.1, y: 0.45, w: 0.3, h: 0.3 },
-      { name: 'right_cheek', x: 0.6, y: 0.45, w: 0.3, h: 0.3 },
-      { name: 'chin', x: 0.3, y: 0.8, w: 0.4, h: 0.2 }
-    ];
-
-    for (const region of regions) {
-      const regionX = Math.floor(faceRegion.x + region.x * faceRegion.width);
-      const regionY = Math.floor(faceRegion.y + region.y * faceRegion.height);
-      const regionW = Math.floor(region.w * faceRegion.width);
-      const regionH = Math.floor(region.h * faceRegion.height);
-
-      // Extract color and texture features from this region
-      let avgR = 0, avgG = 0, avgB = 0;
-      let textureMeasure = 0;
-      let pixelCount = 0;
-
-      for (let dy = 0; dy < regionH; dy += 2) {
-        for (let dx = 0; dx < regionW; dx += 2) {
-          const px = regionX + dx;
-          const py = regionY + dy;
-
-          if (px >= 0 && px < imageWidth && py >= 0 && py < imageData.height) {
-            const index = (py * imageWidth + px) * 4;
-            const r = data[index];
-            const g = data[index + 1];
-            const b = data[index + 2];
-
-            avgR += r;
-            avgG += g;
-            avgB += b;
-            pixelCount++;
-
-            // Simple texture measure (variance in brightness)
-            const brightness = (r + g + b) / 3;
-            textureMeasure += Math.abs(brightness - 128);
-          }
-        }
-      }
-
-      if (pixelCount > 0) {
-        features.push(avgR / pixelCount / 255);
-        features.push(avgG / pixelCount / 255);
-        features.push(avgB / pixelCount / 255);
-        features.push(textureMeasure / pixelCount / 255);
-      }
-    }
-
-    // Pad or truncate to exactly 128 dimensions
-    while (features.length < 128) {
-      features.push(0);
-    }
-
-    return features.slice(0, 128);
-  }
-
-  private createEmbedding(features: number[]): number[] {
-    // Normalize features to 0-255 range for blockchain storage
-    return features.map(feature => Math.round(feature * 255));
-  }
 
   private calculateAverageBrightness(imageData: ImageData): number {
     const data = imageData.data;
