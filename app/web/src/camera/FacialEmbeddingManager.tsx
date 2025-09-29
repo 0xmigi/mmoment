@@ -12,6 +12,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useParams } from "react-router-dom";
 
 interface FacialEmbeddingManagerProps {
   walletAddress?: string;
@@ -28,6 +29,7 @@ export function FacialEmbeddingManager({
   const [error, setError] = useState<string | null>(null);
 
   const { primaryWallet } = useDynamicContext();
+  const { cameraId } = useParams<{ cameraId: string }>();
   const { program } = useProgram();
   const { selectedCamera } = useCamera();
 
@@ -120,6 +122,7 @@ export function FacialEmbeddingManager({
   if (showEnrollment) {
     return (
       <PhoneSelfieEnrollment
+        cameraId={cameraId || ""}
         walletAddress={walletAddress}
         onEnrollmentComplete={handleEnrollmentComplete}
         onCancel={() => setShowEnrollment(false)}

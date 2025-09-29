@@ -9,7 +9,7 @@ interface IRLAppsButtonProps {
   onEnrollmentComplete?: () => void;
 }
 
-export function IRLAppsButton({ walletAddress, onEnrollmentComplete }: IRLAppsButtonProps) {
+export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }: IRLAppsButtonProps) {
   const [showAppsModal, setShowAppsModal] = useState(false);
   const [showEnrollment, setShowEnrollment] = useState(false);
   const facialEmbeddingStatus = useFacialEmbeddingStatus();
@@ -176,6 +176,7 @@ export function IRLAppsButton({ walletAddress, onEnrollmentComplete }: IRLAppsBu
             <div className="p-2 flex-1">
               <div className="h-full rounded-lg overflow-hidden">
                 <PhoneSelfieEnrollment
+                  cameraId={cameraId}
                   onEnrollmentComplete={(result) => {
                     if (result.success) {
                       setShowEnrollment(false);

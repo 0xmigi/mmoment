@@ -5,9 +5,9 @@ import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { Camera, X, RotateCcw, Check, Wifi } from "lucide-react";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useConnection } from "@solana/wallet-adapter-react";
-import { useParams } from "react-router-dom";
 
 interface PhoneSelfieEnrollmentProps {
+  cameraId: string;
   walletAddress?: string;
   onEnrollmentComplete?: (result: {
     success: boolean;
@@ -18,6 +18,7 @@ interface PhoneSelfieEnrollmentProps {
 }
 
 export function PhoneSelfieEnrollment({
+  cameraId,
   onEnrollmentComplete,
   onCancel,
 }: PhoneSelfieEnrollmentProps) {
@@ -43,20 +44,43 @@ export function PhoneSelfieEnrollment({
   const { primaryWallet } = useDynamicContext();
   const { program } = useProgram();
   const { connection } = useConnection();
-  const { cameraId } = useParams<{ cameraId: string }>();
+
+  // Debug logging for state changes
+  useEffect(() => {
+    console.log('[PhoneSelfieEnrollment] 🔄 State update - connectedCameraUrl:', connectedCameraUrl);
+  }, [connectedCameraUrl]);
+
+  useEffect(() => {
+    console.log('[PhoneSelfieEnrollment] 🔄 State update - step:', step);
+  }, [step]);
+
+  useEffect(() => {
+    console.log('[PhoneSelfieEnrollment] 🔄 Prop update - cameraId:', cameraId);
+  }, [cameraId]);
 
   // Check for user session on mount
   useEffect(() => {
+    console.log('[PhoneSelfieEnrollment] 🎯 Main useEffect triggered - dependencies:', {
+      primaryWallet: !!primaryWallet,
+      program: !!program,
+      cameraId: cameraId
+    });
     findUserCurrentSession();
   }, [primaryWallet, program, cameraId]);
 
   const findUserCurrentSession = async () => {
+    console.log('[PhoneSelfieEnrollment] 🔍 findUserCurrentSession called');
+    console.log('[PhoneSelfieEnrollment] 🔍 primaryWallet?.address:', primaryWallet?.address);
+    console.log('[PhoneSelfieEnrollment] 🔍 cameraId:', cameraId);
+
     if (!primaryWallet?.address) {
+      console.log('[PhoneSelfieEnrollment] ❌ No wallet address');
       setError("Please connect your wallet to enroll your face");
       return;
     }
 
     if (!cameraId) {
+      console.log('[PhoneSelfieEnrollment] ❌ No cameraId from route params');
       setError("No camera specified. Please access this from a camera page.");
       return;
     }
@@ -64,14 +88,16 @@ export function PhoneSelfieEnrollment({
     try {
       // Use the camera ID from route params to build the camera URL (same as other camera components)
       const cameraUrl = `https://${cameraId}.mmoment.xyz`;
-      console.log('[PhoneSelfieEnrollment] Using camera from route params:', cameraUrl);
+      console.log('[PhoneSelfieEnrollment] ✅ Building camera URL:', cameraUrl);
 
       // Set the camera URL directly - if user is on camera page, assume camera is accessible
       setConnectedCameraUrl(cameraUrl);
       setStep("camera");
       setError(null);
-      console.log('[PhoneSelfieEnrollment] Camera URL set, proceeding to camera step');
+      console.log('[PhoneSelfieEnrollment] ✅ Camera URL set successfully, step set to camera');
+      console.log('[PhoneSelfieEnrollment] ✅ connectedCameraUrl should now be:', cameraUrl);
     } catch (error) {
+      console.log('[PhoneSelfieEnrollment] ❌ Error in try block:', error);
       setError("Unable to initialize camera connection.");
     }
   };

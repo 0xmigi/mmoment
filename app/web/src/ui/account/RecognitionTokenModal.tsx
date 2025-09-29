@@ -5,6 +5,7 @@ import { PhoneSelfieEnrollment } from '../../camera/PhoneSelfieEnrollment';
 import { FacialEmbeddingStatus } from '../../hooks/useFacialEmbeddingStatus';
 import { useProgram } from '../../anchor/setup';
 import { useState } from 'react';
+import { useParams } from 'react-router-dom';
 
 interface RecognitionTokenModalProps {
   isOpen: boolean;
@@ -16,6 +17,7 @@ interface RecognitionTokenModalProps {
 export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate }: RecognitionTokenModalProps) {
   const { primaryWallet } = useDynamicContext();
   const { program } = useProgram();
+  const { cameraId } = useParams<{ cameraId: string }>();
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showEnrollment, setShowEnrollment] = useState(false);
@@ -205,6 +207,7 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
               </div>
             ) : showEnrollment ? (
               <PhoneSelfieEnrollment
+                cameraId={cameraId || ""}
                 onEnrollmentComplete={(result) => {
                   if (result.success) {
                     setShowEnrollment(false);
