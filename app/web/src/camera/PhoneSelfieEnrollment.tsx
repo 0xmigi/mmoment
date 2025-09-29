@@ -255,12 +255,30 @@ export function PhoneSelfieEnrollment({
       console.log('[PhoneSelfieEnrollment] 🔍 ENROLLMENT DEBUG: walletAddress =', primaryWallet.address);
       console.log('[PhoneSelfieEnrollment] 📞 CALLING faceProcessingService.processFacialEmbedding FOR ENROLLMENT');
 
-      // Send image to Jetson camera for enhanced facial embedding extraction with encryption
-      const result = await faceProcessingService.processFacialEmbedding(
+      // Send image to Jetson camera for enhanced facial embedding extraction
+      // We need BOTH encrypted (for storage) and raw (for blockchain) embeddings
+      const encryptedResult = await faceProcessingService.processFacialEmbedding(
         capturedImage,
         connectedCameraUrl,
         { encrypt: true, requestQuality: true, walletAddress: primaryWallet.address }
       );
+
+      console.log('[PhoneSelfieEnrollment] 📞 Getting raw embedding for blockchain...');
+      const rawResult = await faceProcessingService.processFacialEmbedding(
+        capturedImage,
+        connectedCameraUrl,
+        { encrypt: false, requestQuality: false, walletAddress: primaryWallet.address }
+      );
+
+      console.log('[PhoneSelfieEnrollment] 📞 Both embeddings obtained:', {
+        encryptedSuccess: encryptedResult.success,
+        rawSuccess: rawResult.success,
+        encryptedHasEmbedding: !!encryptedResult.embedding,
+        rawHasEmbedding: !!rawResult.embedding
+      });
+
+      // Use encrypted result for display/quality, but validate both succeeded
+      const result = encryptedResult;
 
       console.log('[PhoneSelfieEnrollment] 📞 ENROLLMENT RESULT from faceProcessingService:', result);
 
@@ -270,11 +288,11 @@ export function PhoneSelfieEnrollment({
         error: result.error
       });
 
-      if (!result.success) {
-        throw new Error(result.error || "Failed to process facial features");
+      if (!result.success || !rawResult.success) {
+        throw new Error(result.error || rawResult.error || "Failed to process facial features");
       }
 
-      if (!result.embedding) {
+      if (!result.embedding || !rawResult.embedding) {
         throw new Error("No facial embedding received from camera");
       }
 
@@ -336,24 +354,17 @@ export function PhoneSelfieEnrollment({
         console.log('[PhoneSelfieEnrollment] 🔍 Account check failed (expected for new enrollments):', accountCheckError);
       }
 
-      // Handle encrypted embedding from Jetson
-      console.log('[PhoneSelfieEnrollment] 🔐 Processing encrypted embedding...');
-      let embeddingBuffer: Buffer;
+      // Use RAW embedding for blockchain (Solana program expects fixed-size array)
+      // The encrypted embedding is for off-chain storage and recognition
+      console.log('[PhoneSelfieEnrollment] 📊 Processing raw embedding for blockchain...');
 
-      if (typeof result.embedding === 'object' && result.embedding !== null && !Array.isArray(result.embedding) && (result.embedding as any).encrypted_embedding) {
-        // This is an encrypted embedding object from Jetson
-        console.log('[PhoneSelfieEnrollment] 🔐 Converting encrypted embedding to buffer...');
-        const encryptedData = (result.embedding as any).encrypted_embedding;
-        embeddingBuffer = Buffer.from(encryptedData, 'base64');
-        console.log('[PhoneSelfieEnrollment] 🔐 Encrypted embedding buffer size:', embeddingBuffer.length);
-      } else if (Array.isArray(result.embedding)) {
-        // This is a raw embedding array (fallback)
-        console.log('[PhoneSelfieEnrollment] 📊 Converting array embedding to buffer...');
-        embeddingBuffer = Buffer.from(new Float32Array(result.embedding).buffer);
-      } else {
-        throw new Error('Invalid embedding format received from camera');
+      if (!Array.isArray(rawResult.embedding)) {
+        throw new Error('Invalid raw embedding format - expected array');
       }
-      console.log('[PhoneSelfieEnrollment] ✅ Embedding buffer prepared');
+
+      console.log('[PhoneSelfieEnrollment] 📊 Raw embedding size:', rawResult.embedding.length);
+      const embeddingBuffer = Buffer.from(new Float32Array(rawResult.embedding).buffer);
+      console.log('[PhoneSelfieEnrollment] ✅ Raw embedding buffer prepared, size:', embeddingBuffer.length);
 
       console.log('[PhoneSelfieEnrollment] 🏗️ Creating enrollment instruction...');
       console.log('[PhoneSelfieEnrollment] 🏗️ Instruction params:', {
