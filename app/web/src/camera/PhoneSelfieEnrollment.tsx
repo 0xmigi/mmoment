@@ -1,4 +1,4 @@
-import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from "../anchor/setup";
+import { useProgram } from "../anchor/setup";
 import { faceProcessingService } from "./face-processing";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
@@ -49,65 +49,58 @@ export function PhoneSelfieEnrollment({
   }, [primaryWallet, program]);
 
   const findUserCurrentSession = async () => {
-    if (!primaryWallet?.address || !program || !connection) {
+    if (!primaryWallet?.address) {
       setError("Please connect your wallet to enroll your face");
       return;
     }
 
     try {
-      console.log('[PhoneSelfieEnrollment] 🔍 Checking for active user sessions...');
+      // Get the camera PDA from localStorage (set by IRLAppsButton)
+      const storedCameraPda = localStorage.getItem('lastAccessedCameraPDA');
 
-      const userPublicKey = new PublicKey(primaryWallet.address);
+      if (storedCameraPda) {
+        const cameraUrl = `https://${storedCameraPda}.mmoment.xyz`;
 
-      // Get all camera accounts from the program to check sessions
-      const allCameras = await program.account.cameraAccount.all();
-      console.log('[PhoneSelfieEnrollment] 📋 Found cameras to check:', allCameras.length);
-
-      let activeSession = null;
-      let activeCameraPda = null;
-
-      // Check each camera for an active session with this user
-      for (const cameraAccount of allCameras) {
-        const cameraPublicKey = cameraAccount.publicKey;
-
-        // Find the session PDA for this user + camera combination
-        const [sessionPda] = PublicKey.findProgramAddressSync(
-          [
-            Buffer.from("session"),
-            userPublicKey.toBuffer(),
-            cameraPublicKey.toBuffer(),
-          ],
-          CAMERA_ACTIVATION_PROGRAM_ID
-        );
-
+        // Test if the camera is accessible
         try {
-          // Try to fetch the session account
-          const sessionAccount = await program.account.userSession.fetch(sessionPda);
-          if (sessionAccount) {
-            console.log('[PhoneSelfieEnrollment] ✅ Found active session with camera:', cameraPublicKey.toString());
-            activeSession = sessionAccount;
-            activeCameraPda = cameraPublicKey.toString();
-            break; // Found an active session, use this camera
+          const testResponse = await fetch(`${cameraUrl}/api/status`, {
+            method: 'GET',
+            mode: 'cors'
+          });
+
+          if (testResponse.ok) {
+            setConnectedCameraUrl(cameraUrl);
+            setStep("camera");
+            setError(null);
+            return;
           }
-        } catch (err) {
-          // No session with this camera, continue checking others
-          continue;
+        } catch (fetchError) {
+          // Camera not accessible, continue to fallback
+          console.log('[PhoneSelfieEnrollment] Stored camera not accessible:', fetchError);
         }
       }
 
-      if (activeSession && activeCameraPda) {
-        console.log('[PhoneSelfieEnrollment] ✅ User is checked into camera:', activeCameraPda);
-        const cameraUrl = `https://${activeCameraPda}.mmoment.xyz`;
-        setConnectedCameraUrl(cameraUrl);
-        setStep("camera");
-        setError(null);
-      } else {
-        console.log('[PhoneSelfieEnrollment] ❌ No active sessions found');
-        setError("Please check into a camera first to enroll your face. Visit a camera page and complete the check-in process.");
+      // Fallback: Use your main Jetson camera directly
+      const mainJetsonUrl = "https://h1wonbkwjgncepeyr65xeewjfggdbospl5ubjan5vyhg.mmoment.xyz";
+      try {
+        const testResponse = await fetch(`${mainJetsonUrl}/api/status`, {
+          method: 'GET',
+          mode: 'cors'
+        });
+
+        if (testResponse.ok) {
+          setConnectedCameraUrl(mainJetsonUrl);
+          setStep("camera");
+          setError(null);
+          return;
+        }
+      } catch (fetchError) {
+        console.log('[PhoneSelfieEnrollment] Main camera not accessible:', fetchError);
       }
+
+      setError("No accessible camera found. Please visit a camera page first or ensure the camera is online.");
     } catch (error) {
-      console.error('[PhoneSelfieEnrollment] Error checking user sessions:', error);
-      setError("Unable to verify camera session. Please ensure you're checked into a camera.");
+      setError("Unable to connect to camera. Please try again later.");
     }
   };
 
@@ -222,29 +215,31 @@ export function PhoneSelfieEnrollment({
       console.log('[PhoneSelfieEnrollment] Image data prefix:', imageData.substring(0, 50));
       console.log('[PhoneSelfieEnrollment] Canvas dimensions:', canvas.width, 'x', canvas.height);
 
-      // Perform quality check using enhanced processing if camera is available
+      // MUST use Jetson for quality check - no fake local assessment
       setProgress("Checking image quality...");
-      let quality;
 
-      if (connectedCameraUrl) {
-        // Use enhanced Jetson quality assessment
-        const result = await faceProcessingService.processFacialEmbedding(
-          imageData,
-          connectedCameraUrl,
-          { requestQuality: true, encrypt: false }
-        );
+      console.log('[PhoneSelfieEnrollment] 🚨 CRITICAL: connectedCameraUrl =', connectedCameraUrl);
+      console.log('[PhoneSelfieEnrollment] 🚨 CRITICAL: typeof connectedCameraUrl =', typeof connectedCameraUrl);
 
-        if (result.success && result.quality) {
-          quality = result.quality;
-          console.log('[PhoneSelfieEnrollment] Enhanced quality assessment:', quality);
-        } else {
-          // Fallback to local quality check
-          quality = await faceProcessingService.analyzeImageQuality(imageData);
-        }
-      } else {
-        // Use local quality assessment as fallback
-        quality = await faceProcessingService.analyzeImageQuality(imageData);
+      if (!connectedCameraUrl) {
+        console.log('[PhoneSelfieEnrollment] 🚨 CRITICAL: connectedCameraUrl is null/undefined - THIS IS THE BUG!');
+        setError("No camera connection - cannot assess image quality");
+        return;
       }
+
+      const result = await faceProcessingService.processFacialEmbedding(
+        imageData,
+        connectedCameraUrl,
+        { requestQuality: true, encrypt: false }
+      );
+
+      if (!result.success || !result.quality) {
+        setError(`Quality assessment failed: ${result.error || 'No quality data from camera'}`);
+        return;
+      }
+
+      const quality = result.quality;
+      console.log('[PhoneSelfieEnrollment] Jetson quality assessment:', quality);
 
       // Store quality information
       setQualityScore(quality.score);
@@ -438,200 +433,196 @@ export function PhoneSelfieEnrollment({
   // Render based on current step
   if (step === "check-connection") {
     return (
-      <div className="bg-gray-100 rounded-xl p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">Face Enrollment</h3>
-          {onCancel && (
-            <button
-              onClick={onCancel}
-              className="text-gray-500 hover:text-gray-700"
-            >
-              <X className="h-5 w-5" />
-            </button>
+      <div className="h-full flex flex-col">
+        <div className="flex-1 bg-gray-900 flex items-center justify-center">
+          <div className="text-center">
+            <Wifi className="h-12 w-12 text-white/70 mx-auto mb-4" />
+            <p className="text-white text-lg mb-2">Connecting to Camera</p>
+            <p className="text-white/70 text-sm">Please wait...</p>
+          </div>
+
+          {error && (
+            <div className="absolute bottom-20 left-4 right-4">
+              <div className="bg-red-500/90 backdrop-blur-sm rounded-lg p-3">
+                <p className="text-white text-sm text-center">{error}</p>
+              </div>
+            </div>
           )}
         </div>
 
-        <div className="text-center mb-4">
-          <Wifi className="h-8 w-8 text-yellow-600 mx-auto mb-3" />
-          <p className="text-sm text-yellow-800 font-medium mb-2">
-            Camera Connection Required
-          </p>
-          <p className="text-xs text-yellow-700">
-            Please check into a camera first
-          </p>
+        <div className="p-4 bg-white">
+          <button
+            onClick={findUserCurrentSession}
+            className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+          >
+            Retry Connection
+          </button>
         </div>
-
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-            <p className="text-sm text-red-700">{error}</p>
-          </div>
-        )}
-
-        <button
-          onClick={findUserCurrentSession}
-          className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          Retry
-        </button>
       </div>
     );
   }
 
   if (step === "camera") {
     return (
-      <div className="bg-gray-100 rounded-xl p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-semibold">Capture Your Face</h3>
-          {onCancel && (
-            <button
-              onClick={onCancel}
-              className="text-gray-500 hover:text-gray-700"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          )}
-        </div>
-
-        <div className="relative bg-black rounded-lg overflow-hidden mb-3">
+      <div className="h-full flex flex-col bg-black">
+        {/* Camera View - PORTRAIT aspect ratio like main camera */}
+        <div className="flex-1 relative overflow-hidden">
           <video
             ref={videoRef}
             autoPlay
             playsInline
             muted
-            className="w-full h-auto"
+            className="w-full h-full object-cover"
             style={{
               transform: "scaleX(-1)", // Mirror the video for selfie mode
-              maxHeight: "400px",
-              objectFit: "cover",
+              aspectRatio: "9/16", // PORTRAIT like main camera, not landscape
             }}
           />
           <canvas ref={canvasRef} className="hidden" />
 
-          {/* Face guide overlay */}
-          <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-              <div className="w-48 h-64 border-2 border-white/50 rounded-full" />
+          {/* Face guide overlay - smaller and more subtle */}
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+            <div className="w-40 h-52 border-2 border-white/50 rounded-full">
+              <div className="absolute inset-4 border border-white/20 rounded-full" />
             </div>
-            <p className="absolute bottom-4 left-0 right-0 text-center text-white text-sm">
-              Position face in oval
-            </p>
           </div>
+
+          {/* Minimal status overlay */}
+          <div className="absolute top-4 left-4 right-4 flex items-center justify-between">
+            <div className="bg-black/30 backdrop-blur-sm rounded-full px-3 py-1">
+              <p className="text-white text-xs">Position face in oval</p>
+            </div>
+            {onCancel && (
+              <button
+                onClick={onCancel}
+                className="w-8 h-8 bg-black/30 backdrop-blur-sm hover:bg-black/50 rounded-full flex items-center justify-center transition-colors"
+              >
+                <X className="h-4 w-4 text-white" />
+              </button>
+            )}
+          </div>
+
+          {/* Error overlay */}
+          {error && (
+            <div className="absolute bottom-16 left-4 right-4">
+              <div className="bg-red-500/90 backdrop-blur-sm rounded-lg p-2">
+                <p className="text-white text-xs text-center">{error}</p>
+              </div>
+            </div>
+          )}
         </div>
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3">
-            <p className="text-sm text-red-700">{error}</p>
-          </div>
-        )}
-
-        <button
-          onClick={capturePhoto}
-          disabled={isCapturing}
-          className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center justify-center"
-        >
-          {isCapturing ? (
-            "Capturing..."
-          ) : (
-            <>
-              <Camera className="h-5 w-5 mr-2" />
-              Take Photo
-            </>
-          )}
-        </button>
+        {/* Floating button over camera */}
+        <div className="absolute bottom-6 left-6 right-6">
+          <button
+            onClick={capturePhoto}
+            disabled={isCapturing}
+            className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center justify-center text-sm font-medium shadow-lg"
+          >
+            {isCapturing ? (
+              <div className="flex items-center space-x-2">
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>Capturing...</span>
+              </div>
+            ) : (
+              <>
+                <Camera className="h-4 w-4 mr-2" />
+                Capture Face
+              </>
+            )}
+          </button>
+        </div>
       </div>
     );
   }
 
   if (step === "preview") {
     return (
-      <div className="bg-gray-100 rounded-xl p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">Review Your Photo</h3>
-          {onCancel && (
-            <button
-              onClick={onCancel}
-              className="text-gray-500 hover:text-gray-700"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          )}
-        </div>
-
-        {capturedImage && (
-          <div className="mb-4">
+      <div className="h-full flex flex-col bg-black">
+        {/* Image Preview - PORTRAIT aspect ratio */}
+        <div className="flex-1 relative overflow-hidden">
+          {capturedImage && (
             <img
               src={capturedImage}
               alt="Captured selfie"
-              className="w-full rounded-lg"
+              className="w-full h-full object-cover"
               style={{
                 transform: "scaleX(-1)", // Mirror the image for selfie mode
-                maxHeight: "400px",
-                objectFit: "cover",
+                aspectRatio: "9/16", // PORTRAIT like main camera
               }}
             />
-          </div>
-        )}
+          )}
 
-        {/* Simplified Quality Score Display */}
-        {qualityScore !== null && qualityRating && (
-          <div className={`rounded-lg p-3 mb-3 text-center ${
-            qualityRating === 'excellent' ? 'bg-green-50 border border-green-200' :
-            qualityRating === 'good' ? 'bg-blue-50 border border-blue-200' :
-            qualityRating === 'acceptable' ? 'bg-yellow-50 border border-yellow-200' :
-            qualityRating === 'poor' ? 'bg-orange-50 border border-orange-200' :
-            'bg-red-50 border border-red-200'
-          }`}>
-            <div className={`inline-flex items-center ${
-              qualityRating === 'excellent' ? 'text-green-800' :
-              qualityRating === 'good' ? 'text-blue-800' :
-              qualityRating === 'acceptable' ? 'text-yellow-800' :
-              qualityRating === 'poor' ? 'text-orange-800' :
-              'text-red-800'
-            }`}>
-              <div className={`w-3 h-3 rounded-full mr-2 ${
-                qualityRating === 'excellent' ? 'bg-green-500' :
-                qualityRating === 'good' ? 'bg-blue-500' :
-                qualityRating === 'acceptable' ? 'bg-yellow-500' :
-                qualityRating === 'poor' ? 'bg-orange-500' :
-                'bg-red-500'
-              }`} />
-              <span className="text-sm font-medium capitalize">
-                {qualityRating} Quality ({qualityScore}%)
-              </span>
+          {/* Quality overlay at top - smaller */}
+          <div className="absolute top-4 left-4 right-4">
+            {qualityScore !== null && qualityRating && (
+              <div className="bg-black/30 backdrop-blur-sm rounded-full px-3 py-1 flex items-center justify-center">
+                <div className={`w-2 h-2 rounded-full mr-2 ${
+                  qualityRating === 'excellent' ? 'bg-green-400' :
+                  qualityRating === 'good' ? 'bg-blue-400' :
+                  qualityRating === 'acceptable' ? 'bg-yellow-400' :
+                  qualityRating === 'poor' ? 'bg-orange-400' :
+                  'bg-red-400'
+                }`} />
+                <span className="text-white text-xs capitalize">
+                  {qualityRating} ({qualityScore}%)
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Issues overlay - smaller */}
+          {(qualityIssues.length > 0 || qualityRecommendations.length > 0) && (
+            <div className="absolute bottom-16 left-4 right-4">
+              <div className="bg-yellow-500/90 backdrop-blur-sm rounded-lg p-2">
+                <p className="text-white text-xs text-center">
+                  {qualityIssues.length > 0 ? qualityIssues[0] : qualityRecommendations[0]}
+                </p>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {(qualityIssues.length > 0 || qualityRecommendations.length > 0) && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3">
-            <p className="text-sm text-yellow-800 text-center">
-              {qualityIssues.length > 0 ? qualityIssues[0] : qualityRecommendations[0]}
-            </p>
-          </div>
-        )}
+          {/* Error overlay - smaller */}
+          {error && (
+            <div className="absolute bottom-16 left-4 right-4">
+              <div className="bg-red-500/90 backdrop-blur-sm rounded-lg p-2">
+                <p className="text-white text-xs text-center">{error}</p>
+              </div>
+            </div>
+          )}
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-            <p className="text-sm text-red-700">{error}</p>
-          </div>
-        )}
+          {/* Cancel button - smaller */}
+          {onCancel && (
+            <div className="absolute top-4 right-4">
+              <button
+                onClick={onCancel}
+                className="w-8 h-8 bg-black/30 backdrop-blur-sm hover:bg-black/50 rounded-full flex items-center justify-center transition-colors"
+              >
+                <X className="h-4 w-4 text-white" />
+              </button>
+            </div>
+          )}
+        </div>
 
-        <div className="flex gap-3">
-          <button
-            onClick={retakePhoto}
-            className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors flex items-center justify-center"
-          >
-            <RotateCcw className="h-5 w-5 mr-2" />
-            Retake
-          </button>
-          <button
-            onClick={processFaceEnrollment}
-            disabled={!!error}
-            className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center justify-center"
-          >
-            <Check className="h-5 w-5 mr-2" />
-            Use This Photo
-          </button>
+        {/* Floating buttons over preview */}
+        <div className="absolute bottom-6 left-6 right-6">
+          <div className="flex gap-3">
+            <button
+              onClick={retakePhoto}
+              className="flex-1 bg-gray-200 text-gray-700 px-4 py-3 rounded-lg hover:bg-gray-300 transition-colors flex items-center justify-center text-sm font-medium shadow-lg"
+            >
+              <RotateCcw className="h-4 w-4 mr-2" />
+              Retake
+            </button>
+            <button
+              onClick={processFaceEnrollment}
+              disabled={!!error}
+              className="flex-1 bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center justify-center text-sm font-medium shadow-lg"
+            >
+              <Check className="h-4 w-4 mr-2" />
+              Create Token
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -639,11 +630,15 @@ export function PhoneSelfieEnrollment({
 
   if (step === "processing") {
     return (
-      <div className="bg-gray-100 rounded-xl p-6">
-        <div className="flex flex-col items-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4" />
-          <p className="text-gray-700 font-medium mb-2">Processing...</p>
-          <p className="text-xs text-gray-500 text-center">{progress.split(' - ')[0]}</p>
+      <div className="h-full flex flex-col">
+        <div className="flex-1 bg-gray-900 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white/50 mx-auto mb-4"></div>
+            <p className="text-white text-base mb-2">Processing...</p>
+            <p className="text-white/70 text-sm">
+              {progress.split(' - ')[0]}
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -651,18 +646,19 @@ export function PhoneSelfieEnrollment({
 
   if (step === "complete") {
     return (
-      <div className="bg-green-50 rounded-xl p-6">
-        <div className="flex flex-col items-center">
-          <div className="bg-green-100 rounded-full p-3 mb-4">
-            <Check className="h-8 w-8 text-green-600" />
+      <div className="h-full flex flex-col">
+        <div className="flex-1 bg-green-600 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Check className="w-8 h-8 text-white" />
+            </div>
+            <p className="text-white text-xl font-semibold mb-2">
+              Token Created!
+            </p>
+            <p className="text-white/90 text-sm text-center px-8">
+              IRL apps are now unlocked across the network
+            </p>
           </div>
-          <p className="text-green-800 font-medium mb-2">
-            Enrollment Complete!
-          </p>
-          <p className="text-sm text-green-700 text-center">
-            Your facial embedding has been securely stored on the blockchain.
-            You can now be recognized at any camera in the network.
-          </p>
         </div>
       </div>
     );

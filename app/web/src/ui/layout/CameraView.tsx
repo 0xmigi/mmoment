@@ -5,8 +5,7 @@ import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from "../../anchor/setup";
 import { TransactionModal } from "../../auth/components/TransactionModal";
 import { CameraModal } from "../../camera/CameraModal";
 import { useCamera, CameraData } from "../../camera/CameraProvider";
-import { FaceEnrollmentButton } from "../../camera/FaceEnrollmentButton";
-import { CameraActionResponse } from "../../camera/camera-interface";
+import { IRLAppsButton } from "../../camera/IRLAppsButton";
 import { cameraStatus } from "../../camera/camera-status";
 import { unifiedCameraService } from "../../camera/unified-camera-service";
 import { useCameraStatus } from "../../camera/useCameraStatus";
@@ -1545,48 +1544,19 @@ export function CameraView() {
           <div className="px-0 pt-0 sm:px-2">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="md:col-span-3 relative">
-                {/* Face Enrollment Button - positioned next to stream */}
+                {/* IRL Apps Button - positioned next to stream */}
                 {currentCameraId &&
                   unifiedCameraService.hasCamera(currentCameraId) && (
                     <div className="absolute top-2 right-4 z-50">
-                      <FaceEnrollmentButton
+                      <IRLAppsButton
                         cameraId={currentCameraId}
                         walletAddress={primaryWallet?.address}
-                        onEnrollmentComplete={(
-                          result: CameraActionResponse<{
-                            enrolled: boolean;
-                            faceId: string;
-                            transactionId?: string;
-                          }>
-                        ) => {
-                          if (result.success) {
-                            const message = result.data?.transactionId
-                              ? `Face enrolled & NFT minted! Face ID: ${
-                                  result.data?.faceId
-                                }, TX: ${result.data.transactionId.slice(
-                                  0,
-                                  8
-                                )}...`
-                              : `Face enrolled successfully! Face ID: ${result.data?.faceId}`;
-                            updateToast("success", message);
+                        onEnrollmentComplete={() => {
+                          updateToast("success", "Recognition token created! IRL apps are now unlocked.");
 
-                            // Add timeline event if we have a transaction ID
-                            if (result.data?.transactionId) {
-                              addTimelineEvent(
-                                "face_enrolled",
-                                result.data.transactionId
-                              );
-
-                              // Refresh timeline to show the new event
-                              if (timelineRef.current?.refreshEvents) {
-                                timelineRef.current?.refreshEvents();
-                              }
-                            }
-                          } else {
-                            updateToast(
-                              "error",
-                              `Face enrollment failed: ${result.error}`
-                            );
+                          // Refresh timeline to show the new event
+                          if (timelineRef.current?.refreshEvents) {
+                            timelineRef.current?.refreshEvents();
                           }
                         }}
                       />
