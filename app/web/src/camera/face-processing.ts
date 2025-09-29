@@ -156,7 +156,7 @@ class FaceProcessingService {
   async processFacialEmbedding(
     imageData: string,
     cameraUrl?: string,
-    options: { encrypt?: boolean; requestQuality?: boolean } = {}
+    options: { encrypt?: boolean; requestQuality?: boolean; walletAddress?: string } = {}
   ): Promise<EnhancedFaceProcessingResult> {
     try {
       // If we have a Jetson camera URL, use the enhanced endpoint
@@ -182,7 +182,7 @@ class FaceProcessingService {
   private async processWithJetsonEndpoint(
     imageData: string,
     cameraUrl: string,
-    options: { encrypt?: boolean; requestQuality?: boolean } = {}
+    options: { encrypt?: boolean; requestQuality?: boolean; walletAddress?: string } = {}
   ): Promise<EnhancedFaceProcessingResult> {
     try {
       console.log('[FaceProcessing] Using enhanced Jetson endpoint:', cameraUrl);
@@ -192,6 +192,12 @@ class FaceProcessingService {
         image_data: imageData.split(',')[1] || imageData, // Remove data:image/jpeg;base64, prefix if present
         quality_assessment: options.requestQuality !== false, // Default to true unless explicitly false
       };
+
+      // Add wallet address if provided (needed for local enrollment)
+      if (options.walletAddress) {
+        payload.wallet_address = options.walletAddress;
+        console.log('[FaceProcessing] Adding wallet address to embedding extraction for local enrollment:', options.walletAddress);
+      }
 
       // Add encryption option if requested
       if (options.encrypt) {

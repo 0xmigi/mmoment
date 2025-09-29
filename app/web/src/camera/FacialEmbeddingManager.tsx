@@ -10,7 +10,6 @@ import {
   CheckCircle,
   AlertCircle,
   Wifi,
-  Camera,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -156,73 +155,37 @@ export function FacialEmbeddingManager({
                 camera. This ensures your embedding is compatible with all
                 cameras in the network.
               </p>
-
-              <div className="mt-4 bg-yellow-100 rounded-lg p-3">
-                <p className="text-sm text-yellow-800">
-                  <strong>Why is this required?</strong> Your face is processed
-                  by the camera's AI to ensure 100% compatibility across all
-                  mmoment cameras.
-                </p>
-              </div>
-
-              <div className="mt-4 flex items-center text-sm text-yellow-600">
-                <Camera className="h-4 w-4 mr-2" />
-                <span>Connect to any mmoment camera to continue</span>
-              </div>
             </div>
           </div>
         </div>
       ) : (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-          <div className="flex items-start space-x-3">
-            <User className="h-6 w-6 text-blue-600 flex-shrink-0 mt-0.5" />
-            <div>
-              <h3 className="text-lg font-semibold text-blue-800">
+        <div className="space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-center space-x-3 mb-3">
+              <User className="h-6 w-6 text-blue-600" />
+              <h3 className="text-base font-semibold text-blue-800">
                 Create Facial Embedding
               </h3>
-              <p className="text-blue-700 mt-1">
-                Create a secure facial embedding to use CV apps on mmoment
-                cameras. This only needs to be done once.
-              </p>
-
-              <div className="mt-4 space-y-2 text-sm text-blue-600">
-                <div className="flex items-center">
-                  <Smartphone className="h-4 w-4 mr-2" />
-                  <span>Uses your phone's front camera</span>
-                </div>
-                <div className="flex items-center">
-                  <Camera className="h-4 w-4 mr-2" />
-                  <span>
-                    Processed by connected camera:{" "}
-                    {selectedCamera?.owner.toString()}
-                  </span>
-                </div>
-                <div className="flex items-center">
-                  <Shield className="h-4 w-4 mr-2" />
-                  <span>Encrypted and stored on Solana blockchain</span>
-                </div>
-                <div className="flex items-center">
-                  <CheckCircle className="h-4 w-4 mr-2" />
-                  <span>Compatible with all mmoment cameras</span>
-                </div>
-              </div>
-
-              <button
-                onClick={() => setShowEnrollment(true)}
-                disabled={!primaryWallet || !selectedCamera}
-                className="mt-6 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2"
-              >
-                <Smartphone className="h-5 w-5" />
-                <span>Create Facial Embedding</span>
-              </button>
-
-              {!primaryWallet && (
-                <p className="mt-2 text-sm text-gray-600">
-                  Please connect your wallet first
-                </p>
-              )}
             </div>
+            <p className="text-sm text-blue-700">
+              Create a secure facial embedding to use CV apps on mmoment cameras. This only needs to be done once.
+            </p>
           </div>
+
+          <button
+            onClick={() => setShowEnrollment(true)}
+            disabled={!primaryWallet || !selectedCamera}
+            className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center space-x-2 font-medium"
+          >
+            <Smartphone className="h-5 w-5" />
+            <span>Create Facial Embedding</span>
+          </button>
+
+          {!primaryWallet && (
+            <p className="text-xs text-gray-500 text-center">
+              Please connect your wallet first
+            </p>
+          )}
         </div>
       )}
     </div>

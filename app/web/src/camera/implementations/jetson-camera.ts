@@ -1365,6 +1365,12 @@ export class JetsonCamera implements ICamera {
         quality_assessment: options.qualityAssessment !== false, // Default to true unless explicitly false
       };
 
+      // Add wallet address if we have an active session (needed for local enrollment)
+      if (this.currentSession?.walletAddress) {
+        payload.wallet_address = this.currentSession.walletAddress;
+        this.log('Adding wallet address to embedding extraction for local enrollment:', this.currentSession.walletAddress);
+      }
+
       // Add encryption option if requested
       if (options.encrypt) {
         payload.encrypt = true;

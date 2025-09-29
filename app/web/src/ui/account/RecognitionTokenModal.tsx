@@ -1,8 +1,10 @@
 import { Dialog } from '@headlessui/react';
-import { X, ScanFace, CheckCircle, AlertCircle, Loader2, Shield, Clock } from 'lucide-react';
+import { X, ScanFace, CheckCircle, AlertCircle, Loader2, Trash2, Smartphone } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { FacialEmbeddingManager } from '../../camera/FacialEmbeddingManager';
+import { PhoneSelfieEnrollment } from '../../camera/PhoneSelfieEnrollment';
 import { FacialEmbeddingStatus } from '../../hooks/useFacialEmbeddingStatus';
+import { useProgram } from '../../anchor/setup';
+import { useState } from 'react';
 
 interface RecognitionTokenModalProps {
   isOpen: boolean;
@@ -13,6 +15,46 @@ interface RecognitionTokenModalProps {
 
 export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate }: RecognitionTokenModalProps) {
   const { primaryWallet } = useDynamicContext();
+  const { program } = useProgram();
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [showEnrollment, setShowEnrollment] = useState(false);
+
+  const handleDeleteRecognitionToken = async () => {
+    if (!primaryWallet?.address || !program) {
+      setDeleteError('Wallet or program not available');
+      return;
+    }
+
+    if (!confirm('Are you sure you want to permanently delete your Recognition Token? This action cannot be undone.')) {
+      return;
+    }
+
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      // Note: This will fail until we add a delete_face instruction to the Solana program
+      // For now, we'll show a message explaining the limitation
+      throw new Error('Delete functionality requires a program update. Contact support to remove your Recognition Token.');
+
+      // Future implementation would be:
+      // const tx = await program.methods
+      //   .deleteFace()
+      //   .accounts({
+      //     user: userPublicKey,
+      //     faceData: faceDataPda,
+      //     systemProgram: SystemProgram.programId,
+      //   })
+      //   .rpc();
+
+    } catch (error) {
+      console.error('Delete error:', error);
+      setDeleteError(error instanceof Error ? error.message : 'Failed to delete Recognition Token');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -44,137 +86,158 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
 
           {/* Content */}
           <div className="p-4">
-            {/* Status Header */}
-            <div className={`rounded-lg p-4 mb-4 border-2 ${
+            {/* Main Status Display */}
+            <div className={`text-center py-6 mb-4 rounded-lg ${
               status.hasEmbedding
-                ? 'bg-green-50 border-green-200'
-                : 'bg-orange-50 border-orange-200'
+                ? 'bg-green-50'
+                : 'bg-orange-50'
             }`}>
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center">
-                  {status.isLoading ? (
-                    <Loader2 className="w-5 h-5 animate-spin text-blue-500 mr-2" />
-                  ) : status.hasEmbedding ? (
-                    <CheckCircle className="w-5 h-5 text-green-500 mr-2" />
-                  ) : (
-                    <AlertCircle className="w-5 h-5 text-orange-500 mr-2" />
-                  )}
-                  <span className="font-medium">
-                    {status.hasEmbedding ? 'Active' : 'Not Enrolled'}
-                  </span>
-                </div>
-                <div className={`text-xs px-2 py-1 rounded-full font-medium ${
-                  status.hasEmbedding
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-orange-100 text-orange-700'
-                }`}>
-                  {status.hasEmbedding ? 'SECURED' : 'PENDING'}
-                </div>
+              {status.isLoading ? (
+                <Loader2 className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-3" />
+              ) : status.hasEmbedding ? (
+                <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-3" />
+              ) : (
+                <AlertCircle className="w-8 h-8 text-orange-500 mx-auto mb-3" />
+              )}
+
+              <div className="font-medium text-lg mb-2">
+                {status.hasEmbedding ? 'Active' : 'Not Enrolled'}
               </div>
 
-              <p className={`text-sm ${
+              {status.hasEmbedding && (
+                <div className="inline-block bg-green-100 text-green-800 text-xs font-medium px-2 py-1 rounded-full mb-2">
+                  SECURED
+                </div>
+              )}
+
+              <div className={`text-sm ${
                 status.hasEmbedding ? 'text-green-700' : 'text-orange-700'
               }`}>
                 {status.hasEmbedding
                   ? 'Your encrypted facial embedding is stored on-chain and ready for use'
-                  : 'Enhanced security features require face enrollment at any camera'
+                  : 'Check in to any camera to enroll'
                 }
-              </p>
+              </div>
             </div>
 
-            {/* Detailed Status Information */}
-            <div className="space-y-4 mb-4">
-              {/* Security Level */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <Shield className="w-4 h-4 text-gray-500 mr-3" />
-                  <div>
-                    <div className="text-sm font-medium">Security Level</div>
-                    <div className="text-xs text-gray-500">Encryption & Privacy</div>
-                  </div>
-                </div>
-                <div className={`text-sm font-medium ${
-                  status.hasEmbedding ? 'text-green-600' : 'text-orange-600'
-                }`}>
-                  {status.hasEmbedding ? 'AES-256 Encrypted' : 'Not Protected'}
-                </div>
-              </div>
-
-              {/* Storage Location */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <div className="w-4 h-4 rounded bg-purple-500 mr-3 flex items-center justify-center">
-                    <div className="w-2 h-2 bg-white rounded-full"></div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium">Storage</div>
-                    <div className="text-xs text-gray-500">Blockchain location</div>
-                  </div>
-                </div>
-                <div className="text-sm text-gray-600">
-                  {status.hasEmbedding ? 'Solana DevNet' : 'Not stored'}
-                </div>
-              </div>
-
-              {/* Last Status Check */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <Clock className="w-4 h-4 text-gray-500 mr-3" />
-                  <div>
-                    <div className="text-sm font-medium">Last Checked</div>
-                    <div className="text-xs text-gray-500">Status verification</div>
-                  </div>
-                </div>
-                <div className="text-sm text-gray-600">
-                  {status.lastChecked
-                    ? status.lastChecked.toLocaleTimeString()
-                    : 'Never'
-                  }
-                </div>
-              </div>
-
-              {/* Error Display */}
-              {status.error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                  <div className="text-sm font-medium text-red-800">Error</div>
-                  <div className="text-xs text-red-700 mt-1">{status.error}</div>
-                </div>
-              )}
-            </div>
-
-            {/* Action Section */}
-            <div className="border-t border-gray-200 pt-4">
-              {status.hasEmbedding ? (
-                <div className="text-center">
-                  <div className="text-sm text-gray-600 mb-3">
-                    Your facial recognition is active and working across all cameras in the network.
-                  </div>
-                  <div className="text-xs text-gray-500">
-                    This enables seamless authentication and enhanced security features.
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <div className="text-sm text-gray-700 mb-3">
-                    To enable face recognition, check in to any camera and complete the enrollment process.
-                  </div>
-
-                  {primaryWallet?.address && (
-                    <div className="bg-gray-50 rounded-lg p-3">
-                      <FacialEmbeddingManager
-                        walletAddress={primaryWallet.address}
-                        onComplete={() => {
-                          if (onStatusUpdate) {
-                            onStatusUpdate();
-                          }
-                          onClose();
-                        }}
-                      />
+            {/* Detailed Information - Only show when active */}
+            {status.hasEmbedding && (
+              <div className="space-y-3 mb-4">
+                <div className="flex items-center justify-between py-2">
+                  <div className="flex items-center">
+                    <div className="w-6 h-6 bg-blue-100 rounded p-1 mr-3">
+                      <div className="w-full h-full bg-blue-500 rounded-sm"></div>
                     </div>
-                  )}
+                    <div>
+                      <div className="font-medium text-sm">Security Level</div>
+                      <div className="text-xs text-gray-500">Encryption & Privacy</div>
+                    </div>
+                  </div>
+                  <div className="text-sm font-medium text-green-600">AES-256 Encrypted</div>
                 </div>
-              )}
-            </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div className="flex items-center">
+                    <div className="w-6 h-6 bg-purple-100 rounded p-1 mr-3">
+                      <div className="w-full h-full bg-purple-500 rounded-sm"></div>
+                    </div>
+                    <div>
+                      <div className="font-medium text-sm">Storage</div>
+                      <div className="text-xs text-gray-500">Blockchain location</div>
+                    </div>
+                  </div>
+                  <div className="text-sm font-medium text-gray-700">Solana DevNet</div>
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div className="flex items-center">
+                    <div className="w-6 h-6 bg-gray-100 rounded p-1 mr-3">
+                      <div className="w-2 h-2 bg-gray-400 rounded-full mx-auto mt-1"></div>
+                    </div>
+                    <div>
+                      <div className="font-medium text-sm">Last Checked</div>
+                      <div className="text-xs text-gray-500">Status verification</div>
+                    </div>
+                  </div>
+                  <div className="text-sm font-medium text-gray-700">
+                    {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Bottom description */}
+            {status.hasEmbedding && (
+              <div className="text-center text-sm text-gray-600 mb-4">
+                <p className="mb-2">Your facial recognition is active and working across all cameras in the network.</p>
+                <p className="text-xs">This enables seamless authentication and enhanced security features.</p>
+              </div>
+            )}
+
+            {/* Error Display */}
+            {status.error && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+                <div className="text-sm text-red-700">{status.error}</div>
+              </div>
+            )}
+
+            {/* Actions */}
+            {status.hasEmbedding ? (
+              <div className="space-y-3">
+                {deleteError && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                    <div className="text-sm text-red-700">{deleteError}</div>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleDeleteRecognitionToken}
+                  disabled={isDeleting}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+                >
+                  {isDeleting ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-4 h-4" />
+                  )}
+                  {isDeleting ? 'Deleting...' : 'Delete Token'}
+                </button>
+              </div>
+            ) : showEnrollment ? (
+              <PhoneSelfieEnrollment
+                onEnrollmentComplete={(result) => {
+                  if (result.success) {
+                    setShowEnrollment(false);
+                    if (onStatusUpdate) {
+                      onStatusUpdate();
+                    }
+                  }
+                }}
+                onCancel={() => setShowEnrollment(false)}
+              />
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-center space-x-3 mb-3">
+                    <div className="w-6 h-6 bg-blue-500 rounded p-1">
+                      <div className="w-full h-full bg-white rounded-sm"></div>
+                    </div>
+                    <h4 className="text-base font-semibold text-blue-800">Create Facial Embedding</h4>
+                  </div>
+                  <p className="text-sm text-blue-700">
+                    Create a secure facial embedding to use CV apps on mmoment cameras. This only needs to be done once.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setShowEnrollment(true)}
+                  className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 font-medium flex items-center justify-center gap-2"
+                >
+                  <Smartphone className="h-5 w-5" />
+                  <span>Create Facial Embedding</span>
+                </button>
+              </div>
+            )}
           </div>
         </Dialog.Panel>
       </div>
