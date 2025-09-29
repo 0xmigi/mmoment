@@ -74,7 +74,11 @@ export function IRLAppsButton({ walletAddress, onEnrollmentComplete }: IRLAppsBu
       {showAppsModal && (
         <>
           {/* Backdrop */}
-          <div className="fixed inset-0 bg-black/50 z-[199]" onClick={() => setShowAppsModal(false)} />
+          <div
+            className="fixed inset-0 bg-black/50 z-[199]"
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            onClick={() => setShowAppsModal(false)}
+          />
 
           {/* Drawer */}
           <div className="fixed inset-x-0 top-16 bottom-0 bg-white rounded-t-2xl shadow-2xl z-[200]">
@@ -155,7 +159,11 @@ export function IRLAppsButton({ walletAddress, onEnrollmentComplete }: IRLAppsBu
       {showEnrollment && (
         <>
           {/* Backdrop */}
-          <div className="fixed inset-0 bg-black/50 z-[199]" onClick={() => setShowEnrollment(false)} />
+          <div
+            className="fixed inset-0 bg-black/50 z-[199]"
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            onClick={() => setShowEnrollment(false)}
+          />
 
           {/* Drawer */}
           <div className="fixed inset-x-0 top-16 bottom-0 bg-white rounded-t-2xl shadow-2xl z-[200]">

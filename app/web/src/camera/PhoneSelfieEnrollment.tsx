@@ -475,7 +475,6 @@ export function PhoneSelfieEnrollment({
             className="w-full h-full object-cover"
             style={{
               transform: "scaleX(-1)", // Mirror the video for selfie mode
-              aspectRatio: "9/16", // PORTRAIT like main camera, not landscape
             }}
           />
           <canvas ref={canvasRef} className="hidden" />
@@ -513,11 +512,11 @@ export function PhoneSelfieEnrollment({
         </div>
 
         {/* Floating button over camera - with bottom spacing */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 bg-white/10 backdrop-blur-sm">
+        <div className="absolute bottom-0 left-0 right-0 p-4 bg-white/10 backdrop-blur-sm z-20">
           <button
             onClick={capturePhoto}
             disabled={isCapturing}
-            className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center justify-center text-sm font-medium shadow-lg"
+            className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center justify-center text-sm font-medium shadow-lg pointer-events-auto"
           >
             {isCapturing ? (
               <div className="flex items-center space-x-2">
