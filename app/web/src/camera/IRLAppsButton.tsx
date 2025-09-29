@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { Smartphone, Eye, Video, Users, Lock, Zap, X, Check } from 'lucide-react';
-import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
+import { Eye, Video, Users, Lock, Zap, X } from 'lucide-react';
 import { useFacialEmbeddingStatus } from '../hooks/useFacialEmbeddingStatus';
 import { PhoneSelfieEnrollment } from './PhoneSelfieEnrollment';
 import { useParams } from 'react-router-dom';
@@ -11,10 +10,9 @@ interface IRLAppsButtonProps {
   onEnrollmentComplete?: () => void;
 }
 
-export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }: IRLAppsButtonProps) {
+export function IRLAppsButton({ walletAddress, onEnrollmentComplete }: IRLAppsButtonProps) {
   const [showAppsModal, setShowAppsModal] = useState(false);
   const [showEnrollment, setShowEnrollment] = useState(false);
-  const { primaryWallet } = useDynamicContext();
   const facialEmbeddingStatus = useFacialEmbeddingStatus();
 
   // Store the camera PDA in localStorage when this component mounts
