@@ -66,27 +66,13 @@ export function PhoneSelfieEnrollment({
       const cameraUrl = `https://${cameraId}.mmoment.xyz`;
       console.log('[PhoneSelfieEnrollment] Using camera from route params:', cameraUrl);
 
-      // Test if the camera is accessible
-      try {
-        const testResponse = await fetch(`${cameraUrl}/api/status`, {
-          method: 'GET',
-          mode: 'cors'
-        });
-
-        if (testResponse.ok) {
-          console.log('[PhoneSelfieEnrollment] Camera accessible, using:', cameraUrl);
-          setConnectedCameraUrl(cameraUrl);
-          setStep("camera");
-          setError(null);
-          return;
-        }
-      } catch (fetchError) {
-        console.log('[PhoneSelfieEnrollment] Camera not accessible:', fetchError);
-      }
-
-      setError("Camera is not accessible. Please ensure the camera is online.");
+      // Set the camera URL directly - if user is on camera page, assume camera is accessible
+      setConnectedCameraUrl(cameraUrl);
+      setStep("camera");
+      setError(null);
+      console.log('[PhoneSelfieEnrollment] Camera URL set, proceeding to camera step');
     } catch (error) {
-      setError("Unable to connect to camera. Please try again later.");
+      setError("Unable to initialize camera connection.");
     }
   };
 
