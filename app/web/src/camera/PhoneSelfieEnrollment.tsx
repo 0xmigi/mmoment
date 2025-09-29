@@ -181,16 +181,22 @@ export function PhoneSelfieEnrollment({
       // MUST use Jetson for quality check - no fake local assessment
       setProgress("Checking image quality...");
 
+      console.log('[PhoneSelfieEnrollment] 🔍 DEBUG: connectedCameraUrl =', connectedCameraUrl);
+      console.log('[PhoneSelfieEnrollment] 🔍 DEBUG: cameraId =', cameraId);
+      console.log('[PhoneSelfieEnrollment] 🔍 DEBUG: Will call processFacialEmbedding with URL:', connectedCameraUrl);
+
       if (!connectedCameraUrl) {
         setError("No camera connection - cannot assess image quality");
         return;
       }
 
+      console.log('[PhoneSelfieEnrollment] 📞 CALLING faceProcessingService.processFacialEmbedding');
       const result = await faceProcessingService.processFacialEmbedding(
         imageData,
         connectedCameraUrl,
         { requestQuality: true, encrypt: false }
       );
+      console.log('[PhoneSelfieEnrollment] 📞 RESULT from faceProcessingService:', result);
 
       if (!result.success || !result.quality) {
         setError(`Quality assessment failed: ${result.error || 'No quality data from camera'}`);
@@ -245,12 +251,18 @@ export function PhoneSelfieEnrollment({
     setProgress("Sending image to camera for processing...");
 
     try {
+      console.log('[PhoneSelfieEnrollment] 🔍 ENROLLMENT DEBUG: connectedCameraUrl =', connectedCameraUrl);
+      console.log('[PhoneSelfieEnrollment] 🔍 ENROLLMENT DEBUG: walletAddress =', primaryWallet.address);
+      console.log('[PhoneSelfieEnrollment] 📞 CALLING faceProcessingService.processFacialEmbedding FOR ENROLLMENT');
+
       // Send image to Jetson camera for enhanced facial embedding extraction with encryption
       const result = await faceProcessingService.processFacialEmbedding(
         capturedImage,
         connectedCameraUrl,
         { encrypt: true, requestQuality: true, walletAddress: primaryWallet.address }
       );
+
+      console.log('[PhoneSelfieEnrollment] 📞 ENROLLMENT RESULT from faceProcessingService:', result);
 
       console.log('[PhoneSelfieEnrollment] Processing result:', {
         success: result.success,
@@ -288,12 +300,16 @@ export function PhoneSelfieEnrollment({
         throw new Error("No facial embedding received from camera");
       }
 
+      console.log('[PhoneSelfieEnrollment] ✅ Embedding validation passed');
       setProgress("Storing encrypted facial embedding on blockchain...");
+      console.log('[PhoneSelfieEnrollment] 📝 Progress updated, getting user public key...');
 
       // Get user's public key
       const userPublicKey = new PublicKey(primaryWallet.address);
+      console.log('[PhoneSelfieEnrollment] 🔑 User public key created:', userPublicKey.toString());
 
       // Derive the PDA for face data storage
+      console.log('[PhoneSelfieEnrollment] 🧮 Deriving PDA for face data storage...');
       const [faceDataPda] = PublicKey.findProgramAddressSync(
         [
           Buffer.from("face-nft"), // CRITICAL: Must be "face-nft" not "face-embedding"
@@ -301,13 +317,28 @@ export function PhoneSelfieEnrollment({
         ],
         program.programId
       );
+      console.log('[PhoneSelfieEnrollment] 🧮 PDA derived:', faceDataPda.toString());
 
-      // Create the instruction to enroll the face
-      // Convert embedding to Buffer format expected by the program
-      const embeddingBuffer = Buffer.from(
-        new Float32Array(result.embedding).buffer
-      );
+      // Handle encrypted embedding from Jetson
+      console.log('[PhoneSelfieEnrollment] 🔐 Processing encrypted embedding...');
+      let embeddingBuffer: Buffer;
 
+      if (typeof result.embedding === 'object' && result.embedding !== null && !Array.isArray(result.embedding) && (result.embedding as any).encrypted_embedding) {
+        // This is an encrypted embedding object from Jetson
+        console.log('[PhoneSelfieEnrollment] 🔐 Converting encrypted embedding to buffer...');
+        const encryptedData = (result.embedding as any).encrypted_embedding;
+        embeddingBuffer = Buffer.from(encryptedData, 'base64');
+        console.log('[PhoneSelfieEnrollment] 🔐 Encrypted embedding buffer size:', embeddingBuffer.length);
+      } else if (Array.isArray(result.embedding)) {
+        // This is a raw embedding array (fallback)
+        console.log('[PhoneSelfieEnrollment] 📊 Converting array embedding to buffer...');
+        embeddingBuffer = Buffer.from(new Float32Array(result.embedding).buffer);
+      } else {
+        throw new Error('Invalid embedding format received from camera');
+      }
+      console.log('[PhoneSelfieEnrollment] ✅ Embedding buffer prepared');
+
+      console.log('[PhoneSelfieEnrollment] 🏗️ Creating enrollment instruction...');
       const enrollInstruction = await program.methods
         .enrollFace(embeddingBuffer)
         .accounts({
@@ -316,25 +347,38 @@ export function PhoneSelfieEnrollment({
           systemProgram: SystemProgram.programId,
         })
         .instruction();
+      console.log('[PhoneSelfieEnrollment] 🏗️ Enrollment instruction created');
 
       // Create and send transaction using Dynamic wallet pattern
+      console.log('[PhoneSelfieEnrollment] 📜 Creating transaction...');
       const tx = new Transaction();
       tx.add(enrollInstruction);
 
       // Get recent blockhash
+      console.log('[PhoneSelfieEnrollment] 🔗 Getting recent blockhash...');
       const { blockhash } = await connection.getLatestBlockhash();
       tx.recentBlockhash = blockhash;
       tx.feePayer = userPublicKey;
+      console.log('[PhoneSelfieEnrollment] 🔗 Transaction configured with blockhash:', blockhash);
 
       // Sign and send the transaction using Dynamic wallet
+      console.log('[PhoneSelfieEnrollment] ✍️ Getting wallet signer...');
       const signer = await (primaryWallet as any).getSigner();
+      console.log('[PhoneSelfieEnrollment] ✍️ Signing transaction...');
       const signedTx = await signer.signTransaction(tx);
+      console.log('[PhoneSelfieEnrollment] ✍️ Transaction signed, sending...');
       const signature = await connection.sendRawTransaction(signedTx.serialize());
+      console.log('[PhoneSelfieEnrollment] 🚀 Transaction sent with signature:', signature);
 
       setProgress("Confirming blockchain transaction...");
+      console.log('[PhoneSelfieEnrollment] ⏳ Waiting for transaction confirmation...');
 
       // Wait for confirmation
+      console.log('[PhoneSelfieEnrollment] ⏳ Calling confirmTransaction...');
       await connection.confirmTransaction({ signature, ...(await connection.getLatestBlockhash()) }, "confirmed");
+      console.log('[PhoneSelfieEnrollment] ✅ Transaction confirmed');
+
+      console.log('[PhoneSelfieEnrollment] 🔍 Checking transaction status...');
       const rpcUrl = program.provider.connection.rpcEndpoint;
       const response = await fetch(rpcUrl, {
         method: "POST",
@@ -349,15 +393,18 @@ export function PhoneSelfieEnrollment({
 
       const data = await response.json();
       const status = data.result?.value?.[0];
+      console.log('[PhoneSelfieEnrollment] 🔍 Transaction status:', status);
 
       if (
         status?.confirmationStatus === "confirmed" ||
         status?.confirmationStatus === "finalized"
       ) {
+        console.log('[PhoneSelfieEnrollment] 🎉 Enrollment successful!');
         setStep("complete");
         setProgress("Facial embedding successfully stored!");
 
         setTimeout(() => {
+          console.log('[PhoneSelfieEnrollment] 📞 Calling onEnrollmentComplete callback');
           onEnrollmentComplete?.({
             success: true,
             transactionId: signature,
