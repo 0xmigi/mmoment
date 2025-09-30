@@ -74,8 +74,8 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
             onClick={() => setShowAppsModal(false)}
           />
 
-          {/* Drawer */}
-          <div className="fixed inset-x-0 top-16 bottom-0 bg-white rounded-t-2xl shadow-2xl z-[9999]">
+          {/* Drawer - slides up from bottom, almost full screen */}
+          <div className="fixed inset-x-0 bottom-0 top-3 bg-white rounded-t-2xl shadow-2xl z-[9999]">
             {/* Header - Mobile sized like CameraModal */}
             <div className="flex items-center justify-between p-3 border-b border-gray-100">
               <h3 className="text-base font-medium">Apps</h3>
@@ -176,8 +176,8 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
             onClick={() => setShowEnrollment(false)}
           />
 
-          {/* Drawer */}
-          <div className="fixed inset-x-0 top-16 bottom-0 bg-white rounded-t-2xl shadow-2xl z-[9999]">
+          {/* Drawer - slides up from bottom, almost full screen */}
+          <div className="fixed inset-x-0 bottom-0 top-3 bg-white rounded-t-2xl shadow-2xl z-[9999]">
             {/* Header - Mobile sized like CameraModal */}
             <div className="flex items-center justify-between p-3 border-b border-gray-100">
               <h3 className="text-base font-medium">Create Recognition Token</h3>
