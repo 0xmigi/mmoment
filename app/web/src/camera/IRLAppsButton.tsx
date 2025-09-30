@@ -64,106 +64,94 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
         )}
       </button>
 
-      {/* Apps Drawer - Full screen with proper mobile sizing */}
+      {/* Apps Full Page */}
       {showAppsModal && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 bg-black/60 z-[99998]"
-            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.6)', zIndex: 99998 }}
-            onClick={() => setShowAppsModal(false)}
-          />
-
-          {/* Drawer - slides up from bottom, almost full screen */}
-          <div className="fixed inset-x-0 bottom-0 top-3 bg-white rounded-t-2xl shadow-2xl z-[99999]" style={{ zIndex: 99999 }}>
-            {/* Header - Mobile sized like CameraModal */}
-            <div className="flex items-center justify-between p-3 border-b border-gray-100">
-              <h3 className="text-base font-medium">Apps</h3>
-              <button
-                onClick={() => setShowAppsModal(false)}
-                className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
-              >
-                <X className="w-4 h-4 text-gray-500" />
-              </button>
-            </div>
-
-            {/* Content - with padding for button */}
-            <div className="p-4 overflow-y-auto" style={{ paddingBottom: '100px' }}>
-              <div className="space-y-3 mb-4">
-                {availableApps.map((app) => {
-                  const isAccessible = facialEmbeddingStatus.hasEmbedding && app.enabled;
-                  const needsToken = !facialEmbeddingStatus.hasEmbedding;
-
-                  return (
-                    <div key={app.id} className="flex items-center mb-4 bg-gray-50 rounded-lg p-3">
-                      <div className={`w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden ${
-                        isAccessible ? 'bg-green-50 text-green-600' : needsToken ? 'bg-orange-50 text-orange-600' : 'bg-gray-100 text-gray-400'
-                      }`}>
-                        {app.icon}
-                      </div>
-                      <div className="ml-3 flex-1">
-                        <div className="text-sm font-medium text-gray-900">{app.name}</div>
-                        <div className="text-xs text-gray-500">{app.description}</div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          if (isAccessible) {
-                            // TODO: Launch app
-                            console.log(`Launching app: ${app.id}`);
-                          }
-                        }}
-                        disabled={!isAccessible}
-                        className={`p-2 rounded-full transition-colors ${
-                          isAccessible
-                            ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                            : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                        }`}
-                        title={isAccessible ? 'Start app' : needsToken ? 'Locked - need token' : 'Not available'}
-                      >
-                        {isAccessible ? (
-                          <Play className="w-4 h-4" fill="currentColor" />
-                        ) : needsToken ? (
-                          <Lock className="w-4 h-4" />
-                        ) : (
-                          <Play className="w-4 h-4" />
-                        )}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {facialEmbeddingStatus.hasEmbedding && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                  <h3 className="text-sm font-medium text-green-800 mb-1">Recognition Token Active</h3>
-                  <p className="text-xs text-green-700">All apps unlocked across the network</p>
-                </div>
-              )}
-
-              {!facialEmbeddingStatus.hasEmbedding && (
-                <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                  <h3 className="text-sm font-medium text-orange-800 mb-1">Apps Locked</h3>
-                  <p className="text-xs text-orange-700">Create a recognition token to unlock</p>
-                </div>
-              )}
-            </div>
-
-            {/* Bottom Button - FIXED POSITION */}
-            {!facialEmbeddingStatus.hasEmbedding && (
-              <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100">
+        <div className="fixed inset-0 bg-white z-50">
+          <div className="min-h-screen bg-white">
+            <div className="max-w-2xl mx-auto pt-8 px-4">
+              <div className="bg-white mb-6 flex items-center justify-between">
+                <h1 className="text-xl font-semibold">Apps</h1>
                 <button
-                  onClick={() => {
-                    setShowAppsModal(false);
-                    setShowEnrollment(true);
-                  }}
-                  className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                  onClick={() => setShowAppsModal(false)}
+                  className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
                 >
-                  Create Recognition Token
+                  <X className="w-5 h-5 text-gray-500" />
                 </button>
               </div>
+            <div className="space-y-3 mb-4">
+              {availableApps.map((app) => {
+                const isAccessible = facialEmbeddingStatus.hasEmbedding && app.enabled;
+                const needsToken = !facialEmbeddingStatus.hasEmbedding;
+
+                return (
+                  <div key={app.id} className="flex items-center mb-4 bg-gray-50 rounded-lg p-3">
+                    <div className={`w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden ${
+                      isAccessible ? 'bg-green-50 text-green-600' : needsToken ? 'bg-orange-50 text-orange-600' : 'bg-gray-100 text-gray-400'
+                    }`}>
+                      {app.icon}
+                    </div>
+                    <div className="ml-3 flex-1">
+                      <div className="text-sm font-medium text-gray-900">{app.name}</div>
+                      <div className="text-xs text-gray-500">{app.description}</div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (isAccessible) {
+                          // TODO: Launch app
+                          console.log(`Launching app: ${app.id}`);
+                        }
+                      }}
+                      disabled={!isAccessible}
+                      className={`p-2 rounded-full transition-colors ${
+                        isAccessible
+                          ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                          : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      }`}
+                      title={isAccessible ? 'Start app' : needsToken ? 'Locked - need token' : 'Not available'}
+                    >
+                      {isAccessible ? (
+                        <Play className="w-4 h-4" fill="currentColor" />
+                      ) : needsToken ? (
+                        <Lock className="w-4 h-4" />
+                      ) : (
+                        <Play className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            {facialEmbeddingStatus.hasEmbedding && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                <h3 className="text-sm font-medium text-green-800 mb-1">Recognition Token Active</h3>
+                <p className="text-xs text-green-700">All apps unlocked across the network</p>
+              </div>
             )}
+
+            {!facialEmbeddingStatus.hasEmbedding && (
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                <h3 className="text-sm font-medium text-orange-800 mb-1">Apps Locked</h3>
+                <p className="text-xs text-orange-700">Create a recognition token to unlock</p>
+              </div>
+            )}
+
+              {!facialEmbeddingStatus.hasEmbedding && (
+                <div className="mt-6">
+                  <button
+                    onClick={() => {
+                      setShowAppsModal(false);
+                      setShowEnrollment(true);
+                    }}
+                    className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                  >
+                    Create Recognition Token
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        </>
+        </div>
       )}
 
       {/* Enrollment Drawer - Full screen camera drawer */}
