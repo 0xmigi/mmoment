@@ -23,6 +23,8 @@ interface EnhancedFaceProcessingResult extends FaceProcessingResult {
   encrypted?: boolean;
   sessionId?: string;
   transactionBuffer?: string; // Base64 encoded transaction from Jetson
+  face_id?: string; // Face ID returned from Jetson transaction building
+  face_nft_pda?: string; // Face NFT PDA address
 }
 
 // Note: ONNX Runtime integration will be added later
