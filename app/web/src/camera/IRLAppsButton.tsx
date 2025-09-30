@@ -69,13 +69,13 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
         <>
           {/* Backdrop */}
           <div
-            className="fixed inset-0 bg-black/50 z-[9998]"
-            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            className="fixed inset-0 bg-black/60 z-[99998]"
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.6)', zIndex: 99998 }}
             onClick={() => setShowAppsModal(false)}
           />
 
           {/* Drawer - slides up from bottom, almost full screen */}
-          <div className="fixed inset-x-0 bottom-0 top-3 bg-white rounded-t-2xl shadow-2xl z-[9999]">
+          <div className="fixed inset-x-0 bottom-0 top-3 bg-white rounded-t-2xl shadow-2xl z-[99999]" style={{ zIndex: 99999 }}>
             {/* Header - Mobile sized like CameraModal */}
             <div className="flex items-center justify-between p-3 border-b border-gray-100">
               <h3 className="text-base font-medium">Apps</h3>
@@ -171,13 +171,13 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
         <>
           {/* Backdrop */}
           <div
-            className="fixed inset-0 bg-black/50 z-[9998]"
-            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+            className="fixed inset-0 bg-black/60 z-[99998]"
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.6)', zIndex: 99998 }}
             onClick={() => setShowEnrollment(false)}
           />
 
           {/* Drawer - slides up from bottom, almost full screen */}
-          <div className="fixed inset-x-0 bottom-0 top-3 bg-white rounded-t-2xl shadow-2xl z-[9999]">
+          <div className="fixed inset-x-0 bottom-0 top-3 bg-white rounded-t-2xl shadow-2xl z-[99999]" style={{ zIndex: 99999 }}>
             {/* Header - Mobile sized like CameraModal */}
             <div className="flex items-center justify-between p-3 border-b border-gray-100">
               <h3 className="text-base font-medium">Create Recognition Token</h3>
