@@ -393,8 +393,8 @@ export function AccountPage() {
           onClose={() => setShowRecognitionModal(false)}
           status={facialEmbeddingStatus}
           onStatusUpdate={() => {
-            // Force refresh of facial embedding status
-            // The hook will automatically refresh
+            // Force refresh of facial embedding status after enrollment
+            facialEmbeddingStatus.refetch();
           }}
         />
 

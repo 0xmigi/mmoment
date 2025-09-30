@@ -8,10 +8,11 @@ export interface FacialEmbeddingStatus {
   isLoading: boolean;
   error: string | null;
   lastChecked: Date | null;
+  refetch: () => Promise<void>;
 }
 
 export function useFacialEmbeddingStatus(): FacialEmbeddingStatus {
-  const [status, setStatus] = useState<FacialEmbeddingStatus>({
+  const [status, setStatus] = useState<Omit<FacialEmbeddingStatus, 'refetch'>>({
     hasEmbedding: false,
     isLoading: true,
     error: null,
@@ -95,5 +96,8 @@ export function useFacialEmbeddingStatus(): FacialEmbeddingStatus {
     return () => clearInterval(interval);
   }, [status.isLoading]);
 
-  return status;
+  return {
+    ...status,
+    refetch: checkEmbeddingStatus,
+  };
 }

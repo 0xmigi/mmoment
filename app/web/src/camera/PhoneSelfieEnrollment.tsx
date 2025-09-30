@@ -376,7 +376,7 @@ export function PhoneSelfieEnrollment({
           throw new Error(confirmData.error || 'Transaction confirmation failed');
         }
 
-        signature = confirmData.transaction_signature;
+        signature = confirmData.transaction_signature || confirmData.transaction_id;
         console.log('[PhoneSelfieEnrollment] 🎉 Enrollment successful with signature:', signature);
 
         setStep("complete");
