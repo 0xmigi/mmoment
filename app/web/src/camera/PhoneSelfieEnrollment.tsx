@@ -1,10 +1,8 @@
-import { useProgram } from "../anchor/setup";
 import { faceProcessingService } from "./face-processing";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
-import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import { Transaction } from "@solana/web3.js";
 import { Camera, X, RotateCcw, Check, Wifi } from "lucide-react";
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useConnection } from "@solana/wallet-adapter-react";
 
 interface PhoneSelfieEnrollmentProps {
   cameraId: string;
@@ -42,13 +40,11 @@ export function PhoneSelfieEnrollment({
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const { primaryWallet } = useDynamicContext();
-  const { program } = useProgram();
-  const { connection } = useConnection();
 
   // Check for user session on mount
   useEffect(() => {
     findUserCurrentSession();
-  }, [primaryWallet, program, cameraId]);
+  }, [primaryWallet, cameraId]);
 
   const findUserCurrentSession = async () => {
     if (!primaryWallet?.address) {
@@ -237,11 +233,10 @@ export function PhoneSelfieEnrollment({
     console.log('[PhoneSelfieEnrollment] 🚀 Requirements check:', {
       capturedImage: !!capturedImage,
       primaryWallet: !!primaryWallet,
-      program: !!program,
       connectedCameraUrl: !!connectedCameraUrl
     });
 
-    if (!capturedImage || !primaryWallet || !program || !connectedCameraUrl) {
+    if (!capturedImage || !primaryWallet || !connectedCameraUrl) {
       console.log('[PhoneSelfieEnrollment] ❌ Missing requirements for enrollment');
       setError("Missing requirements for enrollment");
       return;
@@ -255,51 +250,34 @@ export function PhoneSelfieEnrollment({
       console.log('[PhoneSelfieEnrollment] 🔍 ENROLLMENT DEBUG: walletAddress =', primaryWallet.address);
       console.log('[PhoneSelfieEnrollment] 📞 CALLING faceProcessingService.processFacialEmbedding FOR ENROLLMENT');
 
-      // Send image to Jetson camera for enhanced facial embedding extraction
-      // We need BOTH encrypted (for storage) and raw (for blockchain) embeddings
-      const encryptedResult = await faceProcessingService.processFacialEmbedding(
+      // Send image to Jetson for secure embedding extraction AND transaction building
+      // Jetson will handle all biometric processing and return a pre-built transaction
+      const result = await faceProcessingService.processFacialEmbedding(
         capturedImage,
         connectedCameraUrl,
-        { encrypt: true, requestQuality: true, walletAddress: primaryWallet.address }
+        { encrypt: true, requestQuality: true, walletAddress: primaryWallet.address, buildTransaction: true }
       );
-
-      console.log('[PhoneSelfieEnrollment] 📞 Getting raw embedding for blockchain...');
-      const rawResult = await faceProcessingService.processFacialEmbedding(
-        capturedImage,
-        connectedCameraUrl,
-        { encrypt: false, requestQuality: false, walletAddress: primaryWallet.address }
-      );
-
-      console.log('[PhoneSelfieEnrollment] 📞 Both embeddings obtained:', {
-        encryptedSuccess: encryptedResult.success,
-        rawSuccess: rawResult.success,
-        encryptedHasEmbedding: !!encryptedResult.embedding,
-        rawHasEmbedding: !!rawResult.embedding
-      });
-
-      // Use encrypted result for display/quality, but validate both succeeded
-      const result = encryptedResult;
 
       console.log('[PhoneSelfieEnrollment] 📞 ENROLLMENT RESULT from faceProcessingService:', result);
 
       console.log('[PhoneSelfieEnrollment] Processing result:', {
         success: result.success,
-        hasEmbedding: !!result.embedding,
+        hasTransaction: !!result.transactionBuffer,
+        hasQuality: !!result.quality,
         error: result.error
       });
 
-      if (!result.success || !rawResult.success) {
-        throw new Error(result.error || rawResult.error || "Failed to process facial features");
+      if (!result.success) {
+        throw new Error(result.error || "Failed to process facial features");
       }
 
-      if (!result.embedding || !rawResult.embedding) {
-        throw new Error("No facial embedding received from camera");
+      if (!result.transactionBuffer) {
+        throw new Error("No transaction received from Jetson - enrollment failed");
       }
 
       console.log('[PhoneSelfieEnrollment] Enhanced processing result:', {
-        hasEmbedding: !!result.embedding,
-        embeddingLength: result.embedding.length,
-        encrypted: result.encrypted,
+        hasTransaction: !!result.transactionBuffer,
+        sessionId: result.sessionId,
         qualityScore: result.quality?.score,
         qualityRating: result.quality?.rating
       });
@@ -310,101 +288,18 @@ export function PhoneSelfieEnrollment({
         setProgress(`Quality: ${result.quality.rating} (${result.quality.score}%) - Processing...`);
       }
 
-      // Validate embedding exists (encrypted embedding is an object, not array)
-      console.log('[PhoneSelfieEnrollment] Embedding type:', typeof result.embedding);
-      console.log('[PhoneSelfieEnrollment] Embedding:', result.embedding);
+      console.log('[PhoneSelfieEnrollment] ✅ Transaction received from Jetson');
+      setProgress("Signing blockchain transaction...");
 
-      if (!result.embedding) {
-        throw new Error("No facial embedding received from camera");
-      }
+      // Deserialize the transaction buffer from Jetson
+      console.log('[PhoneSelfieEnrollment] 📜 Deserializing transaction from Jetson...');
+      const transactionBuffer = Buffer.from(result.transactionBuffer, 'base64');
+      const transaction = Transaction.from(transactionBuffer);
+      console.log('[PhoneSelfieEnrollment] 📜 Transaction deserialized successfully');
 
-      console.log('[PhoneSelfieEnrollment] ✅ Embedding validation passed');
-      setProgress("Storing encrypted facial embedding on blockchain...");
-      console.log('[PhoneSelfieEnrollment] 📝 Progress updated, getting user public key...');
-
-      // Get user's public key
-      const userPublicKey = new PublicKey(primaryWallet.address);
-      console.log('[PhoneSelfieEnrollment] 🔑 User public key created:', userPublicKey.toString());
-
-      // Derive the PDA for face data storage
-      console.log('[PhoneSelfieEnrollment] 🧮 Deriving PDA for face data storage...');
-      const [faceDataPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("face-nft"), // CRITICAL: Must be "face-nft" not "face-embedding"
-          userPublicKey.toBuffer(),
-        ],
-        program.programId
-      );
-      console.log('[PhoneSelfieEnrollment] 🧮 PDA derived:', faceDataPda.toString());
-
-      // Check if face enrollment already exists
-      console.log('[PhoneSelfieEnrollment] 🔍 Checking if face enrollment already exists...');
-      try {
-        const existingAccount = await connection.getAccountInfo(faceDataPda);
-        if (existingAccount) {
-          console.log('[PhoneSelfieEnrollment] ⚠️ Face enrollment already exists for this wallet!');
-          throw new Error('You already have a facial embedding enrolled. Please delete the existing enrollment first.');
-        } else {
-          console.log('[PhoneSelfieEnrollment] ✅ No existing face enrollment found, proceeding...');
-        }
-      } catch (accountCheckError) {
-        if (accountCheckError instanceof Error && accountCheckError.message.includes('already have a facial')) {
-          throw accountCheckError; // Re-throw our custom error
-        }
-        console.log('[PhoneSelfieEnrollment] 🔍 Account check failed (expected for new enrollments):', accountCheckError);
-      }
-
-      // Use RAW embedding for blockchain (Solana program expects fixed-size array)
-      // The encrypted embedding is for off-chain storage and recognition
-      console.log('[PhoneSelfieEnrollment] 📊 Processing raw embedding for blockchain...');
-
-      if (!Array.isArray(rawResult.embedding)) {
-        throw new Error('Invalid raw embedding format - expected array');
-      }
-
-      console.log('[PhoneSelfieEnrollment] 📊 Raw embedding size:', rawResult.embedding.length);
-      const embeddingBuffer = Buffer.from(new Float32Array(rawResult.embedding).buffer);
-      console.log('[PhoneSelfieEnrollment] ✅ Raw embedding buffer prepared, size:', embeddingBuffer.length);
-
-      console.log('[PhoneSelfieEnrollment] 🏗️ Creating enrollment instruction...');
-      console.log('[PhoneSelfieEnrollment] 🏗️ Instruction params:', {
-        embeddingBufferSize: embeddingBuffer.length,
-        faceDataPda: faceDataPda.toString(),
-        user: userPublicKey.toString(),
-        systemProgram: SystemProgram.programId.toString()
-      });
-
-      let enrollInstruction;
-      try {
-        enrollInstruction = await program.methods
-          .enrollFace(embeddingBuffer)
-          .accounts({
-            faceNft: faceDataPda,
-            user: userPublicKey,
-            systemProgram: SystemProgram.programId,
-          })
-          .instruction();
-        console.log('[PhoneSelfieEnrollment] 🏗️ Enrollment instruction created successfully');
-      } catch (instructionError) {
-        console.error('[PhoneSelfieEnrollment] ❌ Instruction creation failed:', instructionError);
-        throw new Error(`Failed to create enrollment instruction: ${instructionError instanceof Error ? instructionError.message : 'Unknown error'}`);
-      }
-
-      // Create and send transaction using Dynamic wallet pattern
-      console.log('[PhoneSelfieEnrollment] 📜 Creating transaction...');
-      const tx = new Transaction();
-      tx.add(enrollInstruction);
-
-      // Get recent blockhash
-      console.log('[PhoneSelfieEnrollment] 🔗 Getting recent blockhash...');
-      const { blockhash } = await connection.getLatestBlockhash();
-      tx.recentBlockhash = blockhash;
-      tx.feePayer = userPublicKey;
-      console.log('[PhoneSelfieEnrollment] 🔗 Transaction configured with blockhash:', blockhash);
-
-      // Sign and send the transaction using Dynamic wallet
+      // Sign the pre-built transaction
       console.log('[PhoneSelfieEnrollment] ✍️ Getting wallet signer...');
-      let signer, signedTx, signature;
+      let signer, signedTx, signature: string;
 
       try {
         signer = await (primaryWallet as any).getSigner();
@@ -415,67 +310,42 @@ export function PhoneSelfieEnrollment({
       }
 
       try {
-        console.log('[PhoneSelfieEnrollment] ✍️ Signing transaction...');
-        signedTx = await signer.signTransaction(tx);
+        console.log('[PhoneSelfieEnrollment] ✍️ Signing pre-built transaction...');
+        signedTx = await signer.signTransaction(transaction);
         console.log('[PhoneSelfieEnrollment] ✍️ Transaction signed successfully');
       } catch (signingError) {
         console.error('[PhoneSelfieEnrollment] ❌ Transaction signing failed:', signingError);
         throw new Error(`Transaction signing failed: ${signingError instanceof Error ? signingError.message : 'User rejected or signing failed'}`);
       }
 
+      // Send signed transaction back to Jetson for confirmation
+      console.log('[PhoneSelfieEnrollment] 🚀 Sending signed transaction back to Jetson...');
+      setProgress("Submitting to blockchain...");
+
       try {
-        console.log('[PhoneSelfieEnrollment] 🚀 Sending transaction to blockchain...');
-        signature = await connection.sendRawTransaction(signedTx.serialize());
-        console.log('[PhoneSelfieEnrollment] 🚀 Transaction sent with signature:', signature);
-      } catch (sendError) {
-        console.error('[PhoneSelfieEnrollment] ❌ Transaction send failed:', sendError);
+        const confirmResult = await fetch(`${connectedCameraUrl}/api/face/enroll/confirm`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: result.sessionId,
+            signed_transaction: signedTx.serialize().toString('base64')
+          })
+        });
 
-        // Provide specific error messages for common issues
-        let errorMessage = 'Transaction failed to send';
-        if (sendError instanceof Error) {
-          if (sendError.message.includes('0x1778')) {
-            errorMessage = 'Account already exists - you may already have a face enrollment';
-          } else if (sendError.message.includes('insufficient')) {
-            errorMessage = 'Insufficient SOL balance for transaction fees';
-          } else if (sendError.message.includes('timeout')) {
-            errorMessage = 'Network timeout - please try again';
-          } else {
-            errorMessage = `Blockchain error: ${sendError.message}`;
-          }
+        if (!confirmResult.ok) {
+          throw new Error(`Jetson confirmation failed: ${confirmResult.statusText}`);
         }
-        throw new Error(errorMessage);
-      }
 
-      setProgress("Confirming blockchain transaction...");
-      console.log('[PhoneSelfieEnrollment] ⏳ Waiting for transaction confirmation...');
+        const confirmData = await confirmResult.json();
+        console.log('[PhoneSelfieEnrollment] 🎉 Jetson confirmation result:', confirmData);
 
-      // Wait for confirmation
-      console.log('[PhoneSelfieEnrollment] ⏳ Calling confirmTransaction...');
-      await connection.confirmTransaction({ signature, ...(await connection.getLatestBlockhash()) }, "confirmed");
-      console.log('[PhoneSelfieEnrollment] ✅ Transaction confirmed');
+        if (!confirmData.success) {
+          throw new Error(confirmData.error || 'Transaction confirmation failed');
+        }
 
-      console.log('[PhoneSelfieEnrollment] 🔍 Checking transaction status...');
-      const rpcUrl = program.provider.connection.rpcEndpoint;
-      const response = await fetch(rpcUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "getSignatureStatuses",
-          params: [[signature]],
-        }),
-      });
+        signature = confirmData.transaction_signature;
+        console.log('[PhoneSelfieEnrollment] 🎉 Enrollment successful with signature:', signature);
 
-      const data = await response.json();
-      const status = data.result?.value?.[0];
-      console.log('[PhoneSelfieEnrollment] 🔍 Transaction status:', status);
-
-      if (
-        status?.confirmationStatus === "confirmed" ||
-        status?.confirmationStatus === "finalized"
-      ) {
-        console.log('[PhoneSelfieEnrollment] 🎉 Enrollment successful!');
         setStep("complete");
         setProgress("Facial embedding successfully stored!");
 
@@ -486,8 +356,24 @@ export function PhoneSelfieEnrollment({
             transactionId: signature,
           });
         }, 2000);
-      } else {
-        throw new Error("Transaction failed to confirm");
+
+      } catch (confirmError) {
+        console.error('[PhoneSelfieEnrollment] ❌ Jetson confirmation failed:', confirmError);
+
+        // Provide specific error messages for common issues
+        let errorMessage = 'Transaction confirmation failed';
+        if (confirmError instanceof Error) {
+          if (confirmError.message.includes('0x1778')) {
+            errorMessage = 'Account already exists - you may already have a face enrollment';
+          } else if (confirmError.message.includes('insufficient')) {
+            errorMessage = 'Insufficient SOL balance for transaction fees';
+          } else if (confirmError.message.includes('timeout')) {
+            errorMessage = 'Network timeout - please try again';
+          } else {
+            errorMessage = `Blockchain error: ${confirmError.message}`;
+          }
+        }
+        throw new Error(errorMessage);
       }
     } catch (err) {
       console.error("Enrollment error:", err);
@@ -513,7 +399,6 @@ export function PhoneSelfieEnrollment({
   }, [
     capturedImage,
     primaryWallet,
-    program,
     connectedCameraUrl,
     onEnrollmentComplete,
   ]);

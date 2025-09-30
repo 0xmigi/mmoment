@@ -22,6 +22,7 @@ interface EnhancedFaceProcessingResult extends FaceProcessingResult {
   quality?: ImageQualityResult;
   encrypted?: boolean;
   sessionId?: string;
+  transactionBuffer?: string; // Base64 encoded transaction from Jetson
 }
 
 // Note: ONNX Runtime integration will be added later
@@ -156,7 +157,7 @@ class FaceProcessingService {
   async processFacialEmbedding(
     imageData: string,
     cameraUrl?: string,
-    options: { encrypt?: boolean; requestQuality?: boolean; walletAddress?: string } = {}
+    options: { encrypt?: boolean; requestQuality?: boolean; walletAddress?: string; buildTransaction?: boolean } = {}
   ): Promise<EnhancedFaceProcessingResult> {
     try {
       // MUST have a Jetson camera URL - no fake local processing
@@ -184,7 +185,7 @@ class FaceProcessingService {
   private async processWithJetsonEndpoint(
     imageData: string,
     cameraUrl: string,
-    options: { encrypt?: boolean; requestQuality?: boolean; walletAddress?: string } = {}
+    options: { encrypt?: boolean; requestQuality?: boolean; walletAddress?: string; buildTransaction?: boolean } = {}
   ): Promise<EnhancedFaceProcessingResult> {
     try {
       console.log('[FaceProcessing] Using enhanced Jetson endpoint:', cameraUrl);
@@ -221,6 +222,11 @@ class FaceProcessingService {
       // Add encryption option if requested
       if (options.encrypt) {
         payload.encrypt = true;
+      }
+
+      // Add transaction building option if requested
+      if (options.buildTransaction) {
+        payload.build_transaction = true;
       }
 
       // Call the enhanced Jetson endpoint
@@ -287,7 +293,8 @@ class FaceProcessingService {
         success: true,
         embedding: result.embedding || result.face_embedding,
         encrypted: result.encrypted || false,
-        sessionId: result.biometric_session_id || result.session_id
+        sessionId: result.biometric_session_id || result.session_id,
+        transactionBuffer: result.transaction_buffer // Base64 encoded transaction from Jetson
       };
 
       // Add quality assessment if available
