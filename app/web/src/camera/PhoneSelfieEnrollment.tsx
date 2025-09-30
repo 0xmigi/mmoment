@@ -1,6 +1,7 @@
 import { faceProcessingService } from "./face-processing";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { Transaction } from "@solana/web3.js";
+import { useConnection } from "@solana/wallet-adapter-react";
 import { Camera, X, RotateCcw, Check, Wifi } from "lucide-react";
 import { useState, useRef, useCallback, useEffect } from "react";
 
@@ -40,6 +41,7 @@ export function PhoneSelfieEnrollment({
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const { primaryWallet } = useDynamicContext();
+  const { connection } = useConnection();
 
   // Check for user session on mount
   useEffect(() => {
@@ -343,40 +345,51 @@ export function PhoneSelfieEnrollment({
         throw new Error(`Transaction signing failed: ${signingError instanceof Error ? signingError.message : 'User rejected or signing failed'}`);
       }
 
-      // Send signed transaction back to Jetson for confirmation
-      console.log('[PhoneSelfieEnrollment] 🚀 Sending signed transaction back to Jetson...');
+      // Submit signed transaction to Solana blockchain
+      console.log('[PhoneSelfieEnrollment] 🚀 Submitting transaction to Solana blockchain...');
       setProgress("Submitting to blockchain...");
 
-      // Validate we have all required fields from the Jetson's transaction building response
+      // Validate we have all required fields
       if (!result.face_id) {
         console.error('[PhoneSelfieEnrollment] ❌ Missing face_id in result:', result);
         throw new Error('Missing face_id from Jetson - cannot confirm enrollment');
       }
 
+      if (!connection) {
+        throw new Error('Solana connection not available');
+      }
+
       try {
-        const confirmResult = await fetch(`${connectedCameraUrl}/api/face/enroll/confirm`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            wallet_address: primaryWallet.address,
-            face_id: result.face_id,
-            signed_transaction: signedTx.serialize().toString('base64'),
-            biometric_session_id: result.sessionId
-          })
-        });
+        // Submit the signed transaction to Solana
+        console.log('[PhoneSelfieEnrollment] 📡 Sending transaction to Solana...');
+        signature = await connection.sendRawTransaction(signedTx.serialize());
+        console.log('[PhoneSelfieEnrollment] ✅ Transaction sent! Signature:', signature);
 
-        if (!confirmResult.ok) {
-          throw new Error(`Jetson confirmation failed: ${confirmResult.statusText}`);
+        // Wait for confirmation
+        setProgress("Waiting for blockchain confirmation...");
+        console.log('[PhoneSelfieEnrollment] ⏳ Waiting for transaction confirmation...');
+        await connection.confirmTransaction(signature, 'confirmed');
+        console.log('[PhoneSelfieEnrollment] ✅ Transaction confirmed on blockchain!');
+
+        // Notify Jetson that enrollment succeeded (for local storage/cleanup)
+        console.log('[PhoneSelfieEnrollment] 📞 Notifying Jetson of successful enrollment...');
+        try {
+          await fetch(`${connectedCameraUrl}/api/face/enroll/confirm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              wallet_address: primaryWallet.address,
+              face_id: result.face_id,
+              transaction_signature: signature,
+              biometric_session_id: result.sessionId
+            })
+          });
+          console.log('[PhoneSelfieEnrollment] ✅ Jetson notified successfully');
+        } catch (notifyError) {
+          // Non-fatal - blockchain transaction already succeeded
+          console.warn('[PhoneSelfieEnrollment] ⚠️ Failed to notify Jetson (non-fatal):', notifyError);
         }
 
-        const confirmData = await confirmResult.json();
-        console.log('[PhoneSelfieEnrollment] 🎉 Jetson confirmation result:', confirmData);
-
-        if (!confirmData.success) {
-          throw new Error(confirmData.error || 'Transaction confirmation failed');
-        }
-
-        signature = confirmData.transaction_signature || confirmData.transaction_id;
         console.log('[PhoneSelfieEnrollment] 🎉 Enrollment successful with signature:', signature);
 
         setStep("complete");

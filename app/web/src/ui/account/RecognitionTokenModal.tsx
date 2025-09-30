@@ -211,9 +211,13 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
                 onEnrollmentComplete={(result) => {
                   if (result.success) {
                     setShowEnrollment(false);
-                    if (onStatusUpdate) {
-                      onStatusUpdate();
-                    }
+                    // Wait 3 seconds for blockchain to finalize before refreshing status
+                    setTimeout(() => {
+                      console.log('[RecognitionTokenModal] Refreshing status after enrollment...');
+                      if (onStatusUpdate) {
+                        onStatusUpdate();
+                      }
+                    }, 3000);
                   }
                 }}
                 onCancel={() => setShowEnrollment(false)}

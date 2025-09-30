@@ -47,10 +47,14 @@ export function useFacialEmbeddingStatus(): FacialEmbeddingStatus {
         program.programId
       );
 
-      console.log('[useFacialEmbeddingStatus] Checking for face NFT at PDA:', faceDataPda.toString());
+      console.log('[useFacialEmbeddingStatus] 🔍 Checking for face NFT...');
+      console.log('[useFacialEmbeddingStatus] 🔍 Wallet:', primaryWallet.address);
+      console.log('[useFacialEmbeddingStatus] 🔍 Program ID:', program.programId.toString());
+      console.log('[useFacialEmbeddingStatus] 🔍 PDA:', faceDataPda.toString());
 
       // Try to fetch the face data account
       const faceAccount = await program.account.faceData.fetch(faceDataPda);
+      console.log('[useFacialEmbeddingStatus] 🔍 Raw account data:', faceAccount);
 
       if (faceAccount) {
         console.log('[useFacialEmbeddingStatus] ✅ Face embedding found:', faceAccount);
@@ -70,7 +74,8 @@ export function useFacialEmbeddingStatus(): FacialEmbeddingStatus {
         });
       }
     } catch (error) {
-      console.log('[useFacialEmbeddingStatus] ❌ No face embedding account found (expected if not enrolled)');
+      console.log('[useFacialEmbeddingStatus] ❌ Error fetching face embedding:', error);
+      console.log('[useFacialEmbeddingStatus] ❌ Error details:', error instanceof Error ? error.message : String(error));
       // If account doesn't exist, it means user hasn't enrolled yet
       setStatus({
         hasEmbedding: false,
