@@ -294,13 +294,31 @@ export function PhoneSelfieEnrollment({
       }
 
       console.log('[PhoneSelfieEnrollment] ✅ Transaction received from Jetson');
+      console.log('[PhoneSelfieEnrollment] 📜 Transaction buffer type:', typeof result.transactionBuffer);
+      console.log('[PhoneSelfieEnrollment] 📜 Transaction buffer preview:', result.transactionBuffer?.substring(0, 100));
+
+      // Check if the transaction buffer is actually JSON instead of base64
+      let transaction: Transaction;
+
+      if (result.transactionBuffer.startsWith('{')) {
+        console.error('[PhoneSelfieEnrollment] ❌ Jetson returned JSON instead of serialized transaction!');
+        console.error('[PhoneSelfieEnrollment] ❌ JSON content:', result.transactionBuffer);
+        throw new Error('Jetson API error: Transaction not properly serialized. The Jetson needs to return a base64-encoded Solana transaction, not JSON.');
+      }
+
       setProgress("Signing blockchain transaction...");
 
       // Deserialize the transaction buffer from Jetson
       console.log('[PhoneSelfieEnrollment] 📜 Deserializing transaction from Jetson...');
-      const txBuffer = Buffer.from(result.transactionBuffer, 'base64');
-      const transaction = Transaction.from(txBuffer);
-      console.log('[PhoneSelfieEnrollment] 📜 Transaction deserialized successfully');
+      try {
+        const txBuffer = Buffer.from(result.transactionBuffer, 'base64');
+        transaction = Transaction.from(txBuffer);
+        console.log('[PhoneSelfieEnrollment] 📜 Transaction deserialized successfully');
+      } catch (deserializeError) {
+        console.error('[PhoneSelfieEnrollment] ❌ Failed to deserialize transaction:', deserializeError);
+        console.error('[PhoneSelfieEnrollment] ❌ Buffer content (first 200 chars):', result.transactionBuffer.substring(0, 200));
+        throw new Error('Failed to deserialize transaction from Jetson. The API may not be returning a proper Solana transaction.');
+      }
 
       // Sign the pre-built transaction
       console.log('[PhoneSelfieEnrollment] ✍️ Getting wallet signer...');
