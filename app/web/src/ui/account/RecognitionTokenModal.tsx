@@ -1,11 +1,9 @@
 import { Dialog } from '@headlessui/react';
-import { X, ScanFace, CheckCircle, AlertCircle, Loader2, Trash2, Smartphone } from 'lucide-react';
+import { X, ScanFace, CheckCircle, AlertCircle, Loader2, Trash2 } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { PhoneSelfieEnrollment } from '../../camera/PhoneSelfieEnrollment';
 import { FacialEmbeddingStatus } from '../../hooks/useFacialEmbeddingStatus';
 import { useProgram } from '../../anchor/setup';
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
 
 interface RecognitionTokenModalProps {
   isOpen: boolean;
@@ -14,13 +12,11 @@ interface RecognitionTokenModalProps {
   onStatusUpdate?: () => void;
 }
 
-export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate }: RecognitionTokenModalProps) {
+export function RecognitionTokenModal({ isOpen, onClose, status }: RecognitionTokenModalProps) {
   const { primaryWallet } = useDynamicContext();
   const { program } = useProgram();
-  const { cameraId } = useParams<{ cameraId: string }>();
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [showEnrollment, setShowEnrollment] = useState(false);
 
   const handleDeleteRecognitionToken = async () => {
     if (!primaryWallet?.address || !program) {
@@ -205,23 +201,6 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
                   {isDeleting ? 'Deleting...' : 'Delete Token'}
                 </button>
               </div>
-            ) : showEnrollment ? (
-              <PhoneSelfieEnrollment
-                cameraId={cameraId || ""}
-                onEnrollmentComplete={(result) => {
-                  if (result.success) {
-                    setShowEnrollment(false);
-                    // Wait 3 seconds for blockchain to finalize before refreshing status
-                    setTimeout(() => {
-                      console.log('[RecognitionTokenModal] Refreshing status after enrollment...');
-                      if (onStatusUpdate) {
-                        onStatusUpdate();
-                      }
-                    }, 3000);
-                  }
-                }}
-                onCancel={() => setShowEnrollment(false)}
-              />
             ) : (
               <div className="space-y-4">
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -229,20 +208,15 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
                     <div className="w-6 h-6 bg-blue-500 rounded p-1">
                       <div className="w-full h-full bg-white rounded-sm"></div>
                     </div>
-                    <h4 className="text-base font-semibold text-blue-800">Create Facial Embedding</h4>
+                    <h4 className="text-base font-semibold text-blue-800">How to Create Recognition Token</h4>
                   </div>
-                  <p className="text-sm text-blue-700">
-                    Create a secure facial embedding to use CV apps on mmoment cameras. This only needs to be done once.
+                  <p className="text-sm text-blue-700 mb-2">
+                    To create a Recognition Token, you need to check in to a camera and visit the Apps drawer.
+                  </p>
+                  <p className="text-sm text-blue-600">
+                    Recognition Tokens enable CV apps to recognize you across the mmoment camera network.
                   </p>
                 </div>
-
-                <button
-                  onClick={() => setShowEnrollment(true)}
-                  className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 font-medium flex items-center justify-center gap-2"
-                >
-                  <Smartphone className="h-5 w-5" />
-                  <span>Create Facial Embedding</span>
-                </button>
               </div>
             )}
           </div>
