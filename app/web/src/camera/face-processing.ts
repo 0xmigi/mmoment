@@ -297,13 +297,17 @@ class FaceProcessingService {
         embedding: result.embedding || result.face_embedding,
         encrypted: result.encrypted || false,
         sessionId: result.biometric_session_id || result.session_id,
-        transactionBuffer: result.transaction_buffer || result.transactionBuffer || result.transaction // Base64 encoded transaction from Jetson
+        transactionBuffer: result.transaction_buffer || result.transactionBuffer || result.transaction, // Base64 encoded transaction from Jetson
+        face_id: result.face_id, // Face ID from Jetson transaction building
+        face_nft_pda: result.face_nft_pda // Face NFT PDA address
       };
 
       console.log('[FaceProcessing] Enhanced result built:', {
         hasEmbedding: !!enhancedResult.embedding,
         hasTransaction: !!enhancedResult.transactionBuffer,
-        sessionId: enhancedResult.sessionId
+        sessionId: enhancedResult.sessionId,
+        faceId: enhancedResult.face_id,
+        faceNftPda: enhancedResult.face_nft_pda
       });
 
       // Add quality assessment if available
