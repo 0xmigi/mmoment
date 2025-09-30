@@ -283,6 +283,8 @@ export function PhoneSelfieEnrollment({
       console.log('[PhoneSelfieEnrollment] Enhanced processing result:', {
         hasTransaction: !!result.transactionBuffer,
         sessionId: result.sessionId,
+        faceId: result.face_id,
+        faceNftPda: result.face_nft_pda,
         qualityScore: result.quality?.score,
         qualityRating: result.quality?.rating
       });
@@ -345,13 +347,21 @@ export function PhoneSelfieEnrollment({
       console.log('[PhoneSelfieEnrollment] 🚀 Sending signed transaction back to Jetson...');
       setProgress("Submitting to blockchain...");
 
+      // Validate we have all required fields from the Jetson's transaction building response
+      if (!result.face_id) {
+        console.error('[PhoneSelfieEnrollment] ❌ Missing face_id in result:', result);
+        throw new Error('Missing face_id from Jetson - cannot confirm enrollment');
+      }
+
       try {
         const confirmResult = await fetch(`${connectedCameraUrl}/api/face/enroll/confirm`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            session_id: result.sessionId,
-            signed_transaction: signedTx.serialize().toString('base64')
+            wallet_address: primaryWallet.address,
+            face_id: result.face_id,
+            signed_transaction: signedTx.serialize().toString('base64'),
+            biometric_session_id: result.sessionId
           })
         });
 
