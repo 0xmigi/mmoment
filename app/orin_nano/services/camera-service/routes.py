@@ -960,15 +960,18 @@ def register_routes(app):
         Extract face embedding from base64 image for phone-based enrollment.
         Includes quality scoring and optional encryption for security.
         """
+        logger.info("🔍 DEBUG: /api/face/extract-embedding endpoint called!")
         try:
             data = request.get_json()
+            logger.info(f"🔍 DEBUG: Received data keys: {list(data.keys()) if data else 'None'}")
             if not data:
                 return jsonify({
                     'success': False,
                     'error': 'No data provided'
                 }), 400
 
-            image_data = data.get('image')
+            # Check for image data in both possible field names
+            image_data = data.get('image') or data.get('image_data')
             wallet_address = data.get('wallet_address')  # Optional for encryption
             encrypt = data.get('encrypt', False)  # Whether to encrypt the embedding
 
@@ -1111,6 +1114,36 @@ def register_routes(app):
 
                 logger.info(f"Extracted embedding with quality score: {quality_score}%")
 
+                # Automatically store embedding locally for immediate recognition
+                # Since user is physically at camera taking selfie, enable recognition
+                if wallet_address:
+                    try:
+                        # Store embedding directly since we already extracted it with InsightFace
+                        # (avoid enroll_face() which requires YOLOv8 person detection)
+                        enrollment_metadata = {
+                            'source': 'phone_camera',
+                            'quality_score': quality_score,
+                            'timestamp': int(time.time())
+                        }
+
+                        # Store in memory for recognition
+                        with gpu_face_service._faces_lock:
+                            gpu_face_service._face_embeddings[wallet_address] = embedding
+
+                        # Store display name
+                        display_name = wallet_address[:8] + "..."
+                        gpu_face_service._face_names[wallet_address] = display_name
+                        gpu_face_service._face_metadata[wallet_address] = enrollment_metadata
+
+                        # Save to disk
+                        gpu_face_service.save_face_embedding(wallet_address, embedding, enrollment_metadata)
+
+                        logger.info(f"✅ Successfully stored face embedding locally for {wallet_address[:8]}... - recognition enabled")
+
+                    except Exception as enroll_error:
+                        logger.error(f"❌ Error storing face embedding locally for {wallet_address[:8]}...: {enroll_error}")
+                        # Continue with embedding extraction even if local storage fails
+
                 # If encryption is requested and wallet address provided
                 if encrypt and wallet_address:
                     try:
@@ -1146,19 +1179,55 @@ def register_routes(app):
 
                             if encrypt_response.status_code == 200:
                                 encrypted_data = encrypt_response.json()
+                                nft_package = encrypted_data['nft_package']
 
                                 logger.info(f"Successfully encrypted embedding for {wallet_address[:8]}...")
 
+                                # Build Solana transaction on Jetson (like /api/face/enroll/prepare)
+                                logger.info(f"Building Solana transaction for wallet: {wallet_address}")
+
+                                solana_response = requests.post(
+                                    'http://solana-middleware:5001/api/blockchain/mint-facial-nft',
+                                    json={
+                                        'wallet_address': wallet_address,
+                                        'face_embedding': nft_package,  # Send encrypted NFT package
+                                        'biometric_session_id': session_id
+                                    },
+                                    timeout=30
+                                )
+
+                                if solana_response.status_code != 200:
+                                    logger.error(f"Solana middleware error: {solana_response.status_code}")
+                                    return jsonify({
+                                        'success': False,
+                                        'error': f"Solana middleware error: {solana_response.status_code}"
+                                    }), 500
+
+                                solana_data = solana_response.json()
+
+                                logger.info(f"Successfully prepared transaction for wallet: {wallet_address}")
+
                                 return jsonify({
                                     'success': True,
-                                    'embedding': encrypted_data['nft_package'],  # Encrypted package
+                                    'transaction_buffer': solana_data['transaction_buffer'],
+                                    'face_id': solana_data['face_id'],
                                     'encrypted': True,
                                     'encryption_method': 'AES-256-PBKDF2',
                                     'session_id': session_id,
                                     'quality_score': quality_score,
                                     'quality_factors': quality_factors,
                                     'quality_rating': api_face_extract_embedding.get_quality_rating(quality_score),
-                                    'recommendations': api_face_extract_embedding.get_quality_recommendations(quality_score, quality_factors)
+                                    'recommendations': api_face_extract_embedding.get_quality_recommendations(quality_score, quality_factors),
+                                    'metadata': {
+                                        'wallet_address': wallet_address,
+                                        'timestamp': int(time.time()),
+                                        'biometric_session_id': session_id,
+                                        'encryption_method': 'AES-256-PBKDF2',
+                                        'face_embedding_encrypted': True,
+                                        'embedding_size': len(embedding_list),
+                                        'embedding_type': 'compact_512_dimensions',
+                                        'blockchain_optimized': True
+                                    }
                                 })
                     except Exception as encrypt_error:
                         logger.warning(f"Encryption failed, returning unencrypted: {encrypt_error}")
@@ -1186,6 +1255,33 @@ def register_routes(app):
                         'error': 'Face detection failed',
                         'quality_score': 0
                     }), 400
+
+                # Store embedding locally for fallback case too
+                if wallet_address:
+                    try:
+                        # Store embedding directly since we already extracted it
+                        fallback_metadata = {
+                            'source': 'phone_camera_fallback',
+                            'quality_score': 50,
+                            'timestamp': int(time.time())
+                        }
+
+                        # Store in memory for recognition
+                        with gpu_face_service._faces_lock:
+                            gpu_face_service._face_embeddings[wallet_address] = full_embedding
+
+                        # Store display name
+                        display_name = wallet_address[:8] + "..."
+                        gpu_face_service._face_names[wallet_address] = display_name
+                        gpu_face_service._face_metadata[wallet_address] = fallback_metadata
+
+                        # Save to disk
+                        gpu_face_service.save_face_embedding(wallet_address, full_embedding, fallback_metadata)
+
+                        logger.info(f"✅ Successfully stored face embedding locally (fallback) for {wallet_address[:8]}... - recognition enabled")
+
+                    except Exception as enroll_error:
+                        logger.error(f"❌ Error storing face embedding locally (fallback) for {wallet_address[:8]}...: {enroll_error}")
 
                 return jsonify({
                     'success': True,

@@ -841,18 +841,58 @@ class GPUFaceService:
                 self._face_names.clear()
                 self._face_metadata.clear()
                 self._user_profiles.clear()
-            
+
             # Clear database files
             for file_path in Path(self._faces_dir).glob("*.npy"):
                 file_path.unlink()
             for file_path in Path(self._faces_dir).glob("*_metadata.json"):
                 file_path.unlink()
-            
+
             logger.info("Cleared all enrolled faces")
             return True
-            
+
         except Exception as e:
             logger.error(f"Error clearing enrolled faces: {e}")
+            return False
+
+    def remove_face_embedding(self, wallet_address: str) -> bool:
+        """
+        Remove a specific user's face embedding from memory and disk.
+        Used when a user checks out on-chain.
+        """
+        try:
+            with self._faces_lock:
+                # Remove from memory
+                removed_embedding = self._face_embeddings.pop(wallet_address, None)
+                removed_name = self._face_names.pop(wallet_address, None)
+                removed_metadata = self._face_metadata.pop(wallet_address, None)
+                removed_profile = self._user_profiles.pop(wallet_address, None)
+
+            # Remove from disk
+            embedding_path = os.path.join(self._faces_dir, f"{wallet_address}.npy")
+            metadata_path = os.path.join(self._faces_dir, f"{wallet_address}_metadata.json")
+
+            files_removed = 0
+            if os.path.exists(embedding_path):
+                os.unlink(embedding_path)
+                files_removed += 1
+                logger.info(f"🗑️  Removed embedding file: {embedding_path}")
+
+            if os.path.exists(metadata_path):
+                os.unlink(metadata_path)
+                files_removed += 1
+                logger.info(f"🗑️  Removed metadata file: {metadata_path}")
+
+            if removed_embedding is not None:
+                logger.info(f"✅ Successfully removed face embedding for {wallet_address[:8]}... "
+                           f"(memory: {removed_embedding is not None}, disk files: {files_removed})")
+                return True
+            else:
+                logger.info(f"ℹ️  No face embedding found for {wallet_address[:8]}... (already clean)")
+                return True  # Consider this success since the goal is achieved
+
+        except Exception as e:
+            logger.error(f"❌ Error removing face embedding for {wallet_address}: {e}")
             return False
 
     def get_faces(self) -> Dict:

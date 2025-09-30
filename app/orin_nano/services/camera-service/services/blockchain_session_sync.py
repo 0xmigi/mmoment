@@ -185,7 +185,23 @@ class BlockchainSessionSync:
         """Handle a wallet checking out on-chain"""
         try:
             logger.info(f"👋 Wallet {wallet_address} checked out on-chain - disabling camera session")
-            
+
+            # CRITICAL: Clear facial embedding data for security
+            if self.face_service:
+                try:
+                    # Remove this user's facial embedding from memory and disk
+                    if hasattr(self.face_service, 'remove_face_embedding'):
+                        success = self.face_service.remove_face_embedding(wallet_address)
+                        if success:
+                            logger.info(f"🗑️  Cleared facial embedding for {wallet_address[:8]}...")
+                        else:
+                            logger.warning(f"⚠️  Failed to clear facial embedding for {wallet_address[:8]}...")
+                    else:
+                        logger.warning("⚠️  Face service doesn't support individual face removal")
+
+                except Exception as face_error:
+                    logger.error(f"❌ Error clearing facial data for {wallet_address}: {face_error}")
+
             # End camera session automatically
             if self.session_service:
                 # Find session for this wallet
@@ -195,17 +211,29 @@ class BlockchainSessionSync:
                     success = self.session_service.end_session(session_id, wallet_address)
                     if success:
                         logger.info(f"✅ Ended camera session for {wallet_address}")
-                        
-            # Check if this was the last user - disable face boxes if so
+
+            # Check if this was the last user - disable face boxes and clear all faces if so
             if self.session_service and self.face_service:
                 active_sessions = self.session_service.get_all_sessions()
                 if len(active_sessions) == 0:
                     self.face_service.enable_boxes(False)
+
+                    # Clear all facial embeddings for security when no users are present
+                    try:
+                        if hasattr(self.face_service, 'clear_enrolled_faces'):
+                            clear_success = self.face_service.clear_enrolled_faces()
+                            if clear_success:
+                                logger.info("🗑️  Cleared all facial embeddings - no users checked in")
+                            else:
+                                logger.warning("⚠️  Failed to clear all facial embeddings")
+                    except Exception as clear_error:
+                        logger.error(f"❌ Error clearing all facial data: {clear_error}")
+
                     logger.info("✅ Face boxes disabled - no users checked in")
-                    
+
             # Log for monitoring
             logger.info(f"📹 Camera session ended for user: {wallet_address}")
-            
+
         except Exception as e:
             logger.error(f"Error handling check-out for {wallet_address}: {e}")
             
