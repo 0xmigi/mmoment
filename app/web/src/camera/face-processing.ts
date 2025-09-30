@@ -283,19 +283,26 @@ class FaceProcessingService {
 
       const result = await response.json();
       console.log('[FaceProcessing] Jetson response:', result);
+      console.log('[FaceProcessing] Response keys:', Object.keys(result));
 
       if (!result.success) {
         throw new Error(result.error || 'Jetson processing failed');
       }
 
-      // Extract the enhanced response data
+      // Extract the enhanced response data - handle different field name variations
       const enhancedResult: EnhancedFaceProcessingResult = {
         success: true,
         embedding: result.embedding || result.face_embedding,
         encrypted: result.encrypted || false,
         sessionId: result.biometric_session_id || result.session_id,
-        transactionBuffer: result.transaction_buffer // Base64 encoded transaction from Jetson
+        transactionBuffer: result.transaction_buffer || result.transactionBuffer || result.transaction // Base64 encoded transaction from Jetson
       };
+
+      console.log('[FaceProcessing] Enhanced result built:', {
+        hasEmbedding: !!enhancedResult.embedding,
+        hasTransaction: !!enhancedResult.transactionBuffer,
+        sessionId: enhancedResult.sessionId
+      });
 
       // Add quality assessment if available
       if (result.quality_score !== undefined) {

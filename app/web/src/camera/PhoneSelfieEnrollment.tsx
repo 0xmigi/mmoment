@@ -259,20 +259,25 @@ export function PhoneSelfieEnrollment({
       );
 
       console.log('[PhoneSelfieEnrollment] 📞 ENROLLMENT RESULT from faceProcessingService:', result);
-
-      console.log('[PhoneSelfieEnrollment] Processing result:', {
+      console.log('[PhoneSelfieEnrollment] 📞 Full result object keys:', Object.keys(result));
+      console.log('[PhoneSelfieEnrollment] 📞 Result details:', {
         success: result.success,
         hasTransaction: !!result.transactionBuffer,
         hasQuality: !!result.quality,
-        error: result.error
+        hasEmbedding: !!result.embedding,
+        error: result.error,
+        allFields: Object.keys(result).join(', ')
       });
 
       if (!result.success) {
+        console.error('[PhoneSelfieEnrollment] ❌ Result not successful:', result.error);
         throw new Error(result.error || "Failed to process facial features");
       }
 
       if (!result.transactionBuffer) {
-        throw new Error("No transaction received from Jetson - enrollment failed");
+        console.error('[PhoneSelfieEnrollment] ❌ No transaction buffer found in result');
+        console.error('[PhoneSelfieEnrollment] ❌ Available fields:', Object.keys(result));
+        throw new Error("No transaction received from Jetson - enrollment failed. Check if buildTransaction option is working.");
       }
 
       console.log('[PhoneSelfieEnrollment] Enhanced processing result:', {
@@ -293,8 +298,8 @@ export function PhoneSelfieEnrollment({
 
       // Deserialize the transaction buffer from Jetson
       console.log('[PhoneSelfieEnrollment] 📜 Deserializing transaction from Jetson...');
-      const transactionBuffer = Buffer.from(result.transactionBuffer, 'base64');
-      const transaction = Transaction.from(transactionBuffer);
+      const txBuffer = Buffer.from(result.transactionBuffer, 'base64');
+      const transaction = Transaction.from(txBuffer);
       console.log('[PhoneSelfieEnrollment] 📜 Transaction deserialized successfully');
 
       // Sign the pre-built transaction
@@ -376,7 +381,7 @@ export function PhoneSelfieEnrollment({
         throw new Error(errorMessage);
       }
     } catch (err) {
-      console.error("Enrollment error:", err);
+      console.error('[PhoneSelfieEnrollment] ❌ Enrollment error:', err);
       let errorMessage = "Failed to enroll facial embedding.";
 
       if (err instanceof Error) {
@@ -384,13 +389,17 @@ export function PhoneSelfieEnrollment({
           errorMessage = "You already have a facial embedding stored.";
         } else if (err.message.includes("insufficient funds")) {
           errorMessage = "Insufficient SOL balance for transaction.";
+        } else if (err.message.includes("No transaction received")) {
+          errorMessage = "Jetson did not return a transaction. The API may need updating to support buildTransaction.";
         } else {
           errorMessage = err.message;
         }
       }
 
+      console.error('[PhoneSelfieEnrollment] ❌ Setting error:', errorMessage);
       setError(errorMessage);
       setStep("preview");
+      setProgress("");
       onEnrollmentComplete?.({
         success: false,
         error: errorMessage,
