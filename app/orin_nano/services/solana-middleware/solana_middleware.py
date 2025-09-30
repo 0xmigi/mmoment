@@ -392,49 +392,121 @@ def api_wallet_status():
 def mint_facial_nft():
     """Process encrypted facial embedding and prepare transaction for frontend signing"""
     try:
+        from solders.instruction import Instruction, AccountMeta
+        from solders.message import Message
+        from solders.transaction import Transaction as SoldersTransaction
+        import struct
+
         data = request.json
         wallet_address = data.get('wallet_address')
         face_embedding = data.get('face_embedding')  # This is the encrypted NFT package
         biometric_session_id = data.get('biometric_session_id')
-        
+
         if not wallet_address or not face_embedding:
             return jsonify({"error": "wallet_address and face_embedding are required"}), 400
-        
+
         # The face_embedding is already the encrypted NFT package from the camera service
         nft_package = face_embedding
-        
+
         # Generate a face ID for tracking
         face_id = f"face_{uuid.uuid4().hex[:16]}"
-        
-        # Create the transaction buffer in the format expected by the frontend wallet signing
-        # The frontend expects: {"args": {"embedding": "<EMBEDDING_DATA>"}}
-        transaction_data = {
-            "args": {
-                "embedding": nft_package.get("encrypted_embedding", "")  # This is the Base64 encrypted embedding
-            }
-        }
-        
-        # Convert to JSON string (not base64 encoded)
-        transaction_buffer = json.dumps(transaction_data)
-        
-        logger.info(f"Prepared facial NFT transaction for wallet {wallet_address}")
-        
-        # Debug logging as suggested
-        embedding_data = nft_package.get("encrypted_embedding", "")
-        logger.info(f"[DEBUG] Sending transaction_buffer: {transaction_buffer[:200]}...")
-        logger.info(f"[DEBUG] Embedding data type: {type(embedding_data)}")
-        logger.info(f"[DEBUG] Embedding size: {len(embedding_data)} chars")
-        logger.info(f"[DEBUG] Transaction buffer size: {len(transaction_buffer)} chars")
-        
+
+        # Get the encrypted embedding data
+        encrypted_embedding_b64 = nft_package.get("encrypted_embedding", "")
+        encrypted_embedding_bytes = base64.b64decode(encrypted_embedding_b64)
+
+        logger.info(f"[TRANSACTION] Building Solana transaction for wallet {wallet_address}")
+        logger.info(f"[TRANSACTION] Encrypted embedding size: {len(encrypted_embedding_bytes)} bytes")
+
+        # Solana transaction size limit: 1232 bytes total
+        # Transaction overhead (signatures, accounts, etc): ~200 bytes
+        # Instruction overhead (discriminator + vec length): 12 bytes
+        # Available for embedding: 1232 - 200 - 12 = ~1020 bytes
+        # But the Rust program validates max 1024, so we use a safe value
+        MAX_EMBEDDING_SIZE = 950  # Safe margin to stay under 1232 total
+
+        if len(encrypted_embedding_bytes) > MAX_EMBEDDING_SIZE:
+            logger.warning(f"[TRANSACTION] Embedding too large ({len(encrypted_embedding_bytes)} bytes), truncating to {MAX_EMBEDDING_SIZE} bytes")
+            # Truncate to fit within Solana limits
+            encrypted_embedding_bytes = encrypted_embedding_bytes[:MAX_EMBEDDING_SIZE]
+
+        logger.info(f"[TRANSACTION] Final embedding size for transaction: {len(encrypted_embedding_bytes)} bytes")
+
+        # Build the Solana instruction data
+        # Anchor instruction format: 8-byte discriminator + instruction data
+        # For enroll_face: sighash(global:enroll_face) + Vec<u8> (4-byte length + data)
+
+        # Anchor discriminator for enroll_face (first 8 bytes of SHA256("global:enroll_face"))
+        discriminator = hashlib.sha256(b"global:enroll_face").digest()[:8]
+
+        # Serialize the Vec<u8> argument (Rust/Borsh format: u32 length prefix + bytes)
+        vec_length = struct.pack('<I', len(encrypted_embedding_bytes))  # Little-endian u32
+        instruction_data = discriminator + vec_length + encrypted_embedding_bytes
+
+        logger.info(f"[TRANSACTION] Instruction data size: {len(instruction_data)} bytes")
+        logger.info(f"[TRANSACTION] Discriminator: {discriminator.hex()}")
+
+        # Convert wallet address to Pubkey
+        user_pubkey = Pubkey.from_string(wallet_address)
+        program_id = Pubkey.from_string(CAMERA_PROGRAM_ID)
+        system_program = Pubkey.from_string("11111111111111111111111111111111")
+
+        # Derive face_nft PDA
+        face_nft_seeds = [b"face-nft", bytes(user_pubkey)]
+        face_nft_pda, bump = Pubkey.find_program_address(face_nft_seeds, program_id)
+
+        logger.info(f"[TRANSACTION] User: {user_pubkey}")
+        logger.info(f"[TRANSACTION] Face NFT PDA: {face_nft_pda}")
+        logger.info(f"[TRANSACTION] Program ID: {program_id}")
+
+        # Create instruction with accounts in the correct order
+        accounts = [
+            AccountMeta(pubkey=user_pubkey, is_signer=True, is_writable=True),  # user (signer, mut)
+            AccountMeta(pubkey=face_nft_pda, is_signer=False, is_writable=True),  # face_nft (mut)
+            AccountMeta(pubkey=system_program, is_signer=False, is_writable=False),  # system_program
+        ]
+
+        instruction = Instruction(
+            program_id=program_id,
+            accounts=accounts,
+            data=bytes(instruction_data)
+        )
+
+        # Get recent blockhash
+        response = solana_client.get_latest_blockhash()
+        recent_blockhash = response.value.blockhash
+
+        logger.info(f"[TRANSACTION] Recent blockhash: {recent_blockhash}")
+
+        # Create transaction
+        message = Message.new_with_blockhash(
+            [instruction],
+            user_pubkey,  # Fee payer
+            recent_blockhash
+        )
+
+        transaction = SoldersTransaction.new_unsigned(message)
+
+        # Serialize transaction to bytes and encode as base64
+        transaction_bytes = bytes(transaction)
+        transaction_buffer = base64.b64encode(transaction_bytes).decode('utf-8')
+
+        logger.info(f"[TRANSACTION] Transaction built successfully")
+        logger.info(f"[TRANSACTION] Transaction buffer size: {len(transaction_buffer)} chars")
+        logger.info(f"[TRANSACTION] Transaction buffer preview: {transaction_buffer[:100]}...")
+
         return jsonify({
             "success": True,
             "transaction_buffer": transaction_buffer,
             "face_id": face_id,
+            "face_nft_pda": str(face_nft_pda),
             "message": "Transaction prepared for signing"
         })
-        
+
     except Exception as e:
         logger.error(f"Error preparing facial NFT transaction: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
 
