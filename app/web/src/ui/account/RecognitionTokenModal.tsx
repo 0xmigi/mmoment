@@ -1,9 +1,10 @@
 import { Dialog } from '@headlessui/react';
-import { X, ScanFace, CheckCircle, AlertCircle, Loader2, Trash2 } from 'lucide-react';
+import { X, ScanFace, CheckCircle, AlertCircle, Loader2, Trash2, ExternalLink } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { FacialEmbeddingStatus } from '../../hooks/useFacialEmbeddingStatus';
 import { useProgram } from '../../anchor/setup';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import { PublicKey } from '@solana/web3.js';
 
 interface RecognitionTokenModalProps {
   isOpen: boolean;
@@ -17,6 +18,25 @@ export function RecognitionTokenModal({ isOpen, onClose, status }: RecognitionTo
   const { program } = useProgram();
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Calculate the PDA for this wallet's face data
+  const faceDataPda = useMemo(() => {
+    if (!primaryWallet?.address || !program) return null;
+
+    try {
+      const [pda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('face-nft'),
+          new PublicKey(primaryWallet.address).toBuffer()
+        ],
+        program.programId
+      );
+      return pda.toString();
+    } catch (error) {
+      console.error('Error calculating PDA:', error);
+      return null;
+    }
+  }, [primaryWallet?.address, program]);
 
   const handleDeleteRecognitionToken = async () => {
     if (!primaryWallet?.address || !program) {
@@ -108,11 +128,11 @@ export function RecognitionTokenModal({ isOpen, onClose, status }: RecognitionTo
                 </div>
               )}
 
-              <div className={`text-sm ${
+              <div className={`text-sm px-4 ${
                 status.hasEmbedding ? 'text-green-700' : 'text-orange-700'
               }`}>
                 {status.hasEmbedding
-                  ? 'Your encrypted facial embedding is stored on-chain and ready for use'
+                  ? "Encrypted facial hash stored on-chain"
                   : 'Check in to any camera to enroll'
                 }
               </div>
@@ -161,14 +181,27 @@ export function RecognitionTokenModal({ isOpen, onClose, status }: RecognitionTo
                     {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
-              </div>
-            )}
 
-            {/* Bottom description */}
-            {status.hasEmbedding && (
-              <div className="text-center text-sm text-gray-600 mb-4">
-                <p className="mb-2">Your facial recognition is active and working across all cameras in the network.</p>
-                <p className="text-xs">This enables seamless authentication and enhanced security features.</p>
+                {/* On-chain PDA Link */}
+                {faceDataPda && (
+                  <a
+                    href={`https://explorer.solana.com/address/${faceDataPda}?cluster=devnet`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-between py-2 hover:bg-gray-50 rounded-lg px-2 -mx-2 transition-colors"
+                  >
+                    <div className="flex items-center">
+                      <div className="w-6 h-6 bg-indigo-100 rounded p-1 mr-3">
+                        <ExternalLink className="w-full h-full text-indigo-600" />
+                      </div>
+                      <div>
+                        <div className="font-medium text-sm">View On-Chain</div>
+                        <div className="text-xs text-gray-500">Solana Explorer</div>
+                      </div>
+                    </div>
+                    <ExternalLink className="w-4 h-4 text-gray-400" />
+                  </a>
+                )}
               </div>
             )}
 
