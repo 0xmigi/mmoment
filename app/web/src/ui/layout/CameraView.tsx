@@ -1490,7 +1490,7 @@ export function CameraView() {
 
   return (
     <>
-      <div className="h-full overflow-y-auto pb-40">
+      <div className="pb-40">
         <div className="relative max-w-3xl mx-auto pt-0">
           <ToastContainer message={currentToast} onDismiss={dismissToast} />
 

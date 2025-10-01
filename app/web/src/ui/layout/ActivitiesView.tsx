@@ -30,7 +30,7 @@ export function ActivitiesView() {
     ];
 
     return (
-        <div className="h-full overflow-y-auto pb-20">
+        <div className="pb-20">
             <div className="max-w-3xl mx-auto pt-8">
                 <div className="bg-white rounded-lg p-6">
                     <div className="flex items-center justify-between mb-6">
