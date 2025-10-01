@@ -222,9 +222,9 @@ export const CameraActionModal = ({
         systemProgram: SystemProgram.programId
       };
 
-      // Add face account only if using face recognition and it exists
+      // Add recognition token account only if using face recognition and it exists
       if (useFaceRecognition && faceDataExists && faceDataPda) {
-        accounts.faceNft = faceDataPda;
+        accounts.recognitionToken = faceDataPda;
       }
 
       // Create check-in instruction
