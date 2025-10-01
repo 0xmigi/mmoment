@@ -744,11 +744,10 @@ export function SolDevNetDebug() {
           session: sessionPda,
           systemProgram: SystemProgram.programId
         };
-        
-        // Only add faceAccount if using face recognition and it exists
-        if (useFaceRec && faceDataExists) {
-          console.log('Adding face account to check-in transaction');
-          accountsObj.faceNft = faceDataPda;
+
+        // Only include recognition token if it exists
+        if (faceDataExists) {
+          accountsObj.recognitionToken = faceDataPda;
         }
         
         console.log('Check-in accounts:', accountsObj);
@@ -881,10 +880,10 @@ export function SolDevNetDebug() {
         
         // Define the accounts like in the test script
         const accountsObj: Record<string, PublicKey> = {
-          user: userPublicKey,
+          closer: userPublicKey,
           camera: cameraPublicKey,
           session: sessionPda,
-          systemProgram: SystemProgram.programId
+          sessionUser: userPublicKey, // Rent goes back to user
         };
         
         console.log('Check-out accounts:', accountsObj);
