@@ -71,7 +71,7 @@ export const fetchCameraByPublicKey = async (publicKey: string, connection: Conn
     
     // Fetch the camera account
     try {
-      const cameraAccount = await program.account.cameraAccount.fetch(cameraPubkey) as unknown as CameraAccountData;
+      const cameraAccount = await (program.account as any).cameraAccount.fetch(cameraPubkey) as unknown as CameraAccountData;
       
       if (cameraAccount) {
         console.log('[CameraProvider] Camera account found:', cameraAccount);
@@ -289,7 +289,7 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
 
       try {
         // Try to fetch the registry account
-        const registryAccount = await program.account.cameraRegistry.fetch(registryAddress);
+        const registryAccount = await (program.account as any).cameraRegistry.fetch(registryAddress);
         console.log('Registry account found:', registryAccount);
         
         // Now check if camera account exists
@@ -307,7 +307,7 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
           console.log('Camera address:', cameraAddress.toString());
           
           // Try to fetch the camera account
-          const cameraAccount = await program.account.cameraAccount.fetch(cameraAddress);
+          const cameraAccount = await (program.account as any).cameraAccount.fetch(cameraAddress);
           console.log('Camera account found:', cameraAccount);
           setIsInitialized(true);
         } catch {

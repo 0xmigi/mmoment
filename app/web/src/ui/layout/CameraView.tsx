@@ -111,7 +111,7 @@ const CameraIdDisplay = ({
       );
 
       try {
-        const session = await program.account.userSession.fetch(sessionPda);
+        const session = await (program.account as any).userSession.fetch(sessionPda);
         console.log(`[BLOCKCHAIN CHECK] ✅ SESSION FOUND:`, session);
         setIsCheckedIn(true);
       } catch (err) {
@@ -841,7 +841,7 @@ export function CameraView() {
 
       try {
         // Try to fetch the session account
-        const sessionAccount = await program.account.userSession.fetch(
+        const sessionAccount = await (program.account as any).userSession.fetch(
           sessionPda
         );
         if (sessionAccount) {

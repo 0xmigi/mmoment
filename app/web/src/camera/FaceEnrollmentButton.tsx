@@ -137,10 +137,14 @@ export function FaceEnrollmentButton({ cameraId, walletAddress, onEnrollmentComp
         console.log('[FaceEnrollmentButton] Using embedded wallet transaction flow');
         
         const txSignature = await program.methods
-          .enrollFace(embeddingBuffer) // Use Buffer directly for Anchor
+          .upsertRecognitionToken(
+            embeddingBuffer, // Use Buffer directly for Anchor
+            "Browser Enrollment", // display_name
+            0 // source: phone_selfie
+          )
           .accounts({
             user: userPublicKey,
-            faceNft: faceDataPda,
+            recognitionToken: faceDataPda,
             systemProgram: SystemProgram.programId
           })
           .rpc();
@@ -188,10 +192,14 @@ export function FaceEnrollmentButton({ cameraId, walletAddress, onEnrollmentComp
         
         // Build instruction
         const ix = await program.methods
-          .enrollFace(embeddingBuffer)
+          .upsertRecognitionToken(
+            embeddingBuffer,
+            "Browser Enrollment", // display_name
+            0 // source: phone_selfie
+          )
           .accounts({
             user: userPublicKey,
-            faceNft: faceDataPda,
+            recognitionToken: faceDataPda,
             systemProgram: SystemProgram.programId
           })
           .instruction();

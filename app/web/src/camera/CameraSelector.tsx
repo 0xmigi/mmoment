@@ -48,10 +48,10 @@ export function CameraSelector({ onSelect }: { onSelect: (camera: CameraData) =>
       }
 
       // Get program accounts of type CameraAccount
-      const cameraAccounts = await program.account.cameraAccount.all();
+      const cameraAccounts = await (program.account as any).cameraAccount.all();
 
       // Format the camera data
-      const formattedCameras = cameraAccounts.map(account => {
+      const formattedCameras = cameraAccounts.map((account: any) => {
         const data = account.account;
         return {
           owner: data.owner.toString(),
