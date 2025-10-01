@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use crate::state::{
-    CameraAccount, UserSession, SessionFeatures,
+    CameraAccount, UserSession, SessionFeatures, RecognitionToken,
     UserCheckedIn, ActivityType, ActivityRecorded
 };
 use crate::error::CameraNetworkError;
@@ -9,17 +9,20 @@ use crate::error::CameraNetworkError;
 pub struct CheckIn<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
-    
+
     #[account(
         mut,
         constraint = camera.is_active @ CameraNetworkError::CameraInactive
     )]
     pub camera: Account<'info, CameraAccount>,
-    
+
+    /// Optional recognition token - required if use_face_recognition is true
+    pub recognition_token: Option<Account<'info, RecognitionToken>>,
+
     #[account(
         init,
         payer = user,
-        space = 8 + 32 + 32 + 8 + 8 + 5 + 1, // Discriminator + user + camera + timestamps + features + bump
+        space = 8 + 32 + 32 + 8 + 8 + 8 + 5 + 1, // Added auto_checkout_at = 102 bytes
         seeds = [
             b"session",
             user.key().as_ref(),
@@ -28,7 +31,7 @@ pub struct CheckIn<'info> {
         bump
     )]
     pub session: Account<'info, UserSession>,
-    
+
     pub system_program: Program<'info, System>,
 }
 
@@ -36,14 +39,35 @@ pub fn handler(ctx: Context<CheckIn>, use_face_recognition: bool) -> Result<()> 
     let user = &ctx.accounts.user;
     let camera = &mut ctx.accounts.camera;
     let session = &mut ctx.accounts.session;
-    
+    let now = Clock::get()?.unix_timestamp;
+
+    // Validate recognition token if face recognition requested
+    if use_face_recognition {
+        // Check camera supports face recognition
+        require!(
+            camera.features.face_recognition,
+            CameraNetworkError::FeatureNotAvailable
+        );
+
+        // Check user has recognition token
+        let token = ctx.accounts.recognition_token.as_ref()
+            .ok_or(CameraNetworkError::NoRecognitionToken)?;
+
+        // Validate token belongs to user
+        require!(
+            token.user == user.key(),
+            CameraNetworkError::Unauthorized
+        );
+    }
+
     // Initialize session data
     session.user = user.key();
     session.camera = camera.key();
-    session.check_in_time = Clock::get()?.unix_timestamp;
-    session.last_activity = Clock::get()?.unix_timestamp;
+    session.check_in_time = now;
+    session.last_activity = now;
+    session.auto_checkout_at = now + 7200; // 2 hour fallback timeout
     session.bump = ctx.bumps.session;
-    
+
     // Configure features based on user choice
     // Only face_recognition and gesture_control are optional and tied together
     // All other features are always enabled by default

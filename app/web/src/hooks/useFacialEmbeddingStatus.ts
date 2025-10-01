@@ -38,22 +38,22 @@ export function useFacialEmbeddingStatus(): FacialEmbeddingStatus {
 
       const userPublicKey = new PublicKey(primaryWallet.address);
 
-      // Derive the PDA for face data storage (matching PhoneSelfieEnrollment)
-      const [faceDataPda] = PublicKey.findProgramAddressSync(
+      // Derive the PDA for recognition token storage (matching PhoneSelfieEnrollment)
+      const [recognitionTokenPda] = PublicKey.findProgramAddressSync(
         [
-          Buffer.from("face-nft"), // Must match the seed in enrollment
+          Buffer.from("recognition-token"), // Updated seed
           userPublicKey.toBuffer(),
         ],
         program.programId
       );
 
-      console.log('[useFacialEmbeddingStatus] 🔍 Checking for face NFT...');
+      console.log('[useFacialEmbeddingStatus] 🔍 Checking for recognition token...');
       console.log('[useFacialEmbeddingStatus] 🔍 Wallet:', primaryWallet.address);
       console.log('[useFacialEmbeddingStatus] 🔍 Program ID:', program.programId.toString());
-      console.log('[useFacialEmbeddingStatus] 🔍 PDA:', faceDataPda.toString());
+      console.log('[useFacialEmbeddingStatus] 🔍 PDA:', recognitionTokenPda.toString());
 
-      // Try to fetch the face data account
-      const faceAccount = await program.account.faceData.fetch(faceDataPda);
+      // Try to fetch the recognition token account
+      const faceAccount = await (program.account as any).recognitionToken.fetch(recognitionTokenPda);
       console.log('[useFacialEmbeddingStatus] 🔍 Raw account data:', faceAccount);
 
       if (faceAccount) {

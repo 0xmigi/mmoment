@@ -51,9 +51,12 @@ pub struct UserSession {
     pub camera: Pubkey,          // The camera they're checked into
     pub check_in_time: i64,      // When the session started
     pub last_activity: i64,      // Last activity timestamp
+    pub auto_checkout_at: i64,   // Unix timestamp when session expires (2 hour fallback)
     pub enabled_features: SessionFeatures, // What features are enabled for this session
     pub bump: u8,                // PDA bump
 }
+
+// Updated space: 8 + 32 + 32 + 8 + 8 + 8 + 5 + 1 = 102 bytes
 
 // Features that can be enabled during a session
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
@@ -65,16 +68,20 @@ pub struct SessionFeatures {
     pub messaging: bool,         // Whether messaging is enabled
 }
 
-// Face recognition data
+// Recognition token - stores encrypted facial embedding for user authentication
 #[account]
-pub struct FaceData {
-    pub user: Pubkey,            // The user who owns this face data
-    pub data_hash: [u8; 32],     // Hash of the face data (actual data stored off-chain)
-    pub authorized_cameras: Vec<Pubkey>, // Cameras authorized to use this face data
-    pub last_used: i64,          // When the face data was last used
-    pub creation_date: i64,      // When the face data was created
-    pub bump: u8,                // PDA bump
+pub struct RecognitionToken {
+    pub user: Pubkey,                  // 32 bytes - owner
+    pub encrypted_embedding: Vec<u8>,  // ~600-900 bytes - ACTUAL encrypted data
+    pub created_at: i64,               // 8 bytes - creation timestamp
+    pub version: u8,                   // 1 byte - token version (incremented on regeneration)
+    pub bump: u8,                      // 1 byte - PDA bump
+    pub display_name: Option<String>,  // ~32 bytes - user-friendly label (e.g., "Phone Selfie 2025")
+    pub source: u8,                    // 1 byte - 0=phone_selfie, 1=jetson_capture, 2=imported
 }
+
+// Space calculation: 8 + 32 + 4 + 1024 + 8 + 1 + 1 + 4 + 64 + 1 = 1147 bytes
+// Rent: ~0.009 SOL (one-time, reclaimable)
 
 // User gesture configuration
 #[account]
@@ -154,6 +161,35 @@ pub struct ActivityRecorded {
     pub user: Pubkey,            // The user public key (if applicable)
     pub activity_type: u8,       // Type of activity
     pub timestamp: i64,          // When the activity occurred
+}
+
+// Event emitted when a recognition token is created or regenerated
+#[event]
+pub struct RecognitionTokenCreated {
+    pub user: Pubkey,            // The token owner
+    pub token: Pubkey,           // The token account public key
+    pub version: u8,             // Token version (increments on regeneration)
+    pub source: u8,              // Token source (0=phone_selfie, 1=jetson_capture, 2=imported)
+    pub display_name: Option<String>, // User-friendly label
+    pub timestamp: i64,          // When the token was created
+}
+
+// Event emitted when a recognition token is deleted
+#[event]
+pub struct RecognitionTokenDeleted {
+    pub user: Pubkey,            // The token owner
+    pub token: Pubkey,           // The token account public key
+    pub timestamp: i64,          // When the token was deleted
+}
+
+// Event emitted when a session auto-checks out
+#[event]
+pub struct SessionAutoCheckout {
+    pub user: Pubkey,            // The user who was checked out
+    pub camera: Pubkey,          // The camera public key
+    pub session: Pubkey,         // The session public key
+    pub reason: String,          // Reason: "expired" or "face_timeout"
+    pub timestamp: i64,          // When the auto checkout occurred
 }
 
 // Remove unused seed helper functions, keep only the essential ones

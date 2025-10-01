@@ -326,14 +326,17 @@ export const CameraActionModal = ({
         CAMERA_ACTIVATION_PROGRAM_ID
       );
 
+      // Fetch session to get the original user (for rent reclamation)
+      const sessionAccount = await program.account.userSession.fetch(sessionPda) as any;
+
       // Create check-out instruction
       const ix = await program.methods
         .checkOut()
         .accounts({
-          user: userPublicKey,
+          closer: userPublicKey,  // Changed from 'user' to 'closer'
           camera: cameraPublicKey,
           session: sessionPda,
-          systemProgram: SystemProgram.programId,
+          sessionUser: sessionAccount.user as PublicKey,  // Original session creator
         })
         .instruction();
 

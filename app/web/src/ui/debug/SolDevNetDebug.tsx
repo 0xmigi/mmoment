@@ -536,10 +536,10 @@ export function SolDevNetDebug() {
 
     console.log('Creating face data for user:', userPublicKey.toString());
     
-    // Find the face data PDA - exactly as in face-recognition-test.js
+    // Find the recognition token PDA
     const [faceDataPda] = PublicKey.findProgramAddressSync(
       [
-        Buffer.from('face-nft'),
+        Buffer.from('recognition-token'),
         userPublicKey.toBuffer()
       ],
       CAMERA_ACTIVATION_PROGRAM_ID
@@ -561,10 +561,14 @@ export function SolDevNetDebug() {
     try {
       // Create the method call with proper account naming
       const tx = await program.methods
-        .enrollFace(mockEmbedding)
+        .upsertRecognitionToken(
+          mockEmbedding,
+          "Debug Token", // display_name
+          0  // source: phone_selfie
+        )
         .accounts({
           user: userPublicKey,
-          faceNft: faceDataPda,
+          recognitionToken: faceDataPda,
           systemProgram: SystemProgram.programId,
         })
         .rpc();
@@ -684,10 +688,10 @@ export function SolDevNetDebug() {
       
       console.log('Session PDA:', sessionPda.toString());
 
-      // Find the face data PDA
+      // Find the recognition token PDA
       const [faceDataPda] = PublicKey.findProgramAddressSync(
         [
-          Buffer.from('face-nft'),
+          Buffer.from('recognition-token'),
           userPublicKey.toBuffer()
         ],
         CAMERA_ACTIVATION_PROGRAM_ID
@@ -699,7 +703,7 @@ export function SolDevNetDebug() {
       try {
         // Fetch with generic account type
          
-        const faceAccount = await program.account.faceData.fetch(faceDataPda) as any;
+        const faceAccount = await program.account.recognitionToken.fetch(faceDataPda) as any;
         if (faceAccount) { // Check if account data is valid
            faceDataExists = true;
            console.log('Face data exists');
@@ -1497,10 +1501,10 @@ export function SolDevNetDebug() {
           
           const userPublicKey = new PublicKey(primaryWallet.address);
 
-          // Find the face data PDA (matches enroll_face.rs)
+          // Find the recognition token PDA (matches upsert_recognition_token.rs)
           const [faceDataPda] = PublicKey.findProgramAddressSync(
               [
-                  Buffer.from('face-nft'),
+                  Buffer.from('recognition-token'),
                   userPublicKey.toBuffer()
               ],
               CAMERA_ACTIVATION_PROGRAM_ID
@@ -1519,9 +1523,13 @@ export function SolDevNetDebug() {
               systemProgram: SystemProgram.programId,
           };
 
-          // Call the enrollFace instruction
+          // Call the upsertRecognitionToken instruction
           const tx = await program.methods
-              .enrollFace(Buffer.from(capturedEmbedding)) // Pass embedding as Buffer
+              .upsertRecognitionToken(
+                Buffer.from(capturedEmbedding), // Pass embedding as Buffer
+                "Debug Token", // display_name
+                0  // source: phone_selfie
+              )
               .accounts(accounts)
               .rpc();
           
