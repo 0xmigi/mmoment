@@ -645,7 +645,18 @@ class GPUFaceService:
             
             with self._results_lock:
                 self._recognized_faces = recognized
-                
+
+            # ✅ NEW: Notify blockchain sync service of recognized users
+            # This updates last_seen timestamps for face-based auto-checkout
+            try:
+                from services.blockchain_session_sync import get_blockchain_session_sync
+                blockchain_sync = get_blockchain_session_sync()
+                for wallet_address in recognized.keys():
+                    blockchain_sync.update_user_seen(wallet_address)
+            except Exception as notify_error:
+                # Don't let notification errors break recognition
+                pass
+
         except Exception as e:
             logger.error(f"Error in face recognition: {e}")
 
@@ -857,16 +868,26 @@ class GPUFaceService:
 
     def remove_face_embedding(self, wallet_address: str) -> bool:
         """
-        Remove a specific user's face embedding from memory and disk.
+        Remove ALL traces of a user's face data from memory and disk.
         Used when a user checks out on-chain.
+
+        Ensures complete "leave no trace" cleanup:
+        - Facial embeddings (memory + disk)
+        - User profiles and display names
+        - Active recognition state
+        - Metadata files
         """
         try:
+            # Remove from memory (all face-related data structures)
             with self._faces_lock:
-                # Remove from memory
                 removed_embedding = self._face_embeddings.pop(wallet_address, None)
                 removed_name = self._face_names.pop(wallet_address, None)
                 removed_metadata = self._face_metadata.pop(wallet_address, None)
                 removed_profile = self._user_profiles.pop(wallet_address, None)
+
+            # Remove from active recognition state
+            with self._results_lock:
+                removed_recognition = self._recognized_faces.pop(wallet_address, None)
 
             # Remove from disk
             embedding_path = os.path.join(self._faces_dir, f"{wallet_address}.npy")
@@ -883,9 +904,21 @@ class GPUFaceService:
                 files_removed += 1
                 logger.info(f"🗑️  Removed metadata file: {metadata_path}")
 
+            # Log comprehensive cleanup summary
+            removed_items = {
+                'embedding': removed_embedding is not None,
+                'name': removed_name is not None,
+                'metadata': removed_metadata is not None,
+                'profile': removed_profile is not None,
+                'recognition_state': removed_recognition is not None,
+                'disk_files': files_removed
+            }
+
             if removed_embedding is not None:
-                logger.info(f"✅ Successfully removed face embedding for {wallet_address[:8]}... "
-                           f"(memory: {removed_embedding is not None}, disk files: {files_removed})")
+                logger.info(f"✅ Successfully removed ALL face data for {wallet_address[:8]}... "
+                           f"(embedding: ✓, profile: {'✓' if removed_profile else '✗'}, "
+                           f"recognition: {'✓' if removed_recognition else '✗'}, "
+                           f"disk files: {files_removed})")
                 return True
             else:
                 logger.info(f"ℹ️  No face embedding found for {wallet_address[:8]}... (already clean)")

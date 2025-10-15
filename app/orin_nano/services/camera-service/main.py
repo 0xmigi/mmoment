@@ -149,15 +149,14 @@ def init_services():
     
     # Give WebRTC service time to initialize async components
     time.sleep(2)
-    
-    # TEMPORARILY DISABLED FOR CPU TESTING
-    # from services.blockchain_session_sync import get_blockchain_session_sync, reset_blockchain_session_sync
-    # reset_blockchain_session_sync()  # Ensure fresh instance with current environment variables
-    # blockchain_sync = get_blockchain_session_sync()
-    # blockchain_sync.set_services(session_service, gpu_face_service)
-    # blockchain_sync.start()
-    # logger.info("🔗 Blockchain session sync initialized - camera will auto-enable for on-chain check-ins")
-    logger.warning("BLOCKCHAIN SYNC DISABLED FOR CPU TESTING")
+
+    # Initialize Blockchain Session Sync
+    from services.blockchain_session_sync import get_blockchain_session_sync, reset_blockchain_session_sync
+    reset_blockchain_session_sync()  # Ensure fresh instance with current environment variables
+    blockchain_sync = get_blockchain_session_sync()
+    blockchain_sync.set_services(session_service, gpu_face_service)
+    blockchain_sync.start()
+    logger.info("🔗 Blockchain session sync initialized - camera will auto-enable for on-chain check-ins")
     
     # Initialize Device Registration Service (for QR-based setup flow)
     from services.device_registration import get_device_registration_service

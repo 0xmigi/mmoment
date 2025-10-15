@@ -34,6 +34,21 @@ device_signer = DeviceSigner()
 # Our simple face recognition is always available
 FACENET_AVAILABLE = True
 
+def get_camera_pda():
+    """Get camera PDA from device config file (set during registration)"""
+    config_path = "/app/config/device_config.json"
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                if 'camera_pda' in config:
+                    return config['camera_pda']
+    except Exception as e:
+        logger.debug(f"Could not read camera PDA from device config: {e}")
+
+    # Fallback to environment variable (for backward compatibility during development)
+    return os.environ.get('CAMERA_PDA', 'unknown')
+
 # Import camera utilities
 try:
     from services.utils import detect_cameras, reset_camera_devices, get_camera_health, check_facenet_availability
@@ -141,8 +156,8 @@ def register_routes(app):
                 'videos': '/api/videos',
                 'session_connect': '/api/session/connect',
                 'session_disconnect': '/api/session/disconnect',
-                'face_enroll': '/api/face/enroll',
                 'face_extract_embedding': '/api/face/extract-embedding',
+                'face_enroll_confirm': '/api/face/enroll/confirm',
                 'face_recognize': '/api/face/recognize',
                 'gesture_current': '/api/gesture/current',
                 'visualization_face': '/api/visualization/face',
@@ -675,169 +690,6 @@ def register_routes(app):
         return disconnect()
     
     # Computer Vision (Jetson-specific)
-    @app.route('/api/face/enroll', methods=['POST'])
-    @require_session
-    def api_face_enroll():
-        """Standardized face enrollment endpoint"""
-        return enroll_face()
-    
-    @app.route('/api/face/enroll/prepare-transaction', methods=['POST'])
-    def api_face_enroll_prepare_transaction():
-        """Prepare face enrollment transaction with REAL biometric integration"""
-        logger.info(f"🚀 FACE ENROLLMENT ENDPOINT HIT! Request data: {request.json}")
-        
-        wallet_address = request.json.get('wallet_address')
-        
-        if not wallet_address:
-            return jsonify({
-                'success': False,
-                'error': 'wallet_address is required'
-            }), 400
-        
-        logger.info(f"[ENROLL-PREP] Starting REAL biometric integration for wallet: {wallet_address}")
-        
-        # Check if wallet is checked in on-chain (the ONLY session authority that matters)
-        blockchain_sync = get_blockchain_session_sync()
-        if not blockchain_sync.is_wallet_checked_in(wallet_address):
-            logger.warning(f"[ENROLL-PREP] Wallet {wallet_address} is not checked in on-chain")
-            return jsonify({
-                'success': False,
-                'error': 'Wallet must be checked in on-chain to enroll face'
-            }), 403
-        
-        try:
-            # Step 1: Extract REAL face embedding from current frame
-            buffer_service = get_services()['buffer']
-            face_service = get_services()['face']
-            
-            logger.info(f"[ENROLL-PREP] Extracting real face embedding for wallet: {wallet_address}")
-            
-            # Get current frame
-            frame, timestamp = buffer_service.get_frame()
-            if frame is None:
-                return jsonify({
-                    'success': False,
-                    'error': 'No camera frame available'
-                }), 400
-            
-            # Extract RAW 128-dimension face embedding for blockchain storage
-            face_embedding = face_service.get_current_compact_embedding_with_buffer(buffer_service)
-            if not face_embedding:
-                return jsonify({
-                    'success': False,
-                    'error': 'No face detected in current frame - please ensure your face is visible'
-                }), 400
-            
-            logger.info(f"[ENROLL-PREP] Successfully extracted RAW face embedding, size: {len(face_embedding)} dimensions")
-            
-            # Step 2: Create biometric session and encrypt embedding
-            logger.info(f"[ENROLL-PREP] Creating biometric session for wallet: {wallet_address}")
-            
-            # Create biometric session
-            biometric_response = requests.post(
-                'http://biometric-security:5003/api/biometric/create-session',
-                json={
-                    'wallet_address': wallet_address,
-                    'session_duration': 7200  # 2 hours
-                },
-                timeout=10
-            )
-            
-            if biometric_response.status_code != 200:
-                logger.error(f"[ENROLL-PREP] Failed to create biometric session: {biometric_response.status_code}")
-                return jsonify({
-                    'success': False,
-                    'error': 'Failed to create biometric session'
-                }), 500
-            
-            biometric_session = biometric_response.json()
-            biometric_session_id = biometric_session['session_id']
-            
-            logger.info(f"[ENROLL-PREP] Created biometric session: {biometric_session_id}")
-            
-            # Encrypt the face embedding
-            encrypt_response = requests.post(
-                'http://biometric-security:5003/api/biometric/encrypt-embedding',
-                json={
-                    'embedding': face_embedding,
-                    'wallet_address': wallet_address,
-                    'session_id': biometric_session_id,
-                    'metadata': {
-                        'w': wallet_address[:8],  # Shortened wallet address
-                        't': int(time.time()),    # Timestamp
-                        's': 'cam'               # Shortened source
-                    }
-                },
-                timeout=15
-            )
-            
-            if encrypt_response.status_code != 200:
-                logger.error(f"[ENROLL-PREP] Failed to encrypt embedding: {encrypt_response.status_code}")
-                return jsonify({
-                    'success': False,
-                    'error': 'Failed to encrypt face embedding'
-                }), 500
-            
-            encrypted_data = encrypt_response.json()
-            nft_package = encrypted_data['nft_package']
-            
-            logger.info(f"[ENROLL-PREP] Successfully encrypted face embedding for wallet: {wallet_address}")
-            
-            # Step 3: Call Solana middleware with encrypted data
-            logger.info(f"[ENROLL-PREP] Calling Solana middleware with encrypted data for wallet: {wallet_address}")
-            
-            solana_response = requests.post(
-                'http://solana-middleware:5001/api/blockchain/mint-facial-nft',
-                json={
-                    'wallet_address': wallet_address,
-                    'face_embedding': nft_package,  # Send encrypted NFT package
-                    'biometric_session_id': biometric_session_id
-                },
-                timeout=30
-            )
-            
-            if solana_response.status_code != 200:
-                logger.error(f"[ENROLL-PREP] Solana middleware error: {solana_response.status_code}")
-                return jsonify({
-                    'success': False,
-                    'error': f"Solana middleware error: {solana_response.status_code}"
-                }), 500
-            
-            solana_data = solana_response.json()
-            
-            logger.info(f"[ENROLL-PREP] Successfully prepared encrypted NFT transaction for wallet: {wallet_address}")
-            
-            # Return the transaction data for frontend signing
-            return jsonify({
-                'success': True,
-                'transaction_buffer': solana_data['transaction_buffer'],
-                'face_id': solana_data['face_id'],
-                'metadata': {
-                    'wallet_address': wallet_address,
-                    'timestamp': int(time.time()),
-                    'biometric_session_id': biometric_session_id,
-                    'encryption_method': 'AES-256-PBKDF2',
-                    'face_embedding_encrypted': True,
-                    'embedding_size': len(face_embedding),
-                    'embedding_type': 'compact_128_dimensions',
-                    'blockchain_optimized': True
-                }
-            })
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"[ENROLL-PREP] Network error: {str(e)}")
-            return jsonify({
-                'success': False,
-                'error': f"Service communication error: {str(e)}"
-            }), 503
-            
-        except Exception as e:
-            logger.error(f"[ENROLL-PREP] Unexpected error: {str(e)}")
-            return jsonify({
-                'success': False,
-                'error': f"Failed to prepare transaction: {str(e)}"
-            }), 500
-    
     @app.route('/api/face/enroll/confirm', methods=['POST'])
     def api_face_enroll_confirm():
         """Confirm face enrollment and handle biometric cleanup"""
@@ -895,49 +747,40 @@ def register_routes(app):
             transaction_id = confirm_data['transaction_id']
             
             # Clean up biometric session if provided
+            biometric_purge_success = False
             if biometric_session_id:
-                logger.info(f"[ENROLL-CONFIRM] Cleaning up biometric session: {biometric_session_id}")
-                
+                logger.info(f"[ENROLL-CONFIRM] 🧹 Cleaning up biometric session: {biometric_session_id}")
+
                 try:
                     purge_response = requests.post(
                         'http://biometric-security:5003/api/biometric/purge-session',
                         json={'session_id': biometric_session_id},
                         timeout=10
                     )
-                    
+
                     if purge_response.status_code == 200:
-                        logger.info(f"[ENROLL-CONFIRM] Successfully purged biometric session: {biometric_session_id}")
+                        logger.info(f"[ENROLL-CONFIRM] ✅ Successfully purged biometric session: {biometric_session_id}")
+                        biometric_purge_success = True
                     else:
-                        logger.warning(f"[ENROLL-CONFIRM] Failed to purge biometric session: {purge_response.status_code}")
-                        
+                        logger.error(f"[ENROLL-CONFIRM] ❌ Failed to purge biometric session: HTTP {purge_response.status_code}")
+                        logger.error(f"[ENROLL-CONFIRM] Response: {purge_response.text}")
+
                 except Exception as purge_error:
-                    logger.warning(f"[ENROLL-CONFIRM] Error purging biometric session: {purge_error}")
-            
-            # Enroll the face in the local face service for recognition
-            try:
-                buffer_service = get_services()['buffer']
-                face_service = get_services()['face']
-                
-                frame, timestamp = buffer_service.get_frame()
-                if frame is not None:
-                    enroll_result = face_service.enroll_face(frame, wallet_address)
-                    if enroll_result.get('success'):
-                        logger.info(f"[ENROLL-CONFIRM] Successfully enrolled face locally for recognition: {wallet_address}")
-                    else:
-                        logger.warning(f"[ENROLL-CONFIRM] Local face enrollment warning: {enroll_result.get('error', 'Unknown error')}")
-                        
-            except Exception as local_error:
-                logger.warning(f"[ENROLL-CONFIRM] Error with local face enrollment: {local_error}")
-            
-            logger.info(f"[ENROLL-CONFIRM] Face enrollment completed successfully for wallet: {wallet_address}, transaction_id: {transaction_id}")
-            
+                    logger.error(f"[ENROLL-CONFIRM] ❌ Error purging biometric session: {purge_error}")
+
+            # NOTE: Local enrollment already completed in /api/face/extract-embedding
+            # The phone selfie embedding was stored at lines 1128-1156 in extract-embedding
+            # No need to re-enroll from Jetson camera frame here
+
+            logger.info(f"[ENROLL-CONFIRM] ✅ Face enrollment completed successfully for wallet: {wallet_address}, transaction_id: {transaction_id}")
+
             # Return the expected format for frontend
             return jsonify({
                 'success': True,
                 'face_id': face_id,
                 'transaction_id': transaction_id,
-                'biometric_session_cleaned': bool(biometric_session_id),
-                'local_enrollment_completed': True
+                'biometric_session_cleaned': biometric_purge_success,
+                'local_enrollment_completed': True  # Already done in extract-embedding
             })
             
         except requests.exceptions.RequestException as e:
@@ -959,6 +802,7 @@ def register_routes(app):
         """
         Extract face embedding from base64 image for phone-based enrollment.
         Includes quality scoring and optional encryption for security.
+        Requires on-chain check-in for enrollment with encryption.
         """
         logger.info("🔍 DEBUG: /api/face/extract-embedding endpoint called!")
         try:
@@ -972,7 +816,7 @@ def register_routes(app):
 
             # Check for image data in both possible field names
             image_data = data.get('image') or data.get('image_data')
-            wallet_address = data.get('wallet_address')  # Optional for encryption
+            wallet_address = data.get('wallet_address')
             encrypt = data.get('encrypt', False)  # Whether to encrypt the embedding
 
             if not image_data:
@@ -980,6 +824,24 @@ def register_routes(app):
                     'success': False,
                     'error': 'Missing image data'
                 }), 400
+
+            # CRITICAL: Require wallet_address for ALL recognition token operations
+            if not wallet_address:
+                return jsonify({
+                    'success': False,
+                    'error': 'wallet_address is required to create a recognition token'
+                }), 400
+
+            # CRITICAL: Require on-chain check-in for ANY recognition token creation
+            # User must be physically present at the camera (checked in) to enroll
+            blockchain_sync = get_blockchain_session_sync()
+            if not blockchain_sync.is_wallet_checked_in(wallet_address):
+                logger.warning(f"[EXTRACT-EMBEDDING] ❌ Wallet {wallet_address} not checked in - recognition token creation denied")
+                return jsonify({
+                    'success': False,
+                    'error': 'You must be checked in at this camera to create a recognition token',
+                    'checked_in': False
+                }), 403
 
             # Decode base64 image
             try:
@@ -1369,7 +1231,7 @@ def register_routes(app):
             }), 400
         
         # Get camera PDA for logging
-        camera_pda = os.environ.get('CAMERA_PDA', 'unknown')
+        camera_pda = get_camera_pda()
         
         # Create enhanced user profile with metadata
         user_profile = {
@@ -1470,7 +1332,7 @@ def register_routes(app):
             gpu_face_service = services['gpu_face']
             gpu_face_service.remove_user_profile(wallet_address)
         
-        camera_pda = os.environ.get('CAMERA_PDA', 'unknown')
+        camera_pda = get_camera_pda()
         logger.info(f"[PROFILE-DELETE] Camera {camera_pda[:8]}... removed profile for {wallet_address}")
         
         return jsonify({
@@ -1483,7 +1345,7 @@ def register_routes(app):
     @sign_response
     def api_camera_info():
         """Get camera information for frontend discovery with device signature"""
-        camera_pda = os.environ.get('CAMERA_PDA', 'unknown')
+        camera_pda = get_camera_pda()
         camera_program_id = os.environ.get('CAMERA_PROGRAM_ID', 'unknown')
         
         # Get current session count
@@ -2148,134 +2010,6 @@ def register_routes(app):
         })
 
     # Face recognition routes
-    @app.route('/enroll_face', methods=['POST'])
-    @require_session
-    def enroll_face():
-        """
-        Enroll a face for the current user
-        Captures the current frame and enrolls the face
-        Only works for connected users with a valid session
-        """
-        wallet_address = request.json.get('wallet_address')
-        session_id = request.json.get('session_id')
-        
-        logger.info(f"[ENROLL] Starting face enrollment for wallet: {wallet_address}")
-        
-        # Verify the session is valid
-        session_service = get_services()['session']
-        if not session_service.validate_session(session_id, wallet_address):
-            logger.warning(f"[ENROLL] Invalid session for wallet: {wallet_address}")
-            return jsonify({
-                'success': False,
-                'error': 'You must be connected to enroll your face'
-            }), 403
-        
-        try:
-            # Get services
-            buffer_service = get_services()['buffer']
-            face_service = get_services()['face']
-                
-            logger.info(f"[ENROLL] Got services, enabling face detection for wallet: {wallet_address}")
-            
-            # Enable face detection and boxes for enrollment
-            face_service.enable_detection(True)
-            face_service.enable_boxes(True)
-            
-            # Get multiple frames to find the best one with a face
-            face_detected = False
-            best_frame = None
-            best_timestamp = 0
-            num_tries = 20  # Increased number of tries
-            
-            logger.info(f"[ENROLL] Looking for face in frames for wallet: {wallet_address}")
-                
-            # Try several frames to find a good one with a face
-            for i in range(num_tries):
-                # Get the current frame
-                frame, timestamp = buffer_service.get_frame()
-                
-                if frame is None:
-                    logger.warning(f"[ENROLL] Frame {i+1}/{num_tries} is None for wallet: {wallet_address}")
-                    time.sleep(0.1)
-                    continue
-                
-                # Force a face detection run
-                face_service._detect_faces(frame)
-                faces_info = face_service.get_faces()
-                
-                logger.info(f"[ENROLL] Frame {i+1}/{num_tries} detected {faces_info['detected_count']} faces for wallet: {wallet_address}")
-                
-                if faces_info['detected_count'] > 0:
-                    face_detected = True
-                    best_frame = frame
-                    best_timestamp = timestamp
-                    logger.info(f"[ENROLL] Found face on frame {i+1}/{num_tries} for wallet: {wallet_address}")
-                    break
-                
-                # Wait a bit for the next frame
-                time.sleep(0.1)
-            
-            # If no frames had a face after multiple attempts
-            if not face_detected or best_frame is None:
-                logger.warning(f"[ENROLL] No face detected after checking {num_tries} frames for wallet: {wallet_address}")
-                return jsonify({
-                    'success': False,
-                    'error': 'No face was detected. Please make sure your face is clearly visible in the camera view and you have adequate lighting.',
-                    'include_image': False
-                }), 400
-            
-            # Check if multiple faces are detected
-            faces_info = face_service.get_faces()
-            if faces_info['detected_count'] > 1:
-                logger.warning(f"[ENROLL] Multiple faces ({faces_info['detected_count']}) detected for wallet: {wallet_address}")
-                return jsonify({
-                    'success': False,
-                    'error': 'Multiple faces detected. Please ensure only your face is visible in the camera view.',
-                    'include_image': False
-                }), 400
-            
-            # Log that we found a face for enrollment 
-            logger.info(f"[ENROLL] Found face for enrollment for wallet: {wallet_address}")
-            
-            # We found a frame with a face - use it for enrollment
-            logger.info(f"[ENROLL] Calling face_service.enroll_face for wallet: {wallet_address}")
-            result = face_service.enroll_face(best_frame, wallet_address)
-            
-            if not result['success']:
-                logger.warning(f"[ENROLL] Face enrollment failed: {result.get('error', 'Unknown error')} for wallet: {wallet_address}")
-                return jsonify({
-                    'success': False,
-                    'error': result.get('error', 'Failed to enroll face. Please try again with better lighting and positioning.'),
-                    'include_image': False
-                }), 400
-            
-            logger.info(f"[ENROLL] Face enrollment successful for wallet: {wallet_address}")
-            
-            # Create a processed frame with the face box for better UX
-            processed_frame = face_service.get_processed_frame(best_frame)
-            _, jpeg_data = cv2.imencode('.jpg', processed_frame)
-            image_base64 = base64.b64encode(jpeg_data).decode('utf-8')
-            
-            return jsonify({
-                'success': True,
-                'wallet_address': wallet_address,
-                'include_image': True,
-                'image': image_base64,
-                'encrypted': False,
-                'nft_verified': False,
-                'message': 'Face enrolled successfully'
-            })
-            
-        except Exception as e:
-            logger.error(f"[ENROLL] Error in face enrollment: {str(e)} for wallet: {wallet_address}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return jsonify({
-                'success': False,
-                'error': f"Face enrollment failed: {str(e)}. Please try again or contact support if the issue persists.",
-                'include_image': False
-            }), 500
-
     @app.route('/recognize_face', methods=['POST'])
     def recognize_face():
         """
