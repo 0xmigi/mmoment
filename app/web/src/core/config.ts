@@ -232,7 +232,7 @@ export const CONFIG = {
   TIMELINE_WS_URL: getTimelineWebSocketUrl(),
   CAMERA_PDA: import.meta.env.VITE_CAMERA_PDA || 'EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA',
   // Jetson camera PDA
-  JETSON_CAMERA_PDA: 'H1WoNBkWJgNcePeyr65xEEwjFgGDboSpL5UbJan5VyhG',
+  JETSON_CAMERA_PDA: 'FZ4DgqxLCNpLp1vyvvSZ5A24uyBEUdavvkm5qFE6D54t',
   isUsingDifferentLocalPorts: isUsingDifferentLocalPorts(),
   
   // Known camera configurations with PDA-based URLs
