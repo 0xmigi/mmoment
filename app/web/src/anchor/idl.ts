@@ -174,6 +174,15 @@ export type CameraNetwork = {
           "isSigner": false
         },
         {
+          "name": "recognitionToken",
+          "isMut": false,
+          "isSigner": false,
+          "isOptional": true,
+          "docs": [
+            "Optional recognition token - required if use_face_recognition is true"
+          ]
+        },
+        {
           "name": "session",
           "isMut": true,
           "isSigner": false,
@@ -218,7 +227,7 @@ export type CameraNetwork = {
       ],
       "accounts": [
         {
-          "name": "user",
+          "name": "closer",
           "isMut": true,
           "isSigner": true
         },
@@ -241,7 +250,8 @@ export type CameraNetwork = {
               {
                 "kind": "account",
                 "type": "publicKey",
-                "path": "user"
+                "account": "UserSession",
+                "path": "session.user"
               },
               {
                 "kind": "account",
@@ -251,14 +261,19 @@ export type CameraNetwork = {
               }
             ]
           }
+        },
+        {
+          "name": "sessionUser",
+          "isMut": true,
+          "isSigner": false
         }
       ],
       "args": []
     },
     {
-      "name": "enrollFace",
+      "name": "upsertRecognitionToken",
       "docs": [
-        "Enroll a face for facial recognition"
+        "Create or regenerate a recognition token (stores encrypted facial embedding)"
       ],
       "accounts": [
         {
@@ -267,7 +282,7 @@ export type CameraNetwork = {
           "isSigner": true
         },
         {
-          "name": "faceNft",
+          "name": "recognitionToken",
           "isMut": true,
           "isSigner": false,
           "pda": {
@@ -275,7 +290,7 @@ export type CameraNetwork = {
               {
                 "kind": "const",
                 "type": "string",
-                "value": "face-nft"
+                "value": "recognition-token"
               },
               {
                 "kind": "account",
@@ -295,8 +310,51 @@ export type CameraNetwork = {
         {
           "name": "encryptedEmbedding",
           "type": "bytes"
+        },
+        {
+          "name": "displayName",
+          "type": {
+            "option": "string"
+          }
+        },
+        {
+          "name": "source",
+          "type": "u8"
         }
       ]
+    },
+    {
+      "name": "deleteRecognitionToken",
+      "docs": [
+        "Delete recognition token and reclaim rent"
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "recognitionToken",
+          "isMut": true,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "recognition-token"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "path": "user"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
     },
     {
       "name": "recordActivity",
@@ -332,7 +390,7 @@ export type CameraNetwork = {
   ],
   "accounts": [
     {
-      "name": "cameraRegistry",
+      "name": "CameraRegistry",
       "type": {
         "kind": "struct",
         "fields": [
@@ -356,7 +414,7 @@ export type CameraNetwork = {
       }
     },
     {
-      "name": "cameraAccount",
+      "name": "CameraAccount",
       "type": {
         "kind": "struct",
         "fields": [
@@ -410,7 +468,7 @@ export type CameraNetwork = {
       }
     },
     {
-      "name": "userSession",
+      "name": "UserSession",
       "type": {
         "kind": "struct",
         "fields": [
@@ -431,6 +489,10 @@ export type CameraNetwork = {
             "type": "i64"
           },
           {
+            "name": "autoCheckoutAt",
+            "type": "i64"
+          },
+          {
             "name": "enabledFeatures",
             "type": {
               "defined": "SessionFeatures"
@@ -444,7 +506,7 @@ export type CameraNetwork = {
       }
     },
     {
-      "name": "faceData",
+      "name": "RecognitionToken",
       "type": {
         "kind": "struct",
         "fields": [
@@ -453,37 +515,36 @@ export type CameraNetwork = {
             "type": "publicKey"
           },
           {
-            "name": "dataHash",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
+            "name": "encryptedEmbedding",
+            "type": "bytes"
           },
           {
-            "name": "authorizedCameras",
-            "type": {
-              "vec": "publicKey"
-            }
-          },
-          {
-            "name": "lastUsed",
+            "name": "createdAt",
             "type": "i64"
           },
           {
-            "name": "creationDate",
-            "type": "i64"
+            "name": "version",
+            "type": "u8"
           },
           {
             "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "displayName",
+            "type": {
+              "option": "string"
+            }
+          },
+          {
+            "name": "source",
             "type": "u8"
           }
         ]
       }
     },
     {
-      "name": "gestureConfig",
+      "name": "GestureConfig",
       "type": {
         "kind": "struct",
         "fields": [
@@ -516,7 +577,7 @@ export type CameraNetwork = {
       }
     },
     {
-      "name": "cameraMessage",
+      "name": "CameraMessage",
       "type": {
         "kind": "struct",
         "fields": [
@@ -544,7 +605,7 @@ export type CameraNetwork = {
       }
     },
     {
-      "name": "accessGrant",
+      "name": "AccessGrant",
       "type": {
         "kind": "struct",
         "fields": [
@@ -943,6 +1004,93 @@ export type CameraNetwork = {
           "index": false
         }
       ]
+    },
+    {
+      "name": "RecognitionTokenCreated",
+      "fields": [
+        {
+          "name": "user",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "token",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "version",
+          "type": "u8",
+          "index": false
+        },
+        {
+          "name": "source",
+          "type": "u8",
+          "index": false
+        },
+        {
+          "name": "displayName",
+          "type": {
+            "option": "string"
+          },
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
+    },
+    {
+      "name": "RecognitionTokenDeleted",
+      "fields": [
+        {
+          "name": "user",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "token",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
+    },
+    {
+      "name": "SessionAutoCheckout",
+      "fields": [
+        {
+          "name": "user",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "camera",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "session",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "reason",
+          "type": "string",
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
     }
   ],
   "errors": [
@@ -1015,6 +1163,26 @@ export type CameraNetwork = {
       "code": 6013,
       "name": "AccessGrantExpired",
       "msg": "Access grant has expired"
+    },
+    {
+      "code": 6014,
+      "name": "SessionExpired",
+      "msg": "Session has expired"
+    },
+    {
+      "code": 6015,
+      "name": "NoRecognitionToken",
+      "msg": "No recognition token found - please create one first"
+    },
+    {
+      "code": 6016,
+      "name": "FeatureNotAvailable",
+      "msg": "Feature not available on this camera"
+    },
+    {
+      "code": 6017,
+      "name": "RecognitionTokenTooLarge",
+      "msg": "Recognition token data too large (max 1024 bytes)"
     }
   ]
 };
@@ -1195,6 +1363,15 @@ export const IDL: CameraNetwork = {
           "isSigner": false
         },
         {
+          "name": "recognitionToken",
+          "isMut": false,
+          "isSigner": false,
+          "isOptional": true,
+          "docs": [
+            "Optional recognition token - required if use_face_recognition is true"
+          ]
+        },
+        {
           "name": "session",
           "isMut": true,
           "isSigner": false,
@@ -1239,7 +1416,7 @@ export const IDL: CameraNetwork = {
       ],
       "accounts": [
         {
-          "name": "user",
+          "name": "closer",
           "isMut": true,
           "isSigner": true
         },
@@ -1262,7 +1439,8 @@ export const IDL: CameraNetwork = {
               {
                 "kind": "account",
                 "type": "publicKey",
-                "path": "user"
+                "account": "UserSession",
+                "path": "session.user"
               },
               {
                 "kind": "account",
@@ -1272,14 +1450,19 @@ export const IDL: CameraNetwork = {
               }
             ]
           }
+        },
+        {
+          "name": "sessionUser",
+          "isMut": true,
+          "isSigner": false
         }
       ],
       "args": []
     },
     {
-      "name": "enrollFace",
+      "name": "upsertRecognitionToken",
       "docs": [
-        "Enroll a face for facial recognition"
+        "Create or regenerate a recognition token (stores encrypted facial embedding)"
       ],
       "accounts": [
         {
@@ -1288,7 +1471,7 @@ export const IDL: CameraNetwork = {
           "isSigner": true
         },
         {
-          "name": "faceNft",
+          "name": "recognitionToken",
           "isMut": true,
           "isSigner": false,
           "pda": {
@@ -1296,7 +1479,7 @@ export const IDL: CameraNetwork = {
               {
                 "kind": "const",
                 "type": "string",
-                "value": "face-nft"
+                "value": "recognition-token"
               },
               {
                 "kind": "account",
@@ -1316,8 +1499,51 @@ export const IDL: CameraNetwork = {
         {
           "name": "encryptedEmbedding",
           "type": "bytes"
+        },
+        {
+          "name": "displayName",
+          "type": {
+            "option": "string"
+          }
+        },
+        {
+          "name": "source",
+          "type": "u8"
         }
       ]
+    },
+    {
+      "name": "deleteRecognitionToken",
+      "docs": [
+        "Delete recognition token and reclaim rent"
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "recognitionToken",
+          "isMut": true,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "recognition-token"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "path": "user"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
     },
     {
       "name": "recordActivity",
@@ -1353,7 +1579,7 @@ export const IDL: CameraNetwork = {
   ],
   "accounts": [
     {
-      "name": "cameraRegistry",
+      "name": "CameraRegistry",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1377,7 +1603,7 @@ export const IDL: CameraNetwork = {
       }
     },
     {
-      "name": "cameraAccount",
+      "name": "CameraAccount",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1431,7 +1657,7 @@ export const IDL: CameraNetwork = {
       }
     },
     {
-      "name": "userSession",
+      "name": "UserSession",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1452,6 +1678,10 @@ export const IDL: CameraNetwork = {
             "type": "i64"
           },
           {
+            "name": "autoCheckoutAt",
+            "type": "i64"
+          },
+          {
             "name": "enabledFeatures",
             "type": {
               "defined": "SessionFeatures"
@@ -1465,7 +1695,7 @@ export const IDL: CameraNetwork = {
       }
     },
     {
-      "name": "faceData",
+      "name": "RecognitionToken",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1474,37 +1704,36 @@ export const IDL: CameraNetwork = {
             "type": "publicKey"
           },
           {
-            "name": "dataHash",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
+            "name": "encryptedEmbedding",
+            "type": "bytes"
           },
           {
-            "name": "authorizedCameras",
-            "type": {
-              "vec": "publicKey"
-            }
-          },
-          {
-            "name": "lastUsed",
+            "name": "createdAt",
             "type": "i64"
           },
           {
-            "name": "creationDate",
-            "type": "i64"
+            "name": "version",
+            "type": "u8"
           },
           {
             "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "displayName",
+            "type": {
+              "option": "string"
+            }
+          },
+          {
+            "name": "source",
             "type": "u8"
           }
         ]
       }
     },
     {
-      "name": "gestureConfig",
+      "name": "GestureConfig",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1537,7 +1766,7 @@ export const IDL: CameraNetwork = {
       }
     },
     {
-      "name": "cameraMessage",
+      "name": "CameraMessage",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1565,7 +1794,7 @@ export const IDL: CameraNetwork = {
       }
     },
     {
-      "name": "accessGrant",
+      "name": "AccessGrant",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1964,6 +2193,93 @@ export const IDL: CameraNetwork = {
           "index": false
         }
       ]
+    },
+    {
+      "name": "RecognitionTokenCreated",
+      "fields": [
+        {
+          "name": "user",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "token",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "version",
+          "type": "u8",
+          "index": false
+        },
+        {
+          "name": "source",
+          "type": "u8",
+          "index": false
+        },
+        {
+          "name": "displayName",
+          "type": {
+            "option": "string"
+          },
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
+    },
+    {
+      "name": "RecognitionTokenDeleted",
+      "fields": [
+        {
+          "name": "user",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "token",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
+    },
+    {
+      "name": "SessionAutoCheckout",
+      "fields": [
+        {
+          "name": "user",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "camera",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "session",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "reason",
+          "type": "string",
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
     }
   ],
   "errors": [
@@ -2036,6 +2352,26 @@ export const IDL: CameraNetwork = {
       "code": 6013,
       "name": "AccessGrantExpired",
       "msg": "Access grant has expired"
+    },
+    {
+      "code": 6014,
+      "name": "SessionExpired",
+      "msg": "Session has expired"
+    },
+    {
+      "code": 6015,
+      "name": "NoRecognitionToken",
+      "msg": "No recognition token found - please create one first"
+    },
+    {
+      "code": 6016,
+      "name": "FeatureNotAvailable",
+      "msg": "Feature not available on this camera"
+    },
+    {
+      "code": 6017,
+      "name": "RecognitionTokenTooLarge",
+      "msg": "Recognition token data too large (max 1024 bytes)"
     }
   ]
 };

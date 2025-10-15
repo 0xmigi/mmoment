@@ -123,16 +123,39 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         ],
         CAMERA_ACTIVATION_PROGRAM_ID
       );
-      
+
+      // Derive recognition token PDA and check if it exists
+      const [recognitionTokenPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('recognition-token'), userPublicKey.toBuffer()],
+        CAMERA_ACTIVATION_PROGRAM_ID
+      );
+
+      // Check if recognition token account exists
+      let hasRecognitionToken = false;
+      try {
+        await (program.account as any).recognitionToken.fetch(recognitionTokenPda);
+        hasRecognitionToken = true;
+      } catch (err) {
+        // No token - that's fine
+      }
+
+      // Build accounts object
+      const checkInAccounts: any = {
+        user: userPublicKey,
+        camera: cameraPublicKey,
+        session: sessionPda,
+        systemProgram: SystemProgram.programId
+      };
+
+      // Only include recognition token if it exists
+      if (hasRecognitionToken) {
+        checkInAccounts.recognitionToken = recognitionTokenPda;
+      }
+
       // Create check-in instruction (without face recognition for simplicity)
       const ix = await program.methods
         .checkIn(false) // No face recognition for simplicity in this flow
-        .accounts({
-          user: userPublicKey,
-          camera: cameraPublicKey,
-          session: sessionPda,
-          systemProgram: SystemProgram.programId
-        })
+        .accounts(checkInAccounts)
         .instruction();
       
       // Create transaction
@@ -278,15 +301,32 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     try {
       const cameraPublicKey = new PublicKey(transactionData.cameraAccount);
       
+      const userPublicKey = new PublicKey(primaryWallet.address);
+
       // Find the session PDA for the transaction
       const [sessionPda] = PublicKey.findProgramAddressSync(
         [
           Buffer.from('session'),
-          new PublicKey(primaryWallet.address).toBuffer(),
+          userPublicKey.toBuffer(),
           cameraPublicKey.toBuffer()
         ],
         program.programId
       );
+
+      // Derive recognition token PDA and check if it exists
+      const [recognitionTokenPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('recognition-token'), userPublicKey.toBuffer()],
+        program.programId
+      );
+
+      // Check if recognition token account exists
+      let hasRecognitionToken = false;
+      try {
+        await (program.account as any).recognitionToken.fetch(recognitionTokenPda);
+        hasRecognitionToken = true;
+      } catch (err) {
+        // No token - that's fine
+      }
 
       setStatus('Preparing transaction...');
 
@@ -295,15 +335,23 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         throw new Error('This is not a Solana wallet');
       }
 
+      // Build accounts object
+      const checkInAccounts: any = {
+        user: userPublicKey,
+        camera: cameraPublicKey,
+        session: sessionPda,
+        systemProgram: SystemProgram.programId,
+      };
+
+      // Only include recognition token if it exists
+      if (hasRecognitionToken) {
+        checkInAccounts.recognitionToken = recognitionTokenPda;
+      }
+
       // Instead of recordActivity (which doesn't exist), use checkIn with useFaceRecognition=false
       const ix = await program.methods
         .checkIn(false)
-        .accounts({
-          user: new PublicKey(primaryWallet.address),
-          camera: cameraPublicKey,
-          session: sessionPda,
-          systemProgram: SystemProgram.programId,
-        })
+        .accounts(checkInAccounts)
         .instruction();
       
       // Add priority fee

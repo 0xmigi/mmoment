@@ -46,24 +46,49 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
       try {
         onStatusUpdate?.({ type: 'info', message: 'Recording camera activity...' });
         
+        const userPublicKey = new PublicKey(primaryWallet.address);
+
         // Find the session PDA
         const [sessionPda] = PublicKey.findProgramAddressSync(
           [
             Buffer.from('session'),
-            new PublicKey(primaryWallet.address).toBuffer(),
+            userPublicKey.toBuffer(),
             cameraKeypair.publicKey.toBuffer()
           ],
           program.programId
         );
 
-        // Use checkIn instead of recordActivity
-        await program.methods.checkIn(false)
-        .accounts({
-          user: new PublicKey(primaryWallet.address),
+        // Derive recognition token PDA and check if it exists
+        const [recognitionTokenPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from('recognition-token'), userPublicKey.toBuffer()],
+          program.programId
+        );
+
+        // Check if recognition token account exists
+        let hasRecognitionToken = false;
+        try {
+          await (program.account as any).recognitionToken.fetch(recognitionTokenPda);
+          hasRecognitionToken = true;
+        } catch (err) {
+          // No token - that's fine
+        }
+
+        // Build accounts object
+        const checkInAccounts: any = {
+          user: userPublicKey,
           camera: cameraKeypair.publicKey,
           session: sessionPda,
           systemProgram: SystemProgram.programId,
-        })
+        };
+
+        // Only include recognition token if it exists
+        if (hasRecognitionToken) {
+          checkInAccounts.recognitionToken = recognitionTokenPda;
+        }
+
+        // Use checkIn instead of recordActivity
+        await program.methods.checkIn(false)
+        .accounts(checkInAccounts)
         .rpc();
 
         onStatusUpdate?.({ type: 'info', message: 'Taking picture...' });

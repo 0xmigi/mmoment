@@ -160,58 +160,56 @@ export const CameraActionModal = ({
         CAMERA_ACTIVATION_PROGRAM_ID
       );
 
-      // Find the face data PDA if using face recognition
-      let faceDataPda: PublicKey | null = null;
-      let faceDataExists = false;
+      // Check if user already has an active session - if so, check out first
+      try {
+        const existingSession = await program.account.userSession.fetch(sessionPda);
+        console.log('[CameraActionModal] Existing session found, checking out first:', existingSession);
 
-      if (useFaceRecognition) {
-        [faceDataPda] = PublicKey.findProgramAddressSync(
-          [
-            Buffer.from('face-nft'),
-            userPublicKey.toBuffer()
-          ],
-          CAMERA_ACTIVATION_PROGRAM_ID
-        );
+        // Check out existing session
+        const checkOutIx = await program.methods
+          .checkOut()
+          .accounts({
+            closer: userPublicKey,
+            camera: cameraPublicKey,
+            session: sessionPda,
+            sessionUser: userPublicKey, // Rent goes back to user
+          })
+          .instruction();
 
-        // Check if face data exists
-        try {
-          await program.account.faceData.fetch(faceDataPda);
-          faceDataExists = true;
-        } catch (err) {
-          // Face data doesn't exist, create it first
-          try {
-            const mockEmbedding = Array(32).fill(0).map(() => Math.floor(Math.random() * 256));
-            const enrollIx = await program.methods
-              .enrollFace(mockEmbedding)
-              .accounts({
-                user: userPublicKey,
-                faceNft: faceDataPda,
-                systemProgram: SystemProgram.programId,
-              })
-              .instruction();
+        const checkOutTx = new Transaction().add(checkOutIx);
+        const { blockhash: checkOutBlockhash } = await connection.getLatestBlockhash();
+        checkOutTx.recentBlockhash = checkOutBlockhash;
+        checkOutTx.feePayer = userPublicKey;
 
-            // Create and sign the transaction using Dynamic
-            const enrollTx = new Transaction().add(enrollIx);
-            const { blockhash } = await connection.getLatestBlockhash();
-            enrollTx.recentBlockhash = blockhash;
-            enrollTx.feePayer = userPublicKey;
-
-            // Use the Dynamic wallet to sign and send
-            if (!isSolanaWallet(primaryWallet)) {
-              throw new Error('Not a Solana wallet');
-            }
-            
-            const signer = await primaryWallet.getSigner();
-            const signedTx = await signer.signTransaction(enrollTx);
-            const enrollSig = await connection.sendRawTransaction(signedTx.serialize());
-            await connection.confirmTransaction(enrollSig, 'confirmed');
-            
-            faceDataExists = true;
-          } catch (createErr) {
-            console.error('Error creating face data:', createErr);
-            throw new Error('Failed to create face recognition data');
-          }
+        // Use the Dynamic wallet to sign and send
+        if (!isSolanaWallet(primaryWallet)) {
+          throw new Error('Not a Solana wallet');
         }
+
+        const signer = await primaryWallet.getSigner();
+        const signedCheckOutTx = await signer.signTransaction(checkOutTx);
+        const checkOutSig = await connection.sendRawTransaction(signedCheckOutTx.serialize());
+        await connection.confirmTransaction(checkOutSig, 'confirmed');
+        console.log('[CameraActionModal] Checked out existing session:', checkOutSig);
+      } catch (err) {
+        // No existing session - this is fine, continue with check-in
+        console.log('[CameraActionModal] No existing session found, proceeding with check-in');
+      }
+
+      // Derive recognition token PDA and check if it exists
+      const [recognitionTokenPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('recognition-token'), userPublicKey.toBuffer()],
+        CAMERA_ACTIVATION_PROGRAM_ID
+      );
+
+      // Check if recognition token account exists
+      let hasRecognitionToken = false;
+      try {
+        await (program.account as any).recognitionToken.fetch(recognitionTokenPda);
+        hasRecognitionToken = true;
+        console.log('[CameraActionModal] Recognition token found for user');
+      } catch (err) {
+        console.log('[CameraActionModal] No recognition token found for user');
       }
 
       // Create the accounts object for check-in
@@ -222,9 +220,9 @@ export const CameraActionModal = ({
         systemProgram: SystemProgram.programId
       };
 
-      // Add face account only if using face recognition and it exists
-      if (useFaceRecognition && faceDataExists && faceDataPda) {
-        accounts.faceNft = faceDataPda;
+      // Only include recognition token if it exists
+      if (hasRecognitionToken) {
+        accounts.recognitionToken = recognitionTokenPda;
       }
 
       // Create check-in instruction
