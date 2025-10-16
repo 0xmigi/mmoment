@@ -26,7 +26,7 @@ export function RecognitionTokenModal({ isOpen, onClose, status }: RecognitionTo
     try {
       const [pda] = PublicKey.findProgramAddressSync(
         [
-          Buffer.from('face-nft'),
+          Buffer.from('recognition-token'),
           new PublicKey(primaryWallet.address).toBuffer()
         ],
         program.programId
