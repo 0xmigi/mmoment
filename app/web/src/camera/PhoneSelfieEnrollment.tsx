@@ -1,5 +1,6 @@
 import { faceProcessingService } from "./face-processing";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
+import { isSolanaWallet } from "@dynamic-labs/solana";
 import { Transaction } from "@solana/web3.js";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { Camera, X, RotateCcw, Check, Wifi } from "lucide-react";
@@ -336,9 +337,14 @@ export function PhoneSelfieEnrollment({
       }
 
       try {
+        // Check if wallet is a Solana wallet before getting signer
+        if (!isSolanaWallet(primaryWallet)) {
+          throw new Error('Not a Solana wallet');
+        }
+
         // Dynamic wallet requires getSigner() to get the actual signer with signTransaction method
         console.log('[PhoneSelfieEnrollment] ✍️ Getting signer from Dynamic wallet...');
-        const signer = await (primaryWallet as any).getSigner();
+        const signer = await primaryWallet.getSigner();
         console.log('[PhoneSelfieEnrollment] ✍️ Signer obtained, signing transaction...');
 
         signedTx = await signer.signTransaction(transaction);
