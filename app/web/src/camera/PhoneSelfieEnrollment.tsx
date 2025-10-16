@@ -327,22 +327,39 @@ export function PhoneSelfieEnrollment({
 
       // Sign the pre-built transaction
       console.log('[PhoneSelfieEnrollment] ✍️ Getting wallet signer...');
-      let signer, signedTx, signature: string;
+      let signedTx: Transaction;
+      let signature: string;
 
       try {
-        signer = await (primaryWallet as any).getSigner();
-        console.log('[PhoneSelfieEnrollment] ✍️ Wallet signer obtained');
-      } catch (signerError) {
-        console.error('[PhoneSelfieEnrollment] ❌ Failed to get wallet signer:', signerError);
-        throw new Error(`Wallet connection failed: ${signerError instanceof Error ? signerError.message : 'Unknown error'}`);
-      }
+        // Try to get signer first (Dynamic wallet pattern)
+        if (typeof (primaryWallet as any).getSigner === 'function') {
+          console.log('[PhoneSelfieEnrollment] ✍️ Wallet has getSigner method, attempting to get signer...');
+          try {
+            const signer = await (primaryWallet as any).getSigner();
+            console.log('[PhoneSelfieEnrollment] ✍️ Wallet signer obtained');
 
-      try {
-        console.log('[PhoneSelfieEnrollment] ✍️ Signing pre-built transaction...');
-        signedTx = await signer.signTransaction(transaction);
-        console.log('[PhoneSelfieEnrollment] ✍️ Transaction signed successfully');
+            if (typeof signer.signTransaction === 'function') {
+              console.log('[PhoneSelfieEnrollment] ✍️ Using signer.signTransaction...');
+              signedTx = await signer.signTransaction(transaction);
+              console.log('[PhoneSelfieEnrollment] ✍️ Transaction signed successfully via signer');
+            } else {
+              console.log('[PhoneSelfieEnrollment] ⚠️ Signer does not have signTransaction, falling back to direct wallet signing');
+              signedTx = await (primaryWallet as any).signTransaction(transaction);
+              console.log('[PhoneSelfieEnrollment] ✍️ Transaction signed successfully via wallet fallback');
+            }
+          } catch (signerError) {
+            console.warn('[PhoneSelfieEnrollment] ⚠️ getSigner failed, trying direct wallet signTransaction:', signerError);
+            signedTx = await (primaryWallet as any).signTransaction(transaction);
+            console.log('[PhoneSelfieEnrollment] ✍️ Transaction signed successfully via direct wallet method');
+          }
+        } else {
+          // Wallet doesn't have getSigner, use signTransaction directly
+          console.log('[PhoneSelfieEnrollment] ✍️ Wallet does not have getSigner, using direct signTransaction...');
+          signedTx = await (primaryWallet as any).signTransaction(transaction);
+          console.log('[PhoneSelfieEnrollment] ✍️ Transaction signed successfully via direct wallet');
+        }
       } catch (signingError) {
-        console.error('[PhoneSelfieEnrollment] ❌ Transaction signing failed:', signingError);
+        console.error('[PhoneSelfieEnrollment] ❌ All signing methods failed:', signingError);
         throw new Error(`Transaction signing failed: ${signingError instanceof Error ? signingError.message : 'User rejected or signing failed'}`);
       }
 
