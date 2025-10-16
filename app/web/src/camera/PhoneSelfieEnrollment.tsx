@@ -188,11 +188,12 @@ export function PhoneSelfieEnrollment({
         return;
       }
 
-      console.log('[PhoneSelfieEnrollment] 📞 CALLING faceProcessingService.processFacialEmbedding');
+      console.log('[PhoneSelfieEnrollment] 📞 CALLING faceProcessingService.processFacialEmbedding FOR QUALITY CHECK');
+      console.log('[PhoneSelfieEnrollment] 📞 primaryWallet.address =', primaryWallet?.address);
       const result = await faceProcessingService.processFacialEmbedding(
         imageData,
         connectedCameraUrl,
-        { requestQuality: true, encrypt: false }
+        { requestQuality: true, encrypt: false, walletAddress: primaryWallet?.address }
       );
       console.log('[PhoneSelfieEnrollment] 📞 RESULT from faceProcessingService:', result);
 
