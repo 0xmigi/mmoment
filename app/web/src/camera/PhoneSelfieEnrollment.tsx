@@ -336,6 +336,14 @@ export function PhoneSelfieEnrollment({
 
       // Sign transaction - use EXACT same pattern as working CameraView takePhoto
       console.log('[PhoneSelfieEnrollment] ✍️ Signing transaction with wallet...');
+      console.log('[PhoneSelfieEnrollment] 🔍 primaryWallet type check:', {
+        hasPrimaryWallet: !!primaryWallet,
+        hasGetSigner: !!(primaryWallet as any)?.getSigner,
+        getSignerType: typeof (primaryWallet as any)?.getSigner,
+        walletChain: (primaryWallet as any)?.chain,
+        walletConnector: (primaryWallet as any)?.connector?.name
+      });
+
       const signer = await (primaryWallet as any).getSigner();
       const signedTx = await signer.signTransaction(transaction);
       console.log('[PhoneSelfieEnrollment] ✅ Transaction signed successfully');
