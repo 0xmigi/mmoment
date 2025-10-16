@@ -329,7 +329,7 @@ export function PhoneSelfieEnrollment({
       // Sign the pre-built transaction - MUST use getSigner() to get the actual signer object
       console.log('[PhoneSelfieEnrollment] ✍️ Signing transaction with wallet...');
 
-      let signedTx: Transaction;
+      let signedTx: Transaction | undefined;
       let signature: string;
 
       if (!primaryWallet) {
@@ -342,12 +342,50 @@ export function PhoneSelfieEnrollment({
           throw new Error('Not a Solana wallet');
         }
 
+        // Debug: Log wallet properties
+        console.log('[PhoneSelfieEnrollment] 🔍 Wallet properties:', {
+          address: primaryWallet.address,
+          chain: primaryWallet.chain,
+          connector: primaryWallet.connector?.name,
+          hasGetSigner: typeof primaryWallet.getSigner === 'function',
+          hasConnector: !!primaryWallet.connector
+        });
+
         // Dynamic wallet requires getSigner() to get the actual signer with signTransaction method
         console.log('[PhoneSelfieEnrollment] ✍️ Getting signer from Dynamic wallet...');
-        const signer = await primaryWallet.getSigner();
-        console.log('[PhoneSelfieEnrollment] ✍️ Signer obtained, signing transaction...');
 
-        signedTx = await signer.signTransaction(transaction);
+        // Try-catch specifically for getSigner to provide better error info
+        let signer;
+        try {
+          signer = await primaryWallet.getSigner();
+          console.log('[PhoneSelfieEnrollment] ✍️ Signer obtained:', {
+            hasSigner: !!signer,
+            hasSignTransaction: signer && typeof signer.signTransaction === 'function'
+          });
+        } catch (getSignerError) {
+          console.error('[PhoneSelfieEnrollment] ❌ getSigner() failed:', getSignerError);
+          console.error('[PhoneSelfieEnrollment] ❌ Trying fallback: use connector directly');
+
+          // Fallback: Try to use the connector directly if it exists
+          const connector = primaryWallet.connector as any;
+          if (connector && typeof connector.signTransaction === 'function') {
+            console.log('[PhoneSelfieEnrollment] 📝 Using connector.signTransaction directly');
+            signedTx = await connector.signTransaction(transaction);
+
+            if (signedTx) {
+              console.log('[PhoneSelfieEnrollment] ✅ Transaction signed via connector fallback');
+              // Skip the normal signing flow since we already have signedTx
+            }
+          } else {
+            throw getSignerError; // Re-throw if fallback not available
+          }
+        }
+
+        // Only try to sign if we haven't already done so via fallback
+        if (!signedTx && signer) {
+          console.log('[PhoneSelfieEnrollment] ✍️ Signing transaction...');
+          signedTx = await signer.signTransaction(transaction);
+        }
 
         if (!signedTx) {
           throw new Error('Transaction signing failed - no signed transaction returned');
