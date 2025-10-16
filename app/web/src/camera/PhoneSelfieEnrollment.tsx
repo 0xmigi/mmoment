@@ -327,8 +327,17 @@ export function PhoneSelfieEnrollment({
 
       // Sign the pre-built transaction (same pattern as check-in)
       console.log('[PhoneSelfieEnrollment] ✍️ Signing transaction with wallet...');
+      console.log('[PhoneSelfieEnrollment] 🔍 DEBUG: primaryWallet =', primaryWallet);
+      console.log('[PhoneSelfieEnrollment] 🔍 DEBUG: primaryWallet.address =', primaryWallet?.address);
+      console.log('[PhoneSelfieEnrollment] 🔍 DEBUG: typeof primaryWallet =', typeof primaryWallet);
+      console.log('[PhoneSelfieEnrollment] 🔍 DEBUG: primaryWallet has signTransaction?', typeof (primaryWallet as any)?.signTransaction);
+
       let signedTx: Transaction;
       let signature: string;
+
+      if (!primaryWallet) {
+        throw new Error('Wallet not connected');
+      }
 
       try {
         // Use the same signing pattern as check-in - just use primaryWallet.signTransaction directly
@@ -342,6 +351,8 @@ export function PhoneSelfieEnrollment({
         console.log('[PhoneSelfieEnrollment] ✍️ Transaction signed successfully');
       } catch (signingError) {
         console.error('[PhoneSelfieEnrollment] ❌ Transaction signing failed:', signingError);
+        console.error('[PhoneSelfieEnrollment] ❌ primaryWallet at error time:', primaryWallet);
+        console.error('[PhoneSelfieEnrollment] ❌ Available methods:', Object.keys(primaryWallet || {}));
         throw new Error(`Transaction signing failed: ${signingError instanceof Error ? signingError.message : 'User rejected or signing failed'}`);
       }
 
