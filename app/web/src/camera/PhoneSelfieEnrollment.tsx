@@ -325,12 +325,8 @@ export function PhoneSelfieEnrollment({
         throw new Error('Failed to deserialize transaction from Jetson. The API may not be returning a proper Solana transaction.');
       }
 
-      // Sign the pre-built transaction (same pattern as check-in)
+      // Sign the pre-built transaction - MUST use getSigner() to get the actual signer object
       console.log('[PhoneSelfieEnrollment] ✍️ Signing transaction with wallet...');
-      console.log('[PhoneSelfieEnrollment] 🔍 DEBUG: primaryWallet =', primaryWallet);
-      console.log('[PhoneSelfieEnrollment] 🔍 DEBUG: primaryWallet.address =', primaryWallet?.address);
-      console.log('[PhoneSelfieEnrollment] 🔍 DEBUG: typeof primaryWallet =', typeof primaryWallet);
-      console.log('[PhoneSelfieEnrollment] 🔍 DEBUG: primaryWallet has signTransaction?', typeof (primaryWallet as any)?.signTransaction);
 
       let signedTx: Transaction;
       let signature: string;
@@ -340,9 +336,12 @@ export function PhoneSelfieEnrollment({
       }
 
       try {
-        // Use the same signing pattern as check-in - just use primaryWallet.signTransaction directly
-        console.log('[PhoneSelfieEnrollment] ✍️ Using primaryWallet.signTransaction...');
-        signedTx = await (primaryWallet as any).signTransaction(transaction);
+        // Dynamic wallet requires getSigner() to get the actual signer with signTransaction method
+        console.log('[PhoneSelfieEnrollment] ✍️ Getting signer from Dynamic wallet...');
+        const signer = await (primaryWallet as any).getSigner();
+        console.log('[PhoneSelfieEnrollment] ✍️ Signer obtained, signing transaction...');
+
+        signedTx = await signer.signTransaction(transaction);
 
         if (!signedTx) {
           throw new Error('Transaction signing failed - no signed transaction returned');
@@ -351,8 +350,6 @@ export function PhoneSelfieEnrollment({
         console.log('[PhoneSelfieEnrollment] ✍️ Transaction signed successfully');
       } catch (signingError) {
         console.error('[PhoneSelfieEnrollment] ❌ Transaction signing failed:', signingError);
-        console.error('[PhoneSelfieEnrollment] ❌ primaryWallet at error time:', primaryWallet);
-        console.error('[PhoneSelfieEnrollment] ❌ Available methods:', Object.keys(primaryWallet || {}));
         throw new Error(`Transaction signing failed: ${signingError instanceof Error ? signingError.message : 'User rejected or signing failed'}`);
       }
 
