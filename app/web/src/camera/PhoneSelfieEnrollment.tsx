@@ -1,6 +1,5 @@
 import { faceProcessingService } from "./face-processing";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
-import { isSolanaWallet } from "@dynamic-labs/solana";
 import { Transaction } from "@solana/web3.js";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { Camera, X, RotateCcw, Check, Wifi } from "lucide-react";
@@ -329,73 +328,17 @@ export function PhoneSelfieEnrollment({
       // Sign the pre-built transaction - MUST use getSigner() to get the actual signer object
       console.log('[PhoneSelfieEnrollment] ✍️ Signing transaction with wallet...');
 
-      let signedTx: Transaction | undefined;
       let signature: string;
 
       if (!primaryWallet) {
         throw new Error('Wallet not connected');
       }
 
-      try {
-        // Check if wallet is a Solana wallet before getting signer
-        if (!isSolanaWallet(primaryWallet)) {
-          throw new Error('Not a Solana wallet');
-        }
-
-        // Debug: Log wallet properties
-        console.log('[PhoneSelfieEnrollment] 🔍 Wallet properties:', {
-          address: primaryWallet.address,
-          chain: primaryWallet.chain,
-          connector: primaryWallet.connector?.name,
-          hasGetSigner: typeof primaryWallet.getSigner === 'function',
-          hasConnector: !!primaryWallet.connector
-        });
-
-        // Dynamic wallet requires getSigner() to get the actual signer with signTransaction method
-        console.log('[PhoneSelfieEnrollment] ✍️ Getting signer from Dynamic wallet...');
-
-        // Try-catch specifically for getSigner to provide better error info
-        let signer;
-        try {
-          signer = await primaryWallet.getSigner();
-          console.log('[PhoneSelfieEnrollment] ✍️ Signer obtained:', {
-            hasSigner: !!signer,
-            hasSignTransaction: signer && typeof signer.signTransaction === 'function'
-          });
-        } catch (getSignerError) {
-          console.error('[PhoneSelfieEnrollment] ❌ getSigner() failed:', getSignerError);
-          console.error('[PhoneSelfieEnrollment] ❌ Trying fallback: use connector directly');
-
-          // Fallback: Try to use the connector directly if it exists
-          const connector = primaryWallet.connector as any;
-          if (connector && typeof connector.signTransaction === 'function') {
-            console.log('[PhoneSelfieEnrollment] 📝 Using connector.signTransaction directly');
-            signedTx = await connector.signTransaction(transaction);
-
-            if (signedTx) {
-              console.log('[PhoneSelfieEnrollment] ✅ Transaction signed via connector fallback');
-              // Skip the normal signing flow since we already have signedTx
-            }
-          } else {
-            throw getSignerError; // Re-throw if fallback not available
-          }
-        }
-
-        // Only try to sign if we haven't already done so via fallback
-        if (!signedTx && signer) {
-          console.log('[PhoneSelfieEnrollment] ✍️ Signing transaction...');
-          signedTx = await signer.signTransaction(transaction);
-        }
-
-        if (!signedTx) {
-          throw new Error('Transaction signing failed - no signed transaction returned');
-        }
-
-        console.log('[PhoneSelfieEnrollment] ✍️ Transaction signed successfully');
-      } catch (signingError) {
-        console.error('[PhoneSelfieEnrollment] ❌ Transaction signing failed:', signingError);
-        throw new Error(`Transaction signing failed: ${signingError instanceof Error ? signingError.message : 'User rejected or signing failed'}`);
-      }
+      // Sign transaction - use EXACT same pattern as working CameraView takePhoto
+      console.log('[PhoneSelfieEnrollment] ✍️ Signing transaction with wallet...');
+      const signer = await (primaryWallet as any).getSigner();
+      const signedTx = await signer.signTransaction(transaction);
+      console.log('[PhoneSelfieEnrollment] ✅ Transaction signed successfully');
 
       // Submit signed transaction to Solana blockchain
       console.log('[PhoneSelfieEnrollment] 🚀 Submitting transaction to Solana blockchain...');
