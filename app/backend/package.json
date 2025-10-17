@@ -6,9 +6,8 @@
   "scripts": {
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "build": "cd firestarter-sdk && yarn build && cd .. && tsc",
-    "test": "jest",
-    "postinstall": "cd firestarter-sdk && yarn install && yarn build"
+    "build": "cd firestarter-sdk && yarn install && yarn build && cd .. && tsc",
+    "test": "jest"
   },
   "dependencies": {
     "cors": "^2.8.5",
