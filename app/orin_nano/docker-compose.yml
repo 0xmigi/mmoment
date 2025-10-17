@@ -13,8 +13,8 @@ services:
     network_mode: host
     # Note: ports not needed with host networking - container uses host's network directly
     extra_hosts:
-      - "biometric-security:172.19.0.2"
-      - "solana-middleware:172.19.0.3"
+      - "biometric-security:172.18.0.3"
+      - "solana-middleware:172.18.0.2"
     volumes:
       - ./data/images:/app/photos
       - /mnt/nvme/mmoment-videos:/app/videos  # Using NVMe SSD for video storage  
@@ -33,7 +33,19 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,display
       - BIOMETRIC_SECURITY_URL=http://biometric-security:5003
       - SOLANA_MIDDLEWARE_URL=http://solana-middleware:5001
-      # Blockchain Configuration  
+      # Backend connection for WebRTC signaling and device registration
+      - BACKEND_HOST=mmoment-production.up.railway.app
+      - BACKEND_PORT=443
+      - BACKEND_URL=https://mmoment-production.up.railway.app
+      # WebRTC will auto-detect external IP or use TURN relay
+      - WEBRTC_EXTERNAL_IP=192.168.1.232
+      # aiortc port range for minimal WebRTC
+      - AIORTC_RTP_MIN_PORT=10000
+      - AIORTC_RTP_MAX_PORT=10100
+      # Force Python to use the external IP for socket binding
+      - HOSTNAME=192.168.1.232
+      - HOST=192.168.1.232
+      # Blockchain Configuration
       - CAMERA_PROGRAM_ID=E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL
       # CAMERA_PDA will be set dynamically after device registration
       - SOLANA_RPC_URL=https://api.devnet.solana.com
