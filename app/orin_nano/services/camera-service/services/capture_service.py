@@ -67,10 +67,10 @@ class CaptureService:
         # Photo capture settings
         self._jpeg_quality = 95
         
-        # Video capture settings - OPTIMIZED FOR WEB AND IPFS COMPATIBILITY
-        self._video_format = 'mov'  # MOV format for web compatibility and IPFS upload
+        # Video capture settings - OPTIMIZED FOR SMOOTH PLAYBACK
+        self._video_format = 'mp4'  # MP4 format for universal compatibility
         self._video_codec = 'mp4v'  # mp4v codec for better compression
-        self._video_fps = 15  # Lower FPS for reliability
+        self._video_fps = 30  # Match camera FPS for smooth playback
         
         logger.info("CaptureService initialized with mp4v codec and MOV format for IPFS compatibility")
     
@@ -168,11 +168,11 @@ class CaptureService:
                 height, width = frame.shape[:2]
                 logger.info(f"Starting video recording: {width}x{height} at {self._video_fps} FPS")
                 
-                # Try multiple codec options for maximum compatibility (mp4v first for MOV)
+                # Try multiple codec options for maximum compatibility (mp4v first for quality)
                 codecs_to_try = [
-                    ('mp4v', cv2.VideoWriter_fourcc(*'mp4v')),
-                    ('MJPG', cv2.VideoWriter_fourcc(*'MJPG')),
-                    ('XVID', cv2.VideoWriter_fourcc(*'XVID')),
+                    ('mp4v', cv2.VideoWriter_fourcc(*'mp4v')),  # Original quality codec
+                    ('MJPG', cv2.VideoWriter_fourcc(*'MJPG')),  # High bitrate fallback
+                    ('XVID', cv2.VideoWriter_fourcc(*'XVID')),  # Legacy fallback
                 ]
                 
                 writer = None
@@ -285,49 +285,61 @@ class CaptureService:
     
     def _simple_recording_loop(self, buffer_service, duration_seconds: int) -> None:
         """
-        SIMPLIFIED recording loop that just writes frames as fast as possible.
-        No complex FPS control - just capture what we can get.
+        HIGH-PERFORMANCE recording loop optimized for smooth video capture.
+        Captures frames at the target FPS rate for consistent playback.
         """
         start_time = time.time()
         frame_count = 0
+        target_frame_interval = 1.0 / self._video_fps  # Time between frames for target FPS
+        next_frame_time = start_time
         
-        logger.info(f"Recording loop started (duration: {duration_seconds}s)")
+        logger.info(f"Recording loop started (duration: {duration_seconds}s, target FPS: {self._video_fps})")
         
         try:
             while not self._stop_recording.is_set():
+                current_time = time.time()
+                
                 # Check duration limit
-                if duration_seconds > 0 and (time.time() - start_time) >= duration_seconds:
+                if duration_seconds > 0 and (current_time - start_time) >= duration_seconds:
                     logger.info(f"Recording reached {duration_seconds}s duration limit")
                     break
                 
                 # SAFETY: Force stop any recording that runs longer than 10 minutes
-                if (time.time() - start_time) >= 600:  # 10 minutes
+                if (current_time - start_time) >= 600:  # 10 minutes
                     logger.warning(f"Recording force-stopped after 10 minutes for safety")
                     break
                 
-                # Get frame from buffer
-                frame, timestamp = buffer_service.get_frame()
-                
-                if frame is None:
-                    time.sleep(0.01)  # Brief pause if no frame
-                    continue
-                
-                # Write frame to video
-                if self._current_writer and self._current_writer.isOpened():
-                    self._current_writer.write(frame)
-                    frame_count += 1
+                # Check if it's time for the next frame
+                if current_time >= next_frame_time:
+                    # Get frame from buffer
+                    frame, timestamp = buffer_service.get_frame()
                     
-                    # Log progress every 30 frames
-                    if frame_count % 30 == 0:
-                        elapsed = time.time() - start_time
-                        fps = frame_count / elapsed if elapsed > 0 else 0
-                        logger.debug(f"Recording: {frame_count} frames, {elapsed:.1f}s, {fps:.1f} FPS")
+                    if frame is not None:
+                        # Write frame to video
+                        if self._current_writer and self._current_writer.isOpened():
+                            self._current_writer.write(frame)
+                            frame_count += 1
+                            
+                            # Schedule next frame capture
+                            next_frame_time += target_frame_interval
+                            
+                            # If we're falling behind, catch up
+                            if next_frame_time < current_time:
+                                next_frame_time = current_time + target_frame_interval
+                            
+                            # Log progress every second (at 30 FPS = every 30 frames)
+                            if frame_count % self._video_fps == 0:
+                                elapsed = current_time - start_time
+                                actual_fps = frame_count / elapsed if elapsed > 0 else 0
+                                logger.debug(f"Recording: {frame_count} frames, {elapsed:.1f}s, {actual_fps:.1f} FPS")
+                        else:
+                            logger.error("Video writer is not available")
+                            break
                 else:
-                    logger.error("Video writer is not available")
-                    break
-                
-                # Small delay to prevent overwhelming the system
-                time.sleep(0.01)
+                    # Sleep until next frame time
+                    sleep_time = next_frame_time - current_time
+                    if sleep_time > 0:
+                        time.sleep(min(sleep_time, 0.001))  # Small sleep to prevent CPU spinning
                 
         except Exception as e:
             logger.error(f"Error in recording loop: {e}")
@@ -369,7 +381,8 @@ class CaptureService:
         """Generate a unique filename for a video"""
         timestamp = int(time.time())
         prefix = f"{user_id}_" if user_id else ""
-        return f"{prefix}video_{timestamp}_{uuid.uuid4().hex[:6]}.{self._video_format}"
+        # Use .mov extension for initial recording, will be converted to .mp4
+        return f"{prefix}video_{timestamp}_{uuid.uuid4().hex[:6]}.mov"
     
     def _convert_to_mp4(self, mov_path: str) -> None:
         """
@@ -390,13 +403,14 @@ class CaptureService:
             # Use ffmpeg to convert with H.264 codec
             import subprocess
             
-            # FFmpeg command for efficient conversion
+            # FFmpeg command for efficient conversion with original quality settings
             cmd = [
                 'ffmpeg', '-y',  # Overwrite output file
                 '-i', mov_path,  # Input file
                 '-c:v', 'libx264',  # H.264 video codec
-                '-preset', 'fast',  # Fast encoding preset
-                '-crf', '23',  # Good quality/size balance
+                '-preset', 'fast',  # Fast encoding preset (original setting)
+                '-crf', '23',  # Good quality/size balance (original setting)
+                '-r', str(self._video_fps),  # Ensure correct frame rate
                 '-c:a', 'aac',  # AAC audio codec (if audio exists)
                 '-movflags', '+faststart',  # Optimize for web streaming
                 mp4_path  # Output file

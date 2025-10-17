@@ -52,7 +52,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
   };
 
   return (
-    <div className="flex flex-col h-screen bg-white">
+    <div className="flex flex-col min-h-screen bg-white">
       {/* Top Bar */}
       <div className="flex-none z-[40]">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
@@ -247,9 +247,9 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
       )}
       
       {/* Main Content */}
-      <div className="flex-1 overflow-y-auto relative">
+      <div className="flex-1 relative">
       {isLoggedIn ? (
-        <div className="h-full">
+        <div>
           {children}
         </div>
       ) : (

@@ -8,7 +8,7 @@ skip-lint = false
 camera_network = "E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL"
 
 [programs.localnet]
-camera_network = "Hx5JaUCZXQqvcYzTcdgm9ZE3sqhMWqwAhNXZBrzWm45S"
+camera_network = "E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL"
 
 [registry]
 url = "https://api.apr.dev"

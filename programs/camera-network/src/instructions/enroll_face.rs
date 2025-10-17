@@ -1,61 +1,74 @@
 use anchor_lang::prelude::*;
-use crate::state::{
-    FaceData
-};
+use crate::state::{RecognitionToken, RecognitionTokenCreated};
 use crate::error::CameraNetworkError;
-use solana_program::keccak;
 
 #[derive(Accounts)]
-pub struct EnrollFace<'info> {
+pub struct UpsertRecognitionToken<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
-    
-    // This account is owned by the user directly, not the program
-    // It's important to note that this is "owned" by the user, but still a PDA
-    // (which is necessary for deterministic derivation)
+
     #[account(
         init_if_needed,
         payer = user,
-        space = 8 + 32 + 32 + 4 + 32 * 10 + 8 + 8 + 1, // Discriminator + user + hash + camera vec + timestamps + bump
-        seeds = [
-            b"face-nft",
-            user.key().as_ref()
-        ],
+        space = 8 + 32 + 4 + 1024 + 8 + 1 + 1 + 4 + 64 + 1, // 1147 bytes
+        seeds = [b"recognition-token", user.key().as_ref()],
         bump
     )]
-    pub face_nft: Account<'info, FaceData>,
-    
+    pub recognition_token: Account<'info, RecognitionToken>,
+
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<EnrollFace>, encrypted_embedding: Vec<u8>) -> Result<()> {
+pub fn handler(
+    ctx: Context<UpsertRecognitionToken>,
+    encrypted_embedding: Vec<u8>,
+    display_name: Option<String>,
+    source: u8,
+) -> Result<()> {
     let user = &ctx.accounts.user;
-    let face_nft = &mut ctx.accounts.face_nft;
-    
-    // Validate face data
-    if encrypted_embedding.is_empty() || encrypted_embedding.len() > 1024 {
-        return err!(CameraNetworkError::InvalidFaceData);
+    let token = &mut ctx.accounts.recognition_token;
+
+    // Validate embedding size (1-1024 bytes)
+    require!(
+        !encrypted_embedding.is_empty() && encrypted_embedding.len() <= 1024,
+        CameraNetworkError::RecognitionTokenTooLarge
+    );
+
+    // Validate source type (0=phone_selfie, 1=jetson_capture, 2=imported)
+    require!(source <= 2, CameraNetworkError::InvalidFaceData);
+
+    let is_new = token.created_at == 0;
+    let now = Clock::get()?.unix_timestamp;
+
+    // Store full encrypted embedding
+    token.user = user.key();
+    token.encrypted_embedding = encrypted_embedding;
+    token.created_at = now;
+    token.bump = ctx.bumps.recognition_token;
+    token.display_name = display_name.clone();
+    token.source = source;
+
+    // Increment version on regeneration
+    if is_new {
+        token.version = 1;
+    } else {
+        token.version = token.version.saturating_add(1);
     }
-    
-    // Compute hash of the face data (for verification, not storing raw data)
-    let mut face_hash = [0u8; 32];
-    face_hash.copy_from_slice(&keccak::hash(&encrypted_embedding).to_bytes()[0..32]);
-    
-    // Set face data account
-    face_nft.user = user.key();
-    face_nft.data_hash = face_hash;
-    
-    // If this is a new account, initialize the rest of the fields
-    if face_nft.creation_date == 0 {
-        face_nft.authorized_cameras = Vec::new();
-        face_nft.creation_date = Clock::get()?.unix_timestamp;
-        face_nft.bump = ctx.bumps.face_nft;
-    }
-    
-    face_nft.last_used = Clock::get()?.unix_timestamp;
-    
-    msg!("Face ID NFT created for user {}", user.key());
-    msg!("The face data is encrypted and only usable by the user who created it");
-    
+
+    // Emit event
+    emit!(RecognitionTokenCreated {
+        user: user.key(),
+        token: token.key(),
+        version: token.version,
+        source,
+        display_name,
+        timestamp: now,
+    });
+
+    msg!("Recognition token {} for user {}",
+        if is_new { "created" } else { "regenerated" },
+        user.key()
+    );
+
     Ok(())
 } 

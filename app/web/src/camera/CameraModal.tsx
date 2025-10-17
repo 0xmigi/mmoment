@@ -199,13 +199,29 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         CAMERA_ACTIVATION_PROGRAM_ID
       );
 
-      // Try to fetch the session account
+      // Check if session account exists (use getAccountInfo to avoid decode errors from old sessions)
       try {
-        await program.account.userSession.fetch(sessionPda);
-        console.log("[CameraModal] Session exists, setting checked-in: true");
-        setIsCheckedIn(true);
+        const sessionAccountInfo = await connection.getAccountInfo(sessionPda);
+        if (sessionAccountInfo && sessionAccountInfo.data.length === 102) {
+          // New session structure (102 bytes) - try to decode
+          try {
+            await program.account.userSession.fetch(sessionPda);
+            console.log("[CameraModal] Session exists, setting checked-in: true");
+            setIsCheckedIn(true);
+          } catch (decodeErr) {
+            console.log("[CameraModal] Session exists but can't decode, setting checked-in: false");
+            setIsCheckedIn(false);
+          }
+        } else if (sessionAccountInfo) {
+          // Old session structure - consider not checked in
+          console.log("[CameraModal] Old session structure detected, setting checked-in: false");
+          setIsCheckedIn(false);
+        } else {
+          console.log("[CameraModal] No session found, setting checked-in: false");
+          setIsCheckedIn(false);
+        }
       } catch (err) {
-        console.log("[CameraModal] No session found, setting checked-in: false");
+        console.log("[CameraModal] Error checking session, setting checked-in: false");
         setIsCheckedIn(false);
       }
     } catch (err) {
@@ -223,25 +239,30 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       console.log('[CameraModal] Fetching active users for camera:', camera.id);
       
       const program = await initializeProgram();
-      
-      // Fetch all user sessions
-      const userSessionAccounts = await program.account.userSession.all();
-      console.log('[CameraModal] Found total user sessions:', userSessionAccounts.length);
-      
+
+      // Fetch only NEW session accounts (102 bytes) to avoid decode errors from old sessions (94 bytes)
+      const sessionAccounts = await connection.getProgramAccounts(program.programId, {
+        filters: [
+          { dataSize: 102 }  // New session structure size
+        ]
+      });
+
+      console.log('[CameraModal] Found', sessionAccounts.length, 'new session accounts (102 bytes)');
+
       // Count sessions for this specific camera
       let count = 0;
-      for (const sessionInfo of userSessionAccounts) {
+      for (const accountInfo of sessionAccounts) {
         try {
-           
-          const session = sessionInfo.account as any;
+          const session = program.coder.accounts.decode('UserSession', accountInfo.account.data);
           const sessionCameraKey = session.camera.toString();
-          
+
           if (sessionCameraKey === camera.id) {
             count++;
             console.log('[CameraModal] Found active session for this camera');
           }
         } catch (error) {
-          console.error('[CameraModal] Error parsing user session:', error);
+          // Skip this session - likely old structure
+          continue;
         }
       }
       
@@ -486,17 +507,74 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         CAMERA_ACTIVATION_PROGRAM_ID
       );
 
+      // Check if user already has an active session - if so, check out first
+      try {
+        const sessionAccountInfo = await connection.getAccountInfo(sessionPda);
+        if (sessionAccountInfo) {
+          console.log('[CameraModal] Existing session found, checking out first');
+
+        // Check out existing session
+        const checkOutIx = await program.methods
+          .checkOut()
+          .accounts({
+            closer: userPublicKey,
+            camera: cameraPublicKey,
+            session: sessionPda,
+            sessionUser: userPublicKey, // Rent goes back to user
+          })
+          .instruction();
+
+        const checkOutTx = new Transaction().add(checkOutIx);
+        const { blockhash: checkOutBlockhash } = await connection.getLatestBlockhash();
+        checkOutTx.recentBlockhash = checkOutBlockhash;
+        checkOutTx.feePayer = userPublicKey;
+
+        // Sign and send checkout transaction
+        let signedCheckOutTx;
+        if (typeof (primaryWallet as any).getSigner === 'function') {
+          const signer = await (primaryWallet as any).getSigner();
+          signedCheckOutTx = await signer.signTransaction(checkOutTx);
+        } else {
+          signedCheckOutTx = await (primaryWallet as any).signTransaction(checkOutTx);
+        }
+
+          const checkOutSig = await connection.sendRawTransaction(signedCheckOutTx.serialize());
+          await connection.confirmTransaction(checkOutSig, 'confirmed');
+          console.log('[CameraModal] Checked out existing session:', checkOutSig);
+        }
+      } catch (err) {
+        // No existing session - this is fine, continue with check-in
+        console.log('[CameraModal] No existing session found, proceeding with check-in');
+      }
+
+      // Derive recognition token PDA and check if it exists
+      const [recognitionTokenPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('recognition-token'), userPublicKey.toBuffer()],
+        program.programId
+      );
+
+      // Check if recognition token account exists
+      let hasRecognitionToken = false;
+      try {
+        await program.account.recognitionToken.fetch(recognitionTokenPda);
+        hasRecognitionToken = true;
+        console.log('[CameraModal] Recognition token found for user');
+      } catch (err) {
+        console.log('[CameraModal] No recognition token found for user');
+      }
+
       // Create the accounts object for check-in
       const accounts: any = {
         user: userPublicKey,
         camera: cameraPublicKey,
+        recognitionToken: hasRecognitionToken ? recognitionTokenPda : null, // Pass null for optional accounts that don't exist
         session: sessionPda,
         systemProgram: SystemProgram.programId
       };
 
       // Create check-in instruction
       const ix = await program.methods
-        .checkIn(false)
+        .checkIn(false) // false = don't require face recognition
         .accounts(accounts)
         .instruction();
 
@@ -643,9 +721,10 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       const ix = await program.methods
         .checkOut()
         .accounts({
-          user: userPublicKey,
+          closer: userPublicKey,
           camera: cameraPublicKey,
           session: sessionPda,
+          sessionUser: userPublicKey, // Rent goes back to user
         })
         .instruction();
 

@@ -311,14 +311,19 @@ export const findSessionPDA = (user: PublicKey, camera: PublicKey) => {
 };
 
 /**
- * Helper to find a face data PDA
+ * Helper to find a recognition token PDA
  */
-export const findFaceDataPDA = (user: PublicKey) => {
+export const findRecognitionTokenPDA = (user: PublicKey) => {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("face"), user.toBuffer()],
+    [Buffer.from("recognition-token"), user.toBuffer()],
     CAMERA_NETWORK_PROGRAM_ID
   );
 };
+
+/**
+ * @deprecated Use findRecognitionTokenPDA instead
+ */
+export const findFaceDataPDA = findRecognitionTokenPDA;
 
 /**
  * Alias for useCameraActivationProgram for backward compatibility

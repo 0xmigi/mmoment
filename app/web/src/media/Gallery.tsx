@@ -4,28 +4,54 @@ import { Image, Video } from 'lucide-react';
 import MediaViewer from './MediaViewer';
 import { unifiedIpfsService } from '../storage/ipfs/unified-ipfs-service';
 import { IPFSMedia } from '../storage/ipfs/ipfs-service';
+import { pipeGalleryService, PipeGalleryItem } from '../storage/pipe/pipe-gallery-service';
 
 interface MediaGalleryProps {
-  mode?: 'recent' | 'archive';
+  mode?: "recent" | "archive";
   maxRecentItems?: number;
   cameraId?: string;
 }
 
-export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, cameraId }: MediaGalleryProps) {
+export default function MediaGallery({
+  mode = "recent",
+  maxRecentItems = 5,
+  cameraId,
+}: MediaGalleryProps) {
   const { primaryWallet } = useDynamicContext();
-  const [media, setMedia] = useState<IPFSMedia[]>([]);
+  const [media, setMedia] = useState<(IPFSMedia | PipeGalleryItem)[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [, setDeleting] = useState<string | null>(null);
-  const [selectedMedia, setSelectedMedia] = useState<IPFSMedia | null>(null);
+  const [selectedMedia, setSelectedMedia] = useState<
+    IPFSMedia | PipeGalleryItem | null
+  >(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
+  const [storageType, setStorageType] = useState<"pinata" | "pipe">("pinata");
 
   // Add click handler for media items
-  const handleMediaClick = (media: IPFSMedia) => {
-    console.log("Viewing media with transaction ID:", media.transactionId || "none");
+  const handleMediaClick = (media: IPFSMedia | PipeGalleryItem) => {
+    console.log(
+      "Viewing media with transaction ID:",
+      (media as IPFSMedia).transactionId || "none"
+    );
     setSelectedMedia(media);
     setIsViewerOpen(true);
   };
+
+  // Check storage type preference on mount and when it changes
+  useEffect(() => {
+    const checkStorageType = () => {
+      const type = pipeGalleryService.getStorageType();
+      setStorageType(type);
+    };
+
+    checkStorageType();
+    // Listen for storage changes
+    const handleStorageChange = () => checkStorageType();
+    window.addEventListener("storage", handleStorageChange);
+
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
 
   useEffect(() => {
     let isSubscribed = true;
@@ -45,9 +71,24 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
 
       try {
         setError(null);
-        
-        // Get ALL media from IPFS only - no localStorage shortcuts!
-        const allMedia = await unifiedIpfsService.getMediaForWallet(primaryWallet.address);
+
+        let allMedia: (IPFSMedia | PipeGalleryItem)[] = [];
+
+        if (storageType === "pipe") {
+          // Get media from Pipe storage
+          console.log(
+            "📦 Fetching media from Pipe storage for:",
+            primaryWallet.address
+          );
+          allMedia = await pipeGalleryService.getUserFiles(
+            primaryWallet.address
+          );
+        } else {
+          // Get ALL media from IPFS only - no localStorage shortcuts!
+          allMedia = await unifiedIpfsService.getMediaForWallet(
+            primaryWallet.address
+          );
+        }
 
         if (!isSubscribed) return;
 
@@ -55,22 +96,35 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
         retryCount = 0;
 
         // Sort by timestamp, newest first
-        const sortedMedia = allMedia.sort((a, b) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        );
+        const sortedMedia = allMedia.sort((a, b) => {
+          const aTime =
+            typeof a.timestamp === "string"
+              ? new Date(a.timestamp).getTime()
+              : a.timestamp;
+          const bTime =
+            typeof b.timestamp === "string"
+              ? new Date(b.timestamp).getTime()
+              : b.timestamp;
+          return bTime - aTime;
+        });
 
         // Filter by cameraId if provided
         let cameraFilteredMedia = sortedMedia;
         if (cameraId) {
-          // Filter by cameraId stored in IPFS metadata
-          cameraFilteredMedia = sortedMedia.filter(item => {
-            return item.cameraId === cameraId;
+          // Filter by cameraId stored in metadata
+          cameraFilteredMedia = sortedMedia.filter((item) => {
+            if ("cameraId" in item) {
+              return item.cameraId === cameraId;
+            } else if ("metadata" in item && item.metadata?.camera) {
+              return item.metadata.camera === cameraId;
+            }
+            return false;
           });
         }
 
         // Filter based on mode
         let filteredMedia;
-        if (mode === 'recent') {
+        if (mode === "recent") {
           filteredMedia = cameraFilteredMedia.slice(0, maxRecentItems);
         } else {
           // Archive mode should show ALL media
@@ -79,15 +133,15 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
 
         setMedia(filteredMedia);
       } catch (err) {
-        console.error('Failed to fetch media:', err);
-        
+        console.error("Failed to fetch media:", err);
+
         // Only retry if we haven't exceeded MAX_RETRIES
         if (retryCount < MAX_RETRIES) {
           retryCount++;
           setTimeout(fetchMediaWithRetry, RETRY_DELAY);
         } else {
           if (isSubscribed) {
-            setError('Failed to load media. Please try again later.');
+            setError("Failed to load media. Please try again later.");
           }
         }
       } finally {
@@ -107,7 +161,7 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
       isSubscribed = false;
       clearInterval(interval);
     };
-  }, [primaryWallet?.address, mode, maxRecentItems, cameraId]);
+  }, [primaryWallet?.address, mode, maxRecentItems, cameraId, storageType]);
 
   const handleDelete = async (mediaId: string) => {
     if (!primaryWallet?.address) return;
@@ -116,38 +170,58 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
       setDeleting(mediaId);
       setError(null);
 
-      console.log('🗑️ Starting IPFS media deletion for:', mediaId);
-      
-      // Add a small delay to allow UI to show loading state
-      await new Promise(resolve => setTimeout(resolve, 500));
+      let success = false;
 
-      // All media is in IPFS - delete from IPFS only
-      const success = await unifiedIpfsService.deleteMedia(mediaId, primaryWallet.address);
-      console.log('🗑️ IPFS media deletion result:', mediaId, 'success:', success);
+      if (storageType === "pipe") {
+        console.log(
+          "🗑️ Pipe storage deletion not yet implemented for:",
+          mediaId
+        );
+        setError("Deletion from Pipe storage is not yet supported");
+        return;
+      } else {
+        console.log("🗑️ Starting IPFS media deletion for:", mediaId);
+
+        // Add a small delay to allow UI to show loading state
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        // All media is in IPFS - delete from IPFS only
+        success = await unifiedIpfsService.deleteMedia(
+          mediaId,
+          primaryWallet.address
+        );
+        console.log(
+          "🗑️ IPFS media deletion result:",
+          mediaId,
+          "success:",
+          success
+        );
+      }
 
       if (success) {
-        console.log('✅ MEDIA DELETION SUCCESS (Gallery):', mediaId);
+        console.log("✅ MEDIA DELETION SUCCESS (Gallery):", mediaId);
         // Add a small delay before updating UI to ensure backend operations complete
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        setMedia(current => current.filter(m => m.id !== mediaId));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        setMedia((current) => current.filter((m) => m.id !== mediaId));
       } else {
-        console.error('❌ MEDIA DELETION FAILED (Gallery):', mediaId);
-        setError('Failed to delete media. Please try again.');
+        console.error("❌ MEDIA DELETION FAILED (Gallery):", mediaId);
+        setError("Failed to delete media. Please try again.");
       }
     } catch (err) {
-      console.error('🗑️ MEDIA DELETION ERROR (Gallery):', err);
+      console.error("🗑️ MEDIA DELETION ERROR (Gallery):", err);
       // Only show error message if deletion actually failed
       // Don't show error for timing issues or temporary failures
-      if (err instanceof Error && err.message.includes('Failed to delete')) {
-        setError('Failed to delete media. Please try again.');
+      if (err instanceof Error && err.message.includes("Failed to delete")) {
+        setError("Failed to delete media. Please try again.");
       } else {
-        console.warn('🗑️ Deletion error might be temporary, not showing user error message');
+        console.warn(
+          "🗑️ Deletion error might be temporary, not showing user error message"
+        );
       }
     } finally {
       setDeleting(null);
     }
   };
-
 
   if (!primaryWallet?.address) {
     return (
@@ -157,13 +231,14 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
     );
   }
 
-  const title = mode === 'recent'
-    ? `Your recents`
-    : `Gallery (${media.length})`;
+  const title =
+    mode === "recent" ? `Your recents` : `Gallery (${media.length})`;
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h2 className="text-xl text-left font-bold text-gray-800 mb-6">{title}</h2>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-xl text-left font-bold text-gray-800">{title}</h2>
+      </div>
 
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
@@ -175,10 +250,12 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
         <div className="text-left py-4">Loading your media...</div>
       ) : media.length === 0 ? (
         <div className="text-left py-4 text-gray-500">
-          {mode === 'recent' ? 'No media in current session' : 'No archived media found'}
+          {mode === "recent"
+            ? "No media in current session"
+            : "No archived media found"}
         </div>
       ) : (
-        <div 
+        <div
           className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3"
           data-testid="media-gallery"
         >
@@ -189,42 +266,45 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
               onClick={() => handleMediaClick(item)}
             >
               <div className="absolute inset-0 rounded-lg overflow-hidden">
-                {item.type === 'video' ? (
+                {item.type === "video" ? (
                   // biome-ignore lint/a11y/useMediaCaption: <explanation>
                   <video
                     src={item.url}
                     className="w-full h-full object-cover"
                     onError={(e) => {
-                      console.error('IPFS video playback error:', {
+                      console.error("IPFS video playback error:", {
                         mediaId: item.id,
                         url: item.url,
                         mimeType: item.mimeType,
-                        error: e.currentTarget.error
+                        error: e.currentTarget.error,
                       });
-                      
+
                       // Try backup URLs if available
                       const video = e.currentTarget as HTMLVideoElement;
                       if (item.backupUrls?.length) {
                         const currentIndex = item.backupUrls.indexOf(video.src);
                         if (currentIndex < item.backupUrls.length - 1) {
-                          console.log('Trying backup URL:', item.backupUrls[currentIndex + 1]);
+                          console.log(
+                            "Trying backup URL:",
+                            item.backupUrls[currentIndex + 1]
+                          );
                           video.src = item.backupUrls[currentIndex + 1];
                         }
                       }
                     }}
                     onLoadStart={(_e) => {
-                      console.log('Video load started:', {
+                      console.log("Video load started:", {
                         mediaId: item.id,
                         url: item.url,
-                        mimeType: item.mimeType
+                        mimeType: item.mimeType,
                       });
                     }}
                     onCanPlay={(e) => {
-                      console.log('Video can play:', {
+                      console.log("Video can play:", {
                         mediaId: item.id,
                         duration: e.currentTarget.duration,
                         videoWidth: e.currentTarget.videoWidth,
-                        videoHeight: e.currentTarget.videoHeight
+                        videoHeight: e.currentTarget.videoHeight,
                       });
                     }}
                   />
@@ -247,7 +327,7 @@ export default function MediaGallery({ mode = 'recent', maxRecentItems = 5, came
                 )}
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
                 <div className="absolute top-2 left-2">
-                  {item.type === 'video' ? (
+                  {item.type === "video" ? (
                     <Video className="w-4 h-4 text-white drop-shadow" />
                   ) : (
                     <Image className="w-4 h-4 text-white drop-shadow" />

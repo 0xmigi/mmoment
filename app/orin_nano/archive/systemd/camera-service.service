@@ -1,0 +1,17 @@
+[Unit]
+Description=Camera Service
+After=network.target
+
+[Service]
+Type=simple
+User=azuolas
+WorkingDirectory=/home/azuolas/mmoment/app/orin_nano/camera_service
+Environment="PYTHONPATH=/home/azuolas/mmoment/app/orin_nano/camera_service"
+Environment="CAMERA_PDA=WT9oJrL7sbNip8Rc2w5LoWFpwsUcZZJnnjE2zZjMuvD"
+Environment="SOLANA_MIDDLEWARE_URL=http://localhost:5001"
+ExecStart=/usr/bin/python3 -m camera_service
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target 

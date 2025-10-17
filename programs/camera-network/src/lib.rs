@@ -48,11 +48,21 @@ pub mod camera_network {
         instructions::check_out::handler(ctx)
     }
     
-    /// Enroll a face for facial recognition
-    pub fn enroll_face(ctx: Context<EnrollFace>, encrypted_embedding: Vec<u8>) -> Result<()> {
-        instructions::enroll_face::handler(ctx, encrypted_embedding)
+    /// Create or regenerate a recognition token (stores encrypted facial embedding)
+    pub fn upsert_recognition_token(
+        ctx: Context<UpsertRecognitionToken>,
+        encrypted_embedding: Vec<u8>,
+        display_name: Option<String>,
+        source: u8,
+    ) -> Result<()> {
+        instructions::enroll_face::handler(ctx, encrypted_embedding, display_name, source)
     }
-    
+
+    /// Delete recognition token and reclaim rent
+    pub fn delete_recognition_token(ctx: Context<DeleteRecognitionToken>) -> Result<()> {
+        instructions::delete_recognition_token::handler(ctx)
+    }
+
     /// Record a camera activity (photo, video, stream)
     pub fn record_activity(ctx: Context<RecordActivity>, args: RecordActivityArgs) -> Result<()> {
         instructions::record_activity::handler(ctx, args)

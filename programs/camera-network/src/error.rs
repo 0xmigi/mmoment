@@ -43,4 +43,16 @@ pub enum CameraNetworkError {
     
     #[msg("Access grant has expired")]
     AccessGrantExpired,
+
+    #[msg("Session has expired")]
+    SessionExpired,
+
+    #[msg("No recognition token found - please create one first")]
+    NoRecognitionToken,
+
+    #[msg("Feature not available on this camera")]
+    FeatureNotAvailable,
+
+    #[msg("Recognition token data too large (max 1024 bytes)")]
+    RecognitionTokenTooLarge,
 } 

@@ -19,14 +19,65 @@ from aiortc.contrib.media import MediaPlayer
 import asyncio
 import queue
 
+# Enable detailed WebRTC/ICE debugging
+logging.getLogger('aiortc').setLevel(logging.DEBUG)
+logging.getLogger('aiortc.rtcicetransport').setLevel(logging.DEBUG)
+logging.getLogger('aioice').setLevel(logging.DEBUG)
+
+# SMART RELAY FALLBACK: Keep relay-only patch ready but don't force it by default
+import aioice
+_original_connection_init = aioice.Connection.__init__
+
+def _smart_transport_policy(self, *args, **kwargs):
+    # Keep default ALL policy for local WiFi performance
+    # Relay-only mode can be enabled via environment variable if needed
+    if os.environ.get('FORCE_RELAY_ONLY', 'false').lower() == 'true':
+        kwargs['transport_policy'] = aioice.TransportPolicy.RELAY
+        logger.info("🔄 RELAY-ONLY: Forced relay transport due to FORCE_RELAY_ONLY=true")
+    else:
+        # Use default ALL policy for best local WiFi performance
+        logger.info("🔄 SMART TRANSPORT: Using ALL transport policy for optimal local WiFi + cellular fallback")
+    return _original_connection_init(self, *args, **kwargs)
+
+aioice.Connection.__init__ = _smart_transport_policy
+
 # FORCE aiortc to recognize correct network interface for ICE candidates
 import aioice
+import socket
+import subprocess
 _original_get_host_addresses = aioice.ice.get_host_addresses
+
+def get_jetson_ip():
+    """Dynamically get Jetson's actual IP address"""
+    try:
+        # Try to get the primary network interface IP (excluding docker interfaces)
+        result = subprocess.run(
+            ["ip", "route", "get", "1.1.1.1"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if result.returncode == 0:
+            # Parse output like: "1.1.1.1 via 192.168.1.1 dev wlP1p1s0 src 192.168.1.232"
+            parts = result.stdout.split()
+            if 'src' in parts:
+                src_index = parts.index('src')
+                if src_index + 1 < len(parts):
+                    ip = parts[src_index + 1]
+                    logger.info(f"🌐 Detected Jetson IP dynamically: {ip}")
+                    return ip
+    except Exception as e:
+        logger.error(f"Failed to get IP dynamically: {e}")
+    
+    # Fallback to current IP if dynamic detection fails
+    fallback_ip = '192.168.1.232'
+    logger.warning(f"Using fallback IP: {fallback_ip}")
+    return fallback_ip
 
 def _force_jetson_interface(use_ipv4=True, use_ipv6=False):
     """Force aiortc to use Jetson's actual IP instead of 0.0.0.0"""
-    jetson_ip = '192.168.1.232'  # Force use of actual Jetson IP
     if use_ipv4:
+        jetson_ip = get_jetson_ip()
         return [jetson_ip]
     return []
 
@@ -152,10 +203,13 @@ class WebRTCService:
         self.event_loop = None
         self.thread = None
         
-        # Get backend URL - use local Mac backend
-        backend_host = os.getenv('BACKEND_HOST', '192.168.1.80')
-        backend_port = os.getenv('BACKEND_PORT', '3001')
-        self.backend_url = f"http://{backend_host}:{backend_port}"
+        # Get backend URL - prefer BACKEND_URL env var, fallback to constructing from host/port
+        self.backend_url = os.getenv('BACKEND_URL')
+        if not self.backend_url:
+            # Fallback to constructing from host/port for backward compatibility
+            backend_host = os.getenv('BACKEND_HOST', '192.168.1.80')
+            backend_port = os.getenv('BACKEND_PORT', '3001')
+            self.backend_url = f"http://{backend_host}:{backend_port}"
         logger.info(f"WebRTC service will connect to backend at: {self.backend_url}")
         
         # Use Camera PDA as the identifier (matches your existing architecture)
@@ -165,35 +219,74 @@ class WebRTCService:
             self.camera_pda = self._get_device_id()
         logger.info(f"Camera PDA: {self.camera_pda}")
         
-        # Get external IP for WebRTC
-        self.external_ip = os.environ.get('WEBRTC_EXTERNAL_IP', '192.168.1.232')
+        # Get external IP for WebRTC dynamically
+        self.external_ip = os.environ.get('WEBRTC_EXTERNAL_IP', get_jetson_ip())
         
         # ENHANCED WEBRTC WITH MULTIPLE STUN/TURN SERVERS
         from aiortc import RTCIceServer
+        
+        # Extract hostname from backend URL for TURN server
+        turn_hostname = self.backend_url.replace("https://", "").replace("http://", "")
+        if ":" in turn_hostname:
+            turn_hostname = turn_hostname.split(":")[0]
+        
+        # Oracle Cloud CoTURN server with time-based auth
+        import time
+        import hmac
+        import hashlib
+        import base64
+        
+        # Generate time-based TURN credentials
+        timestamp = int(time.time()) + 86400  # Valid for 24 hours
+        username = str(timestamp)
+        secret = 'mmoment-webrtc-secret-2025'
+        
+        # Generate HMAC-SHA1 credential
+        mac = hmac.new(secret.encode(), username.encode(), hashlib.sha1)
+        credential = base64.b64encode(mac.digest()).decode()
+        
+        # Enhanced TURN configuration for cellular compatibility
+        self._configure_turn_transport(username, credential)
+        
         self.rtc_config = RTCConfiguration(
             iceServers=[
-                # Multiple STUN servers for redundancy
-                RTCIceServer(urls=['stun:stun.l.google.com:19302']),
-                RTCIceServer(urls=['stun:stun1.l.google.com:19302']),
-                RTCIceServer(urls=['stun:stun.cloudflare.com:3478']),
-                # Multiple TURN servers for NAT traversal
+                # Oracle TURN server ONLY - prioritize reliable relay over STUN
                 RTCIceServer(
-                    urls=['turn:openrelay.metered.ca:80'],
-                    username='openrelayproject',
-                    credential='openrelayproject'
+                    urls=[
+                        'turn:129.80.99.75:3478',           # UDP first for best local WiFi performance
+                        'turn:129.80.99.75:3478?transport=tcp'  # TCP fallback for cellular
+                    ],
+                    username=username,
+                    credential=credential
                 ),
-                RTCIceServer(
-                    urls=['turn:openrelay.metered.ca:443'],
-                    username='openrelayproject',
-                    credential='openrelayproject'
-                ),
+                # Keep Oracle STUN as backup
+                RTCIceServer(urls=['stun:129.80.99.75:3478']),
             ]
         )
+        logger.info("🔄 WebRTC configured with Oracle TURN server prioritized for cellular compatibility")
         
-        # Configure port range for media - use the same range as docker-compose
-        self.media_port_range = (10000, 10100)
+        # Configure port range from environment variables (matching Docker Compose config)
+        min_port = int(os.environ.get('AIORTC_RTP_MIN_PORT', '10000'))
+        max_port = int(os.environ.get('AIORTC_RTP_MAX_PORT', '10100'))
+        self.media_port_range = (min_port, max_port)
+        logger.info(f"🔧 WebRTC media port range: {min_port}-{max_port}")
         
         logger.info(f"WebRTC service configured with external IP: {self.external_ip}")
+    
+    def _configure_turn_transport(self, username, credential):
+        """Configure TURN transport for optimal cellular relay performance"""
+        try:
+            # Set environment variables that aiortc/aioice might use
+            os.environ['TURN_SERVER'] = '129.80.99.75:3478'
+            os.environ['TURN_USERNAME'] = username
+            os.environ['TURN_PASSWORD'] = credential
+            
+            # Force longer TURN allocation lifetime for stable cellular connections
+            os.environ['TURN_LIFETIME'] = '3600'  # 1 hour instead of default 10 minutes
+            
+            logger.info("🔧 TURN transport configured for cellular compatibility")
+        except Exception as e:
+            logger.warning(f"TURN transport configuration failed: {e}")
     
     def _get_device_id(self) -> str:
         """Get device ID from registration system (PDA-based)"""
@@ -324,11 +417,17 @@ class WebRTCService:
             print(f"HANDLER CALLED: viewer-wants-connection with data: {data}")
             logger.info(f"Handler called: viewer-wants-connection with data: {data}")
             
-            viewer_id = data.get('viewerId') if isinstance(data, dict) else str(data)
-            logger.info(f"Processing viewer {viewer_id}")
+            if isinstance(data, dict):
+                viewer_id = data.get('viewerId')
+                cellular_mode = data.get('cellularMode', False)
+            else:
+                viewer_id = str(data)
+                cellular_mode = False
+                
+            logger.info(f"Processing viewer {viewer_id}, cellular mode: {cellular_mode}")
             
-            # Create WebRTC peer connection and offer
-            await self._create_peer_connection_and_offer(viewer_id)
+            # Create WebRTC peer connection and offer with cellular mode support
+            await self._create_peer_connection_and_offer(viewer_id, cellular_mode=cellular_mode)
         
         @self.sio.on('webrtc-answer')
         async def handle_webrtc_answer(data):
@@ -441,7 +540,7 @@ class WebRTCService:
         except Exception as e:
             logger.error(f"Failed to send test webrtc-offer: {e}")
     
-    async def _create_peer_connection_and_offer(self, viewer_id: str):
+    async def _create_peer_connection_and_offer(self, viewer_id: str, cellular_mode: bool = False):
         """Create a new WebRTC peer connection and send offer"""
         logger.info(f"CRITICAL: Starting _create_peer_connection_and_offer for viewer {viewer_id}")
         
@@ -516,23 +615,41 @@ class WebRTCService:
                 
                 # Log full candidate details for debugging
                 candidate_ip = candidate.ip
-                logger.info(f"🧊 ICE candidate generated - IP: {candidate_ip}, Port: {candidate.port}, Type: {candidate.type}, Protocol: {candidate.protocol}")
+                candidate_type = candidate.type
+                
+                # Detailed logging for cross-network debugging
+                if candidate_type == 'host':
+                    logger.info(f"🏠 HOST candidate: {candidate_ip}:{candidate.port} ({candidate.protocol})")
+                elif candidate_type == 'srflx':
+                    logger.info(f"🌐 STUN candidate (server reflexive): {candidate_ip}:{candidate.port} ({candidate.protocol})")
+                elif candidate_type == 'relay':
+                    logger.info(f"🔄 TURN relay candidate: {candidate_ip}:{candidate.port} ({candidate.protocol}) - CRITICAL for cross-network!")
+                else:
+                    logger.info(f"🧊 ICE candidate ({candidate_type}): {candidate_ip}:{candidate.port} ({candidate.protocol})")
             else:
-                logger.warning(f"🧊 ICE candidate event fired with None candidate for viewer {viewer_id}")
+                logger.info(f"✅ ICE gathering complete signal for viewer {viewer_id}")
                 return
             
-            # CRITICAL: Check for Docker-internal IPs
-            if candidate_ip.startswith('172.17.') or candidate_ip.startswith('172.18.'):
-                logger.warning(f"🚨 Docker-internal IP detected in ICE candidate: {candidate_ip}")
+            # CRITICAL: Check for Docker-internal IPs only on host candidates
+            if candidate_type == 'host' and (candidate_ip.startswith('172.17.') or candidate_ip.startswith('172.18.')):
+                logger.warning(f"🚨 Docker-internal IP detected in host candidate: {candidate_ip}")
                 # Force external IP for Docker-internal candidates
                 candidate_ip = self.external_ip
                 logger.info(f"🧊 Replaced Docker IP with external IP: {candidate_ip}")
             
-            # MINIMAL: Use aiortc's actual port without redirection
+            # Use aiortc's actual port without redirection
             actual_port = candidate.port
+            
+            # Build proper ICE candidate string
+            ice_candidate_str = f"candidate:{candidate.foundation} {candidate.component} {candidate.protocol.upper()} {candidate.priority} {candidate_ip} {actual_port} typ {candidate.type}"
+            
+            # Add generation for relay candidates (TURN)
+            if candidate.type == 'relay' and hasattr(candidate, 'relatedAddress') and candidate.relatedAddress:
+                ice_candidate_str += f" raddr {candidate.relatedAddress} rport {candidate.relatedPort}"
+            
             candidate_data = {
                 'candidate': {
-                        'candidate': f"candidate:{candidate.foundation} {candidate.component} {candidate.protocol.upper()} {candidate.priority} {candidate_ip} {actual_port} typ {candidate.type}",
+                        'candidate': ice_candidate_str,
                         'sdpMid': candidate.sdpMid,
                         'sdpMLineIndex': candidate.sdpMLineIndex,
                         # FRONTEND COMPATIBILITY: Add parsed fields that frontend might expect
@@ -561,22 +678,82 @@ class WebRTCService:
             await pc.setLocalDescription(offer)
             logger.info(f"CRITICAL: Set local description for viewer {viewer_id}")
             
-            # GITHUB SOLUTION: Use pc.localDescription.sdp - this contains ALL ICE candidates!
-            # aiortc embeds ICE candidates in SDP after setLocalDescription()
+            # CRITICAL FIX: Wait for ICE gathering to complete before sending offer
+            # This ensures all ICE candidates (including TURN relay) are included in the SDP
+            logger.info(f"🧊 Waiting for ICE gathering to complete...")
+            ice_gathering_timeout = 5.0  # 5 second timeout for ICE gathering
+            start_time = time.time()
+            
+            while pc.iceGatheringState != 'complete' and (time.time() - start_time) < ice_gathering_timeout:
+                await asyncio.sleep(0.1)
+                logger.info(f"🧊 ICE gathering state: {pc.iceGatheringState}")
+            
+            if pc.iceGatheringState == 'complete':
+                logger.info(f"✅ ICE gathering completed after {time.time() - start_time:.2f}s")
+            else:
+                logger.warning(f"⚠️ ICE gathering timed out after {ice_gathering_timeout}s, state: {pc.iceGatheringState}")
+            
+            # Now use pc.localDescription which includes ALL gathered ICE candidates
             final_offer = RTCSessionDescription(
                 type=pc.localDescription.type,
                 sdp=pc.localDescription.sdp
             )
             
-            logger.info(f"🎯 USING pc.localDescription.sdp WITH ICE CANDIDATES")
-            logger.info(f"🔍 Final SDP: {final_offer.sdp[:500]}...")
+            logger.info(f"🎯 Using complete SDP with all ICE candidates")
+            logger.info(f"🔍 Final SDP preview: {final_offer.sdp[:500]}...")
             
-            # Fix SDP to use external IP and proper media ports
-            fixed_sdp = final_offer.sdp.replace('c=IN IP4 0.0.0.0', f'c=IN IP4 {self.external_ip}')
-            fixed_sdp = fixed_sdp.replace('o=- ', f'o=- ').replace(' IN IP4 0.0.0.0\r\n', f' IN IP4 {self.external_ip}\r\n')
+            # Use the complete SDP with all ICE candidates
+            complete_sdp = final_offer.sdp
+            
+            # Log ICE candidates found in SDP for debugging
+            ice_candidate_lines = [line for line in complete_sdp.split('\n') if line.startswith('a=candidate:')]
+            logger.info(f"📊 Found {len(ice_candidate_lines)} ICE candidates in SDP:")
+            for candidate in ice_candidate_lines[:5]:  # Log first 5 candidates
+                logger.info(f"  - {candidate}")
+            
+            # CRITICAL FIX: Override SDP connection address ONLY for cellular compatibility
+            # Only apply when we have relay candidates AND no local network connectivity
+            has_relay_candidates = any('typ relay' in line for line in ice_candidate_lines)
+            has_host_candidates = any('typ host' in line for line in ice_candidate_lines)
+            has_srflx_candidates = any('typ srflx' in line for line in ice_candidate_lines)
+            
+            logger.info(f"🔍 DEBUG: ICE candidate analysis - relay: {has_relay_candidates}, host: {has_host_candidates}, srflx: {has_srflx_candidates}")
+            
+            # INTELLIGENT CELLULAR FIX: Use cellular mode parameter
+            # When cellular_mode is True, replace local IP with TURN server IP
+            # This forces all traffic through the TURN relay for cellular compatibility
+            
+            if cellular_mode and has_relay_candidates:
+                logger.info(f"📱 CELLULAR MODE ACTIVATED: Will use TURN server IP for connection")
+                should_apply_cellular_fix = True
+            else:
+                logger.info(f"📶 WIFI MODE: Using local IP for optimal performance")
+                should_apply_cellular_fix = False
+            
+            if should_apply_cellular_fix:
+                # Replace connection address with TURN server IP for cellular compatibility
+                import re
+                original_sdp = complete_sdp
+                
+                # Replace connection line with TURN server IP
+                turn_server_ip = '129.80.99.75'  # Oracle TURN server IP
+                connection_pattern = r'c=IN IP4 [\d.]+(?=\r?\n)'
+                modified_sdp = re.sub(connection_pattern, f'c=IN IP4 {turn_server_ip}', complete_sdp)
+                
+                if modified_sdp != original_sdp:
+                    complete_sdp = modified_sdp
+                    logger.info(f"🔄 CELLULAR FIX: Replaced SDP connection address with TURN server IP {turn_server_ip}")
+                else:
+                    logger.warning("⚠️ Could not modify SDP connection address - pattern not found")
+            else:
+                if has_relay_candidates and has_host_candidates:
+                    logger.info("🏠 LOCAL NETWORK: Relay + host candidates found, keeping local IP for optimal performance")
+                elif not has_relay_candidates:
+                    logger.info("🏠 LOCAL NETWORK: No relay candidates, using direct local connection")
+                else:
+                    logger.info("🔍 MIXED CONNECTION: Using original SDP configuration")
             
             # CRITICAL FIX: Find what port aiortc actually bound to and use that
-            import re
             actual_rtp_port = None
             actual_rtcp_port = None
             
@@ -609,24 +786,20 @@ class WebRTCService:
             
             # SIMPLE APPROACH: Don't modify ports - use aiortc's natural ports
             logger.info(f"🔍 SIMPLE WebRTC: Using aiortc's natural ports without redirection")
-            logger.info(f"🔍 Original SDP (keeping as-is): {fixed_sdp[:200]}...")
+            logger.info(f"🔍 Complete SDP ready with all ICE candidates")
             
-            if fixed_sdp != offer.sdp:
-                logger.info(f"CRITICAL: Fixed SDP for viewer {viewer_id} - replaced IPs and ports")
-            else:
-                logger.warning(f"CRITICAL: No major SDP changes needed for viewer {viewer_id}")
-            
-            # Send offer to viewer via signaling server
+            # Send offer to viewer via signaling server with complete SDP
             offer_data = {
                 'offer': {
                     'type': offer.type,
-                    'sdp': fixed_sdp
+                    'sdp': complete_sdp
                 },
                 'targetId': viewer_id,
                 'cameraId': self.camera_pda
             }
             
             logger.info(f"CRITICAL: Sending webrtc-offer event with data: {offer_data}")
+            logger.info(f"📱 Offer mode: {'CELLULAR' if cellular_mode else 'WIFI'} - SDP c= line uses: {'TURN server IP' if should_apply_cellular_fix else 'Local IP'}")
             await self.sio.emit('webrtc-offer', offer_data)
             logger.info(f"CRITICAL: Successfully sent WebRTC offer to viewer {viewer_id}")
             

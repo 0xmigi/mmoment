@@ -32,7 +32,11 @@ class BlockchainSessionSync:
         # Track current state
         self.checked_in_wallets: Set[str] = set()
         self.last_sync = 0
-        
+
+        # ✅ NEW: Track when users were last seen in frame (for face-based auto-checkout)
+        self.last_seen_at: Dict[str, float] = {}  # wallet_address -> timestamp
+        self.auto_checkout_threshold = 1800  # 30 minutes in seconds
+
         # Services (will be injected)
         self.session_service = None
         self.face_service = None
@@ -73,10 +77,12 @@ class BlockchainSessionSync:
         logger.info("🔗 Blockchain session sync stopped")
         
     def _sync_loop(self):
-        """Main sync loop that checks blockchain state"""
+        """Main sync loop that checks blockchain state and monitors face-based auto-checkout"""
         while self.is_running and not self.stop_event.is_set():
             try:
                 self._sync_blockchain_state()
+                # ✅ NEW: Monitor for face-based auto-checkout
+                self._monitor_face_based_checkout()
                 time.sleep(self.sync_interval)
             except Exception as e:
                 logger.error(f"Error in blockchain sync loop: {e}")
@@ -164,20 +170,26 @@ class BlockchainSessionSync:
         """Handle a wallet checking in on-chain"""
         try:
             logger.info(f"🎉 Wallet {wallet_address} checked in on-chain - enabling camera session")
-            
+
             # Create camera session automatically
             if self.session_service:
                 session_info = self.session_service.create_session(wallet_address)
                 logger.info(f"✅ Created camera session {session_info['session_id']} for {wallet_address}")
-                
+
             # Enable face boxes automatically
             if self.face_service:
                 self.face_service.enable_boxes(True)
                 logger.info(f"✅ Face boxes enabled for checked-in user: {wallet_address}")
-                
+
+            # ✅ NEW: Fetch and decrypt recognition token from on-chain
+            self._fetch_and_decrypt_recognition_token(wallet_address)
+
+            # ✅ NEW: Initialize last_seen tracking for face-based auto-checkout
+            self.last_seen_at[wallet_address] = time.time()
+
             # Log for monitoring
             logger.info(f"📹 Camera now active for user: {wallet_address}")
-            
+
         except Exception as e:
             logger.error(f"Error handling check-in for {wallet_address}: {e}")
             
@@ -185,7 +197,23 @@ class BlockchainSessionSync:
         """Handle a wallet checking out on-chain"""
         try:
             logger.info(f"👋 Wallet {wallet_address} checked out on-chain - disabling camera session")
-            
+
+            # CRITICAL: Clear facial embedding data for security
+            if self.face_service:
+                try:
+                    # Remove this user's facial embedding from memory and disk
+                    if hasattr(self.face_service, 'remove_face_embedding'):
+                        success = self.face_service.remove_face_embedding(wallet_address)
+                        if success:
+                            logger.info(f"🗑️  Cleared facial embedding for {wallet_address[:8]}...")
+                        else:
+                            logger.warning(f"⚠️  Failed to clear facial embedding for {wallet_address[:8]}...")
+                    else:
+                        logger.warning("⚠️  Face service doesn't support individual face removal")
+
+                except Exception as face_error:
+                    logger.error(f"❌ Error clearing facial data for {wallet_address}: {face_error}")
+
             # End camera session automatically
             if self.session_service:
                 # Find session for this wallet
@@ -195,20 +223,213 @@ class BlockchainSessionSync:
                     success = self.session_service.end_session(session_id, wallet_address)
                     if success:
                         logger.info(f"✅ Ended camera session for {wallet_address}")
-                        
-            # Check if this was the last user - disable face boxes if so
+
+            # ✅ NEW: Remove from last_seen tracking
+            self.last_seen_at.pop(wallet_address, None)
+
+            # Check if this was the last user - disable face boxes and clear all faces if so
             if self.session_service and self.face_service:
                 active_sessions = self.session_service.get_all_sessions()
                 if len(active_sessions) == 0:
                     self.face_service.enable_boxes(False)
+
+                    # Clear all facial embeddings for security when no users are present
+                    try:
+                        if hasattr(self.face_service, 'clear_enrolled_faces'):
+                            clear_success = self.face_service.clear_enrolled_faces()
+                            if clear_success:
+                                logger.info("🗑️  Cleared all facial embeddings - no users checked in")
+                            else:
+                                logger.warning("⚠️  Failed to clear all facial embeddings")
+                    except Exception as clear_error:
+                        logger.error(f"❌ Error clearing all facial data: {clear_error}")
+
                     logger.info("✅ Face boxes disabled - no users checked in")
-                    
+
             # Log for monitoring
             logger.info(f"📹 Camera session ended for user: {wallet_address}")
-            
+
         except Exception as e:
             logger.error(f"Error handling check-out for {wallet_address}: {e}")
-            
+
+    def _fetch_and_decrypt_recognition_token(self, wallet_address: str):
+        """
+        Fetch the user's recognition token (encrypted facial embedding) from on-chain
+        and decrypt it for local recognition use.
+        """
+        try:
+            logger.info(f"🔐 Fetching recognition token for {wallet_address} from blockchain...")
+
+            # Step 1: Get the recognition token (encrypted facial embedding) from Solana middleware
+            response = requests.get(
+                f"{self.solana_middleware_url}/api/blockchain/get-facial-nft",
+                params={'wallet_address': wallet_address},
+                timeout=10
+            )
+
+            if response.status_code != 200:
+                logger.warning(f"⚠️  No recognition token found on-chain for {wallet_address} (HTTP {response.status_code})")
+                logger.info(f"ℹ️  User can still use camera without face recognition")
+                return
+
+            nft_data = response.json()
+            if not nft_data.get('success'):
+                logger.warning(f"⚠️  No recognition token found for {wallet_address}: {nft_data.get('error')}")
+                logger.info(f"ℹ️  User can still use camera without face recognition")
+                return
+
+            encrypted_nft_package = nft_data.get('nft_package')
+            if not encrypted_nft_package:
+                logger.warning(f"⚠️  Recognition token data missing for {wallet_address}")
+                return
+
+            logger.info(f"✅ Found recognition token on-chain for {wallet_address}")
+
+            # Step 2: Decrypt the facial embedding via biometric security service
+            # Create a temporary biometric session for decryption
+            bio_session_response = requests.post(
+                'http://biometric-security:5003/api/biometric/create-session',
+                json={
+                    'wallet_address': wallet_address,
+                    'session_duration': 300  # 5 min temporary session
+                },
+                timeout=10
+            )
+
+            if bio_session_response.status_code != 200:
+                logger.error(f"❌ Failed to create biometric session for decryption: HTTP {bio_session_response.status_code}")
+                return
+
+            bio_session = bio_session_response.json()
+            session_id = bio_session['session_id']
+
+            # Decrypt the embedding
+            decrypt_response = requests.post(
+                'http://biometric-security:5003/api/biometric/decrypt-for-session',
+                json={
+                    'nft_package': encrypted_nft_package,
+                    'wallet_address': wallet_address,
+                    'session_id': session_id
+                },
+                timeout=15
+            )
+
+            if decrypt_response.status_code != 200:
+                logger.error(f"❌ Failed to decrypt recognition token: HTTP {decrypt_response.status_code}")
+                # Clean up biometric session
+                requests.post(
+                    'http://biometric-security:5003/api/biometric/purge-session',
+                    json={'session_id': session_id},
+                    timeout=10
+                )
+                return
+
+            decrypt_data = decrypt_response.json()
+            embedding = decrypt_data.get('embedding')
+
+            if not embedding:
+                logger.error(f"❌ Decryption returned no embedding for {wallet_address}")
+                return
+
+            logger.info(f"✅ Successfully decrypted recognition token for {wallet_address}, embedding size: {len(embedding)}")
+
+            # Step 3: Store the embedding locally for recognition
+            import numpy as np
+            embedding_array = np.array(embedding, dtype=np.float32)
+
+            if self.face_service:
+                with self.face_service._faces_lock:
+                    self.face_service._face_embeddings[wallet_address] = embedding_array
+                    self.face_service._face_names[wallet_address] = wallet_address[:8] + "..."
+                    self.face_service._face_metadata[wallet_address] = {
+                        'source': 'on_chain_recognition_token',
+                        'timestamp': int(time.time()),
+                        'decrypted_on_check_in': True
+                    }
+
+                # Save to disk for persistence
+                self.face_service.save_face_embedding(wallet_address, embedding_array, {
+                    'source': 'on_chain_recognition_token',
+                    'timestamp': int(time.time())
+                })
+
+                logger.info(f"✅ Recognition token activated for {wallet_address} - face recognition enabled!")
+
+            # Clean up biometric session after successful decryption
+            requests.post(
+                'http://biometric-security:5003/api/biometric/purge-session',
+                json={'session_id': session_id},
+                timeout=10
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Error fetching/decrypting recognition token for {wallet_address}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+    def update_user_seen(self, wallet_address: str):
+        """
+        Update the last_seen timestamp for a user.
+        Call this when a user's face is recognized in frame.
+        """
+        if wallet_address in self.checked_in_wallets:
+            self.last_seen_at[wallet_address] = time.time()
+            # Optional: log only periodically to avoid spam
+            # logger.debug(f"👁️  User {wallet_address[:8]}... seen in frame")
+
+    def _monitor_face_based_checkout(self):
+        """
+        Monitor checked-in users with recognition tokens for auto-checkout.
+        If a user hasn't been seen in frame for 30 minutes, auto check them out.
+        """
+        try:
+            if not self.face_service:
+                return  # Can't monitor without face service
+
+            now = time.time()
+
+            for wallet_address in list(self.checked_in_wallets):
+                # Only auto-checkout users who have a local face embedding
+                # (users with recognition tokens)
+                if not self._has_local_face_embedding(wallet_address):
+                    continue  # Skip, will rely on on-chain timeout
+
+                last_seen = self.last_seen_at.get(wallet_address, now)
+                time_not_seen = now - last_seen
+
+                # Check if user hasn't been seen for the threshold (30 minutes = 1800 seconds)
+                if time_not_seen > self.auto_checkout_threshold:
+                    logger.info(f"👋 User {wallet_address[:8]}... not seen for {int(time_not_seen/60)} minutes - initiating auto check-out")
+                    self._send_checkout_transaction(wallet_address)
+
+        except Exception as e:
+            logger.error(f"❌ Error monitoring face-based checkout: {e}")
+
+    def _has_local_face_embedding(self, wallet_address: str) -> bool:
+        """Check if a user has a face embedding stored locally"""
+        if not self.face_service:
+            return False
+
+        return wallet_address in self.face_service._face_embeddings
+
+    def _send_checkout_transaction(self, wallet_address: str):
+        """
+        Send a check-out transaction to the blockchain for a user.
+        This is called when auto-checkout is triggered.
+        """
+        try:
+            # For now, just call the existing check-out handler
+            # The actual blockchain transaction is handled by the frontend
+            # But we can still clean up the local session
+            self._handle_check_out(wallet_address)
+
+            # TODO: In the future, we might want to send an actual blockchain transaction here
+            # This would require the Jetson to have a wallet/keypair to sign transactions
+            # For now, rely on the 2-hour on-chain timeout as a fallback
+
+        except Exception as e:
+            logger.error(f"❌ Error sending checkout transaction for {wallet_address}: {e}")
+
     def force_sync(self):
         """Force an immediate sync with blockchain state"""
         logger.info("🔄 Force syncing blockchain state...")

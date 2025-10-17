@@ -10,6 +10,7 @@ export function PinataSettings() {
   const [apiKey, setApiKey] = useState('');
   const [apiSecret, setApiSecret] = useState('');
   const [isSaved, setIsSaved] = useState(false);
+  const [usePipeStorage, setUsePipeStorage] = useState(false);
 
   // Load credentials on mount
   useEffect(() => {
@@ -17,6 +18,10 @@ export function PinataSettings() {
     setJwt(creds.PINATA_JWT || '');
     setApiKey(creds.PINATA_API_KEY || '');
     setApiSecret(creds.PINATA_API_SECRET || '');
+
+    // Load storage preference
+    const storageType = localStorage.getItem('mmoment_storage_type');
+    setUsePipeStorage(storageType === 'pipe');
   }, []);
 
   // Handle form submission
@@ -27,6 +32,18 @@ export function PinataSettings() {
       PINATA_API_KEY: apiKey,
       PINATA_API_SECRET: apiSecret
     });
+
+    // Save storage preference
+    localStorage.setItem('mmoment_storage_type', usePipeStorage ? 'pipe' : 'pinata');
+
+    setIsSaved(true);
+    setTimeout(() => setIsSaved(false), 3000);
+  };
+
+  const handleStorageToggle = () => {
+    const newValue = !usePipeStorage;
+    setUsePipeStorage(newValue);
+    localStorage.setItem('mmoment_storage_type', newValue ? 'pipe' : 'pinata');
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 3000);
   };
@@ -52,7 +69,7 @@ export function PinataSettings() {
     <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
       <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold">Pinata IPFS Settings</h2>
+          <h2 className="text-xl font-semibold">Storage Settings</h2>
           <button
             onClick={() => setIsOpen(false)}
             className="text-gray-500 hover:text-gray-700"
@@ -71,10 +88,39 @@ export function PinataSettings() {
           </p>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-medium text-gray-900">Storage Provider</h3>
+              <p className="text-sm text-gray-600 mt-1">
+                {usePipeStorage ? 'Using Pipe Network (User-owned storage)' : 'Using Pinata IPFS'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleStorageToggle}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                usePipeStorage ? 'bg-green-500' : 'bg-gray-200'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  usePipeStorage ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+          {usePipeStorage && (
+            <div className="mt-3 text-sm text-green-700 bg-green-50 p-2 rounded">
+              Gallery will fetch content from user's Pipe storage account
+            </div>
+          )}
+        </div>
+
+        <form onSubmit={handleSubmit} className={usePipeStorage ? 'opacity-50 pointer-events-none' : ''}>
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              JWT Token
+              Pinata JWT Token
             </label>
             <input
               type="text"
@@ -87,7 +133,7 @@ export function PinataSettings() {
           
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              API Key
+              Pinata API Key
             </label>
             <input
               type="text"
@@ -100,7 +146,7 @@ export function PinataSettings() {
           
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              API Secret
+              Pinata API Secret
             </label>
             <input
               type="text"

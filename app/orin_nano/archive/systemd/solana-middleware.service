@@ -1,0 +1,14 @@
+[Unit]
+Description=Solana Middleware Service
+After=network.target
+
+[Service]
+Type=simple
+User=azuolas
+WorkingDirectory=/home/azuolas/mmoment/app/orin_nano/solana_middleware
+ExecStart=/usr/bin/python3 /home/azuolas/mmoment/app/orin_nano/solana_middleware/solana_middleware.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target 
