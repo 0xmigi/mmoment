@@ -27,6 +27,9 @@ services:
       - ./services/camera-service:/app
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - /dev:/dev
+    devices:
+      - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
     environment:
       - DISPLAY=${DISPLAY}
       - NVIDIA_VISIBLE_DEVICES=all
