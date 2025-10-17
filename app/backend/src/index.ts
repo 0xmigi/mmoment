@@ -4,7 +4,7 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import { config } from "dotenv";
-import { createFirestarterSDK } from "firestarter-sdk";
+// import { createFirestarterSDK } from "firestarter-sdk"; // TODO: Re-enable
 import dgram from "dgram";
 import net from "net";
 // Using built-in fetch in Node.js 18+
@@ -13,9 +13,10 @@ import net from "net";
 config();
 
 // Initialize the Firestarter SDK
-const firestarterSDK = createFirestarterSDK({
-  baseUrl: "https://us-west-00-firestarter.pipenetwork.com",
-});
+// TODO: Re-enable
+const firestarterSDK: any = null; // createFirestarterSDK({
+//   baseUrl: "https://us-west-00-firestarter.pipenetwork.com",
+// });
 
 // In-memory storage for pipe accounts (simple key-value store)
 // The SDK handles auth, we just store the mapping
