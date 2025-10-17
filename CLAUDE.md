@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ CRITICAL GIT COMMIT RULES ⚠️
+
+**NEVER INCLUDE THE FOLLOWING IN GIT COMMITS:**
+- ❌ "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+- ❌ "Co-Authored-By: Claude <noreply@anthropic.com>"
+- ❌ ANY self-citation or Anthropic/Claude attribution
+- ❌ ANY mention of Claude Code, Anthropic, or AI assistance
+
+**Git commits must be clean and professional with NO AI attribution whatsoever.**
+
 ## Project Overview
 
 MMOMENT is a blockchain-integrated camera network system that creates identity-aware cameras for capturing social content. The system combines AI-powered computer vision, Solana blockchain integration, and real-time streaming to enable seamless content capture at predictable interaction points.

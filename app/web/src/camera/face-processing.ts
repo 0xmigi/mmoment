@@ -210,6 +210,9 @@ class FaceProcessingService {
       console.log('[FaceProcessing] Image data length after processing:', processedImageData.length);
       console.log('[FaceProcessing] Image data starts with:', processedImageData.substring(0, 20));
 
+      console.log('[FaceProcessing] 🔍 DEBUG: options received:', options);
+      console.log('[FaceProcessing] 🔍 DEBUG: options.walletAddress =', options.walletAddress);
+
       const payload: any = {
         image_data: processedImageData,
         quality_assessment: options.requestQuality !== false,
@@ -218,8 +221,13 @@ class FaceProcessingService {
       // Add wallet address if provided (needed for local enrollment)
       if (options.walletAddress) {
         payload.wallet_address = options.walletAddress;
-        console.log('[FaceProcessing] Adding wallet address to embedding extraction for local enrollment:', options.walletAddress);
+        console.log('[FaceProcessing] ✅ Adding wallet address to payload:', options.walletAddress);
+      } else {
+        console.warn('[FaceProcessing] ⚠️ NO wallet address in options - payload will NOT include wallet_address!');
       }
+
+      console.log('[FaceProcessing] 🔍 DEBUG: Final payload keys:', Object.keys(payload));
+      console.log('[FaceProcessing] 🔍 DEBUG: Final payload.wallet_address =', payload.wallet_address);
 
       // Add encryption option if requested
       if (options.encrypt) {

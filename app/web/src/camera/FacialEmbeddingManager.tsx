@@ -51,7 +51,7 @@ export function FacialEmbeddingManager({
       const userPublicKey = new PublicKey(walletAddress);
       const [faceDataPda] = PublicKey.findProgramAddressSync(
         [
-          Buffer.from("face-nft"), // MUST match the Solana program seed
+          Buffer.from("recognition-token"), // MUST match the Solana program seed
           userPublicKey.toBuffer(),
         ],
         program.programId

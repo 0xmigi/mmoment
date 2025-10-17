@@ -188,11 +188,12 @@ export function PhoneSelfieEnrollment({
         return;
       }
 
-      console.log('[PhoneSelfieEnrollment] 📞 CALLING faceProcessingService.processFacialEmbedding');
+      console.log('[PhoneSelfieEnrollment] 📞 CALLING faceProcessingService.processFacialEmbedding FOR QUALITY CHECK');
+      console.log('[PhoneSelfieEnrollment] 📞 primaryWallet.address =', primaryWallet?.address);
       const result = await faceProcessingService.processFacialEmbedding(
         imageData,
         connectedCameraUrl,
-        { requestQuality: true, encrypt: false }
+        { requestQuality: true, encrypt: false, walletAddress: primaryWallet?.address }
       );
       console.log('[PhoneSelfieEnrollment] 📞 RESULT from faceProcessingService:', result);
 
@@ -324,26 +325,28 @@ export function PhoneSelfieEnrollment({
         throw new Error('Failed to deserialize transaction from Jetson. The API may not be returning a proper Solana transaction.');
       }
 
-      // Sign the pre-built transaction
-      console.log('[PhoneSelfieEnrollment] ✍️ Getting wallet signer...');
-      let signer, signedTx, signature: string;
+      // Sign the pre-built transaction - MUST use getSigner() to get the actual signer object
+      console.log('[PhoneSelfieEnrollment] ✍️ Signing transaction with wallet...');
 
-      try {
-        signer = await (primaryWallet as any).getSigner();
-        console.log('[PhoneSelfieEnrollment] ✍️ Wallet signer obtained');
-      } catch (signerError) {
-        console.error('[PhoneSelfieEnrollment] ❌ Failed to get wallet signer:', signerError);
-        throw new Error(`Wallet connection failed: ${signerError instanceof Error ? signerError.message : 'Unknown error'}`);
+      let signature: string;
+
+      if (!primaryWallet) {
+        throw new Error('Wallet not connected');
       }
 
-      try {
-        console.log('[PhoneSelfieEnrollment] ✍️ Signing pre-built transaction...');
-        signedTx = await signer.signTransaction(transaction);
-        console.log('[PhoneSelfieEnrollment] ✍️ Transaction signed successfully');
-      } catch (signingError) {
-        console.error('[PhoneSelfieEnrollment] ❌ Transaction signing failed:', signingError);
-        throw new Error(`Transaction signing failed: ${signingError instanceof Error ? signingError.message : 'User rejected or signing failed'}`);
-      }
+      // Sign transaction - use EXACT same pattern as working CameraView takePhoto
+      console.log('[PhoneSelfieEnrollment] ✍️ Signing transaction with wallet...');
+      console.log('[PhoneSelfieEnrollment] 🔍 primaryWallet type check:', {
+        hasPrimaryWallet: !!primaryWallet,
+        hasGetSigner: !!(primaryWallet as any)?.getSigner,
+        getSignerType: typeof (primaryWallet as any)?.getSigner,
+        walletChain: (primaryWallet as any)?.chain,
+        walletConnector: (primaryWallet as any)?.connector?.name
+      });
+
+      const signer = await (primaryWallet as any).getSigner();
+      const signedTx = await signer.signTransaction(transaction);
+      console.log('[PhoneSelfieEnrollment] ✅ Transaction signed successfully');
 
       // Submit signed transaction to Solana blockchain
       console.log('[PhoneSelfieEnrollment] 🚀 Submitting transaction to Solana blockchain...');
