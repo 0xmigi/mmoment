@@ -455,9 +455,8 @@ finalhandler@1.3.1:
     statuses "2.0.1"
     unpipe "~1.0.0"
 
-"firestarter-sdk@git+https://github.com/0xmigi/firestarter-sdk.git":
+"firestarter-sdk@file:../../packages/firestarter-sdk":
   version "0.1.0-alpha.1"
-  resolved "git+https://github.com/0xmigi/firestarter-sdk.git#cb9ed46dbaf5e08a644d4de8f119f4f184ec3ad3"
   dependencies:
     "@noble/hashes" "^1.3.0"
     axios "^1.6.0"
