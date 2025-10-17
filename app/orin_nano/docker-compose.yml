@@ -35,9 +35,9 @@ services:
       # CAMERA_PDA will be set dynamically after device registration
       - SOLANA_RPC_URL=https://api.devnet.solana.com
       # Cloudflare Configuration for DNS automation
-      - CLOUDFLARE_API_TOKEN=KZkPikyV6obPoDlxTFwtKxfrxukonzAEpzVs4JM3
-      - CLOUDFLARE_ZONE_ID=a14bb2a85b1c73cab3b192854218f2fb
-      - CLOUDFLARE_TUNNEL_ID=6257e873-7943-4b85-b8a3-72b5b9d0a500
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
+      - CLOUDFLARE_ZONE_ID=${CLOUDFLARE_ZONE_ID}
+      - CLOUDFLARE_TUNNEL_ID=${CLOUDFLARE_TUNNEL_ID}
       # Livepeer Configuration (Current Active Account)
       - LIVEPEER_API_KEY=${LIVEPEER_API_KEY}
       - LIVEPEER_STREAM_KEY=${LIVEPEER_STREAM_KEY}
