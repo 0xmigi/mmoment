@@ -4,7 +4,8 @@ import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { FacialEmbeddingStatus } from '../../hooks/useFacialEmbeddingStatus';
 import { useProgram } from '../../anchor/setup';
 import { useState, useMemo } from 'react';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, Transaction } from '@solana/web3.js';
+import { useConnection } from '@solana/wallet-adapter-react';
 
 interface RecognitionTokenModalProps {
   isOpen: boolean;
@@ -13,11 +14,13 @@ interface RecognitionTokenModalProps {
   onStatusUpdate?: () => void;
 }
 
-export function RecognitionTokenModal({ isOpen, onClose, status }: RecognitionTokenModalProps) {
+export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate }: RecognitionTokenModalProps) {
   const { primaryWallet } = useDynamicContext();
   const { program } = useProgram();
+  const { connection } = useConnection();
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [showConfirmDelete, setShowConfirmDelete] = useState(false);
 
   // Calculate the PDA for this wallet's face data
   const faceDataPda = useMemo(() => {
@@ -38,36 +41,81 @@ export function RecognitionTokenModal({ isOpen, onClose, status }: RecognitionTo
     }
   }, [primaryWallet?.address, program]);
 
+  const confirmDelete = () => {
+    setShowConfirmDelete(true);
+  };
+
   const handleDeleteRecognitionToken = async () => {
-    if (!primaryWallet?.address || !program) {
+    if (!primaryWallet?.address || !program || !connection) {
       setDeleteError('Wallet or program not available');
       return;
     }
 
-    if (!confirm('Are you sure you want to permanently delete your Recognition Token? This action cannot be undone.')) {
-      return;
-    }
-
+    setShowConfirmDelete(false);
     setIsDeleting(true);
     setDeleteError(null);
 
     try {
-      // Note: This will fail until we add a delete_face instruction to the Solana program
-      // For now, we'll show a message explaining the limitation
-      throw new Error('Delete functionality requires a program update. Contact support to remove your Recognition Token.');
+      const userPublicKey = new PublicKey(primaryWallet.address);
 
-      // Future implementation would be:
-      // const tx = await program.methods
-      //   .deleteFace()
-      //   .accounts({
-      //     user: userPublicKey,
-      //     faceData: faceDataPda,
-      //     systemProgram: SystemProgram.programId,
-      //   })
-      //   .rpc();
+      // Calculate the PDA for the recognition token
+      const [recognitionTokenPda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('recognition-token'),
+          userPublicKey.toBuffer()
+        ],
+        program.programId
+      );
+
+      console.log('[DeleteToken] Deleting recognition token...');
+      console.log('[DeleteToken] User:', userPublicKey.toString());
+      console.log('[DeleteToken] Recognition Token PDA:', recognitionTokenPda.toString());
+
+      // Build the transaction instruction - DO NOT use .rpc()
+      const instruction = await program.methods
+        .deleteRecognitionToken()
+        .accounts({
+          user: userPublicKey,
+          recognitionToken: recognitionTokenPda,
+        })
+        .instruction();
+
+      // Create transaction with recent blockhash
+      const { blockhash } = await connection.getLatestBlockhash();
+      const transaction = new Transaction({
+        feePayer: userPublicKey,
+        blockhash,
+        lastValidBlockHeight: (await connection.getLatestBlockhash()).lastValidBlockHeight,
+      }).add(instruction);
+
+      console.log('[DeleteToken] Transaction built, signing with Dynamic wallet...');
+
+      // Sign transaction using Dynamic's getSigner() - EXACT pattern from working enrollment code
+      const signer = await (primaryWallet as any).getSigner();
+      const signedTx = await signer.signTransaction(transaction);
+
+      console.log('[DeleteToken] Transaction signed successfully');
+
+      // Submit signed transaction to Solana
+      console.log('[DeleteToken] Submitting transaction to Solana...');
+      const signature = await connection.sendRawTransaction(signedTx.serialize());
+      console.log('[DeleteToken] Transaction sent! Signature:', signature);
+
+      // Wait for confirmation
+      console.log('[DeleteToken] Waiting for confirmation...');
+      await connection.confirmTransaction(signature, 'confirmed');
+      console.log('[DeleteToken] ✅ Recognition token deleted successfully!');
+
+      // Close the modal and refresh status
+      onClose();
+
+      // Trigger a status update if callback is provided
+      if (onStatusUpdate) {
+        onStatusUpdate();
+      }
 
     } catch (error) {
-      console.error('Delete error:', error);
+      console.error('[DeleteToken] Delete error:', error);
       setDeleteError(error instanceof Error ? error.message : 'Failed to delete Recognition Token');
     } finally {
       setIsDeleting(false);
@@ -221,18 +269,48 @@ export function RecognitionTokenModal({ isOpen, onClose, status }: RecognitionTo
                   </div>
                 )}
 
-                <button
-                  onClick={handleDeleteRecognitionToken}
-                  disabled={isDeleting}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
-                >
-                  {isDeleting ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
+                {showConfirmDelete ? (
+                  <>
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-3">
+                      <div className="text-sm text-orange-900 font-medium mb-1">
+                        Are you sure?
+                      </div>
+                      <div className="text-sm text-orange-700">
+                        This will permanently delete your Recognition Token. You will reclaim ~0.009 SOL rent.
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setShowConfirmDelete(false)}
+                        disabled={isDeleting}
+                        className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleDeleteRecognitionToken}
+                        disabled={isDeleting}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+                      >
+                        {isDeleting ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-4 h-4" />
+                        )}
+                        {isDeleting ? 'Deleting...' : 'Confirm Delete'}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <button
+                    onClick={confirmDelete}
+                    disabled={isDeleting}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+                  >
                     <Trash2 className="w-4 h-4" />
-                  )}
-                  {isDeleting ? 'Deleting...' : 'Delete Token'}
-                </button>
+                    Delete Token
+                  </button>
+                )}
               </div>
             ) : (
               <div className="space-y-4">
