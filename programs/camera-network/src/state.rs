@@ -72,7 +72,7 @@ pub struct SessionFeatures {
 #[account]
 pub struct RecognitionToken {
     pub user: Pubkey,                  // 32 bytes - owner
-    pub encrypted_embedding: Vec<u8>,  // ~600-900 bytes - ACTUAL encrypted data
+    pub encrypted_embedding: Vec<u8>,  // ~2800-3000 bytes - Fernet-encrypted embedding (512 floats + Fernet overhead)
     pub created_at: i64,               // 8 bytes - creation timestamp
     pub version: u8,                   // 1 byte - token version (incremented on regeneration)
     pub bump: u8,                      // 1 byte - PDA bump
@@ -80,8 +80,8 @@ pub struct RecognitionToken {
     pub source: u8,                    // 1 byte - 0=phone_selfie, 1=jetson_capture, 2=imported
 }
 
-// Space calculation: 8 + 32 + 4 + 1024 + 8 + 1 + 1 + 4 + 64 + 1 = 1147 bytes
-// Rent: ~0.009 SOL (one-time, reclaimable)
+// Space calculation: 8 + 32 + 4 + 3200 + 8 + 1 + 1 + 4 + 64 + 1 = 3323 bytes
+// Rent: ~0.024 SOL (one-time, reclaimable)
 
 // User gesture configuration
 #[account]

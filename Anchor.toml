@@ -15,7 +15,7 @@ url = "https://api.apr.dev"
 
 [provider]
 cluster = "Devnet"
-wallet = "./test-wallet.json"
+wallet = "target/deploy/camera_network-authority.json"
 
 [scripts]
 camera-network = "node scripts/camera-network-client.js"
