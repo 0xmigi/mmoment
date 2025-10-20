@@ -251,7 +251,7 @@ def decrypt_face_embedding():
 
 @app.route('/verify-nft-ownership', methods=['POST'])
 def verify_nft_ownership():
-    """Verify that a wallet owns a valid NFT for facial recognition"""
+    """Verify that a wallet owns a valid recognition token"""
     try:
         data = request.json
         wallet_address = data.get('wallet_address')
@@ -388,8 +388,8 @@ def api_wallet_status():
         logger.error(f"Error getting wallet status: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/blockchain/mint-facial-nft', methods=['POST'])
-def mint_facial_nft():
+@app.route('/api/blockchain/mint-recognition-token', methods=['POST'])
+def mint_recognition_token():
     """Process encrypted facial embedding and prepare transaction for frontend signing"""
     try:
         from solders.instruction import Instruction, AccountMeta
@@ -419,16 +419,14 @@ def mint_facial_nft():
         logger.info(f"[TRANSACTION] Encrypted embedding size: {len(encrypted_embedding_bytes)} bytes")
 
         # Solana transaction size limit: 1232 bytes total
-        # Transaction overhead (signatures, accounts, etc): ~200 bytes
-        # Instruction overhead (discriminator + vec length): 12 bytes
-        # Available for embedding: 1232 - 200 - 12 = ~1020 bytes
-        # But the Rust program validates max 1024, so we use a safe value
-        MAX_EMBEDDING_SIZE = 950  # Safe margin to stay under 1232 total
+        # With int8 quantization: 512 bytes raw + Fernet overhead (~300-400 bytes) = ~900 bytes
+        # Transaction overhead (signatures, accounts, discriminator): ~250 bytes
+        # Safe limit for instruction data: 950 bytes
+        MAX_EMBEDDING_SIZE = 950
 
         if len(encrypted_embedding_bytes) > MAX_EMBEDDING_SIZE:
-            logger.warning(f"[TRANSACTION] Embedding too large ({len(encrypted_embedding_bytes)} bytes), truncating to {MAX_EMBEDDING_SIZE} bytes")
-            # Truncate to fit within Solana limits
-            encrypted_embedding_bytes = encrypted_embedding_bytes[:MAX_EMBEDDING_SIZE]
+            logger.error(f"[TRANSACTION] Embedding too large ({len(encrypted_embedding_bytes)} bytes), exceeds max {MAX_EMBEDDING_SIZE} bytes")
+            return jsonify({"error": f"Encrypted embedding too large: {len(encrypted_embedding_bytes)} bytes (max {MAX_EMBEDDING_SIZE})"}), 400
 
         logger.info(f"[TRANSACTION] Final embedding size for transaction: {len(encrypted_embedding_bytes)} bytes")
 
@@ -519,7 +517,7 @@ def mint_facial_nft():
         })
 
     except Exception as e:
-        logger.error(f"Error preparing facial NFT transaction: {e}")
+        logger.error(f"Error preparing recognition token transaction: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
@@ -612,57 +610,90 @@ def get_checked_in_users_api():
         logger.error(f"Error getting checked-in users: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/blockchain/get-facial-nft', methods=['GET'])
-def get_facial_nft_api():
-    """Get a user's facial NFT (encrypted recognition token) from on-chain"""
+@app.route('/api/blockchain/get-recognition-token', methods=['GET'])
+def get_recognition_token_api():
+    """Get a user's recognition token (encrypted embedding) from on-chain"""
     try:
         from solders.pubkey import Pubkey
-        from anchorpy import Provider, Wallet
 
         wallet_address = request.args.get('wallet_address')
 
         if not wallet_address:
             return jsonify({"error": "wallet_address is required"}), 400
 
-        logger.info(f"🔍 Fetching facial NFT for wallet: {wallet_address}")
+        logger.info(f"🔍 Fetching recognition token for wallet: {wallet_address}")
 
         # Convert wallet address to Pubkey
         user_pubkey = Pubkey.from_string(wallet_address)
 
         # ✅ Derive the RecognitionToken PDA: seeds = ["recognition-token", user_pubkey]
+        program_id = Pubkey.from_string(CAMERA_PROGRAM_ID)
         recognition_token_pda, bump = Pubkey.find_program_address(
             [b"recognition-token", bytes(user_pubkey)],
-            CAMERA_PROGRAM_ID
+            program_id
         )
 
         logger.info(f"📍 Recognition Token PDA: {recognition_token_pda}")
 
         # Fetch the account data from Solana
-        account_info = client.get_account_info(recognition_token_pda)
+        account_info = solana_client.get_account_info(recognition_token_pda)
 
         if not account_info.value:
-            logger.warning(f"⚠️  No facial NFT found for wallet {wallet_address}")
+            logger.warning(f"⚠️  No recognition token found for wallet {wallet_address}")
             return jsonify({
                 "success": False,
                 "error": "No recognition token found on-chain for this wallet"
             }), 404
 
         # The account data contains the encrypted embedding
-        # Anchor account layout: 8-byte discriminator + account data
+        # Anchor account layout: 8-byte discriminator + Borsh-serialized RecognitionToken struct
         account_data = account_info.value.data
 
+        # Parse account data based on encoding
+        if isinstance(account_data, list) and len(account_data) > 0:
+            if isinstance(account_data[0], str):
+                # Base64 encoded
+                account_bytes = base64.b64decode(account_data[0])
+            else:
+                # Already bytes
+                account_bytes = bytes(account_data)
+        elif isinstance(account_data, bytes):
+            account_bytes = account_data
+        else:
+            logger.error(f"❌ Unknown account data format: {type(account_data)}")
+            return jsonify({"error": "Failed to parse account data"}), 500
+
         # Skip the 8-byte Anchor discriminator
-        encrypted_data = account_data[8:]
+        data_offset = 8
 
-        logger.info(f"✅ Found facial NFT for {wallet_address}, size: {len(encrypted_data)} bytes")
+        # Parse Borsh-encoded RecognitionToken:
+        # - user: Pubkey (32 bytes)
+        # - encrypted_embedding: Vec<u8> (4 bytes length + data)
+        # - created_at: i64 (8 bytes)
+        # - version: u8 (1 byte)
+        # - bump: u8 (1 byte)
+        # - display_name: Option<String>
+        # - source: u8 (1 byte)
 
-        # The encrypted_data is the raw bytes from on-chain
-        # We need to return it in the same format as the biometric service expects
+        # Skip user pubkey (32 bytes)
+        data_offset += 32
+
+        # Read Vec<u8> length (4 bytes, little-endian)
+        vec_length = int.from_bytes(account_bytes[data_offset:data_offset+4], byteorder='little')
+        data_offset += 4
+
+        logger.info(f"📊 Vec<u8> length from Borsh: {vec_length} bytes")
+
+        # Read the encrypted embedding bytes
+        encrypted_data = account_bytes[data_offset:data_offset+vec_length]
+
+        logger.info(f"✅ Found recognition token for {wallet_address}, embedding size: {len(encrypted_data)} bytes, base64 will be: {len(base64.b64encode(encrypted_data).decode('utf-8'))} chars")
+
         # Convert to base64 for JSON transport
         encrypted_embedding_b64 = base64.b64encode(encrypted_data).decode('utf-8')
 
-        # Return in NFT package format (matching what biometric service expects)
-        nft_package = {
+        # Return token package format (matching what biometric service expects)
+        token_package = {
             "encrypted_embedding": encrypted_embedding_b64,
             "wallet_address": wallet_address,
             "source": "on_chain",
@@ -672,12 +703,12 @@ def get_facial_nft_api():
         return jsonify({
             "success": True,
             "wallet_address": wallet_address,
-            "nft_package": nft_package,
+            "token_package": token_package,
             "recognition_token_pda": str(recognition_token_pda)
         })
 
     except Exception as e:
-        logger.error(f"❌ Error fetching facial NFT: {e}")
+        logger.error(f"❌ Error fetching recognition token: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500

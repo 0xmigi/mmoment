@@ -1041,7 +1041,7 @@ def register_routes(app):
 
                             if encrypt_response.status_code == 200:
                                 encrypted_data = encrypt_response.json()
-                                nft_package = encrypted_data['nft_package']
+                                token_package = encrypted_data['token_package']
 
                                 logger.info(f"Successfully encrypted embedding for {wallet_address[:8]}...")
 
@@ -1049,10 +1049,10 @@ def register_routes(app):
                                 logger.info(f"Building Solana transaction for wallet: {wallet_address}")
 
                                 solana_response = requests.post(
-                                    'http://solana-middleware:5001/api/blockchain/mint-facial-nft',
+                                    'http://solana-middleware:5001/api/blockchain/mint-recognition-token',
                                     json={
                                         'wallet_address': wallet_address,
-                                        'face_embedding': nft_package,  # Send encrypted NFT package
+                                        'face_embedding': token_package,  # Send encrypted token package
                                         'biometric_session_id': session_id
                                     },
                                     timeout=30

@@ -22,11 +22,12 @@ class BlockchainSessionSync:
     """
     
     def __init__(self, solana_middleware_url: str = None):
-        self.solana_middleware_url = solana_middleware_url or os.environ.get('SOLANA_MIDDLEWARE_URL', 'http://solana-middleware:5001')
+        # Camera service uses host networking, so connect via localhost
+        self.solana_middleware_url = solana_middleware_url or os.environ.get('SOLANA_MIDDLEWARE_URL', 'http://localhost:5001')
         logger.info(f"🔧 BlockchainSessionSync initialized with URL: {self.solana_middleware_url}")
         self.is_running = False
         self.sync_thread = None
-        self.sync_interval = 60  # Check blockchain state every 60 seconds (much less aggressive)
+        self.sync_interval = 10  # Check blockchain state every 10 seconds for faster recognition token activation
         self.stop_event = threading.Event()
         
         # Track current state
@@ -93,26 +94,39 @@ class BlockchainSessionSync:
         try:
             # Get current checked-in wallets from blockchain via Solana middleware
             checked_in_wallets = self._get_checked_in_wallets()
-            
+
             if checked_in_wallets is None:
                 return  # Error getting blockchain state
-                
+
             # Compare with current state
             newly_checked_in = checked_in_wallets - self.checked_in_wallets
             newly_checked_out = self.checked_in_wallets - checked_in_wallets
-            
+
             # Handle new check-ins
             for wallet in newly_checked_in:
                 self._handle_check_in(wallet)
-                
+
             # Handle check-outs
             for wallet in newly_checked_out:
                 self._handle_check_out(wallet)
-                
+
+            # ✅ FIX: On first sync (startup/restart), fetch recognition tokens for all already-checked-in users
+            # This ensures users who were already checked-in before camera restart get their tokens loaded
+            is_first_sync = (self.last_sync == 0)
+            if is_first_sync and len(checked_in_wallets) > 0:
+                logger.info(f"🔄 First sync detected - fetching recognition tokens for {len(checked_in_wallets)} already checked-in users")
+                for wallet in checked_in_wallets:
+                    # Only fetch token, don't re-create session (already handled by newly_checked_in)
+                    if wallet not in newly_checked_in:
+                        logger.info(f"🔐 Fetching recognition token for existing user: {wallet[:8]}...")
+                        self._fetch_and_decrypt_recognition_token(wallet)
+                        # Initialize last_seen tracking
+                        self.last_seen_at[wallet] = time.time()
+
             # Update current state
             self.checked_in_wallets = checked_in_wallets
             self.last_sync = time.time()
-            
+
             # Log status periodically
             if len(checked_in_wallets) > 0:
                 logger.debug(f"🔗 {len(checked_in_wallets)} wallets checked in on-chain: {list(checked_in_wallets)}")
@@ -262,7 +276,7 @@ class BlockchainSessionSync:
 
             # Step 1: Get the recognition token (encrypted facial embedding) from Solana middleware
             response = requests.get(
-                f"{self.solana_middleware_url}/api/blockchain/get-facial-nft",
+                f"{self.solana_middleware_url}/api/blockchain/get-recognition-token",
                 params={'wallet_address': wallet_address},
                 timeout=10
             )
@@ -272,14 +286,14 @@ class BlockchainSessionSync:
                 logger.info(f"ℹ️  User can still use camera without face recognition")
                 return
 
-            nft_data = response.json()
-            if not nft_data.get('success'):
-                logger.warning(f"⚠️  No recognition token found for {wallet_address}: {nft_data.get('error')}")
+            token_data = response.json()
+            if not token_data.get('success'):
+                logger.warning(f"⚠️  No recognition token found for {wallet_address}: {token_data.get('error')}")
                 logger.info(f"ℹ️  User can still use camera without face recognition")
                 return
 
-            encrypted_nft_package = nft_data.get('nft_package')
-            if not encrypted_nft_package:
+            encrypted_token_package = token_data.get('token_package')
+            if not encrypted_token_package:
                 logger.warning(f"⚠️  Recognition token data missing for {wallet_address}")
                 return
 
@@ -307,7 +321,7 @@ class BlockchainSessionSync:
             decrypt_response = requests.post(
                 'http://biometric-security:5003/api/biometric/decrypt-for-session',
                 json={
-                    'nft_package': encrypted_nft_package,
+                    'token_package': encrypted_token_package,
                     'wallet_address': wallet_address,
                     'session_id': session_id
                 },
