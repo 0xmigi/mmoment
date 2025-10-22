@@ -625,24 +625,34 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       console.log('✅ [CameraModal] Gas-sponsored check-in successful!', signature);
       console.log('Check-in transaction confirmed successfully');
 
-      // Send user profile to camera for display name labeling using new API
-      if (primaryProfile?.displayName || primaryProfile?.username) {
-        try {
-          const profileResult = await unifiedCameraService.sendUserProfile(camera.id, {
-            wallet_address: primaryWallet.address,
-            display_name: primaryProfile.displayName,
-            username: primaryProfile.username
-          });
+      // 🎉 NEW: Use unified check-in endpoint - no more race conditions!
+      // This triggers immediate blockchain sync and recognition token loading
+      console.log('🚀 [CameraModal] Calling unified check-in endpoint...');
+      try {
+        const checkinResult = await unifiedCameraService.checkin(camera.id, {
+          wallet_address: primaryWallet.address,
+          display_name: primaryProfile?.displayName,
+          username: primaryProfile?.username,
+          transaction_signature: signature
+        });
 
-          if (profileResult.success) {
-            console.log('[CameraModal] User profile sent successfully to camera');
-          } else {
-            console.warn('[CameraModal] Failed to send user profile to camera:', profileResult.error);
-          }
-        } catch (err) {
-          console.warn('[CameraModal] Failed to send display name to camera:', err);
-          // Don't fail the check-in if this fails
+        if (checkinResult.success) {
+          console.log('✅ [CameraModal] Unified check-in successful!', checkinResult.data);
+          console.log(`   Display name: ${checkinResult.data?.display_name}`);
+          console.log(`   Session ID: ${checkinResult.data?.session_id}`);
+        } else {
+          console.warn('⚠️  [CameraModal] Unified check-in failed:', checkinResult.error);
+          // Fall back to old method if unified check-in fails
+          console.log('📤 [CameraModal] Falling back to separate profile send...');
+          await unifiedCameraService.sendUserProfile(camera.id, {
+            wallet_address: primaryWallet.address,
+            display_name: primaryProfile?.displayName,
+            username: primaryProfile?.username
+          });
         }
+      } catch (err) {
+        console.error('❌ [CameraModal] Unified check-in error:', err);
+        // Don't fail the overall check-in if this fails
       }
 
       setIsCheckedIn(true);

@@ -354,7 +354,18 @@ class BlockchainSessionSync:
             if self.face_service:
                 with self.face_service._faces_lock:
                     self.face_service._face_embeddings[wallet_address] = embedding_array
-                    self.face_service._face_names[wallet_address] = wallet_address[:8] + "..."
+
+                    # ✅ FIX: Use existing display name if available (from unified check-in), don't overwrite!
+                    # Only set fallback wallet address if no profile was provided
+                    if wallet_address not in self.face_service._face_names:
+                        # No profile set yet - use get_user_display_name helper which checks user_profiles
+                        display_name = self.face_service.get_user_display_name(wallet_address)
+                        self.face_service._face_names[wallet_address] = display_name
+                        logger.info(f"📝 Set display name for {wallet_address[:8]}...: {display_name}")
+                    else:
+                        existing_name = self.face_service._face_names[wallet_address]
+                        logger.info(f"✓ Keeping existing display name for {wallet_address[:8]}...: {existing_name}")
+
                     self.face_service._face_metadata[wallet_address] = {
                         'source': 'on_chain_recognition_token',
                         'timestamp': int(time.time()),
@@ -367,7 +378,8 @@ class BlockchainSessionSync:
                     'timestamp': int(time.time())
                 })
 
-                logger.info(f"✅ Recognition token activated for {wallet_address} - face recognition enabled!")
+                final_display_name = self.face_service._face_names.get(wallet_address, wallet_address[:8])
+                logger.info(f"✅ Recognition token activated for {wallet_address[:8]}... ({final_display_name}) - face recognition enabled!")
 
             # Clean up biometric session after successful decryption
             requests.post(
