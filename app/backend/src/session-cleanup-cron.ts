@@ -1,8 +1,8 @@
 // Session Cleanup Cron Job
 // Automatically checks out expired sessions and collects rent as reward
-import { Connection, Keypair, PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet } from '@coral-xyz/anchor';
-import IDL from './camera_network_idl.json';
+import { IDL } from './idl';
 import { Server } from 'socket.io';
 
 const CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
