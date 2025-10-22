@@ -1041,7 +1041,7 @@ def register_routes(app):
 
                             if encrypt_response.status_code == 200:
                                 encrypted_data = encrypt_response.json()
-                                nft_package = encrypted_data['nft_package']
+                                token_package = encrypted_data['token_package']
 
                                 logger.info(f"Successfully encrypted embedding for {wallet_address[:8]}...")
 
@@ -1049,10 +1049,10 @@ def register_routes(app):
                                 logger.info(f"Building Solana transaction for wallet: {wallet_address}")
 
                                 solana_response = requests.post(
-                                    'http://solana-middleware:5001/api/blockchain/mint-facial-nft',
+                                    'http://solana-middleware:5001/api/blockchain/mint-recognition-token',
                                     json={
                                         'wallet_address': wallet_address,
-                                        'face_embedding': nft_package,  # Send encrypted NFT package
+                                        'face_embedding': token_package,  # Send encrypted token package
                                         'biometric_session_id': session_id
                                     },
                                     timeout=30
@@ -1319,27 +1319,133 @@ def register_routes(app):
                 'success': False,
                 'error': 'Wallet address is required'
             }), 400
-        
+
         # Remove profile from both face services
         services = get_services()
-        
+
         # Remove from simple face service
         face_service = services['face']
         face_service.remove_user_profile(wallet_address)
-        
+
         # Remove from GPU face service if available
         if 'gpu_face' in services:
             gpu_face_service = services['gpu_face']
             gpu_face_service.remove_user_profile(wallet_address)
-        
+
         camera_pda = get_camera_pda()
         logger.info(f"[PROFILE-DELETE] Camera {camera_pda[:8]}... removed profile for {wallet_address}")
-        
+
         return jsonify({
             'success': True,
             'wallet_address': wallet_address,
             'message': 'User profile deleted successfully'
         })
+
+    @app.route('/api/checkin', methods=['POST'])
+    def api_unified_checkin():
+        """
+        Unified check-in endpoint - handles everything in one atomic operation.
+        Called by frontend after on-chain check-in transaction confirms.
+
+        No more race conditions - this triggers immediate blockchain sync and recognition token loading.
+        """
+        data = request.json or {}
+        wallet_address = data.get('wallet_address')
+        display_name = data.get('display_name')
+        username = data.get('username')
+        transaction_signature = data.get('transaction_signature')  # Optional: for verification
+
+        if not wallet_address:
+            return jsonify({
+                'success': False,
+                'error': 'Wallet address is required'
+            }), 400
+
+        camera_pda = get_camera_pda()
+        logger.info(f"🎉 [UNIFIED-CHECKIN] User {wallet_address[:8]}... checking in to camera {camera_pda[:8]}...")
+
+        try:
+            services = get_services()
+
+            # Step 1: Store user profile FIRST (before loading recognition token)
+            user_profile = {
+                'wallet_address': wallet_address,
+                'display_name': display_name,
+                'username': username,
+                'camera_pda': camera_pda,
+                'updated_at': int(time.time()),
+                'transaction_signature': transaction_signature
+            }
+
+            face_service = services['face']
+            face_service.store_user_profile(wallet_address, user_profile)
+
+            if 'gpu_face' in services:
+                gpu_face_service = services['gpu_face']
+                gpu_face_service.store_user_profile(wallet_address, user_profile)
+
+            resolved_display_name = display_name or username or wallet_address[:8]
+            logger.info(f"✅ [UNIFIED-CHECKIN] Stored profile for {wallet_address[:8]}...: {resolved_display_name}")
+
+            # Step 2: Create camera session
+            session_service = services['session']
+            session_info = session_service.create_session(wallet_address, user_profile)
+            logger.info(f"✅ [UNIFIED-CHECKIN] Created session {session_info['session_id']} for {wallet_address[:8]}...")
+
+            # Step 3: Enable face boxes
+            face_service.enable_boxes(True)
+            logger.info(f"✅ [UNIFIED-CHECKIN] Face boxes enabled")
+
+            # Step 4: Force immediate blockchain sync to load recognition token
+            # This triggers the recognition token fetch without waiting for polling
+            from services.blockchain_session_sync import get_blockchain_session_sync
+            blockchain_sync = get_blockchain_session_sync()
+            blockchain_sync.force_sync()
+            logger.info(f"✅ [UNIFIED-CHECKIN] Forced immediate blockchain sync for recognition token loading")
+
+            # Step 5: Pre-authorize Pipe storage session for fast uploads
+            import asyncio
+            from services.pipe_storage_service import pre_authorize_user_session
+
+            def run_pipe_authorization():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    auth_success = loop.run_until_complete(pre_authorize_user_session(wallet_address))
+                    if auth_success:
+                        logger.info(f"✅ [UNIFIED-CHECKIN] Pipe session pre-authorized for {wallet_address[:8]}...")
+                    else:
+                        logger.warning(f"⚠️  [UNIFIED-CHECKIN] Pipe session pre-authorization failed for {wallet_address[:8]}...")
+                except Exception as e:
+                    logger.error(f"❌ [UNIFIED-CHECKIN] Pipe pre-authorization error: {e}")
+                finally:
+                    loop.close()
+
+            # Start Pipe authorization in background thread
+            import threading
+            pipe_auth_thread = threading.Thread(target=run_pipe_authorization, daemon=True)
+            pipe_auth_thread.start()
+
+            logger.info(f"🎉 [UNIFIED-CHECKIN] Complete! User {resolved_display_name} successfully checked in")
+
+            return jsonify({
+                'success': True,
+                'wallet_address': wallet_address,
+                'display_name': resolved_display_name,
+                'session_id': session_info['session_id'],
+                'camera_pda': camera_pda,
+                'camera_url': f"https://{camera_pda.lower()}.mmoment.xyz/api",
+                'message': 'Check-in successful - camera activated with face recognition'
+            })
+
+        except Exception as e:
+            logger.error(f"❌ [UNIFIED-CHECKIN] Error during check-in for {wallet_address[:8]}...: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return jsonify({
+                'success': False,
+                'error': f'Check-in failed: {str(e)}'
+            }), 500
     
     @app.route('/api/camera/info', methods=['GET'])
     @sign_response

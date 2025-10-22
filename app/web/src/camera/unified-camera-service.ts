@@ -716,6 +716,71 @@ export class UnifiedCameraService {
   }
 
   /**
+   * Unified check-in - handles everything in one atomic operation
+   * Eliminates race conditions by triggering immediate blockchain sync
+   */
+  public async checkin(cameraId: string, profile: {
+    wallet_address: string;
+    display_name?: string;
+    username?: string;
+    transaction_signature?: string;
+  }): Promise<CameraActionResponse<{
+    wallet_address: string;
+    display_name: string;
+    session_id: string;
+    camera_pda: string;
+    camera_url: string;
+    message: string;
+  }>> {
+    try {
+      this.log(`[DEBUG] Unified check-in to camera: ${cameraId}`, profile);
+
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        this.log(`[ERROR] Camera not found: ${cameraId}`);
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const apiUrl = (camera as any).apiUrl;
+      const url = `${apiUrl}/api/checkin`;
+      this.log(`[DEBUG] Making unified check-in request to: ${url}`);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        credentials: 'omit',
+        body: JSON.stringify(profile)
+      });
+
+      this.log(`[DEBUG] Response status: ${response.status}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.log(`[ERROR] HTTP error response: ${errorText}`);
+        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      this.log(`[SUCCESS] Unified check-in successful for ${cameraId}`, result);
+
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      this.log(`[ERROR] Error during unified check-in to ${cameraId}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unified check-in failed'
+      };
+    }
+  }
+
+  /**
    * Get user profile from camera
    */
   public async getUserProfile(cameraId: string, walletAddress: string): Promise<CameraActionResponse<{

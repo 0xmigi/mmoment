@@ -6,8 +6,13 @@
 - **Program ID**: E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL
 - **Program Name**: camera_network
 - **Network**: Devnet
+- **Upgrade Authority**: BRmmwLEvvfGYUsJEzPD7PTzvwKqzPXaBhGxPrN3Lvoed
 
-## Recovery Instructions
+## Important Files
+- `camera_network-keypair.json` - Program address keypair (E67W...)
+- `camera_network-authority.json` - Upgrade authority wallet (BRmm...)
+
+## Program Keypair Recovery
 If the keypair in `target/deploy/camera_network-keypair.json` is lost, regenerate it using:
 
 ```bash

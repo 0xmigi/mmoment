@@ -396,9 +396,9 @@ class TimelineService {
     }
 
     // Update to handle new event types without type errors
-    const validEventTypes = ['initialization', 'user_connected', 'photo_captured', 
-      'video_recorded', 'stream_started', 'stream_ended', 'check_in', 'check_out', 'face_enrolled'];
-      
+    const validEventTypes = ['initialization', 'user_connected', 'photo_captured',
+      'video_recorded', 'stream_started', 'stream_ended', 'check_in', 'check_out', 'auto_check_out', 'face_enrolled'];
+
     if (!validEventTypes.includes(event.type)) {
       console.warn(`Unknown event type: ${event.type}, treating as initialization`);
       event = { ...event, type: 'initialization' as any };

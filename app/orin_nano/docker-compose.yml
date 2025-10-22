@@ -10,11 +10,14 @@ services:
     build:
       context: ./services/camera-service
       dockerfile: Dockerfile
-    ports:
-      - "5002:5002"
+    network_mode: host
+    # Note: ports not needed with host networking - container uses host's network directly
+    extra_hosts:
+      - "biometric-security:172.20.0.3"
+      - "solana-middleware:172.20.0.2"
     volumes:
       - ./data/images:/app/photos
-      - ./data/videos:/app/videos  
+      - /mnt/nvme/mmoment-videos:/app/videos  # Using NVMe SSD for video storage  
       - ./data/face_embeddings:/app/face_embeddings
       - ./data/faces:/app/faces
       - ./data/recordings:/app/recordings
@@ -24,13 +27,28 @@ services:
       - ./services/camera-service:/app
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - /dev:/dev
+    devices:
+      - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
     environment:
       - DISPLAY=${DISPLAY}
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,display
       - BIOMETRIC_SECURITY_URL=http://biometric-security:5003
       - SOLANA_MIDDLEWARE_URL=http://solana-middleware:5001
-      # Blockchain Configuration  
+      # Backend connection for WebRTC signaling and device registration
+      - BACKEND_HOST=mmoment-production.up.railway.app
+      - BACKEND_PORT=443
+      - BACKEND_URL=https://mmoment-production.up.railway.app
+      # WebRTC will auto-detect external IP or use TURN relay
+      - WEBRTC_EXTERNAL_IP=192.168.1.232
+      # aiortc port range for minimal WebRTC
+      - AIORTC_RTP_MIN_PORT=10000
+      - AIORTC_RTP_MAX_PORT=10100
+      # Force Python to use the external IP for socket binding
+      - HOSTNAME=192.168.1.232
+      - HOST=192.168.1.232
+      # Blockchain Configuration
       - CAMERA_PROGRAM_ID=E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL
       # CAMERA_PDA will be set dynamically after device registration
       - SOLANA_RPC_URL=https://api.devnet.solana.com
@@ -48,8 +66,6 @@ services:
       # - LIVEPEER_STREAM_KEY=${LIVEPEER_STREAM_KEY_OLD}
       # - LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
       # - LIVEPEER_PLAYBACK_ID=${LIVEPEER_PLAYBACK_ID_OLD}
-    networks:
-      - mmoment-network
     runtime: nvidia
     privileged: true
     cap_add:
@@ -75,7 +91,8 @@ services:
       context: ./services/biometric-security
       dockerfile: Dockerfile
     networks:
-      - mmoment-network
+      mmoment-network:
+        ipv4_address: 172.20.0.3
     environment:
       - SOLANA_MIDDLEWARE_URL=http://solana-middleware:5001
     restart: unless-stopped
@@ -96,7 +113,8 @@ services:
     volumes:
       - ./data/config:/app/config  # Share device config with camera service
     networks:
-      - mmoment-network
+      mmoment-network:
+        ipv4_address: 172.20.0.2
     environment:
       - SOLANA_NETWORK=devnet
       - SOLANA_RPC_URL=https://api.devnet.solana.com
@@ -112,4 +130,7 @@ services:
 
 networks:
   mmoment-network:
-    driver: bridge 
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16 

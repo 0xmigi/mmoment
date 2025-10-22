@@ -10,6 +10,11 @@ pub struct CheckIn<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
 
+    /// The payer for the session account - usually the user, but can be a sponsor
+    /// This allows gas sponsorship where a third party pays for account rent
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
     #[account(
         mut,
         constraint = camera.is_active @ CameraNetworkError::CameraInactive
@@ -21,7 +26,7 @@ pub struct CheckIn<'info> {
 
     #[account(
         init,
-        payer = user,
+        payer = payer,  // Changed from 'user' to 'payer' to allow gas sponsorship
         space = 8 + 32 + 32 + 8 + 8 + 8 + 5 + 1, // Added auto_checkout_at = 102 bytes
         seeds = [
             b"session",

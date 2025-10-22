@@ -6,6 +6,7 @@ import { SystemProgram, Keypair, PublicKey } from '@solana/web3.js';
 import { Camera, Loader } from 'lucide-react';
 import { CONFIG } from '../core/config';
 import { unifiedIpfsService } from '../storage/ipfs/unified-ipfs-service';
+import { buildAndSponsorTransaction } from '../services/gas-sponsorship';
 
 interface ActivateCameraProps {
   onCameraUpdate?: (params: { address: string; isLive: boolean }) => void;
@@ -17,7 +18,7 @@ interface ActivateCameraProps {
 export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void> }, ActivateCameraProps>(
   ({ onPhotoCapture, onStatusUpdate }, ref) => {
     const { primaryWallet } = useDynamicContext();
-    useConnection();
+    const { connection } = useConnection();
     const { program } = useProgram();
     const [loading, setLoading] = useState(false);
     const [, setShowTooltip] = useState(false);
@@ -76,6 +77,7 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
         // Build accounts object
         const checkInAccounts: any = {
           user: userPublicKey,
+          payer: userPublicKey, // Will be replaced by fee payer in gas sponsorship
           camera: cameraKeypair.publicKey,
           session: sessionPda,
           systemProgram: SystemProgram.programId,
@@ -86,10 +88,59 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
           checkInAccounts.recognitionToken = recognitionTokenPda;
         }
 
-        // Use checkIn instead of recordActivity
-        await program.methods.checkIn(false)
-        .accounts(checkInAccounts)
-        .rpc();
+        // Build transaction for gas sponsorship
+        const buildCheckInTx = async () => {
+          const tx = await program.methods.checkIn(false)
+            .accounts(checkInAccounts)
+            .transaction();
+          return tx;
+        };
+
+        // Check if user has enabled sponsored gas
+        const sponsoredGasEnabled = localStorage.getItem('sponsoredGasEnabled') === 'true';
+        let signature: string;
+
+        if (sponsoredGasEnabled) {
+          // Use sponsored gas if enabled
+          console.log('[ActivateCamera] Attempting sponsored check-in...');
+          const signer = await (primaryWallet as any).getSigner();
+          const sponsorResult = await buildAndSponsorTransaction(
+            userPublicKey,
+            signer,
+            buildCheckInTx,
+            'check_in',
+            connection
+          );
+
+          if (!sponsorResult.success) {
+            // Fallback to regular transaction if sponsorship fails
+            console.log('[ActivateCamera] Sponsorship failed, falling back to regular transaction');
+            const tx = await buildCheckInTx();
+            const { blockhash } = await connection.getLatestBlockhash();
+            tx.recentBlockhash = blockhash;
+            tx.feePayer = userPublicKey;
+
+            const signedTx = await signer.signTransaction(tx);
+            signature = await connection.sendRawTransaction(signedTx.serialize());
+            await connection.confirmTransaction(signature, 'confirmed');
+          } else {
+            signature = sponsorResult.signature!;
+            console.log('✅ [ActivateCamera] Sponsored check-in successful!', signature);
+          }
+        } else {
+          // Use regular self-paid transaction
+          console.log('[ActivateCamera] Executing regular check-in transaction...');
+          const tx = await buildCheckInTx();
+          const { blockhash } = await connection.getLatestBlockhash();
+          tx.recentBlockhash = blockhash;
+          tx.feePayer = userPublicKey;
+
+          const signer = await (primaryWallet as any).getSigner();
+          const signedTx = await signer.signTransaction(tx);
+          signature = await connection.sendRawTransaction(signedTx.serialize());
+          await connection.confirmTransaction(signature, 'confirmed');
+          console.log('✅ [ActivateCamera] Check-in transaction confirmed successfully:', signature);
+        }
 
         onStatusUpdate?.({ type: 'info', message: 'Taking picture...' });
         const apiUrl = `${CONFIG.CAMERA_API_URL}/api/capture`;

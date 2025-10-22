@@ -59,6 +59,8 @@ const getEventText = (type: TimelineEventType): string => {
       return 'checked in to the camera';
     case 'check_out':
       return 'checked out from the camera';
+    case 'auto_check_out':
+      return 'was checked out by cleanup bot';
     case 'face_enrolled':
       return 'enrolled their face';
   }
@@ -315,7 +317,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
 
   const getEventIcon = (type: TimelineEventType, isOverlay = false) => {
     const iconClass = `w-4 h-4 ${isOverlay ? 'text-white' : ''}`;
-    
+
     switch (type) {
       case 'initialization':
         return <Power className={iconClass} />;
@@ -331,6 +333,8 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
         return <User className={`${iconClass} ${isOverlay ? '' : 'text-green-500'}`} />;
       case 'check_out':
         return <User className={`${iconClass} ${isOverlay ? '' : 'text-gray-400'}`} />;
+      case 'auto_check_out':
+        return <User className={`${iconClass} ${isOverlay ? '' : 'text-orange-500'}`} />;
       case 'face_enrolled':
         return <User className={`${iconClass} ${isOverlay ? '' : 'text-blue-500'}`} />;
       default:

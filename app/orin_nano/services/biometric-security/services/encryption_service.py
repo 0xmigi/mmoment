@@ -32,21 +32,28 @@ class BiometricEncryptionService:
         
         logger.info("Biometric encryption service initialized")
     
-    def generate_encryption_key(self, wallet_address: str, session_id: str) -> bytes:
+    def generate_encryption_key(self, wallet_address: str, session_id: str = None) -> bytes:
         """
-        Generate deterministic encryption key for a wallet/session combination
-        
+        Generate deterministic encryption key for a wallet
+
+        For recognition tokens that need to work across sessions/cameras,
+        the key is derived ONLY from wallet address (session_id is ignored).
+
         Args:
             wallet_address: User's wallet address
-            session_id: Current session ID
-            
+            session_id: Ignored for recognition tokens (kept for API compatibility)
+
         Returns:
             32-byte encryption key
         """
         try:
-            # Combine wallet + session + static component for key material
-            key_material = f"{wallet_address}-{session_id}-facial-embedding".encode()
-            
+            # Use ONLY wallet address for key material (session-independent)
+            # This makes recognition tokens portable across sessions and cameras
+            key_material_str = f"{wallet_address}-recognition-token-v2"
+            key_material = key_material_str.encode()
+
+            logger.info(f"🔑 Generating encryption key with material: {wallet_address[:8]}...-recognition-token-v2")
+
             # Use PBKDF2 for key derivation
             kdf = PBKDF2HMAC(
                 algorithm=hashes.SHA256(),
@@ -54,13 +61,13 @@ class BiometricEncryptionService:
                 salt=self.salt,
                 iterations=self.iterations,
             )
-            
+
             # Generate and encode key
             key = base64.urlsafe_b64encode(kdf.derive(key_material))
-            
-            logger.debug(f"Generated encryption key for wallet: {wallet_address[:8]}...")
+
+            logger.info(f"🔑 Generated wallet-only encryption key for: {wallet_address[:8]}...")
             return key
-            
+
         except Exception as e:
             logger.error(f"Error generating encryption key: {e}")
             raise
@@ -88,11 +95,16 @@ class BiometricEncryptionService:
             # Generate encryption key
             key = self.generate_encryption_key(wallet_address, session_id)
             cipher = Fernet(key)
-            
+
+            # Quantize embedding from float32 to int8 for smaller on-chain storage
+            # This reduces size from 2048 bytes to 512 bytes with minimal accuracy loss (~1-3%)
+            # Original range: typically [-1, 1] for normalized embeddings
+            embedding_quantized = np.clip(embedding_array * 127, -128, 127).astype(np.int8)
+
             # Prepare embedding data
-            embedding_bytes = embedding_array.tobytes()
-            embedding_shape = embedding_array.shape
-            embedding_dtype = str(embedding_array.dtype)
+            embedding_bytes = embedding_quantized.tobytes()
+            embedding_shape = embedding_array.shape  # Keep original shape
+            embedding_dtype = 'int8'  # Mark as quantized
             
             # Create comprehensive metadata
             full_metadata = {
@@ -137,15 +149,15 @@ class BiometricEncryptionService:
             logger.error(f"Error encrypting embedding: {e}")
             raise
     
-    def decrypt_embedding(self, nft_package: Dict, wallet_address: str, session_id: str) -> np.ndarray:
+    def decrypt_embedding(self, token_package: Dict, wallet_address: str, session_id: str) -> np.ndarray:
         """
-        Decrypt a facial embedding from NFT package
-        
+        Decrypt a facial embedding from recognition token package
+
         Args:
-            nft_package: The NFT package containing encrypted embedding
-            wallet_address: User's wallet address  
+            token_package: The recognition token package containing encrypted embedding
+            wallet_address: User's wallet address
             session_id: Current session ID
-            
+
         Returns:
             Decrypted InsightFace embedding as numpy array
         """
@@ -153,35 +165,76 @@ class BiometricEncryptionService:
             # Generate decryption key (same as encryption key)
             key = self.generate_encryption_key(wallet_address, session_id)
             cipher = Fernet(key)
-            
-            # Decrypt metadata first to validate
-            encrypted_metadata = base64.b64decode(nft_package['encrypted_metadata'])
-            
-            metadata_json = cipher.decrypt(encrypted_metadata)
-            metadata = json.loads(metadata_json.decode())
-            
-            # Validate wallet address matches
-            if metadata['wallet_address'] != wallet_address:
-                raise ValueError("Wallet address mismatch in NFT package")
-            
-            # Verify this is an InsightFace embedding
-            if metadata.get('model') != 'insightface':
-                logger.warning(f"NFT package model type: {metadata.get('model')} (expected: insightface)")
-            
-            # Decrypt embedding data
-            encrypted_embedding = base64.b64decode(nft_package['encrypted_embedding'])
-            
-            embedding_bytes = cipher.decrypt(encrypted_embedding)
-            
-            # Reconstruct numpy array with original shape and dtype
-            embedding = np.frombuffer(embedding_bytes, dtype=metadata['dtype'])
-            embedding = embedding.reshape(metadata['shape'])
-            
+
+            # Check if this is an on-chain recognition token (no encrypted_metadata)
+            # or a full token package (with encrypted_metadata)
+            has_metadata = 'encrypted_metadata' in token_package
+
+            if has_metadata:
+                # Full token package with metadata - original flow
+                encrypted_metadata = base64.b64decode(token_package['encrypted_metadata'])
+                metadata_json = cipher.decrypt(encrypted_metadata)
+                metadata = json.loads(metadata_json.decode())
+
+                # Validate wallet address matches
+                if metadata['wallet_address'] != wallet_address:
+                    raise ValueError("Wallet address mismatch in token package")
+
+                # Verify this is an InsightFace embedding
+                if metadata.get('model') != 'insightface':
+                    logger.warning(f"Token package model type: {metadata.get('model')} (expected: insightface)")
+
+                # Decrypt embedding data
+                encrypted_embedding = base64.b64decode(token_package['encrypted_embedding'])
+                embedding_bytes = cipher.decrypt(encrypted_embedding)
+
+                # Reconstruct numpy array with original shape and dtype
+                embedding = np.frombuffer(embedding_bytes, dtype=metadata['dtype'])
+                embedding = embedding.reshape(metadata['shape'])
+
+                # Dequantize from int8 back to float32 if needed
+                if metadata['dtype'] == 'int8':
+                    embedding = embedding.astype(np.float32) / 127.0
+
+            else:
+                # On-chain recognition token (minimal format - just encrypted embedding)
+                logger.info(f"Decrypting on-chain recognition token for wallet: {wallet_address[:8]}...")
+
+                try:
+                    # Decrypt embedding data
+                    # The token_package['encrypted_embedding'] is base64-encoded bytes from blockchain
+                    encrypted_embedding_b64 = token_package['encrypted_embedding']
+                    logger.info(f"Encrypted embedding (base64) length: {len(encrypted_embedding_b64)} chars")
+
+                    # The encrypted_embedding_b64 is OUR base64 encoding of Fernet's output
+                    # Fernet.decrypt() expects the Fernet token (which is already base64 internally)
+                    # So we need to decode our outer base64 layer first
+                    fernet_token = base64.b64decode(encrypted_embedding_b64)
+                    embedding_bytes = cipher.decrypt(fernet_token)
+                    logger.info(f"Decrypted embedding size: {len(embedding_bytes)} bytes")
+
+                    # Reconstruct numpy array - embeddings are now quantized to int8 (512 bytes)
+                    embedding = np.frombuffer(embedding_bytes, dtype=np.int8)
+
+                    # Validate size
+                    if len(embedding) != 512:
+                        logger.warning(f"Unexpected embedding size: {len(embedding)} (expected 512)")
+
+                    # Dequantize from int8 back to float32
+                    embedding = embedding.astype(np.float32) / 127.0
+                    logger.info(f"Dequantized embedding to float32, range: [{embedding.min():.3f}, {embedding.max():.3f}]")
+
+                except Exception as decrypt_error:
+                    logger.error(f"Failed to decrypt on-chain token: {type(decrypt_error).__name__}: {str(decrypt_error)}")
+                    raise
+
             logger.info(f"Successfully decrypted embedding for wallet: {wallet_address[:8]}...")
             return embedding
-            
+
         except Exception as e:
-            logger.error(f"Error decrypting embedding: {e}")
+            logger.error(f"Error decrypting embedding: {type(e).__name__}: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             raise
     
     def validate_nft_package(self, nft_package: Dict) -> bool:

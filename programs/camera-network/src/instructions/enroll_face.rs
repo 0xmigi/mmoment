@@ -10,7 +10,7 @@ pub struct UpsertRecognitionToken<'info> {
     #[account(
         init_if_needed,
         payer = user,
-        space = 8 + 32 + 4 + 1024 + 8 + 1 + 1 + 4 + 64 + 1, // 1147 bytes
+        space = 8 + 32 + 4 + 1024 + 8 + 1 + 1 + 4 + 64 + 1, // 1147 bytes - standard size for single transaction
         seeds = [b"recognition-token", user.key().as_ref()],
         bump
     )]
@@ -28,7 +28,7 @@ pub fn handler(
     let user = &ctx.accounts.user;
     let token = &mut ctx.accounts.recognition_token;
 
-    // Validate embedding size (1-1024 bytes)
+    // Validate embedding size (1-1024 bytes for single transaction)
     require!(
         !encrypted_embedding.is_empty() && encrypted_embedding.len() <= 1024,
         CameraNetworkError::RecognitionTokenTooLarge

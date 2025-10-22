@@ -8,6 +8,7 @@ export type TimelineEventType =
   | 'stream_ended'
   | 'check_in'
   | 'check_out'
+  | 'auto_check_out'
   | 'face_enrolled';
 
 export interface TimelineUser {

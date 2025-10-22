@@ -107,10 +107,10 @@ def encrypt_embedding():
         )
         
         logger.info(f"Encrypted embedding for wallet: {data['wallet_address']}")
-        
+
         return jsonify({
             'success': True,
-            'nft_package': result,
+            'token_package': result,
             'wallet_address': data['wallet_address']
         }), 200
         
@@ -133,19 +133,21 @@ def decrypt_for_session():
     try:
         data = request.json
         
-        # Validate required fields
-        required_fields = ['nft_package', 'wallet_address', 'session_id']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({'error': f'Missing required field: {field}'}), 400
-        
+        # Validate required fields - accept both old 'nft_package' and new 'token_package' for compatibility
+        token_package = data.get('token_package') or data.get('nft_package')
+        if not token_package:
+            return jsonify({'error': 'Missing required field: token_package'}), 400
+
+        if 'wallet_address' not in data or 'session_id' not in data:
+            return jsonify({'error': 'Missing required fields: wallet_address, session_id'}), 400
+
         # Validate session
         if not session_manager.validate_session(data['session_id'], data['wallet_address']):
             return jsonify({'error': 'Invalid session'}), 403
-        
+
         # Decrypt the embedding
         decrypted_embedding = encryption_service.decrypt_embedding(
-            nft_package=data['nft_package'],
+            token_package=token_package,
             wallet_address=data['wallet_address'],
             session_id=data['session_id']
         )

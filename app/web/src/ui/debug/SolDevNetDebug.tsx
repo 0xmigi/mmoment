@@ -883,7 +883,8 @@ export function SolDevNetDebug() {
           closer: userPublicKey,
           camera: cameraPublicKey,
           session: sessionPda,
-          sessionUser: userPublicKey, // Rent goes back to user
+          sessionUser: userPublicKey,
+          rentDestination: userPublicKey, // Rent goes back to user
         };
         
         console.log('Check-out accounts:', accountsObj);
