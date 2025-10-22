@@ -96,33 +96,51 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
           return tx;
         };
 
-        // Use gas sponsorship!
-        console.log('🎉 Attempting gas-sponsored check-in...');
-        const signer = await (primaryWallet as any).getSigner();
-        const result = await buildAndSponsorTransaction(
-          userPublicKey,
-          signer,
-          buildCheckInTx,
-          'check_in',
-          connection
-        );
+        // Check if user has enabled sponsored gas
+        const sponsoredGasEnabled = localStorage.getItem('sponsoredGasEnabled') === 'true';
+        let signature: string;
 
-        if (!result.success) {
-          if (result.requiresUserPayment) {
-            onStatusUpdate?.({
-              type: 'error',
-              message: 'You\'ve used all 10 free interactions! Please add SOL to your wallet.'
-            });
+        if (sponsoredGasEnabled) {
+          // Use sponsored gas if enabled
+          console.log('[ActivateCamera] Attempting sponsored check-in...');
+          const signer = await (primaryWallet as any).getSigner();
+          const sponsorResult = await buildAndSponsorTransaction(
+            userPublicKey,
+            signer,
+            buildCheckInTx,
+            'check_in',
+            connection
+          );
+
+          if (!sponsorResult.success) {
+            // Fallback to regular transaction if sponsorship fails
+            console.log('[ActivateCamera] Sponsorship failed, falling back to regular transaction');
+            const tx = await buildCheckInTx();
+            const { blockhash } = await connection.getLatestBlockhash();
+            tx.recentBlockhash = blockhash;
+            tx.feePayer = userPublicKey;
+
+            const signedTx = await signer.signTransaction(tx);
+            signature = await connection.sendRawTransaction(signedTx.serialize());
+            await connection.confirmTransaction(signature, 'confirmed');
           } else {
-            onStatusUpdate?.({
-              type: 'error',
-              message: result.error || 'Transaction failed'
-            });
+            signature = sponsorResult.signature!;
+            console.log('✅ [ActivateCamera] Sponsored check-in successful!', signature);
           }
-          return;
-        }
+        } else {
+          // Use regular self-paid transaction
+          console.log('[ActivateCamera] Executing regular check-in transaction...');
+          const tx = await buildCheckInTx();
+          const { blockhash } = await connection.getLatestBlockhash();
+          tx.recentBlockhash = blockhash;
+          tx.feePayer = userPublicKey;
 
-        console.log('✅ Gas-sponsored check-in successful!', result.signature);
+          const signer = await (primaryWallet as any).getSigner();
+          const signedTx = await signer.signTransaction(tx);
+          signature = await connection.sendRawTransaction(signedTx.serialize());
+          await connection.confirmTransaction(signature, 'confirmed');
+          console.log('✅ [ActivateCamera] Check-in transaction confirmed successfully:', signature);
+        }
 
         onStatusUpdate?.({ type: 'info', message: 'Taking picture...' });
         const apiUrl = `${CONFIG.CAMERA_API_URL}/api/capture`;

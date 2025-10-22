@@ -17,6 +17,11 @@ interface BalanceData {
   lastUpdated: Date | null;
 }
 
+interface SponsorshipQuota {
+  used: number;
+  total: number;
+}
+
 export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps) {
   const { primaryWallet } = useDynamicContext();
   const { connection } = useConnection();
@@ -27,6 +32,10 @@ export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps)
     lastUpdated: null,
   });
   const [copied, setCopied] = useState(false);
+  const [sponsorshipQuota, setSponsorshipQuota] = useState<SponsorshipQuota>({ used: 0, total: 10 });
+  const [sponsoredGasEnabled, setSponsoredGasEnabled] = useState(() => {
+    return localStorage.getItem('sponsoredGasEnabled') === 'true';
+  });
 
   const fetchBalance = async () => {
     if (!primaryWallet?.address || !connection) {
@@ -64,8 +73,25 @@ export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps)
   useEffect(() => {
     if (isOpen) {
       fetchBalance();
+      fetchSponsorshipQuota();
     }
   }, [isOpen, primaryWallet?.address, connection]);
+
+  const fetchSponsorshipQuota = async () => {
+    if (!primaryWallet?.address) return;
+
+    try {
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://mmoment-backend-production.up.railway.app';
+      const response = await fetch(`${backendUrl}/api/sponsorship-status/${primaryWallet.address}`);
+      if (response.ok) {
+        const data = await response.json();
+        setSponsorshipQuota({ used: data.used || 0, total: data.limit || 10 });
+      }
+    } catch (error) {
+      console.error('Error fetching sponsorship quota:', error);
+      // Keep default 0/10 on error
+    }
+  };
 
   const handleCopyAddress = async () => {
     if (!primaryWallet?.address) return;
@@ -83,6 +109,12 @@ export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps)
     if (primaryWallet?.address) {
       window.open(`https://solscan.io/account/${primaryWallet.address}?cluster=devnet`, '_blank');
     }
+  };
+
+  const handleToggleSponsoredGas = () => {
+    const newValue = !sponsoredGasEnabled;
+    setSponsoredGasEnabled(newValue);
+    localStorage.setItem('sponsoredGasEnabled', String(newValue));
   };
 
   const formatAddress = (address: string, start = 6, end = 6) => {
@@ -146,6 +178,48 @@ export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps)
                 >
                   <ExternalLink className="w-4 h-4" />
                 </button>
+              </div>
+            </div>
+
+            {/* Sponsored Gas Banner */}
+            <div className="mb-4 pb-3 border-b border-gray-200">
+              <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-3 border border-blue-100">
+                <div className="flex justify-between items-start mb-2">
+                  <div className="flex-1">
+                    <div className="text-xs font-medium text-blue-900 mb-1">🎁 Free Transactions</div>
+                    <div className="text-xs text-blue-700">
+                      First 10 transactions on us!
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-lg font-bold text-blue-600">
+                      {sponsorshipQuota.total - sponsorshipQuota.used}/{sponsorshipQuota.total}
+                    </div>
+                    <div className="text-xs text-blue-600">remaining</div>
+                  </div>
+                </div>
+                <div className="w-full bg-blue-200/50 rounded-full h-1.5 mb-2">
+                  <div
+                    className="bg-blue-500 h-1.5 rounded-full transition-all"
+                    style={{ width: `${((sponsorshipQuota.total - sponsorshipQuota.used) / sponsorshipQuota.total) * 100}%` }}
+                  />
+                </div>
+                {sponsorshipQuota.total - sponsorshipQuota.used > 0 ? (
+                  <button
+                    onClick={handleToggleSponsoredGas}
+                    className={`w-full py-2 px-3 rounded-md text-xs font-medium transition-colors ${
+                      sponsoredGasEnabled
+                        ? 'bg-green-500 text-white hover:bg-green-600'
+                        : 'bg-white text-blue-600 border border-blue-300 hover:bg-blue-50'
+                    }`}
+                  >
+                    {sponsoredGasEnabled ? '✓ Sponsored Gas Enabled' : 'Enable Sponsored Gas'}
+                  </button>
+                ) : (
+                  <div className="text-xs text-center text-orange-600 py-2">
+                    All free transactions used. Add SOL to continue.
+                  </div>
+                )}
               </div>
             </div>
 
