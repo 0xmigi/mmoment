@@ -98,7 +98,7 @@ async function runCleanup() {
     // Check each session for expiration
     for (const accountInfo of sessionAccounts) {
       try {
-        const session = program.coder.accounts.decode('UserSession', accountInfo.account.data);
+        const session = program.coder.accounts.decode('userSession', accountInfo.account.data);
         const sessionPubkey = accountInfo.pubkey;
 
         // Debug: Log session details
@@ -159,9 +159,9 @@ async function runCleanup() {
                 transactionId: signature,
               };
 
-              // Emit to the specific camera room
-              io.to(session.camera.toString()).emit('newTimelineEvent', timelineEvent);
-              console.log(`      📡 Timeline event emitted for auto-checkout`);
+              // Emit to the specific camera room (use 'timelineEvent' not 'newTimelineEvent')
+              io.to(session.camera.toString()).emit('timelineEvent', timelineEvent);
+              console.log(`      📡 Timeline event emitted for auto-checkout to room ${session.camera.toString().slice(0, 8)}...`);
             }
 
           } catch (cleanupError: any) {

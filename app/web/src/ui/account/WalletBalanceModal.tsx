@@ -4,6 +4,7 @@ import { X, Copy, Check, ExternalLink } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { CONFIG } from '../../core/config';
 
 interface WalletBalanceModalProps {
   isOpen: boolean;
@@ -81,11 +82,11 @@ export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps)
     if (!primaryWallet?.address) return;
 
     try {
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://mmoment-backend-production.up.railway.app';
-      const response = await fetch(`${backendUrl}/api/sponsorship-status/${primaryWallet.address}`);
+      const response = await fetch(`${CONFIG.BACKEND_URL}/api/sponsorship-status/${primaryWallet.address}`);
       if (response.ok) {
         const data = await response.json();
-        setSponsorshipQuota({ used: data.used || 0, total: data.limit || 10 });
+        // API returns { count: X, remaining: Y } where count = used transactions
+        setSponsorshipQuota({ used: data.count || 0, total: 10 });
       }
     } catch (error) {
       console.error('Error fetching sponsorship quota:', error);

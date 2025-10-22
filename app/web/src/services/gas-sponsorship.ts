@@ -1,7 +1,8 @@
 // Gas Sponsorship Service - Frontend
 import { Transaction, Connection, PublicKey } from '@solana/web3.js';
+import { CONFIG } from '../core/config';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+const BACKEND_URL = CONFIG.BACKEND_URL;
 
 export interface SponsorshipStatus {
   eligible: boolean;
