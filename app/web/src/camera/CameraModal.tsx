@@ -602,27 +602,50 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         return new Transaction().add(ix);
       };
 
-      // Use gas sponsorship for check-in!
-      console.log('🎉 [CameraModal] Attempting gas-sponsored check-in...');
-      const signer = await (primaryWallet as any).getSigner();
-      const sponsorResult = await buildAndSponsorTransaction(
-        userPublicKey,
-        signer,
-        buildCheckInTx,
-        'check_in',
-        connection
-      );
+      // Check user's SOL balance to decide whether to sponsor
+      const balance = await connection.getBalance(userPublicKey);
+      const solBalance = balance / 1e9;
+      const MIN_SOL_FOR_SELF_PAY = 0.01; // 0.01 SOL minimum to pay own fees
 
-      if (!sponsorResult.success) {
-        if (sponsorResult.requiresUserPayment) {
-          throw new Error('You\'ve used all 10 free interactions! Please add SOL to your wallet to continue.');
-        } else {
-          throw new Error(sponsorResult.error || 'Failed to sponsor transaction');
+      let signature: string;
+
+      if (solBalance >= MIN_SOL_FOR_SELF_PAY) {
+        // User has enough SOL - use regular transaction
+        console.log(`💰 [CameraModal] User has ${solBalance.toFixed(4)} SOL, using regular check-in...`);
+        const checkInTx = await buildCheckInTx();
+        const { blockhash } = await connection.getLatestBlockhash();
+        checkInTx.recentBlockhash = blockhash;
+        checkInTx.feePayer = userPublicKey;
+
+        const signer = await (primaryWallet as any).getSigner();
+        const signedTx = await signer.signTransaction(checkInTx);
+        signature = await connection.sendRawTransaction(signedTx.serialize());
+        await connection.confirmTransaction(signature, 'confirmed');
+        console.log('✅ [CameraModal] Regular check-in successful!', signature);
+      } else {
+        // Low balance - try gas sponsorship
+        console.log(`🎉 [CameraModal] Low balance (${solBalance.toFixed(4)} SOL), attempting gas-sponsored check-in...`);
+        const signer = await (primaryWallet as any).getSigner();
+        const sponsorResult = await buildAndSponsorTransaction(
+          userPublicKey,
+          signer,
+          buildCheckInTx,
+          'check_in',
+          connection
+        );
+
+        if (!sponsorResult.success) {
+          if (sponsorResult.requiresUserPayment) {
+            throw new Error('You\'ve used all 10 free interactions! Please add SOL to your wallet to continue.');
+          } else {
+            throw new Error(sponsorResult.error || 'Failed to sponsor transaction');
+          }
         }
+
+        signature = sponsorResult.signature!;
+        console.log('✅ [CameraModal] Gas-sponsored check-in successful!', signature);
       }
 
-      const signature = sponsorResult.signature!;
-      console.log('✅ [CameraModal] Gas-sponsored check-in successful!', signature);
       console.log('Check-in transaction confirmed successfully');
 
       // 🎉 NEW: Use unified check-in endpoint - no more race conditions!
@@ -749,27 +772,50 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         return new Transaction().add(ix);
       };
 
-      // Use gas sponsorship for check-out!
-      console.log('🎉 [CameraModal] Attempting gas-sponsored check-out...');
-      const signer = await (primaryWallet as any).getSigner();
-      const sponsorResult = await buildAndSponsorTransaction(
-        userPublicKey,
-        signer,
-        buildCheckOutTx,
-        'check_out',
-        connection
-      );
+      // Check user's SOL balance to decide whether to sponsor
+      const balance = await connection.getBalance(userPublicKey);
+      const solBalance = balance / 1e9;
+      const MIN_SOL_FOR_SELF_PAY = 0.01; // 0.01 SOL minimum to pay own fees
 
-      if (!sponsorResult.success) {
-        if (sponsorResult.requiresUserPayment) {
-          throw new Error('You\'ve used all 10 free interactions! Please add SOL to your wallet to continue.');
-        } else {
-          throw new Error(sponsorResult.error || 'Failed to sponsor transaction');
+      let signature: string;
+
+      if (solBalance >= MIN_SOL_FOR_SELF_PAY) {
+        // User has enough SOL - use regular transaction
+        console.log(`💰 [CameraModal] User has ${solBalance.toFixed(4)} SOL, using regular check-out...`);
+        const checkOutTx = await buildCheckOutTx();
+        const { blockhash } = await connection.getLatestBlockhash();
+        checkOutTx.recentBlockhash = blockhash;
+        checkOutTx.feePayer = userPublicKey;
+
+        const signer = await (primaryWallet as any).getSigner();
+        const signedTx = await signer.signTransaction(checkOutTx);
+        signature = await connection.sendRawTransaction(signedTx.serialize());
+        await connection.confirmTransaction(signature, 'confirmed');
+        console.log('✅ [CameraModal] Regular check-out successful!', signature);
+      } else {
+        // Low balance - try gas sponsorship
+        console.log(`🎉 [CameraModal] Low balance (${solBalance.toFixed(4)} SOL), attempting gas-sponsored check-out...`);
+        const signer = await (primaryWallet as any).getSigner();
+        const sponsorResult = await buildAndSponsorTransaction(
+          userPublicKey,
+          signer,
+          buildCheckOutTx,
+          'check_out',
+          connection
+        );
+
+        if (!sponsorResult.success) {
+          if (sponsorResult.requiresUserPayment) {
+            throw new Error('You\'ve used all 10 free interactions! Please add SOL to your wallet to continue.');
+          } else {
+            throw new Error(sponsorResult.error || 'Failed to sponsor transaction');
+          }
         }
+
+        signature = sponsorResult.signature!;
+        console.log('✅ [CameraModal] Gas-sponsored check-out successful!', signature);
       }
 
-      const signature = sponsorResult.signature!;
-      console.log('✅ [CameraModal] Gas-sponsored check-out successful!', signature);
       console.log('Check-out transaction confirmed successfully');
 
       // Remove user profile from camera after successful check-out
