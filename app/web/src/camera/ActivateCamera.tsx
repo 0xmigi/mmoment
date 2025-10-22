@@ -6,6 +6,7 @@ import { SystemProgram, Keypair, PublicKey } from '@solana/web3.js';
 import { Camera, Loader } from 'lucide-react';
 import { CONFIG } from '../core/config';
 import { unifiedIpfsService } from '../storage/ipfs/unified-ipfs-service';
+import { buildAndSponsorTransaction } from '../services/gas-sponsorship';
 
 interface ActivateCameraProps {
   onCameraUpdate?: (params: { address: string; isLive: boolean }) => void;
@@ -17,7 +18,7 @@ interface ActivateCameraProps {
 export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void> }, ActivateCameraProps>(
   ({ onPhotoCapture, onStatusUpdate }, ref) => {
     const { primaryWallet } = useDynamicContext();
-    useConnection();
+    const { connection } = useConnection();
     const { program } = useProgram();
     const [loading, setLoading] = useState(false);
     const [, setShowTooltip] = useState(false);
@@ -76,6 +77,7 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
         // Build accounts object
         const checkInAccounts: any = {
           user: userPublicKey,
+          payer: userPublicKey, // Will be replaced by fee payer in gas sponsorship
           camera: cameraKeypair.publicKey,
           session: sessionPda,
           systemProgram: SystemProgram.programId,
@@ -86,10 +88,41 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
           checkInAccounts.recognitionToken = recognitionTokenPda;
         }
 
-        // Use checkIn instead of recordActivity
-        await program.methods.checkIn(false)
-        .accounts(checkInAccounts)
-        .rpc();
+        // Build transaction for gas sponsorship
+        const buildCheckInTx = async () => {
+          const tx = await program.methods.checkIn(false)
+            .accounts(checkInAccounts)
+            .transaction();
+          return tx;
+        };
+
+        // Use gas sponsorship!
+        console.log('🎉 Attempting gas-sponsored check-in...');
+        const signer = await (primaryWallet as any).getSigner();
+        const result = await buildAndSponsorTransaction(
+          userPublicKey,
+          signer,
+          buildCheckInTx,
+          'check_in',
+          connection
+        );
+
+        if (!result.success) {
+          if (result.requiresUserPayment) {
+            onStatusUpdate?.({
+              type: 'error',
+              message: 'You\'ve used all 10 free interactions! Please add SOL to your wallet.'
+            });
+          } else {
+            onStatusUpdate?.({
+              type: 'error',
+              message: result.error || 'Transaction failed'
+            });
+          }
+          return;
+        }
+
+        console.log('✅ Gas-sponsored check-in successful!', result.signature);
 
         onStatusUpdate?.({ type: 'info', message: 'Taking picture...' });
         const apiUrl = `${CONFIG.CAMERA_API_URL}/api/capture`;

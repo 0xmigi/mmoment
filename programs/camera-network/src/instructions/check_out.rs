@@ -8,14 +8,14 @@ use crate::error::CameraNetworkError;
 #[derive(Accounts)]
 pub struct CheckOut<'info> {
     #[account(mut)]
-    pub closer: Signer<'info>,  // Can be anyone if session expired
+    pub closer: Signer<'info>,  // User checking out themselves OR anyone if expired
 
     #[account(mut)]
     pub camera: Account<'info, CameraAccount>,
 
     #[account(
         mut,
-        close = session_user,  // Rent goes to original user
+        close = rent_destination,  // Rent goes to designated recipient
         seeds = [
             b"session",
             session.user.as_ref(),
@@ -26,25 +26,49 @@ pub struct CheckOut<'info> {
     )]
     pub session: Account<'info, UserSession>,
 
-    /// CHECK: Original session creator (for rent reclamation)
+    /// CHECK: Original session creator (for self-checkout)
     #[account(mut)]
     pub session_user: UncheckedAccount<'info>,
+
+    /// CHECK: Destination for rent reclamation (user if self-checkout, closer if expired cleanup)
+    #[account(mut)]
+    pub rent_destination: UncheckedAccount<'info>,
 }
 
 pub fn handler(ctx: Context<CheckOut>) -> Result<()> {
     let closer = &ctx.accounts.closer;
     let camera = &mut ctx.accounts.camera;
     let session = &ctx.accounts.session;
+    let rent_destination = &ctx.accounts.rent_destination;
+    let session_user = &ctx.accounts.session_user;
     let now = Clock::get()?.unix_timestamp;
 
-    // Check authorization: session owner OR expired session
-    let is_owner = closer.key() == session.user;
+    // Check authorization
+    let is_user_checkout = closer.key() == session.user;
     let is_expired = now > session.auto_checkout_at;
 
+    // Allow checkout if:
+    // 1. User is checking out themselves, OR
+    // 2. Session is expired (anyone can cleanup for rent reward)
     require!(
-        is_owner || is_expired,
+        is_user_checkout || is_expired,
         CameraNetworkError::Unauthorized
     );
+
+    // Validate rent destination:
+    // - If user self-checkout: rent must go to user
+    // - If expired cleanup: rent goes to closer (incentive for running cleanup bots)
+    if is_user_checkout {
+        require!(
+            rent_destination.key() == session_user.key(),
+            CameraNetworkError::Unauthorized
+        );
+    } else if is_expired {
+        require!(
+            rent_destination.key() == closer.key(),
+            CameraNetworkError::Unauthorized
+        );
+    }
 
     // Calculate session duration
     let session_duration = now.checked_sub(session.check_in_time)
@@ -72,8 +96,8 @@ pub fn handler(ctx: Context<CheckOut>) -> Result<()> {
         timestamp: now,
     });
 
-    if is_expired && !is_owner {
-        msg!("Expired session cleaned up by {} for user {}", closer.key(), session.user);
+    if is_expired && !is_user_checkout {
+        msg!("Expired session cleaned up by {} for user {} - rent collected as reward", closer.key(), session.user);
     } else {
         msg!("User {} checked out from camera {} after {} seconds",
             session.user, camera.key(), session_duration);

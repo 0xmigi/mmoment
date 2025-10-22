@@ -12,6 +12,27 @@ import net from "net";
 // Load environment variables
 config();
 
+// Import gas sponsorship service
+import {
+  initializeGasSponsorshipService,
+  sponsorTransaction,
+  getUserSponsorshipStatus,
+  getSponsorshipStats,
+  resetUserSponsorship,
+  clearAllSponsorships,
+  checkFeePayerBalance
+} from './gas-sponsorship';
+
+// Import session cleanup cron service
+import {
+  initializeSessionCleanupCron,
+  stopCleanupCron,
+  triggerManualCleanup,
+  getCleanupCronStatus
+} from './session-cleanup-cron';
+
+// Note: Socket.IO server (io) will be passed to session cleanup cron after it's created below
+
 // Initialize the Firestarter SDK
 // TODO: Re-enable
 const firestarterSDK: any = null; // createFirestarterSDK({
@@ -519,6 +540,183 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
     console.error("❌ Download failed:", error);
     res.status(500).json({
       error: error instanceof Error ? error.message : "Download failed",
+    });
+  }
+});
+
+// ========================================
+// GAS SPONSORSHIP ENDPOINTS
+// ========================================
+
+// Sponsor a transaction for a user
+app.post("/api/sponsor-transaction", async (req, res) => {
+  try {
+    const { userWallet, transaction, action } = req.body;
+
+    if (!userWallet || !transaction || !action) {
+      return res.status(400).json({
+        success: false,
+        error: 'userWallet, transaction, and action are required'
+      });
+    }
+
+    console.log(`📝 Sponsorship request from ${userWallet.slice(0, 8)}... for action: ${action}`);
+
+    const result = await sponsorTransaction(userWallet, transaction, action);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        transaction: result.transaction,
+        remaining: result.remaining,
+        message: `Transaction sponsored! ${result.remaining} free interactions remaining.`
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.error,
+        requiresUserPayment: result.error?.includes('used all')
+      });
+    }
+  } catch (error) {
+    console.error('Sponsor transaction error:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to sponsor transaction'
+    });
+  }
+});
+
+// Check user's sponsorship status
+app.get("/api/sponsorship-status/:userWallet", (req, res) => {
+  try {
+    const { userWallet } = req.params;
+
+    if (!userWallet) {
+      return res.status(400).json({ error: 'userWallet is required' });
+    }
+
+    const status = getUserSponsorshipStatus(userWallet);
+    res.json(status);
+  } catch (error) {
+    console.error('Get sponsorship status error:', error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to get sponsorship status'
+    });
+  }
+});
+
+// Get sponsorship statistics (for monitoring)
+app.get("/api/sponsorship-stats", (_req, res) => {
+  try {
+    const stats = getSponsorshipStats();
+    res.json(stats);
+  } catch (error) {
+    console.error('Get sponsorship stats error:', error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to get sponsorship stats'
+    });
+  }
+});
+
+// Check fee payer balance
+app.get("/api/fee-payer-balance", async (_req, res) => {
+  try {
+    const balance = await checkFeePayerBalance();
+    res.json({
+      balance,
+      publicKey: process.env.FEE_PAYER_SECRET_KEY
+        ? '9k5MGiM9Xqx8f2362M1B2rH5uMKFFVNuXaCDKyTsFXep'
+        : 'Not configured'
+    });
+  } catch (error) {
+    console.error('Check fee payer balance error:', error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to check balance'
+    });
+  }
+});
+
+// Reset user sponsorship (for testing only - should be protected in production)
+app.post("/api/reset-sponsorship/:userWallet", (req, res) => {
+  try {
+    const { userWallet } = req.params;
+    const existed = resetUserSponsorship(userWallet);
+    res.json({
+      success: true,
+      message: existed
+        ? `Reset sponsorship for ${userWallet.slice(0, 8)}...`
+        : `No sponsorship data found for ${userWallet.slice(0, 8)}...`
+    });
+  } catch (error) {
+    console.error('Reset sponsorship error:', error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to reset sponsorship'
+    });
+  }
+});
+
+// Clear all sponsorships (for testing only - should be protected in production)
+app.post("/api/clear-all-sponsorships", (_req, res) => {
+  try {
+    const count = clearAllSponsorships();
+    res.json({
+      success: true,
+      message: `Cleared sponsorship data for ${count} users`
+    });
+  } catch (error) {
+    console.error('Clear sponsorships error:', error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to clear sponsorships'
+    });
+  }
+});
+
+// ============================================================================
+// SESSION CLEANUP CRON ENDPOINTS
+// ============================================================================
+
+// Get cleanup cron status
+app.get("/api/cleanup-cron/status", (_req, res) => {
+  try {
+    const status = getCleanupCronStatus();
+    res.json(status);
+  } catch (error) {
+    console.error('Get cron status error:', error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to get cron status'
+    });
+  }
+});
+
+// Trigger manual cleanup (for testing)
+app.post("/api/cleanup-cron/trigger", async (_req, res) => {
+  try {
+    await triggerManualCleanup();
+    res.json({
+      success: true,
+      message: 'Manual cleanup triggered'
+    });
+  } catch (error) {
+    console.error('Trigger manual cleanup error:', error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to trigger cleanup'
+    });
+  }
+});
+
+// Stop cleanup cron
+app.post("/api/cleanup-cron/stop", (_req, res) => {
+  try {
+    stopCleanupCron();
+    res.json({
+      success: true,
+      message: 'Cleanup cron stopped'
+    });
+  } catch (error) {
+    console.error('Stop cron error:', error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Failed to stop cron'
     });
   }
 });
@@ -1338,4 +1536,21 @@ httpServer.listen(port, "0.0.0.0", () => {
     turnPort: TURN_PORT,
     turnUsername: TURN_USERNAME,
   });
+
+  // Initialize Gas Sponsorship Service and Session Cleanup Cron after server starts
+  if (process.env.FEE_PAYER_SECRET_KEY && process.env.SOLANA_RPC_URL) {
+    initializeGasSponsorshipService(
+      process.env.SOLANA_RPC_URL,
+      process.env.FEE_PAYER_SECRET_KEY
+    );
+
+    // Initialize Session Cleanup Cron with Socket.IO server for timeline events
+    initializeSessionCleanupCron(
+      process.env.SOLANA_RPC_URL,
+      process.env.FEE_PAYER_SECRET_KEY,
+      io  // Pass Socket.IO server for timeline event emissions
+    );
+  } else {
+    console.warn('⚠️  Gas sponsorship and cleanup cron not configured - missing FEE_PAYER_SECRET_KEY or SOLANA_RPC_URL');
+  }
 });

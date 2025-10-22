@@ -13,6 +13,7 @@ import { timelineService } from '../timeline/timeline-service';
 import { unifiedCameraService } from './unified-camera-service';
 import { useSocialProfile } from '../auth/social/useSocialProfile';
 import { CONFIG } from '../core/config';
+import { buildAndSponsorTransaction } from '../services/gas-sponsorship';
 
 interface CameraModalProps {
   isOpen: boolean;
@@ -70,19 +71,27 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
 
   // Add a more frequent check for session status and active users
   useEffect(() => {
-    if (!isOpen || !camera.id || !primaryWallet?.address) return;
-    
+    if (!isOpen || !camera.id) return;
+
     console.log("[CameraModal] Checking session status and active users on open");
-    checkSessionStatus();
+
+    // Only check session status if wallet is connected
+    if (primaryWallet?.address) {
+      checkSessionStatus();
+    }
+
+    // Always fetch active users (doesn't need wallet)
     fetchActiveUsersForCamera();
-    
+
     // Also set up a periodic check while the modal is open
     const intervalId = setInterval(() => {
       console.log("[CameraModal] Periodic session status and active users check");
-      checkSessionStatus();
+      if (primaryWallet?.address) {
+        checkSessionStatus();
+      }
       fetchActiveUsersForCamera();
     }, 3000); // Check every 3 seconds
-    
+
     return () => {
       console.log("[CameraModal] Cleaning up session status and active users check");
       clearInterval(intervalId);
@@ -233,12 +242,18 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
   // Function to fetch active users count for this specific camera
   const fetchActiveUsersForCamera = async () => {
     if (!camera.id || !connection) return;
-    
+
     try {
       setLoadingActiveUsers(true);
       console.log('[CameraModal] Fetching active users for camera:', camera.id);
-      
-      const program = await initializeProgram();
+
+      // Create a read-only program instance (no wallet needed for reading data)
+      const provider = new AnchorProvider(
+        connection,
+        {} as any, // No wallet needed for read-only operations
+        { commitment: 'confirmed' }
+      );
+      const program = new Program(IDL as any, CAMERA_ACTIVATION_PROGRAM_ID, provider);
 
       // Fetch only NEW session accounts (102 bytes) to avoid decode errors from old sessions (94 bytes)
       const sessionAccounts = await connection.getProgramAccounts(program.programId, {
@@ -253,15 +268,17 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       let count = 0;
       for (const accountInfo of sessionAccounts) {
         try {
-          const session = program.coder.accounts.decode('UserSession', accountInfo.account.data);
+          const session = program.coder.accounts.decode('userSession', accountInfo.account.data);
           const sessionCameraKey = session.camera.toString();
+
+          console.log('[CameraModal] Session decoded - Camera:', sessionCameraKey, 'Looking for:', camera.id);
 
           if (sessionCameraKey === camera.id) {
             count++;
-            console.log('[CameraModal] Found active session for this camera');
+            console.log('[CameraModal] ✅ Found active session for this camera');
           }
         } catch (error) {
-          // Skip this session - likely old structure
+          console.error('[CameraModal] ❌ Failed to decode session:', error);
           continue;
         }
       }
@@ -520,7 +537,8 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
             closer: userPublicKey,
             camera: cameraPublicKey,
             session: sessionPda,
-            sessionUser: userPublicKey, // Rent goes back to user
+            sessionUser: userPublicKey,
+            rentDestination: userPublicKey, // Rent goes back to user
           })
           .instruction();
 
@@ -564,103 +582,83 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       }
 
       // Create the accounts object for check-in
+      // NOTE: payer will be set to the fee payer (gas sponsor) in the transaction
       const accounts: any = {
         user: userPublicKey,
+        payer: userPublicKey, // This will be overridden by the fee payer in gas sponsorship
         camera: cameraPublicKey,
         recognitionToken: hasRecognitionToken ? recognitionTokenPda : null, // Pass null for optional accounts that don't exist
         session: sessionPda,
         systemProgram: SystemProgram.programId
       };
 
-      // Create check-in instruction
-      const ix = await program.methods
-        .checkIn(false) // false = don't require face recognition
-        .accounts(accounts)
-        .instruction();
+      // Build check-in transaction function
+      const buildCheckInTx = async () => {
+        const ix = await program.methods
+          .checkIn(false) // false = don't require face recognition
+          .accounts(accounts)
+          .instruction();
 
-      // Create and sign the transaction using Dynamic
-      const tx = new Transaction().add(ix);
-      const { blockhash } = await connection.getLatestBlockhash();
-      tx.recentBlockhash = blockhash;
-      tx.feePayer = userPublicKey;
+        return new Transaction().add(ix);
+      };
 
-      // Sign and send transaction
-      try {
-        // Get the signer object, accounting for different wallet interfaces
-        let signedTx;
-        
-        // Check if wallet has a getSigner method (Dynamic wallet)
-        if (typeof (primaryWallet as any).getSigner === 'function') {
-          const signer = await (primaryWallet as any).getSigner();
-          
-          // Check if signer has signTransaction
-          if (typeof signer.signTransaction === 'function') {
-            console.log('Using signer.signTransaction for check-in');
-            signedTx = await signer.signTransaction(tx);
+      // Use gas sponsorship for check-in!
+      console.log('🎉 [CameraModal] Attempting gas-sponsored check-in...');
+      const signer = await (primaryWallet as any).getSigner();
+      const sponsorResult = await buildAndSponsorTransaction(
+        userPublicKey,
+        signer,
+        buildCheckInTx,
+        'check_in',
+        connection
+      );
+
+      if (!sponsorResult.success) {
+        if (sponsorResult.requiresUserPayment) {
+          throw new Error('You\'ve used all 10 free interactions! Please add SOL to your wallet to continue.');
+        } else {
+          throw new Error(sponsorResult.error || 'Failed to sponsor transaction');
+        }
+      }
+
+      const signature = sponsorResult.signature!;
+      console.log('✅ [CameraModal] Gas-sponsored check-in successful!', signature);
+      console.log('Check-in transaction confirmed successfully');
+
+      // Send user profile to camera for display name labeling using new API
+      if (primaryProfile?.displayName || primaryProfile?.username) {
+        try {
+          const profileResult = await unifiedCameraService.sendUserProfile(camera.id, {
+            wallet_address: primaryWallet.address,
+            display_name: primaryProfile.displayName,
+            username: primaryProfile.username
+          });
+
+          if (profileResult.success) {
+            console.log('[CameraModal] User profile sent successfully to camera');
           } else {
-            console.log('Signer does not have signTransaction, using fallback for check-in');
-            // Fallback to direct wallet signTransaction if available
-            signedTx = await (primaryWallet as any).signTransaction(tx);
+            console.warn('[CameraModal] Failed to send user profile to camera:', profileResult.error);
           }
-        } else {
-          // Standard wallet adapter interface
-          console.log('Using primaryWallet.signTransaction directly for check-in');
-          signedTx = await (primaryWallet as any).signTransaction(tx);
+        } catch (err) {
+          console.warn('[CameraModal] Failed to send display name to camera:', err);
+          // Don't fail the check-in if this fails
         }
-        
-        if (!signedTx) {
-          throw new Error('Transaction signing failed - no signed transaction returned');
-        }
-        
-        console.log('Transaction signed successfully, sending to network for check-in');
-        const signature = await connection.sendRawTransaction(signedTx.serialize());
-        
-        console.log('Check-in transaction sent, confirming:', signature);
-        await connection.confirmTransaction(signature, 'confirmed');
-        console.log('Check-in transaction confirmed successfully');
-        
-        // Send user profile to camera for display name labeling using new API
-        if (primaryProfile?.displayName || primaryProfile?.username) {
-          try {
-            const profileResult = await unifiedCameraService.sendUserProfile(camera.id, {
-              wallet_address: primaryWallet.address,
-              display_name: primaryProfile.displayName,
-              username: primaryProfile.username
-            });
-            
-            if (profileResult.success) {
-              console.log('[CameraModal] User profile sent successfully to camera');
-            } else {
-              console.warn('[CameraModal] Failed to send user profile to camera:', profileResult.error);
-            }
-          } catch (err) {
-            console.warn('[CameraModal] Failed to send display name to camera:', err);
-            // Don't fail the check-in if this fails
-          }
-        }
-        
-        setIsCheckedIn(true);
-        
-        // Add to timeline
-        addCheckInEvent(signature);
-        
-        // Refresh the timeline
-        timelineService.refreshEvents();
-        
-        // Refresh active users count
-        await fetchActiveUsersForCamera();
-        
-        // Notify parent component
-        if (onCheckStatusChange) {
-          onCheckStatusChange(true);
-        }
-      } catch (signError) {
-        console.error('Transaction signing error:', signError);
-        if (signError instanceof Error) {
-          setError(`Failed to sign check-in transaction: ${signError.message}`);
-        } else {
-          setError('Failed to sign check-in transaction. Please try again.');
-        }
+      }
+
+      setIsCheckedIn(true);
+
+      // Add to timeline
+      addCheckInEvent(signature);
+
+      // Refresh the timeline
+      timelineService.refreshEvents();
+
+      // Refresh active users count
+      await fetchActiveUsersForCamera();
+
+      // Notify parent component
+      if (onCheckStatusChange) {
+        onCheckStatusChange(true);
       }
       
     } catch (error) {
@@ -717,93 +715,80 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         CAMERA_ACTIVATION_PROGRAM_ID
       );
 
-      // Create check-out instruction
-      const ix = await program.methods
-        .checkOut()
-        .accounts({
-          closer: userPublicKey,
-          camera: cameraPublicKey,
-          session: sessionPda,
-          sessionUser: userPublicKey, // Rent goes back to user
-        })
-        .instruction();
+      // Fetch the session account to get the actual user
+      const sessionAccount = await program.account.userSession.fetch(sessionPda) as any;
+      console.log('[CameraModal] Session account data:', {
+        user: sessionAccount.user.toString(),
+        camera: sessionAccount.camera.toString(),
+        checkInTime: new Date(sessionAccount.checkInTime.toNumber() * 1000).toISOString(),
+      });
 
-      // Create and sign the transaction using Dynamic
-      const tx = new Transaction().add(ix);
-      const { blockhash } = await connection.getLatestBlockhash();
-      tx.recentBlockhash = blockhash;
-      tx.feePayer = userPublicKey;
+      // Build check-out transaction function
+      const buildCheckOutTx = async () => {
+        const ix = await program.methods
+          .checkOut()
+          .accounts({
+            closer: userPublicKey,
+            camera: cameraPublicKey,
+            session: sessionPda,
+            sessionUser: sessionAccount.user as PublicKey,  // Use actual session user
+            rentDestination: userPublicKey, // Rent goes back to user on self-checkout
+          })
+          .instruction();
 
-      // Sign and send transaction
+        return new Transaction().add(ix);
+      };
+
+      // Use gas sponsorship for check-out!
+      console.log('🎉 [CameraModal] Attempting gas-sponsored check-out...');
+      const signer = await (primaryWallet as any).getSigner();
+      const sponsorResult = await buildAndSponsorTransaction(
+        userPublicKey,
+        signer,
+        buildCheckOutTx,
+        'check_out',
+        connection
+      );
+
+      if (!sponsorResult.success) {
+        if (sponsorResult.requiresUserPayment) {
+          throw new Error('You\'ve used all 10 free interactions! Please add SOL to your wallet to continue.');
+        } else {
+          throw new Error(sponsorResult.error || 'Failed to sponsor transaction');
+        }
+      }
+
+      const signature = sponsorResult.signature!;
+      console.log('✅ [CameraModal] Gas-sponsored check-out successful!', signature);
+      console.log('Check-out transaction confirmed successfully');
+
+      // Remove user profile from camera after successful check-out
       try {
-        // Get the signer object, accounting for different wallet interfaces
-        let signedTx;
-        
-        // Check if wallet has a getSigner method (Dynamic wallet)
-        if (typeof (primaryWallet as any).getSigner === 'function') {
-          const signer = await (primaryWallet as any).getSigner();
-          
-          // Check if signer has signTransaction
-          if (typeof signer.signTransaction === 'function') {
-            console.log('Using signer.signTransaction');
-            signedTx = await signer.signTransaction(tx);
-          } else {
-            console.log('Signer does not have signTransaction, using fallback');
-            // Fallback to direct wallet signTransaction if available
-            signedTx = await (primaryWallet as any).signTransaction(tx);
-          }
+        const removeResult = await unifiedCameraService.removeUserProfile(camera.id, primaryWallet.address);
+        if (removeResult.success) {
+          console.log('[CameraModal] User profile removed successfully from camera');
         } else {
-          // Standard wallet adapter interface
-          console.log('Using primaryWallet.signTransaction directly');
-          signedTx = await (primaryWallet as any).signTransaction(tx);
+          console.warn('[CameraModal] Failed to remove user profile from camera:', removeResult.error);
         }
-        
-        if (!signedTx) {
-          throw new Error('Transaction signing failed - no signed transaction returned');
-        }
-        
-        console.log('Transaction signed successfully, sending to network');
-        const signature = await connection.sendRawTransaction(signedTx.serialize());
-        
-        console.log('Transaction sent, confirming:', signature);
-        await connection.confirmTransaction(signature, 'confirmed');
-        console.log('Check-out transaction confirmed successfully');
-        
-        // Remove user profile from camera after successful check-out
-        try {
-          const removeResult = await unifiedCameraService.removeUserProfile(camera.id, primaryWallet.address);
-          if (removeResult.success) {
-            console.log('[CameraModal] User profile removed successfully from camera');
-          } else {
-            console.warn('[CameraModal] Failed to remove user profile from camera:', removeResult.error);
-          }
-        } catch (err) {
-          console.warn('[CameraModal] Failed to remove user profile from camera:', err);
-          // Don't fail the check-out if this fails
-        }
-        
-        setIsCheckedIn(false);
-        
-        // Add to timeline
-        addCheckOutEvent(signature);
-        
-        // Refresh the timeline
-        timelineService.refreshEvents();
-        
-        // Refresh active users count
-        await fetchActiveUsersForCamera();
-        
-        // Notify parent component
-        if (onCheckStatusChange) {
-          onCheckStatusChange(false);
-        }
-      } catch (signError) {
-        console.error('Transaction signing error:', signError);
-        if (signError instanceof Error) {
-          setError(`Failed to sign check-out transaction: ${signError.message}`);
-        } else {
-          setError('Failed to sign check-out transaction. Please try again.');
-        }
+      } catch (err) {
+        console.warn('[CameraModal] Failed to remove user profile from camera:', err);
+        // Don't fail the check-out if this fails
+      }
+
+      setIsCheckedIn(false);
+
+      // Add to timeline
+      addCheckOutEvent(signature);
+
+      // Refresh the timeline
+      timelineService.refreshEvents();
+
+      // Refresh active users count
+      await fetchActiveUsersForCamera();
+
+      // Notify parent component
+      if (onCheckStatusChange) {
+        onCheckStatusChange(false);
       }
       
     } catch (error) {

@@ -172,7 +172,8 @@ export const CameraActionModal = ({
             closer: userPublicKey,
             camera: cameraPublicKey,
             session: sessionPda,
-            sessionUser: userPublicKey, // Rent goes back to user
+            sessionUser: userPublicKey,
+            rentDestination: userPublicKey, // Rent goes back to user
           })
           .instruction();
 
@@ -335,6 +336,7 @@ export const CameraActionModal = ({
           camera: cameraPublicKey,
           session: sessionPda,
           sessionUser: sessionAccount.user as PublicKey,  // Original session creator
+          rentDestination: userPublicKey,  // Rent goes back to user
         })
         .instruction();
 

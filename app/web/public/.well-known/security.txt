@@ -1,0 +1,18 @@
+Contact: mailto:security@mmoment.xyz
+Expires: 2026-12-31T23:59:59.000Z
+Preferred-Languages: en
+Canonical: https://mmoment.xyz/.well-known/security.txt
+
+# MMOMENT Camera Network Security Policy
+#
+# MMOMENT is a legitimate blockchain-integrated camera network system
+# that creates identity-aware cameras for capturing social content.
+#
+# Technology Stack:
+# - Solana blockchain integration
+# - AI-powered computer vision (YOLOv8, InsightFace)
+# - Real-time streaming via Livepeer
+# - Cloudflare tunnel for secure access
+#
+# If you believe you've found a security vulnerability, please report it
+# to the contact above. We take security seriously and will respond promptly.
