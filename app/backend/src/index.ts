@@ -775,6 +775,41 @@ const timelineEvents: TimelineEvent[] = [];
 const cameraRooms = new Map<string, Set<string>>();
 const pendingClaims = new Map<string, DeviceClaim>();
 
+// Helper function to add timeline events (used by both Socket.IO handlers and cron bot)
+function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: Server) {
+  // Generate unique ID based on timestamp and random string
+  const newEvent = {
+    ...event,
+    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    timestamp: event.timestamp || Date.now(),
+  };
+
+  // Store the event
+  timelineEvents.push(newEvent);
+
+  // Keep only last 100 events per camera
+  if (event.cameraId) {
+    const cameraEvents = timelineEvents.filter(
+      (e) => e.cameraId === event.cameraId,
+    );
+    if (cameraEvents.length > 100) {
+      const oldestEventIndex = timelineEvents.findIndex(
+        (e) => e.cameraId === event.cameraId,
+      );
+      if (oldestEventIndex !== -1) {
+        timelineEvents.splice(oldestEventIndex, 1);
+      }
+    }
+    // Broadcast only to sockets in this camera's room
+    socketServer.to(event.cameraId).emit("timelineEvent", newEvent);
+  } else {
+    // If no cameraId, broadcast to all
+    socketServer.emit("timelineEvent", newEvent);
+  }
+
+  return newEvent;
+}
+
 // Device claim endpoints for QR-based registration
 // 1. Frontend creates a claim token with user wallet and WiFi credentials
 app.post("/api/claim/create", (req, res) => {
@@ -1094,35 +1129,7 @@ io.on("connection", (socket) => {
 
   // Handle new timeline events
   socket.on("newTimelineEvent", (event: Omit<TimelineEvent, "id">) => {
-    // Generate unique ID based on timestamp and random string
-    const newEvent = {
-      ...event,
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      timestamp: event.timestamp || Date.now(),
-    };
-
-    // Store the event
-    timelineEvents.push(newEvent);
-
-    // Keep only last 100 events per camera
-    if (event.cameraId) {
-      const cameraEvents = timelineEvents.filter(
-        (e) => e.cameraId === event.cameraId,
-      );
-      if (cameraEvents.length > 100) {
-        const oldestEventIndex = timelineEvents.findIndex(
-          (e) => e.cameraId === event.cameraId,
-        );
-        if (oldestEventIndex !== -1) {
-          timelineEvents.splice(oldestEventIndex, 1);
-        }
-      }
-      // Broadcast only to sockets in this camera's room
-      io.to(event.cameraId).emit("timelineEvent", newEvent);
-    } else {
-      // If no cameraId, broadcast to all
-      io.emit("timelineEvent", newEvent);
-    }
+    addTimelineEvent(event, io);
   });
 
   // Handle get recent events request
@@ -1544,11 +1551,12 @@ httpServer.listen(port, "0.0.0.0", () => {
       process.env.FEE_PAYER_SECRET_KEY
     );
 
-    // Initialize Session Cleanup Cron with Socket.IO server for timeline events
+    // Initialize Session Cleanup Cron with Socket.IO server and timeline event handler
     initializeSessionCleanupCron(
       process.env.SOLANA_RPC_URL,
       process.env.FEE_PAYER_SECRET_KEY,
-      io  // Pass Socket.IO server for timeline event emissions
+      io,  // Pass Socket.IO server for timeline event emissions
+      addTimelineEvent  // Pass helper function to add timeline events
     );
   } else {
     console.warn('⚠️  Gas sponsorship and cleanup cron not configured - missing FEE_PAYER_SECRET_KEY or SOLANA_RPC_URL');

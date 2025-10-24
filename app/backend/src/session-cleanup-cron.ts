@@ -8,23 +8,46 @@ import { Server } from 'socket.io';
 const CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const PROGRAM_ID = new PublicKey('E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL');
 
+// Type for timeline event without ID
+type TimelineEventWithoutId = {
+  type: string;
+  user: {
+    address: string;
+  };
+  timestamp: number;
+  cameraId: string;
+  transactionId?: string;
+};
+
+type AddTimelineEventFn = (event: TimelineEventWithoutId, socketServer: Server) => any;
+
 let connection: Connection | null = null;
 let cronBotKeypair: Keypair | null = null;
 let program: Program | null = null;
 let cleanupIntervalId: NodeJS.Timeout | null = null;
 let io: Server | null = null;
+let addTimelineEventFn: AddTimelineEventFn | null = null;
 
-export function initializeSessionCleanupCron(rpcUrl: string, cronBotSecretKey: string, socketServer?: Server) {
+export function initializeSessionCleanupCron(
+  rpcUrl: string,
+  cronBotSecretKey: string,
+  socketServer?: Server,
+  addTimelineEvent?: AddTimelineEventFn
+) {
   try {
     // Parse the secret key from JSON array format
     const secretKeyArray = JSON.parse(cronBotSecretKey);
     cronBotKeypair = Keypair.fromSecretKey(new Uint8Array(secretKeyArray));
     connection = new Connection(rpcUrl, 'confirmed');
 
-    // Store Socket.IO server reference for timeline events
+    // Store Socket.IO server reference and timeline event handler
     if (socketServer) {
       io = socketServer;
       console.log('   Socket.IO server connected for timeline events');
+    }
+    if (addTimelineEvent) {
+      addTimelineEventFn = addTimelineEvent;
+      console.log('   Timeline event handler connected');
     }
 
     // Create Anchor provider and program
@@ -147,8 +170,8 @@ async function runCleanup() {
             console.log(`      ✅ Cleaned up! Tx: ${signature.slice(0, 8)}...`);
             console.log(`         Rent collected by cron bot`);
 
-            // Emit timeline event for auto-checkout
-            if (io) {
+            // Add timeline event for auto-checkout using the shared helper function
+            if (io && addTimelineEventFn) {
               const timelineEvent = {
                 type: 'auto_check_out',
                 user: {
@@ -159,9 +182,9 @@ async function runCleanup() {
                 transactionId: signature,
               };
 
-              // Emit to the specific camera room (use 'timelineEvent' not 'newTimelineEvent')
-              io.to(session.camera.toString()).emit('timelineEvent', timelineEvent);
-              console.log(`      📡 Timeline event emitted for auto-checkout to room ${session.camera.toString().slice(0, 8)}...`);
+              // Use the shared helper function to properly store and broadcast the event
+              addTimelineEventFn(timelineEvent, io);
+              console.log(`      📡 Timeline event added and broadcast for auto-checkout to camera ${session.camera.toString().slice(0, 8)}...`);
             }
 
           } catch (cleanupError: any) {
