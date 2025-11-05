@@ -19,7 +19,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "firestarter-sdk": "file:/mnt/nvme/firestarter-sdk",
+    "firestarter-sdk": "github:0xmigi/firestarter-sdk",
     "form-data": "^4.0.4",
     "node-fetch": "2",
     "rpc-websockets": "7.10.0",

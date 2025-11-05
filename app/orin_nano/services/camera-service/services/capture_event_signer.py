@@ -83,20 +83,23 @@ class CaptureEventSigner:
         # Sign the event with device key
         signed_event = self.device_signer.sign_response(capture_event)
 
-        # Extract the signature for use as "transaction signature"
-        device_signature = signed_event['device_signature']
+        # Extract the signature dict - it contains the actual signature string
+        device_signature_dict = signed_event['device_signature']
+        # Get the actual base64 signature string
+        device_signature_str = device_signature_dict['signature']
 
         logger.info(f"📝 Signed capture event for {user_wallet[:8]}...")
         logger.info(f"   Camera: {camera_pda}")
         logger.info(f"   Type: {capture_type}")
         logger.info(f"   Hash: {file_hash[:16]}...")
-        logger.info(f"   Signature: {device_signature[:16]}...")
+        logger.info(f"   Signature: {device_signature_str[:16]}...")
 
         return {
             'success': True,
             'capture_event': capture_event,
-            'device_signature': device_signature,
-            'device_public_key': signed_event['device_public_key'],
+            'device_signature': device_signature_str,  # Return the string for upload
+            'device_signature_full': device_signature_dict,  # Full dict for response
+            'device_public_key': signed_event.get('device_public_key', device_signature_dict['device_pubkey']),
             'timestamp': timestamp,
             'signed_data': signed_event
         }

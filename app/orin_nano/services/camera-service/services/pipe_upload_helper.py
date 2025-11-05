@@ -120,18 +120,27 @@ class PipeUploader:
         with open(file_path, 'rb') as f:
             files = {'file': (file_path.name, f, 'application/octet-stream')}
 
-            # Add credentials as query params (Pipe API pattern)
-            params = {
-                'user_id': creds['user_id'],
-                'user_app_key': creds['user_app_key'],
-                'file_name': file_path.name
-            }
+            # Build params and headers based on auth type
+            params = {'file_name': file_path.name}
+            headers = {}
+
+            # Support both user_app_key (new accounts) and JWT (legacy accounts)
+            if creds.get('user_app_key'):
+                # New account with user_app_key
+                headers['X-User-Id'] = creds['user_id']
+                headers['X-User-App-Key'] = creds['user_app_key']
+            elif creds.get('access_token'):
+                # Legacy account with JWT
+                headers['Authorization'] = f"Bearer {creds['access_token']}"
+            else:
+                raise ValueError("Missing authentication: need either user_app_key or access_token")
 
             # Upload with timeout suitable for large files
             response = requests.post(
                 upload_url,
                 files=files,
                 params=params,
+                headers=headers,
                 timeout=600  # 10 minutes for large videos
             )
             response.raise_for_status()

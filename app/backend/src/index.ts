@@ -540,14 +540,22 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
       `📥 Streaming download ${fileId} for wallet: ${walletAddress.slice(0, 8)}...`,
     );
 
-    // Get user account to retrieve credentials
-    const user = await firestarterSDK.createUserAccount(walletAddress);
+    // Use system Pipe account (same one used for uploads)
+    const pipeUsername = process.env.PIPE_USERNAME || "wallettest1762286471";
+    const pipePassword = process.env.PIPE_PASSWORD || "StrongPass123!@#";
 
-    // Get stored account with actual credentials
-    const account = pipeAccounts.get(walletAddress);
-    if (!account) {
-      return res.status(404).json({ error: "No Pipe account found" });
+    // Login to get JWT token
+    const loginResp = await fetch("https://us-west-01-firestarter.pipenetwork.com/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: pipeUsername, password: pipePassword })
+    });
+
+    if (!loginResp.ok) {
+      throw new Error(`Login failed: ${loginResp.status}`);
     }
+
+    const tokens = await loginResp.json();
 
     // Determine content type from file extension
     let contentType = "application/octet-stream";
@@ -565,14 +573,13 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
     res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Cache-Control", "public, max-age=31536000");
 
-    // Stream directly from Pipe to client (no buffering in backend)
+    // Stream directly from Pipe to client using JWT auth
     const downloadUrl = new URL("https://us-west-01-firestarter.pipenetwork.com/download-stream");
     downloadUrl.searchParams.append("file_name", decodeURIComponent(fileId));
 
     const pipeResponse = await axios.get(downloadUrl.toString(), {
       headers: {
-        "X-User-Id": account.userId,
-        "X-User-App-Key": account.userAppKey,
+        "Authorization": `Bearer ${tokens.access_token}`,
       },
       responseType: "stream", // Critical: stream mode
       timeout: 300000, // 5 minutes for large files
@@ -608,38 +615,46 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
 // Jetson endpoint: Get Pipe credentials for direct uploads
 app.get("/api/pipe/jetson/credentials", async (req, res) => {
   try {
-    // Use your actual Pipe account credentials from env
-    const pipeUsername = process.env.PIPE_USERNAME;
-    const pipePassword = process.env.PIPE_PASSWORD;
+    // Use your funded Pipe account with JWT auth
+    const pipeUsername = process.env.PIPE_USERNAME || "wallettest1762286471";
+    const pipePassword = process.env.PIPE_PASSWORD || "StrongPass123!@#";
 
-    if (!pipeUsername || !pipePassword) {
-      throw new Error("Pipe credentials not configured in environment");
+    console.log(`🔧 Getting Pipe credentials for Jetson...`);
+
+    // Login to get JWT token
+    const loginResp = await fetch("https://us-west-01-firestarter.pipenetwork.com/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: pipeUsername, password: pipePassword })
+    });
+
+    if (!loginResp.ok) {
+      throw new Error(`Login failed: ${loginResp.status}`);
     }
 
-    // Get or create account using your actual credentials
-    const systemWallet = process.env.SYSTEM_WALLET_ADDRESS || "MMOMENT_PIPE_SYSTEM";
-    let account = pipeAccounts.get(systemWallet);
+    const tokens = await loginResp.json();
 
-    if (!account) {
-      console.log(`🔧 Authenticating with Pipe account: ${pipeUsername}...`);
+    // Get user_id
+    const walletResp = await fetch("https://us-west-01-firestarter.pipenetwork.com/checkWallet", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${tokens.access_token}`
+      },
+      body: JSON.stringify({})
+    });
 
-      // Use SDK to authenticate with your existing account
-      const user = await firestarterSDK.createUserAccount(pipeUsername);
-
-      account = {
-        userId: user.userId,
-        userAppKey: user.userAppKey || "",
-        walletAddress: systemWallet,
-        created: new Date(),
-      };
-
-      pipeAccounts.set(systemWallet, account);
-      console.log(`✅ Authenticated with Pipe account ${pipeUsername}`);
+    if (!walletResp.ok) {
+      throw new Error(`checkWallet failed: ${walletResp.status}`);
     }
 
+    const walletData = await walletResp.json();
+    console.log(`✅ Got Pipe credentials for user: ${walletData.user_id}`);
+
+    // Return JWT auth credentials (works for all accounts)
     res.json({
-      userId: account.userId,
-      userAppKey: account.userAppKey,
+      user_id: walletData.user_id,
+      access_token: tokens.access_token,
       baseUrl: "https://us-west-01-firestarter.pipenetwork.com",
     });
   } catch (error) {
