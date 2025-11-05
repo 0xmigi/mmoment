@@ -38,46 +38,52 @@ class PipeGalleryService {
   }
 
   /**
-   * Fetch user's files from Pipe storage
+   * Fetch user's files from Pipe storage (blockchain-based ownership)
    */
   async getUserFiles(walletAddress: string): Promise<PipeGalleryItem[]> {
     try {
+      console.log(`📸 Fetching Pipe gallery for wallet: ${walletAddress.slice(0, 8)}...`);
+
       const response = await fetch(
-        `${this.backendUrl}/api/pipe/files/${walletAddress}`
+        `${this.backendUrl}/api/pipe/gallery/${walletAddress}`
       );
 
       if (!response.ok) {
-        console.error("Failed to fetch Pipe files:", response.statusText);
+        console.error("Failed to fetch Pipe gallery:", response.statusText);
         return [];
       }
 
       const data = await response.json();
 
-      // Transform Pipe files into gallery items
-      return data.files.map((file: PipeFile) => {
-        // Determine file type from contentType or name
-        const isVideo =
-          file.contentType?.startsWith("video/") ||
-          file.name.match(/\.(mp4|webm|ogg|mov)$/i);
+      if (!data.success || !data.media) {
+        console.warn("No media found in Pipe gallery");
+        return [];
+      }
+
+      console.log(`✅ Found ${data.count} media items from Pipe`);
+
+      // Transform backend media items into gallery items
+      return data.media.map((item: any) => {
+        const isVideo = item.type === 'video';
 
         return {
-          id: file.id, // Use Pipe file ID as id for compatibility
-          cid: file.id, // Use Pipe file ID as CID equivalent
-          name: file.name,
-          url: file.url,
+          id: item.fileId,
+          cid: item.fileId,
+          name: item.fileName,
+          url: `${this.backendUrl}${item.url}`, // Full URL to backend download endpoint
           type: isVideo ? "video" : ("image" as "image" | "video"),
-          mimeType: file.contentType || "application/octet-stream",
-          timestamp: new Date(file.uploadedAt).getTime(),
+          mimeType: isVideo ? "video/mp4" : "image/jpeg",
+          timestamp: new Date(item.uploadedAt).getTime(),
           backupUrls: [],
-          walletAddress: undefined,
+          walletAddress,
           provider: "pipe",
-          transactionId: undefined,
-          cameraId: file.metadata?.camera,
-          metadata: file.metadata,
+          transactionId: item.txSignature,
+          cameraId: item.cameraId,
+          metadata: {},
         };
       });
     } catch (error) {
-      console.error("Error fetching Pipe files:", error);
+      console.error("Error fetching Pipe gallery:", error);
       return [];
     }
   }

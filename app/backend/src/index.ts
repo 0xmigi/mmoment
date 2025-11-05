@@ -4,13 +4,21 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import { config } from "dotenv";
-// import { createFirestarterSDK } from "firestarter-sdk"; // TODO: Re-enable
+import { createFirestarterSDK } from "firestarter-sdk";
 import dgram from "dgram";
 import net from "net";
+import axios from "axios";
+import { Connection, PublicKey } from "@solana/web3.js";
 // Using built-in fetch in Node.js 18+
 
 // Load environment variables
 config();
+
+// Initialize Solana connection
+const connection = new Connection(
+  process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",
+  "confirmed"
+);
 
 // Import gas sponsorship service
 import {
@@ -33,11 +41,10 @@ import {
 
 // Note: Socket.IO server (io) will be passed to session cleanup cron after it's created below
 
-// Initialize the Firestarter SDK
-// TODO: Re-enable
-const firestarterSDK: any = null; // createFirestarterSDK({
-//   baseUrl: "https://us-west-00-firestarter.pipenetwork.com",
-// });
+// Initialize the Firestarter SDK with mainnet endpoint
+const firestarterSDK = createFirestarterSDK({
+  baseUrl: "https://us-west-01-firestarter.pipenetwork.com", // Mainnet
+});
 
 // In-memory storage for pipe accounts (simple key-value store)
 // The SDK handles auth, we just store the mapping
@@ -50,6 +57,20 @@ const pipeAccounts = new Map<
     created: Date;
   }
 >();
+
+// Transaction signature to file mapping (privacy-preserving)
+// Maps on-chain tx signature → Pipe file metadata
+// Ownership is derived from blockchain, not stored here
+interface TxFileMapping {
+  txSignature: string;      // On-chain transaction signature
+  fileId: string;           // Pipe file ID (blake3 hash)
+  fileName: string;         // Stored filename on Pipe
+  cameraId: string;         // Which camera captured this
+  uploadedAt: Date;         // When Jetson uploaded
+  fileType: 'photo' | 'video';
+}
+
+const txToFileMapping = new Map<string, TxFileMapping>();
 
 const app = express();
 
@@ -495,7 +516,7 @@ app.get("/api/pipe/files/:walletAddress", async (req, res) => {
   }
 });
 
-// Download proxy endpoint for authenticated file downloads
+// Streaming download endpoint for large videos (no buffering)
 app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
   const { walletAddress, fileId } = req.params;
 
@@ -507,39 +528,223 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
 
   try {
     console.log(
-      `📥 Downloading file ${fileId} for wallet: ${walletAddress.slice(0, 8)}...`,
+      `📥 Streaming download ${fileId} for wallet: ${walletAddress.slice(0, 8)}...`,
     );
 
-    // Get user account with proper authentication
+    // Get user account to retrieve credentials
     const user = await firestarterSDK.createUserAccount(walletAddress);
 
-    // Use SDK to download file with proper JWT authentication
-    const fileBuffer = await firestarterSDK.downloadFile(
-      walletAddress,
-      decodeURIComponent(fileId),
-    );
+    // Get stored account with actual credentials
+    const account = pipeAccounts.get(walletAddress);
+    if (!account) {
+      return res.status(404).json({ error: "No Pipe account found" });
+    }
 
-    // Determine content type from file extension or default
-    const contentType =
-      fileId.includes(".jpg") || fileId.includes(".jpeg")
-        ? "image/jpeg"
-        : fileId.includes(".png")
-          ? "image/png"
-          : fileId.includes(".gif")
-            ? "image/gif"
-            : "application/octet-stream";
+    // Determine content type from file extension
+    let contentType = "application/octet-stream";
+    const fileName = decodeURIComponent(fileId).toLowerCase();
+    if (fileName.includes(".mp4") || fileName.includes(".mov")) {
+      contentType = "video/mp4";
+    } else if (fileName.includes(".jpg") || fileName.includes(".jpeg")) {
+      contentType = "image/jpeg";
+    } else if (fileName.includes(".png")) {
+      contentType = "image/png";
+    }
 
-    // Set appropriate headers
+    // Set headers for streaming
     res.setHeader("Content-Type", contentType);
-    res.setHeader("Content-Length", fileBuffer.length);
-    res.setHeader("Cache-Control", "public, max-age=31536000"); // Cache for 1 year
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "public, max-age=31536000");
 
-    // Send the file
-    res.send(fileBuffer);
+    // Stream directly from Pipe to client (no buffering in backend)
+    const downloadUrl = new URL("https://us-west-01-firestarter.pipenetwork.com/download-stream");
+    downloadUrl.searchParams.append("file_name", decodeURIComponent(fileId));
+
+    const pipeResponse = await axios.get(downloadUrl.toString(), {
+      headers: {
+        "X-User-Id": account.userId,
+        "X-User-App-Key": account.userAppKey,
+      },
+      responseType: "stream", // Critical: stream mode
+      timeout: 300000, // 5 minutes for large files
+    });
+
+    // Set content length if available
+    const contentLength = pipeResponse.headers['content-length'];
+    if (contentLength) {
+      res.setHeader("Content-Length", contentLength);
+    }
+
+    // Pipe the stream directly to response
+    pipeResponse.data.pipe(res);
+
+    // Handle stream errors
+    pipeResponse.data.on('error', (error: any) => {
+      console.error("Stream error:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Stream failed" });
+      }
+    });
+
   } catch (error) {
     console.error("❌ Download failed:", error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : "Download failed",
+      });
+    }
+  }
+});
+
+// Jetson endpoint: Get Pipe credentials for direct uploads
+app.get("/api/pipe/jetson/credentials", async (req, res) => {
+  try {
+    // Use your actual Pipe account credentials from env
+    const pipeUsername = process.env.PIPE_USERNAME;
+    const pipePassword = process.env.PIPE_PASSWORD;
+
+    if (!pipeUsername || !pipePassword) {
+      throw new Error("Pipe credentials not configured in environment");
+    }
+
+    // Get or create account using your actual credentials
+    const systemWallet = process.env.SYSTEM_WALLET_ADDRESS || "MMOMENT_PIPE_SYSTEM";
+    let account = pipeAccounts.get(systemWallet);
+
+    if (!account) {
+      console.log(`🔧 Authenticating with Pipe account: ${pipeUsername}...`);
+
+      // Use SDK to authenticate with your existing account
+      const user = await firestarterSDK.createUserAccount(pipeUsername);
+
+      account = {
+        userId: user.userId,
+        userAppKey: user.userAppKey || "",
+        walletAddress: systemWallet,
+        created: new Date(),
+      };
+
+      pipeAccounts.set(systemWallet, account);
+      console.log(`✅ Authenticated with Pipe account ${pipeUsername}`);
+    }
+
+    res.json({
+      userId: account.userId,
+      userAppKey: account.userAppKey,
+      baseUrl: "https://us-west-01-firestarter.pipenetwork.com",
+    });
+  } catch (error) {
+    console.error("❌ Failed to get Jetson credentials:", error);
     res.status(500).json({
-      error: error instanceof Error ? error.message : "Download failed",
+      error: error instanceof Error ? error.message : "Failed to get credentials",
+    });
+  }
+});
+
+// Jetson endpoint: Notify backend after direct upload to Pipe
+app.post("/api/pipe/jetson/upload-complete", async (req, res) => {
+  const { txSignature, fileName, fileId, blake3Hash, size, cameraId, fileType } = req.body;
+
+  if (!txSignature || !fileName || !fileId) {
+    return res.status(400).json({
+      error: "txSignature, fileName, and fileId are required"
+    });
+  }
+
+  try {
+    console.log(`📝 Jetson uploaded: ${fileName} for tx ${txSignature.slice(0, 8)}... (${size} bytes)`);
+
+    // Store tx → file mapping (privacy-preserving)
+    const mapping: TxFileMapping = {
+      txSignature,
+      fileId: blake3Hash || fileId,
+      fileName,
+      cameraId: cameraId || 'unknown',
+      uploadedAt: new Date(),
+      fileType: fileType || 'photo',
+    };
+
+    txToFileMapping.set(txSignature, mapping);
+
+    console.log(`✅ Mapped tx ${txSignature.slice(0, 8)}... → file ${fileId.slice(0, 20)}...`);
+
+    // Notify connected clients via WebSocket
+    io.emit("pipe:upload:complete", {
+      txSignature,
+      fileName,
+      fileId: mapping.fileId,
+      size,
+      cameraId,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.json({
+      success: true,
+      fileId: mapping.fileId,
+      txSignature,
+    });
+  } catch (error) {
+    console.error("❌ Failed to process upload notification:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to process upload",
+    });
+  }
+});
+
+// Gallery endpoint: Get user's media by querying blockchain
+app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
+  const { walletAddress } = req.params;
+
+  if (!walletAddress) {
+    return res.status(400).json({ error: "Wallet address required" });
+  }
+
+  try {
+    console.log(`📸 Fetching gallery for wallet: ${walletAddress.slice(0, 8)}...`);
+
+    // Get user's transactions from blockchain
+    const userPubkey = new PublicKey(walletAddress);
+    const signatures = await connection.getSignaturesForAddress(userPubkey, {
+      limit: 100, // Last 100 transactions
+    });
+
+    console.log(`Found ${signatures.length} transactions for user`);
+
+    // Find media files for user's transactions
+    const mediaItems = [];
+
+    for (const sig of signatures) {
+      const mapping = txToFileMapping.get(sig.signature);
+      if (mapping) {
+        // Build download URL
+        const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(mapping.fileName)}`;
+
+        mediaItems.push({
+          id: mapping.fileId,
+          fileId: mapping.fileId,
+          fileName: mapping.fileName,
+          url: downloadUrl,
+          type: mapping.fileType,
+          cameraId: mapping.cameraId,
+          uploadedAt: mapping.uploadedAt.toISOString(),
+          txSignature: mapping.txSignature,
+          provider: 'pipe'
+        });
+      }
+    }
+
+    console.log(`✅ Found ${mediaItems.length} media items for user`);
+
+    res.json({
+      success: true,
+      media: mediaItems,
+      count: mediaItems.length
+    });
+
+  } catch (error) {
+    console.error("❌ Failed to fetch gallery:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to fetch gallery",
     });
   }
 });
