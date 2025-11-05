@@ -12,9 +12,8 @@ import hashlib
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-# Add parent directory to path to import pipe_upload_helper
-sys.path.append(str(Path(__file__).parent.parent.parent.parent))
-from pipe_upload_helper import PipeUploader
+# Import pipe_upload_helper from same services directory
+from services.pipe_upload_helper import PipeUploader
 
 logger = logging.getLogger(__name__)
 
