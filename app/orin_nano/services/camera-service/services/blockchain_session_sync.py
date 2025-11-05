@@ -352,25 +352,20 @@ class BlockchainSessionSync:
             embedding_array = np.array(embedding, dtype=np.float32)
 
             if self.face_service:
+                # ALWAYS get display name from get_user_display_name() which checks _user_profiles first
+                # This ensures display names from check-in are never overwritten with cached values
+                display_name = self.face_service.get_user_display_name(wallet_address)
+
+                # Acquire lock for minimal time - NO LOGGING INSIDE
                 with self.face_service._faces_lock:
                     self.face_service._face_embeddings[wallet_address] = embedding_array
-
-                    # ✅ FIX: Use existing display name if available (from unified check-in), don't overwrite!
-                    # Only set fallback wallet address if no profile was provided
-                    if wallet_address not in self.face_service._face_names:
-                        # No profile set yet - use get_user_display_name helper which checks user_profiles
-                        display_name = self.face_service.get_user_display_name(wallet_address)
-                        self.face_service._face_names[wallet_address] = display_name
-                        logger.info(f"📝 Set display name for {wallet_address[:8]}...: {display_name}")
-                    else:
-                        existing_name = self.face_service._face_names[wallet_address]
-                        logger.info(f"✓ Keeping existing display name for {wallet_address[:8]}...: {existing_name}")
-
+                    self.face_service._face_names[wallet_address] = display_name
                     self.face_service._face_metadata[wallet_address] = {
                         'source': 'on_chain_recognition_token',
                         'timestamp': int(time.time()),
                         'decrypted_on_check_in': True
                     }
+                # Lock released here - now safe to log
 
                 # Save to disk for persistence
                 self.face_service.save_face_embedding(wallet_address, embedding_array, {

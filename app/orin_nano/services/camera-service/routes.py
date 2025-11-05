@@ -577,47 +577,68 @@ def register_routes(app):
         if filename and latest_video.get('filename') != filename:
             logger.warning(f"Expected filename {filename} but got {latest_video.get('filename')}")
 
-        # Upload video to user's Pipe storage asynchronously
-        import asyncio
-        from services.pipe_storage_service import handle_user_capture_upload
+        # Upload video to Pipe using device-signed direct upload
+        from services.capture_event_signer import sign_capture
+        from services.direct_pipe_upload import get_direct_pipe_upload_service
+        import threading
 
         pipe_upload_info = {'initiated': False, 'storage_provider': 'pipe'}
 
         try:
-            # Read the video file data
+            # Get video file path
             video_path = latest_video.get('path')
             if video_path and os.path.exists(video_path):
-                with open(video_path, 'rb') as f:
-                    video_data = f.read()
+                # Get camera PDA for signing
+                camera_pda = get_camera_pda()
 
-                # Prepare metadata for Pipe upload
-                metadata = {
-                    'timestamp': latest_video.get('timestamp'),
-                    'camera_id': 'jetson01',  # TODO: Get actual camera ID from device config
-                    'size': latest_video.get('size'),
-                    'local_path': video_path,
-                    'local_filename': latest_video.get('filename'),
-                    'capture_type': 'video',
-                    'duration_seconds': duration_limit
-                }
+                # Calculate file hash and sign capture event with device key
+                upload_service = get_direct_pipe_upload_service()
+                file_hash = upload_service.calculate_file_hash(video_path)
 
-                # Upload to user's specific Pipe storage account
+                if not file_hash:
+                    logger.error("Failed to calculate file hash")
+                    raise Exception("Failed to calculate file hash")
+
+                # Sign capture event (instant, no blockchain wait!)
+                signed_event = sign_capture(
+                    user_wallet=wallet_address,
+                    camera_pda=camera_pda,
+                    file_hash=file_hash,
+                    capture_type='video',
+                    file_path=video_path,
+                    metadata={
+                        'timestamp': latest_video.get('timestamp'),
+                        'size': latest_video.get('size'),
+                        'filename': latest_video.get('filename'),
+                        'duration_seconds': duration_limit
+                    }
+                )
+
+                device_signature = signed_event['device_signature']
+
+                logger.info(f"📝 Video capture event signed: {device_signature[:16]}...")
+
+                # Upload to Pipe in background thread
                 def run_pipe_upload():
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
                     try:
-                        upload_result = loop.run_until_complete(
-                            handle_user_capture_upload(wallet_address, video_data, metadata)
+                        upload_result = upload_service.upload_video(
+                            wallet_address=wallet_address,
+                            video_path=video_path,
+                            camera_id=camera_pda,
+                            device_signature=device_signature,
+                            duration=duration_limit,
+                            timestamp=latest_video.get('timestamp')
                         )
                         if upload_result['success']:
-                            logger.info(f"✅ Video uploaded to {wallet_address[:8]}...'s Pipe: {upload_result.get('filename')}")
+                            logger.info(f"✅ Video uploaded to Pipe: {upload_result.get('file_name')}")
+                            logger.info(f"   File ID: {upload_result.get('file_id')}")
+                            logger.info(f"   Device Signature: {device_signature[:16]}...")
                         else:
-                            logger.error(f"❌ Pipe video upload failed for {wallet_address[:8]}...: {upload_result.get('error')}")
-                    finally:
-                        loop.close()
+                            logger.error(f"❌ Pipe video upload failed: {upload_result.get('error')}")
+                    except Exception as e:
+                        logger.error(f"❌ Pipe upload thread error: {e}", exc_info=True)
 
                 # Start upload in background thread
-                import threading
                 upload_thread = threading.Thread(target=run_pipe_upload, daemon=True)
                 upload_thread.start()
 
@@ -625,17 +646,19 @@ def register_routes(app):
                     'initiated': True,
                     'target_wallet': wallet_address,
                     'upload_status': 'uploading',
-                    'storage_provider': 'pipe'
+                    'storage_provider': 'pipe',
+                    'device_signature': device_signature,
+                    'upload_type': 'direct_jetson_device_signed'
                 }
 
-                logger.info(f"🎥 Video recorded for {wallet_address[:8]}... -> uploading to their Pipe storage")
+                logger.info(f"🎥 Video recorded for {wallet_address[:8]}... -> uploading directly to Pipe")
 
             else:
                 logger.error(f"Video file not found at {video_path}")
                 pipe_upload_info['error'] = 'Video file not found'
 
         except Exception as e:
-            logger.error(f"Failed to initiate Pipe video upload for {wallet_address[:8]}...: {e}")
+            logger.error(f"Failed to initiate Pipe video upload for {wallet_address[:8]}...: {e}", exc_info=True)
             pipe_upload_info = {
                 'initiated': False,
                 'error': str(e),
@@ -992,8 +1015,8 @@ def register_routes(app):
                         with gpu_face_service._faces_lock:
                             gpu_face_service._face_embeddings[wallet_address] = embedding
 
-                        # Store display name
-                        display_name = wallet_address[:8] + "..."
+                        # Store display name - use get_user_display_name to check _user_profiles first
+                        display_name = gpu_face_service.get_user_display_name(wallet_address)
                         gpu_face_service._face_names[wallet_address] = display_name
                         gpu_face_service._face_metadata[wallet_address] = enrollment_metadata
 
@@ -1132,8 +1155,8 @@ def register_routes(app):
                         with gpu_face_service._faces_lock:
                             gpu_face_service._face_embeddings[wallet_address] = full_embedding
 
-                        # Store display name
-                        display_name = wallet_address[:8] + "..."
+                        # Store display name - use get_user_display_name to check _user_profiles first
+                        display_name = gpu_face_service.get_user_display_name(wallet_address)
                         gpu_face_service._face_names[wallet_address] = display_name
                         gpu_face_service._face_metadata[wallet_address] = fallback_metadata
 
@@ -2260,39 +2283,62 @@ def register_routes(app):
         # Add base64 data to response
         photo_info['image_data'] = f"data:image/jpeg;base64,{base64_image}"
 
-        # Upload to user's Pipe storage asynchronously
-        import asyncio
-        from services.pipe_storage_service import handle_user_capture_upload
+        # Upload to Pipe using device-signed direct upload
+        from services.capture_event_signer import sign_capture
+        from services.direct_pipe_upload import get_direct_pipe_upload_service
+        import threading
 
         try:
-            # Prepare metadata for Pipe upload
-            metadata = {
-                'timestamp': photo_info.get('timestamp'),
-                'camera_id': 'jetson01',  # TODO: Get actual camera ID from device config
-                'width': photo_info.get('width'),
-                'height': photo_info.get('height'),
-                'local_path': photo_info['path'],
-                'local_filename': photo_info['filename'],
-                'capture_type': 'photo'
-            }
+            # Get camera PDA for signing
+            camera_pda = get_camera_pda()
+            photo_path = photo_info['path']
 
-            # Upload to user's specific Pipe storage account
+            # Calculate file hash and sign capture event with device key
+            upload_service = get_direct_pipe_upload_service()
+            file_hash = upload_service.calculate_file_hash(photo_path)
+
+            if not file_hash:
+                raise Exception("Failed to calculate file hash")
+
+            # Sign capture event (instant, no blockchain wait!)
+            signed_event = sign_capture(
+                user_wallet=wallet_address,
+                camera_pda=camera_pda,
+                file_hash=file_hash,
+                capture_type='photo',
+                file_path=photo_path,
+                metadata={
+                    'timestamp': photo_info.get('timestamp'),
+                    'width': photo_info.get('width'),
+                    'height': photo_info.get('height'),
+                    'filename': photo_info['filename']
+                }
+            )
+
+            device_signature = signed_event['device_signature']
+
+            logger.info(f"📝 Photo capture event signed: {device_signature[:16]}...")
+
+            # Upload to Pipe in background thread
             def run_pipe_upload():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
                 try:
-                    upload_result = loop.run_until_complete(
-                        handle_user_capture_upload(wallet_address, image_data, metadata)
+                    upload_result = upload_service.upload_photo(
+                        wallet_address=wallet_address,
+                        photo_path=photo_path,
+                        camera_id=camera_pda,
+                        device_signature=device_signature,
+                        timestamp=photo_info.get('timestamp')
                     )
                     if upload_result['success']:
-                        logger.info(f"✅ Photo uploaded to {wallet_address[:8]}...'s Pipe: {upload_result.get('filename')}")
+                        logger.info(f"✅ Photo uploaded to Pipe: {upload_result.get('file_name')}")
+                        logger.info(f"   File ID: {upload_result.get('file_id')}")
+                        logger.info(f"   Device Signature: {device_signature[:16]}...")
                     else:
-                        logger.error(f"❌ Pipe upload failed for {wallet_address[:8]}...: {upload_result.get('error')}")
-                finally:
-                    loop.close()
+                        logger.error(f"❌ Pipe photo upload failed: {upload_result.get('error')}")
+                except Exception as e:
+                    logger.error(f"❌ Pipe upload thread error: {e}", exc_info=True)
 
             # Start upload in background thread
-            import threading
             upload_thread = threading.Thread(target=run_pipe_upload, daemon=True)
             upload_thread.start()
 
@@ -2301,13 +2347,15 @@ def register_routes(app):
                 'initiated': True,
                 'target_wallet': wallet_address,
                 'upload_status': 'uploading',
-                'storage_provider': 'pipe'
+                'storage_provider': 'pipe',
+                'device_signature': device_signature,
+                'upload_type': 'direct_jetson_device_signed'
             }
 
-            logger.info(f"📸 Photo captured for {wallet_address[:8]}... -> uploading to their Pipe storage")
+            logger.info(f"📸 Photo captured for {wallet_address[:8]}... -> uploading directly to Pipe")
 
         except Exception as e:
-            logger.error(f"Failed to initiate Pipe upload for {wallet_address[:8]}...: {e}")
+            logger.error(f"Failed to initiate Pipe upload for {wallet_address[:8]}...: {e}", exc_info=True)
             photo_info['pipe_upload'] = {
                 'initiated': False,
                 'error': str(e),

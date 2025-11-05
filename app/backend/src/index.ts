@@ -58,11 +58,13 @@ const pipeAccounts = new Map<
   }
 >();
 
-// Transaction signature to file mapping (privacy-preserving)
-// Maps on-chain tx signature → Pipe file metadata
-// Ownership is derived from blockchain, not stored here
-interface TxFileMapping {
-  txSignature: string;      // On-chain transaction signature
+// Device signature to file mapping (privacy-preserving)
+// Maps device signature OR blockchain tx signature → Pipe file metadata
+// Supports both: device-signed instant captures AND blockchain tx captures
+interface FileMapping {
+  signature: string;        // Device signature OR blockchain tx signature
+  signatureType: 'device' | 'blockchain';
+  walletAddress: string;    // Owner's wallet address
   fileId: string;           // Pipe file ID (blake3 hash)
   fileName: string;         // Stored filename on Pipe
   cameraId: string;         // Which camera captured this
@@ -70,7 +72,14 @@ interface TxFileMapping {
   fileType: 'photo' | 'video';
 }
 
-const txToFileMapping = new Map<string, TxFileMapping>();
+const signatureToFileMapping = new Map<string, FileMapping>();
+
+// Wallet to signatures mapping (for gallery queries)
+// Maps wallet address → array of signatures (both device and blockchain)
+const walletToSignatures = new Map<string, string[]>();
+
+// Legacy support - keep old variable name for backward compatibility
+const txToFileMapping = signatureToFileMapping;
 
 const app = express();
 
@@ -643,7 +652,7 @@ app.get("/api/pipe/jetson/credentials", async (req, res) => {
 
 // Jetson endpoint: Notify backend after direct upload to Pipe
 app.post("/api/pipe/jetson/upload-complete", async (req, res) => {
-  const { txSignature, fileName, fileId, blake3Hash, size, cameraId, fileType } = req.body;
+  const { txSignature, fileName, fileId, blake3Hash, size, cameraId, fileType, metadata } = req.body;
 
   if (!txSignature || !fileName || !fileId) {
     return res.status(400).json({
@@ -652,11 +661,23 @@ app.post("/api/pipe/jetson/upload-complete", async (req, res) => {
   }
 
   try {
-    console.log(`📝 Jetson uploaded: ${fileName} for tx ${txSignature.slice(0, 8)}... (${size} bytes)`);
+    // Determine signature type (device signature vs blockchain tx)
+    // Device signatures are typically longer ed25519 signatures
+    // Blockchain tx signatures are base58-encoded (88 chars)
+    const signatureType = metadata?.user_wallet ? 'device' : 'blockchain';
+    const walletAddress = metadata?.user_wallet || 'unknown';
 
-    // Store tx → file mapping (privacy-preserving)
-    const mapping: TxFileMapping = {
-      txSignature,
+    console.log(`📝 Jetson uploaded: ${fileName}`);
+    console.log(`   Signature Type: ${signatureType}`);
+    console.log(`   Signature: ${txSignature.slice(0, 16)}...`);
+    console.log(`   Wallet: ${walletAddress.slice(0, 8)}...`);
+    console.log(`   Size: ${size} bytes`);
+
+    // Store signature → file mapping
+    const mapping: FileMapping = {
+      signature: txSignature,
+      signatureType,
+      walletAddress,
       fileId: blake3Hash || fileId,
       fileName,
       cameraId: cameraId || 'unknown',
@@ -664,13 +685,24 @@ app.post("/api/pipe/jetson/upload-complete", async (req, res) => {
       fileType: fileType || 'photo',
     };
 
-    txToFileMapping.set(txSignature, mapping);
+    signatureToFileMapping.set(txSignature, mapping);
 
-    console.log(`✅ Mapped tx ${txSignature.slice(0, 8)}... → file ${fileId.slice(0, 20)}...`);
+    // Also track by wallet address for gallery queries
+    if (walletAddress !== 'unknown') {
+      const existingSignatures = walletToSignatures.get(walletAddress) || [];
+      existingSignatures.push(txSignature);
+      walletToSignatures.set(walletAddress, existingSignatures);
+
+      console.log(`✅ Mapped ${signatureType} signature → file for ${walletAddress.slice(0, 8)}...`);
+      console.log(`   Total files for wallet: ${existingSignatures.length}`);
+    }
 
     // Notify connected clients via WebSocket
     io.emit("pipe:upload:complete", {
       txSignature,
+      signature: txSignature,
+      signatureType,
+      walletAddress,
       fileName,
       fileId: mapping.fileId,
       size,
@@ -682,6 +714,8 @@ app.post("/api/pipe/jetson/upload-complete", async (req, res) => {
       success: true,
       fileId: mapping.fileId,
       txSignature,
+      signature: txSignature,
+      signatureType,
     });
   } catch (error) {
     console.error("❌ Failed to process upload notification:", error);
@@ -691,7 +725,7 @@ app.post("/api/pipe/jetson/upload-complete", async (req, res) => {
   }
 });
 
-// Gallery endpoint: Get user's media by querying blockchain
+// Gallery endpoint: Get user's media (supports both device-signed and blockchain tx captures)
 app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
   const { walletAddress } = req.params;
 
@@ -702,21 +736,15 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
   try {
     console.log(`📸 Fetching gallery for wallet: ${walletAddress.slice(0, 8)}...`);
 
-    // Get user's transactions from blockchain
-    const userPubkey = new PublicKey(walletAddress);
-    const signatures = await connection.getSignaturesForAddress(userPubkey, {
-      limit: 100, // Last 100 transactions
-    });
-
-    console.log(`Found ${signatures.length} transactions for user`);
-
-    // Find media files for user's transactions
     const mediaItems = [];
 
-    for (const sig of signatures) {
-      const mapping = txToFileMapping.get(sig.signature);
+    // Method 1: Get device-signed captures (instant captures, no blockchain tx)
+    const deviceSignatures = walletToSignatures.get(walletAddress) || [];
+    console.log(`   Device-signed captures: ${deviceSignatures.length}`);
+
+    for (const sig of deviceSignatures) {
+      const mapping = signatureToFileMapping.get(sig);
       if (mapping) {
-        // Build download URL
         const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(mapping.fileName)}`;
 
         mediaItems.push({
@@ -727,13 +755,55 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
           type: mapping.fileType,
           cameraId: mapping.cameraId,
           uploadedAt: mapping.uploadedAt.toISOString(),
-          txSignature: mapping.txSignature,
+          txSignature: mapping.signature,
+          signatureType: mapping.signatureType,
           provider: 'pipe'
         });
       }
     }
 
-    console.log(`✅ Found ${mediaItems.length} media items for user`);
+    // Method 2: Get blockchain tx captures (legacy/privacy mode captures)
+    try {
+      const userPubkey = new PublicKey(walletAddress);
+      const blockchainSignatures = await connection.getSignaturesForAddress(userPubkey, {
+        limit: 100, // Last 100 transactions
+      });
+
+      console.log(`   Blockchain transactions: ${blockchainSignatures.length}`);
+
+      for (const sig of blockchainSignatures) {
+        const mapping = signatureToFileMapping.get(sig.signature);
+        if (mapping && mapping.signatureType === 'blockchain') {
+          // Avoid duplicates
+          const exists = mediaItems.some(item => item.fileId === mapping.fileId);
+          if (!exists) {
+            const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(mapping.fileName)}`;
+
+            mediaItems.push({
+              id: mapping.fileId,
+              fileId: mapping.fileId,
+              fileName: mapping.fileName,
+              url: downloadUrl,
+              type: mapping.fileType,
+              cameraId: mapping.cameraId,
+              uploadedAt: mapping.uploadedAt.toISOString(),
+              txSignature: mapping.signature,
+              signatureType: mapping.signatureType,
+              provider: 'pipe'
+            });
+          }
+        }
+      }
+    } catch (blockchainError) {
+      console.log(`   Blockchain query skipped (may be offline):`, blockchainError);
+    }
+
+    // Sort by upload date (newest first)
+    mediaItems.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+
+    console.log(`✅ Found ${mediaItems.length} total media items for user`);
+    console.log(`   Device-signed: ${mediaItems.filter(m => m.signatureType === 'device').length}`);
+    console.log(`   Blockchain tx: ${mediaItems.filter(m => m.signatureType === 'blockchain').length}`);
 
     res.json({
       success: true,

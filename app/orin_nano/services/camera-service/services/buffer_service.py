@@ -434,9 +434,11 @@ class BufferService:
         """
         if gesture_service:
             self._gesture_service = gesture_service
-        
+            logger.info(f"✅ Injected gesture service: {gesture_service}")
+
         if gpu_face_service:
             self._gpu_face_service = gpu_face_service
+            logger.info(f"✅ Injected GPU face service: {gpu_face_service}")
 
     def get_buffer_frames(self, count: int = 30) -> List[Tuple[np.ndarray, float]]:
         """

@@ -179,43 +179,41 @@ class GPUFaceService:
 
     def extract_face_embedding(self, face_img: np.ndarray) -> Optional[np.ndarray]:
         """Extract high-quality face embedding using InsightFace"""
+        import sys
+        print(f"🔍 extract_face_embedding called, shape={face_img.shape}", flush=True, file=sys.stderr)
         if not self._models_loaded:
-            logger.warning("Models not loaded")
+            print(f"🔍 Models not loaded", flush=True, file=sys.stderr)
             return None
-            
+
         try:
             # Ensure face image is in the right format and size
             if face_img.shape[0] < 50 or face_img.shape[1] < 50:
-                logger.warning(f"Face image too small: {face_img.shape}")
+                print(f"🔍 Face too small: {face_img.shape}", flush=True, file=sys.stderr)
                 return None
-            
+
             # Convert BGR to RGB if needed (InsightFace expects RGB)
+            print(f"🔍 Converting BGR to RGB...", flush=True, file=sys.stderr)
             if len(face_img.shape) == 3 and face_img.shape[2] == 3:
                 face_rgb = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
             else:
                 face_rgb = face_img
-            
-            # PROOF OF INSIGHTFACE GPU USAGE
-            logger.info(f"🔥 GPU PROOF: InsightFace extracting embedding")
-            
+
             # Extract embedding with GPU
+            print(f"🔍 BEFORE InsightFace get()...", flush=True, file=sys.stderr)
             faces = self.face_embedder.get(face_rgb)
-            logger.info(f"✅ InsightFace extraction complete: {len(faces)} faces found")
-            
+            print(f"🔍 AFTER InsightFace get(): {len(faces)} faces", flush=True, file=sys.stderr)
+
             if len(faces) > 0:
                 # Get the largest face (most confident detection)
                 face = max(faces, key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]))
-                
+
                 # Return normalized embedding
                 embedding = face.normed_embedding
-                logger.debug(f"Successfully extracted embedding, shape: {embedding.shape}")
                 return embedding
             else:
-                logger.warning("InsightFace found no faces in the region")
                 return None
-                
+
         except Exception as e:
-            logger.warning(f"Failed to extract embedding: {e}")
             return None
 
     def extract_compact_face_embedding(self, face_img: np.ndarray) -> Optional[np.ndarray]:
@@ -241,50 +239,53 @@ class GPUFaceService:
             # Reduce to 128 dimensions using simple truncation
             # This keeps the most significant features while fitting blockchain limits
             compact_embedding = full_embedding[:128]
-            
+
             # Renormalize the compact embedding to maintain similarity properties
             norm = np.linalg.norm(compact_embedding)
             if norm > 0:
                 compact_embedding = compact_embedding / norm
-            
-            logger.debug(f"Successfully extracted compact embedding, shape: {compact_embedding.shape}")
+
             return compact_embedding
-            
+
         except Exception as e:
-            logger.warning(f"Failed to create compact embedding: {e}")
             return None
 
     def detect_and_recognize_faces(self, frame: np.ndarray) -> List[Dict]:
         """Detect persons and extract faces for recognition"""
+        import sys
+        print(f"🔍 detect_and_recognize_faces called, models_loaded={self._models_loaded}", flush=True, file=sys.stderr)
         if not self._models_loaded:
+            print(f"🔍 Models not loaded, returning empty", flush=True, file=sys.stderr)
             return []
-            
+
         faces = []
-        
+
         try:
-            # PROOF OF GPU INFERENCE IN BUFFER
+            # GPU inference with YOLOv8
             import torch
             device = next(self.face_detector.model.parameters()).device
-            logger.info(f"🔥 GPU PROOF: YOLOv8 running on device: {device} (type: {device.type})")
-            
+
             # Check if CUDA is being used
             if device.type != 'cuda':
-                logger.error(f"❌ CRITICAL: YOLOv8 NOT on GPU! Device: {device}")
                 raise RuntimeError("GPU detection failed - model not on CUDA!")
-            
+
             # CRITICAL FIX: Force YOLOv8 to use GPU for inference
             # YOLOv8 bug: ignores .to('cuda') without explicit device parameter!
             # Enable tracking with persist=True for identity tracking
             with torch.cuda.nvtx.range("YOLOv8_inference"):  # GPU profiling marker
                 results = self.face_detector.track(frame, device=0, verbose=False, persist=True)  # device=0 forces GPU, persist enables tracking!
             
-            logger.info(f"✅ GPU INFERENCE COMPLETE: {len(results)} detections on {device}")
-            
+            import sys
             for result in results:
                 if result.boxes is not None:
+                    print(f"🔍 Found {len(result.boxes)} boxes", flush=True, file=sys.stderr)
                     for i, box in enumerate(result.boxes):
+                        cls = int(box.cls)
+                        conf = float(box.conf)
+                        print(f"🔍 Box {i}: class={cls}, conf={conf}", flush=True, file=sys.stderr)
                         # Filter for person class (class 0 in COCO)
-                        if int(box.cls) == 0 and float(box.conf) > 0.5:
+                        if cls == 0 and conf > 0.5:
+                            print(f"🔍 Person detected! Processing...", flush=True, file=sys.stderr)
                             # Get bounding box coordinates
                             x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                             confidence = float(box.conf)
@@ -303,10 +304,13 @@ class GPUFaceService:
 
                             # Extract face region
                             face_region = frame[y1_padded:y2_padded, x1_padded:x2_padded]
+                            print(f"🔍 Face region size: {face_region.size}", flush=True, file=sys.stderr)
 
                             if face_region.size > 0:
                                 # Attempt face recognition
+                                print(f"🔍 BEFORE calling recognize_face()...", flush=True, file=sys.stderr)
                                 recognized_name, similarity = self.recognize_face(face_region)
+                                print(f"🔍 AFTER recognize_face(): name={recognized_name}, sim={similarity}", flush=True, file=sys.stderr)
 
                                 face_data = {
                                     'box': (x1, y1, x2, y2),
@@ -318,9 +322,14 @@ class GPUFaceService:
                                 }
 
                                 faces.append(face_data)
-        
+                                print(f"🔍 Face added to list! Total: {len(faces)}", flush=True, file=sys.stderr)
+
         except Exception as e:
-            logger.error(f"Error in face detection: {e}")
+            # REMOVED: logger causes deadlock
+            import sys
+            print(f"🚨 EXCEPTION in detect_and_recognize_faces: {e}", flush=True, file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
 
         return faces
 
@@ -378,28 +387,30 @@ class GPUFaceService:
 
     def recognize_face(self, face_img: np.ndarray) -> Tuple[Optional[str], float]:
         """Recognize a face by comparing embeddings"""
+        # Quick check if we have any embeddings (minimal lock time)
         with self._faces_lock:
             if not self._face_embeddings:
                 return None, 0.0
-        
-        # Extract embedding for input face
+            # Make a copy of embeddings dict to avoid holding lock during embedding extraction
+            embeddings_copy = self._face_embeddings.copy()
+
+        # Extract embedding for input face (outside lock)
         query_embedding = self.extract_face_embedding(face_img)
         if query_embedding is None:
             return None, 0.0
-        
-        # Compare with all database faces using cosine similarity
+
+        # Compare with all database faces using cosine similarity (no lock needed, using copy)
         best_match = None
         best_similarity = 0.0
-        
-        with self._faces_lock:
-            for wallet_address, db_embedding in self._face_embeddings.items():
-                # Cosine similarity (higher is better for normalized embeddings)
-                similarity = float(np.dot(query_embedding, db_embedding))
-                
-                if similarity > best_similarity and similarity > self._similarity_threshold:
-                    best_similarity = similarity
-                    best_match = wallet_address
-        
+
+        for wallet_address, db_embedding in embeddings_copy.items():
+            # Cosine similarity (higher is better for normalized embeddings)
+            similarity = float(np.dot(query_embedding, db_embedding))
+
+            if similarity > best_similarity and similarity > self._similarity_threshold:
+                best_similarity = similarity
+                best_match = wallet_address
+
         return best_match, best_similarity
 
     def enroll_face(self, frame: np.ndarray, wallet_address: str, metadata: Dict = None) -> Dict:
@@ -563,62 +574,58 @@ class GPUFaceService:
     def _processing_loop(self) -> None:
         """Main processing loop for face detection and recognition"""
         logger.info("Starting GPU face processing loop")
-        
+
         while self._processing_enabled and not self._stop_event.is_set():
             try:
                 current_time = time.time()
-                
-                # Get current frame from buffer service  
+
+                # Get current frame from buffer service
                 if hasattr(self._buffer_service, 'get_latest_frame'):
                     frame = self._buffer_service.get_latest_frame()
                     if frame is None:
-                        logger.debug("No frame available from buffer service")
                         time.sleep(0.1)
                         continue
-                    else:
-                        if self.frame_count % 100 == 0:  # Log every 100th frame
-                            logger.info(f"GPU processing frame #{self.frame_count}, shape: {frame.shape}")
                 else:
-                    logger.warning("Buffer service has no get_latest_frame method")
                     time.sleep(0.1)
                     continue
-                
+
                 # Perform face detection at intervals
                 if current_time - self._last_detection_time >= self._detection_interval:
                     if self._detection_enabled:
-                        logger.info("Running GPU face detection...")
                         self._detect_faces(frame)
                     self._last_detection_time = current_time
-                
+
                 # Perform face recognition at intervals
                 if current_time - self._last_recognition_time >= self._recognition_interval:
                     if self._detection_enabled:
                         self._recognize_faces(frame)
                     self._last_recognition_time = current_time
-                
+
                 # Update performance metrics
                 self.frame_count += 1
                 elapsed = current_time - self.start_time
                 if elapsed > 0:
                     self.fps = self.frame_count / elapsed
-                
+
                 # Increased sleep to prevent excessive CPU/GPU usage
                 time.sleep(0.5)
                 
             except Exception as e:
-                logger.error(f"Error in processing loop: {e}")
+                logger.error(f"Error in processing loop: {e}", exc_info=True)
                 time.sleep(0.5)
+
+        logger.warning(f"🛑 Processing loop exited - enabled: {self._processing_enabled}, stop_event: {self._stop_event.is_set()}")
 
     def _detect_faces(self, frame: np.ndarray) -> None:
         """Detect faces in frame and update results"""
         try:
             faces = self.detect_and_recognize_faces(frame)
-            
+
             with self._results_lock:
                 self._detected_faces = faces
-                
+
         except Exception as e:
-            logger.error(f"Error in face detection: {e}")
+            pass  # Silent - logging here causes deadlock
 
     def _recognize_faces(self, frame: np.ndarray) -> None:
         """Recognize faces in frame and update results"""
@@ -665,7 +672,8 @@ class GPUFaceService:
         Apply face detection and recognition overlays to a copy of the frame.
         This does NOT modify the original frame from the buffer.
         """
-        if frame is None or not self._visualization_enabled or not self._boxes_enabled:
+        # Show boxes if EITHER visualization OR boxes are enabled (not both required)
+        if frame is None or not (self._visualization_enabled or self._boxes_enabled):
             return frame
             
         # Make a copy to avoid modifying the original
@@ -828,20 +836,28 @@ class GPUFaceService:
 
     def get_user_display_name(self, wallet_address: str) -> str:
         """Get the best display name for a wallet address"""
+        import sys
         with self._faces_lock:
             # First check if we have a stored user profile
             if wallet_address in self._user_profiles:
                 profile = self._user_profiles[wallet_address]
+                print(f"🔍 DISPLAY_NAME: Found profile for {wallet_address[:8]}: {profile}", flush=True, file=sys.stderr)
                 if profile.get('display_name'):
+                    print(f"🔍 DISPLAY_NAME: Returning display_name: {profile['display_name']}", flush=True, file=sys.stderr)
                     return profile['display_name']
                 elif profile.get('username'):
+                    print(f"🔍 DISPLAY_NAME: Returning username: {profile['username']}", flush=True, file=sys.stderr)
                     return profile['username']
-            
+            else:
+                print(f"🔍 DISPLAY_NAME: No profile for {wallet_address[:8]}, _user_profiles has {len(self._user_profiles)} entries", flush=True, file=sys.stderr)
+
             # Fallback to stored face names
             if wallet_address in self._face_names:
+                print(f"🔍 DISPLAY_NAME: Returning from _face_names: {self._face_names[wallet_address]}", flush=True, file=sys.stderr)
                 return self._face_names[wallet_address]
-            
+
             # Final fallback to shortened wallet address
+            print(f"🔍 DISPLAY_NAME: Fallback to wallet[:8]: {wallet_address[:8]}", flush=True, file=sys.stderr)
             return wallet_address[:8]
 
     def clear_enrolled_faces(self) -> bool:
