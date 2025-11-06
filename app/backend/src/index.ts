@@ -645,34 +645,57 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
 
     // Pipe returns multipart form-data, need to extract actual file content
     const responseData = Buffer.from(pipeResponse.data);
-    const responseText = responseData.toString('binary');
 
-    // Find boundary in Content-Type header
-    const contentTypeHeader = pipeResponse.headers['content-type'] || '';
-    const boundaryMatch = contentTypeHeader.match(/boundary=([^;]+)/);
+    // Extract boundary from first line (format: --{boundary})
+    const firstLineEnd = responseData.indexOf('\n'.charCodeAt(0));
+    if (firstLineEnd !== -1) {
+      const boundary = responseData.slice(0, firstLineEnd).toString('utf8').trim();
 
-    if (boundaryMatch) {
-      // Parse multipart form-data to extract file content
-      const boundary = '--' + boundaryMatch[1];
-      const parts = responseText.split(boundary);
+      if (boundary.startsWith('--')) {
+        // Split by boundary (use Buffer for binary safety)
+        const boundaryBuffer = Buffer.from(boundary, 'utf8');
+        const parts: Buffer[] = [];
+        let start = 0;
+        let pos = 0;
 
-      // Find the part with file content (skip headers)
-      for (const part of parts) {
-        if (part.includes('Content-Disposition') && part.includes('filename')) {
-          // Extract content after headers (double CRLF separates headers from content)
-          const contentStart = part.indexOf('\r\n\r\n') + 4;
-          const contentEnd = part.lastIndexOf('\r\n');
+        while ((pos = responseData.indexOf(boundaryBuffer, start)) !== -1) {
+          if (start < pos) {
+            parts.push(responseData.slice(start, pos));
+          }
+          start = pos + boundaryBuffer.length;
+        }
+        if (start < responseData.length) {
+          parts.push(responseData.slice(start));
+        }
 
-          if (contentStart > 3 && contentEnd > contentStart) {
-            const fileContent = Buffer.from(part.substring(contentStart, contentEnd), 'binary');
-            res.setHeader("Content-Length", fileContent.length);
-            return res.send(fileContent);
+        // Find the part with file content
+        for (const part of parts) {
+          const partText = part.toString('utf8', 0, Math.min(200, part.length)); // Check headers only
+          if (partText.includes('Content-Disposition') && partText.includes('filename')) {
+            // Find double newline that separates headers from content
+            const headerEnd = part.indexOf('\n\n'.charCodeAt(0));
+            if (headerEnd !== -1) {
+              // Extract binary content after headers, trim trailing CRLF
+              let fileContent = part.slice(headerEnd + 2);
+              // Remove trailing \r\n or \n
+              if (fileContent[fileContent.length - 1] === 10) { // \n
+                fileContent = fileContent.slice(0, -1);
+                if (fileContent[fileContent.length - 1] === 13) { // \r
+                  fileContent = fileContent.slice(0, -1);
+                }
+              }
+
+              console.log(`✅ Extracted ${fileContent.length} bytes from multipart response`);
+              res.setHeader("Content-Length", fileContent.length);
+              return res.send(fileContent);
+            }
           }
         }
       }
     }
 
-    // Fallback: if not multipart or parsing failed, send as-is
+    // Fallback: if parsing failed, send as-is
+    console.warn('⚠️  Failed to parse multipart response, sending raw data');
     res.setHeader("Content-Length", responseData.length);
     res.send(responseData);
 
