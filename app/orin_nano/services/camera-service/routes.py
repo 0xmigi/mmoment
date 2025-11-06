@@ -2319,40 +2319,44 @@ def register_routes(app):
 
             logger.info(f"📝 Photo capture event signed: {device_signature[:16]}...")
 
-            # Upload to Pipe in background thread
-            def run_pipe_upload():
-                try:
-                    upload_result = upload_service.upload_photo(
-                        wallet_address=wallet_address,
-                        photo_path=photo_path,
-                        camera_id=camera_pda,
-                        device_signature=device_signature,
-                        timestamp=photo_info.get('timestamp')
-                    )
-                    if upload_result['success']:
-                        logger.info(f"✅ Photo uploaded to Pipe: {upload_result.get('file_name')}")
-                        logger.info(f"   File ID: {upload_result.get('file_id')}")
-                        logger.info(f"   Device Signature: {device_signature[:16]}...")
-                    else:
-                        logger.error(f"❌ Pipe photo upload failed: {upload_result.get('error')}")
-                except Exception as e:
-                    logger.error(f"❌ Pipe upload thread error: {e}", exc_info=True)
+            # Upload to Pipe synchronously (wait for completion before returning)
+            logger.info(f"📤 Uploading photo to Pipe...")
+            upload_result = upload_service.upload_photo(
+                wallet_address=wallet_address,
+                photo_path=photo_path,
+                camera_id=camera_pda,
+                device_signature=device_signature,
+                timestamp=photo_info.get('timestamp')
+            )
 
-            # Start upload in background thread
-            upload_thread = threading.Thread(target=run_pipe_upload, daemon=True)
-            upload_thread.start()
+            if upload_result['success']:
+                logger.info(f"✅ Photo uploaded to Pipe: {upload_result.get('file_name')}")
+                logger.info(f"   File ID: {upload_result.get('file_id')}")
+                logger.info(f"   Device Signature: {device_signature[:16]}...")
 
-            # Add Pipe upload info to response
-            photo_info['pipe_upload'] = {
-                'initiated': True,
-                'target_wallet': wallet_address,
-                'upload_status': 'uploading',
-                'storage_provider': 'pipe',
-                'device_signature': device_signature,
-                'upload_type': 'direct_jetson_device_signed'
-            }
+                # Add successful upload info to response
+                photo_info['pipe_upload'] = {
+                    'initiated': True,
+                    'completed': True,
+                    'target_wallet': wallet_address,
+                    'upload_status': 'completed',
+                    'storage_provider': 'pipe',
+                    'device_signature': device_signature,
+                    'file_name': upload_result.get('file_name'),
+                    'file_id': upload_result.get('file_id'),
+                    'upload_type': 'direct_jetson_device_signed'
+                }
+            else:
+                logger.error(f"❌ Pipe photo upload failed: {upload_result.get('error')}")
+                photo_info['pipe_upload'] = {
+                    'initiated': True,
+                    'completed': False,
+                    'upload_status': 'failed',
+                    'error': upload_result.get('error'),
+                    'storage_provider': 'pipe'
+                }
 
-            logger.info(f"📸 Photo captured for {wallet_address[:8]}... -> uploading directly to Pipe")
+            logger.info(f"📸 Photo captured for {wallet_address[:8]}... -> Pipe upload complete")
 
         except Exception as e:
             logger.error(f"Failed to initiate Pipe upload for {wallet_address[:8]}...: {e}", exc_info=True)

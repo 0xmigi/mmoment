@@ -153,9 +153,9 @@ class PipeUploader:
             )
             response.raise_for_status()
 
-            # Pipe returns filename as response
-            stored_filename = response.text.strip()
-            print(f"✅ Uploaded to Pipe: {stored_filename}")
+            # Pipe returns status message, not filename - use original filename for downloads
+            upload_status = response.text.strip()
+            print(f"✅ Uploaded to Pipe: {upload_status}")
 
         # Determine file type
         file_type = 'video' if file_path.suffix.lower() in ['.mp4', '.mov', '.avi'] else 'photo'
@@ -164,8 +164,8 @@ class PipeUploader:
         print(f"📝 Notifying backend with tx signature: {tx_signature[:16]}...")
         notify_data = {
             'txSignature': tx_signature,
-            'fileName': stored_filename,
-            'fileId': blake3_hash or stored_filename,
+            'fileName': file_path.name,  # Use original filename for downloads, not Pipe's status message
+            'fileId': blake3_hash or file_path.name,
             'blake3Hash': blake3_hash,
             'size': file_size,
             'cameraId': camera_id,
@@ -179,12 +179,12 @@ class PipeUploader:
         )
         notify_response.raise_for_status()
 
-        print(f"✅ Upload complete and tracked!")
+        print(f"✅ Upload complete! Stored as: {file_path.name}")
 
         return {
             'success': True,
-            'fileName': stored_filename,
-            'fileId': blake3_hash or stored_filename,
+            'fileName': file_path.name,  # Return original filename, not status message
+            'fileId': blake3_hash or file_path.name,
             'size': file_size,
             'blake3Hash': blake3_hash
         }

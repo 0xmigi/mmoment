@@ -639,26 +639,42 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
       headers: {
         "Authorization": `Bearer ${access_token}`,
       },
-      responseType: "stream",
+      responseType: "arraybuffer",  // Get full response to parse multipart
       timeout: 300000,
     });
 
-    // Set content length if available
-    const contentLength = pipeResponse.headers['content-length'];
-    if (contentLength) {
-      res.setHeader("Content-Length", contentLength);
+    // Pipe returns multipart form-data, need to extract actual file content
+    const responseData = Buffer.from(pipeResponse.data);
+    const responseText = responseData.toString('binary');
+
+    // Find boundary in Content-Type header
+    const contentTypeHeader = pipeResponse.headers['content-type'] || '';
+    const boundaryMatch = contentTypeHeader.match(/boundary=([^;]+)/);
+
+    if (boundaryMatch) {
+      // Parse multipart form-data to extract file content
+      const boundary = '--' + boundaryMatch[1];
+      const parts = responseText.split(boundary);
+
+      // Find the part with file content (skip headers)
+      for (const part of parts) {
+        if (part.includes('Content-Disposition') && part.includes('filename')) {
+          // Extract content after headers (double CRLF separates headers from content)
+          const contentStart = part.indexOf('\\r\\n\\r\\n') + 4;
+          const contentEnd = part.lastIndexOf('\\r\\n');
+
+          if (contentStart > 3 && contentEnd > contentStart) {
+            const fileContent = Buffer.from(part.substring(contentStart, contentEnd), 'binary');
+            res.setHeader("Content-Length", fileContent.length);
+            return res.send(fileContent);
+          }
+        }
+      }
     }
 
-    // Pipe the stream directly to response
-    pipeResponse.data.pipe(res);
-
-    // Handle stream errors
-    pipeResponse.data.on('error', (error: any) => {
-      console.error("Stream error:", error);
-      if (!res.headersSent) {
-        res.status(500).json({ error: "Stream failed" });
-      }
-    });
+    // Fallback: if not multipart or parsing failed, send as-is
+    res.setHeader("Content-Length", responseData.length);
+    res.send(responseData);
 
   } catch (error) {
     console.error("❌ Download failed:", error);
