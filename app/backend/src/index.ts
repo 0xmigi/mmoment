@@ -629,8 +629,9 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
     res.setHeader("Cache-Control", "public, max-age=31536000");
 
     // Stream directly from Pipe to client using JWT auth
+    // CRITICAL: Use fileId (hash) directly - Pipe uses content addressing
     const downloadUrl = new URL("https://us-west-01-firestarter.pipenetwork.com/download-stream");
-    downloadUrl.searchParams.append("file_name", decodeURIComponent(fileId));
+    downloadUrl.searchParams.append("file_name", fileId);
 
     const pipeResponse = await axios.get(downloadUrl.toString(), {
       headers: {
@@ -789,7 +790,8 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
     for (const sig of deviceSignatures) {
       const mapping = signatureToFileMapping.get(sig);
       if (mapping) {
-        const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(mapping.fileName)}`;
+        // Use fileId (hash) for download URL instead of fileName (which may be placeholder)
+        const downloadUrl = `/api/pipe/download/${walletAddress}/${mapping.fileId}`;
 
         mediaItems.push({
           id: mapping.fileId,
@@ -821,7 +823,8 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
           // Avoid duplicates
           const exists = mediaItems.some(item => item.fileId === mapping.fileId);
           if (!exists) {
-            const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(mapping.fileName)}`;
+            // Use fileId (hash) for download URL instead of fileName (which may be placeholder)
+            const downloadUrl = `/api/pipe/download/${walletAddress}/${mapping.fileId}`;
 
             mediaItems.push({
               id: mapping.fileId,
