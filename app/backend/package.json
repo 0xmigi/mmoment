@@ -10,7 +10,8 @@
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "build": "tsc",
-    "test": "jest"
+    "test": "jest",
+    "postinstall": "cd node_modules/firestarter-sdk && npm run build"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.29",
