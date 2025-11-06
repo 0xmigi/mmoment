@@ -672,17 +672,17 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
         for (const part of parts) {
           const partText = part.toString('utf8', 0, Math.min(200, part.length)); // Check headers only
           if (partText.includes('Content-Disposition') && partText.includes('filename')) {
-            // Find double newline that separates headers from content
-            const headerEnd = part.indexOf('\n\n'.charCodeAt(0));
+            // Find CRLF CRLF that separates headers from content
+            const separator = Buffer.from('\r\n\r\n', 'utf8');
+            const headerEnd = part.indexOf(separator);
             if (headerEnd !== -1) {
               // Extract binary content after headers, trim trailing CRLF
-              let fileContent = part.slice(headerEnd + 2);
-              // Remove trailing \r\n or \n
-              if (fileContent[fileContent.length - 1] === 10) { // \n
-                fileContent = fileContent.slice(0, -1);
-                if (fileContent[fileContent.length - 1] === 13) { // \r
-                  fileContent = fileContent.slice(0, -1);
-                }
+              let fileContent = part.slice(headerEnd + 4); // Skip \r\n\r\n
+              // Remove trailing \r\n
+              if (fileContent.length >= 2 &&
+                  fileContent[fileContent.length - 2] === 13 &&
+                  fileContent[fileContent.length - 1] === 10) {
+                fileContent = fileContent.slice(0, -2);
               }
 
               console.log(`✅ Extracted ${fileContent.length} bytes from multipart response`);
