@@ -827,8 +827,8 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
     for (const sig of deviceSignatures) {
       const mapping = signatureToFileMapping.get(sig);
       if (mapping) {
-        // Use fileId (hash) for download URL instead of fileName (which may be placeholder)
-        const downloadUrl = `/api/pipe/download/${walletAddress}/${mapping.fileId}`;
+        // Use fileName for download URL (original filename from upload)
+        const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(mapping.fileName)}`;
 
         mediaItems.push({
           id: mapping.fileId,
