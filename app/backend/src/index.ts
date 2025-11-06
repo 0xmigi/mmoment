@@ -672,13 +672,18 @@ app.get("/api/pipe/jetson/credentials", async (req, res) => {
   try {
     console.log(`🔧 Getting Pipe credentials for Jetson...`);
 
-    // Use cached token helper (only logs in once per hour)
-    const { access_token, user_id } = await getPipeJWTToken();
+    // Get user_app_key from environment (new auth method)
+    const user_id = process.env.PIPE_USER_ID;
+    const user_app_key = process.env.PIPE_USER_APP_KEY;
 
-    // Return JWT auth credentials
+    if (!user_id || !user_app_key) {
+      throw new Error("PIPE_USER_ID and PIPE_USER_APP_KEY must be set in environment");
+    }
+
+    // Return user_app_key auth credentials (new accounts)
     res.json({
       user_id: user_id,
-      access_token: access_token,
+      user_app_key: user_app_key,
       baseUrl: "https://us-west-01-firestarter.pipenetwork.com",
     });
   } catch (error) {
