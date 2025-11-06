@@ -660,8 +660,8 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
       for (const part of parts) {
         if (part.includes('Content-Disposition') && part.includes('filename')) {
           // Extract content after headers (double CRLF separates headers from content)
-          const contentStart = part.indexOf('\\r\\n\\r\\n') + 4;
-          const contentEnd = part.lastIndexOf('\\r\\n');
+          const contentStart = part.indexOf('\r\n\r\n') + 4;
+          const contentEnd = part.lastIndexOf('\r\n');
 
           if (contentStart > 3 && contentEnd > contentStart) {
             const fileContent = Buffer.from(part.substring(contentStart, contentEnd), 'binary');
