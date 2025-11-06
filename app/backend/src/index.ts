@@ -609,9 +609,14 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
       `📥 Streaming download ${fileId} for wallet: ${walletAddress.slice(0, 8)}...`,
     );
 
-    // Get Pipe credentials (user_app_key based auth)
-    const pipeCredsResponse = await axios.get(`${process.env.BACKEND_URL || 'http://localhost:3001'}/api/pipe/jetson/credentials`);
-    const pipeCreds = pipeCredsResponse.data;
+    // Get Pipe credentials directly from environment
+    const user_id = process.env.PIPE_USER_ID;
+    const user_app_key = process.env.PIPE_USER_APP_KEY;
+    const baseUrl = process.env.PIPE_BASE_URL || 'https://us-west-01-firestarter.pipenetwork.com';
+
+    if (!user_id || !user_app_key) {
+      throw new Error("PIPE_USER_ID and PIPE_USER_APP_KEY must be set");
+    }
 
     // Determine content type from file extension
     let contentType = "application/octet-stream";
@@ -631,15 +636,15 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
 
     // Stream directly from Pipe to client using user_app_key auth
     // CRITICAL: Use fileId (hash) directly - Pipe uses content addressing
-    const downloadUrl = new URL(`${pipeCreds.baseUrl}/download-stream`);
+    const downloadUrl = new URL(`${baseUrl}/download-stream`);
     downloadUrl.searchParams.append("file_name", fileId);
 
     console.log(`📥 Downloading from Pipe: ${downloadUrl.toString().slice(0, 80)}...`);
 
     const pipeResponse = await axios.get(downloadUrl.toString(), {
       headers: {
-        "X-User-Id": pipeCreds.user_id,
-        "X-User-App-Key": pipeCreds.user_app_key,
+        "X-User-Id": user_id,
+        "X-User-App-Key": user_app_key,
       },
       responseType: "stream", // Critical: stream mode
       timeout: 300000, // 5 minutes for large files
