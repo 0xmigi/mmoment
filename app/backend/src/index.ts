@@ -629,19 +629,11 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
     res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Cache-Control", "public, max-age=31536000");
 
-    // Look up the actual fileName from mappings (Pipe needs the original filename, not hash)
-    let actualFileName = fileId; // fallback to fileId if not found
-    for (const [sig, mapping] of signatureToFileMapping.entries()) {
-      if (mapping.fileId === fileId) {
-        actualFileName = mapping.fileName;
-        break;
-      }
-    }
-
+    // Pipe priority-upload uses content-addressing: download by hash (fileId), not placeholder fileName
     const downloadUrl = new URL(`${baseUrl}/download-stream`);
-    downloadUrl.searchParams.append("file_name", actualFileName);
+    downloadUrl.searchParams.append("file_name", fileId);
 
-    console.log(`📥 Downloading from Pipe: ${actualFileName.slice(0, 50)}...`);
+    console.log(`📥 Downloading from Pipe using fileId: ${fileId.slice(0, 20)}...`);
 
     const pipeResponse = await axios.get(downloadUrl.toString(), {
       headers: {
