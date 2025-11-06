@@ -40,13 +40,21 @@ class PipeUploader:
         response.raise_for_status()
 
         data = response.json()
+        # Backend returns either user_app_key (new) or access_token (legacy)
         self.credentials = {
-            'user_id': data['userId'],
-            'user_app_key': data['userAppKey']
+            'user_id': data['user_id']
         }
+
+        # Support both auth types
+        if 'user_app_key' in data:
+            self.credentials['user_app_key'] = data['user_app_key']
+        elif 'access_token' in data:
+            self.credentials['access_token'] = data['access_token']
+
         self.base_url = data['baseUrl']
 
-        print(f"✅ Got credentials for user: {self.credentials['user_id'][:20]}...")
+        auth_type = 'user_app_key' if 'user_app_key' in self.credentials else 'access_token'
+        print(f"✅ Got credentials ({auth_type}) for user: {self.credentials['user_id'][:20]}...")
         return self.credentials
 
     def _calculate_blake3(self, file_path: str) -> Optional[str]:

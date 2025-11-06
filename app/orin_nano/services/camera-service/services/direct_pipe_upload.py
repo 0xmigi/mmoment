@@ -234,11 +234,14 @@ class DirectPipeUploadService:
 _direct_pipe_upload_service = None
 
 
-def get_direct_pipe_upload_service(backend_url: str = "http://192.168.1.232:3001") -> DirectPipeUploadService:
+def get_direct_pipe_upload_service(backend_url: str = None) -> DirectPipeUploadService:
     """Get or create the singleton direct Pipe upload service instance."""
     global _direct_pipe_upload_service
 
     if _direct_pipe_upload_service is None:
+        # Use environment variable if backend_url not provided
+        if backend_url is None:
+            backend_url = os.getenv('BACKEND_URL', 'http://localhost:3001')
         _direct_pipe_upload_service = DirectPipeUploadService(backend_url=backend_url)
 
     return _direct_pipe_upload_service
