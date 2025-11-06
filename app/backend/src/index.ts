@@ -58,6 +58,75 @@ const pipeAccounts = new Map<
   }
 >();
 
+// Cached Pipe JWT token for Jetson uploads
+let cachedPipeToken: {
+  access_token: string;
+  user_id: string;
+  expires_at: number; // timestamp
+} | null = null;
+
+// Helper function to get or refresh Pipe JWT token
+async function getPipeJWTToken(): Promise<{ access_token: string; user_id: string }> {
+  const now = Date.now();
+
+  // Return cached token if still valid (with 5 min buffer)
+  if (cachedPipeToken && cachedPipeToken.expires_at > now + 5 * 60 * 1000) {
+    console.log(`✅ Using cached Pipe token (expires in ${Math.floor((cachedPipeToken.expires_at - now) / 1000 / 60)} min)`);
+    return {
+      access_token: cachedPipeToken.access_token,
+      user_id: cachedPipeToken.user_id
+    };
+  }
+
+  // Token expired or doesn't exist - login fresh
+  const pipeUsername = process.env.PIPE_USERNAME || "wallettest1762286471";
+  const pipePassword = process.env.PIPE_PASSWORD || "StrongPass123!@#";
+
+  console.log(`🔄 Fetching fresh Pipe JWT token...`);
+
+  const loginResp = await fetch("https://us-west-01-firestarter.pipenetwork.com/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: pipeUsername, password: pipePassword })
+  });
+
+  if (!loginResp.ok) {
+    throw new Error(`Login failed: ${loginResp.status}`);
+  }
+
+  const tokens = await loginResp.json();
+
+  // Get user_id
+  const walletResp = await fetch("https://us-west-01-firestarter.pipenetwork.com/checkWallet", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${tokens.access_token}`
+    },
+    body: JSON.stringify({})
+  });
+
+  if (!walletResp.ok) {
+    throw new Error(`checkWallet failed: ${walletResp.status}`);
+  }
+
+  const walletData = await walletResp.json();
+
+  // Cache the token (assume 1 hour expiry)
+  cachedPipeToken = {
+    access_token: tokens.access_token,
+    user_id: walletData.user_id,
+    expires_at: now + 60 * 60 * 1000 // 1 hour from now
+  };
+
+  console.log(`✅ Fresh Pipe token cached (user: ${walletData.user_id.slice(0, 20)}...)`);
+
+  return {
+    access_token: tokens.access_token,
+    user_id: walletData.user_id
+  };
+}
+
 // Device signature to file mapping (privacy-preserving)
 // Maps device signature OR blockchain tx signature → Pipe file metadata
 // Supports both: device-signed instant captures AND blockchain tx captures
@@ -540,22 +609,8 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
       `📥 Streaming download ${fileId} for wallet: ${walletAddress.slice(0, 8)}...`,
     );
 
-    // Use system Pipe account (same one used for uploads)
-    const pipeUsername = process.env.PIPE_USERNAME || "wallettest1762286471";
-    const pipePassword = process.env.PIPE_PASSWORD || "StrongPass123!@#";
-
-    // Login to get JWT token
-    const loginResp = await fetch("https://us-west-01-firestarter.pipenetwork.com/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: pipeUsername, password: pipePassword })
-    });
-
-    if (!loginResp.ok) {
-      throw new Error(`Login failed: ${loginResp.status}`);
-    }
-
-    const tokens = await loginResp.json();
+    // Use cached token helper (only logs in once per hour)
+    const { access_token } = await getPipeJWTToken();
 
     // Determine content type from file extension
     let contentType = "application/octet-stream";
@@ -579,7 +634,7 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
 
     const pipeResponse = await axios.get(downloadUrl.toString(), {
       headers: {
-        "Authorization": `Bearer ${tokens.access_token}`,
+        "Authorization": `Bearer ${access_token}`,
       },
       responseType: "stream", // Critical: stream mode
       timeout: 300000, // 5 minutes for large files
@@ -615,46 +670,15 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
 // Jetson endpoint: Get Pipe credentials for direct uploads
 app.get("/api/pipe/jetson/credentials", async (req, res) => {
   try {
-    // Use your funded Pipe account with JWT auth
-    const pipeUsername = process.env.PIPE_USERNAME || "wallettest1762286471";
-    const pipePassword = process.env.PIPE_PASSWORD || "StrongPass123!@#";
-
     console.log(`🔧 Getting Pipe credentials for Jetson...`);
 
-    // Login to get JWT token
-    const loginResp = await fetch("https://us-west-01-firestarter.pipenetwork.com/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: pipeUsername, password: pipePassword })
-    });
+    // Use cached token helper (only logs in once per hour)
+    const { access_token, user_id } = await getPipeJWTToken();
 
-    if (!loginResp.ok) {
-      throw new Error(`Login failed: ${loginResp.status}`);
-    }
-
-    const tokens = await loginResp.json();
-
-    // Get user_id
-    const walletResp = await fetch("https://us-west-01-firestarter.pipenetwork.com/checkWallet", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${tokens.access_token}`
-      },
-      body: JSON.stringify({})
-    });
-
-    if (!walletResp.ok) {
-      throw new Error(`checkWallet failed: ${walletResp.status}`);
-    }
-
-    const walletData = await walletResp.json();
-    console.log(`✅ Got Pipe credentials for user: ${walletData.user_id}`);
-
-    // Return JWT auth credentials (works for all accounts)
+    // Return JWT auth credentials
     res.json({
-      user_id: walletData.user_id,
-      access_token: tokens.access_token,
+      user_id: user_id,
+      access_token: access_token,
       baseUrl: "https://us-west-01-firestarter.pipenetwork.com",
     });
   } catch (error) {
