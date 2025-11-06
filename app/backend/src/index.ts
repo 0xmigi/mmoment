@@ -609,14 +609,9 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
       `📥 Streaming download ${fileId} for wallet: ${walletAddress.slice(0, 8)}...`,
     );
 
-    // Get Pipe credentials directly from environment
-    const user_id = process.env.PIPE_USER_ID;
-    const user_app_key = process.env.PIPE_USER_APP_KEY;
+    // Get JWT token (legacy Pipe account uses JWT Bearer auth, not user_app_key)
+    const { access_token } = await getPipeJWTToken();
     const baseUrl = process.env.PIPE_BASE_URL || 'https://us-west-01-firestarter.pipenetwork.com';
-
-    if (!user_id || !user_app_key) {
-      throw new Error("PIPE_USER_ID and PIPE_USER_APP_KEY must be set");
-    }
 
     // Determine content type from file extension
     let contentType = "application/octet-stream";
@@ -634,20 +629,26 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
     res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Cache-Control", "public, max-age=31536000");
 
-    // Stream directly from Pipe to client using user_app_key auth
-    // CRITICAL: Use fileId (hash) directly - Pipe uses content addressing
-    const downloadUrl = new URL(`${baseUrl}/download-stream`);
-    downloadUrl.searchParams.append("file_name", fileId);
+    // Look up the actual fileName from mappings (Pipe needs the original filename, not hash)
+    let actualFileName = fileId; // fallback to fileId if not found
+    for (const [sig, mapping] of signatureToFileMapping.entries()) {
+      if (mapping.fileId === fileId) {
+        actualFileName = mapping.fileName;
+        break;
+      }
+    }
 
-    console.log(`📥 Downloading from Pipe: ${downloadUrl.toString().slice(0, 80)}...`);
+    const downloadUrl = new URL(`${baseUrl}/download-stream`);
+    downloadUrl.searchParams.append("file_name", actualFileName);
+
+    console.log(`📥 Downloading from Pipe: ${actualFileName.slice(0, 50)}...`);
 
     const pipeResponse = await axios.get(downloadUrl.toString(), {
       headers: {
-        "X-User-Id": user_id,
-        "X-User-App-Key": user_app_key,
+        "Authorization": `Bearer ${access_token}`,
       },
-      responseType: "stream", // Critical: stream mode
-      timeout: 300000, // 5 minutes for large files
+      responseType: "stream",
+      timeout: 300000,
     });
 
     // Set content length if available
