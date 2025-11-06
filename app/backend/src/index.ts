@@ -572,7 +572,8 @@ app.get("/api/pipe/files/:walletAddress", async (req, res) => {
           : new Date(record.uploadedAt).toISOString()
         : new Date().toISOString(),
       // Create a backend proxy URL for downloads since we need JWT auth
-      url: `http://localhost:3001/api/pipe/download/${walletAddress}/${encodeURIComponent(record.fileId)}`,
+      // Use fileName (not fileId/hash) because Pipe downloads by original filename
+      url: `/api/pipe/download/${walletAddress}/${encodeURIComponent(record.fileName)}`,
       metadata: record.metadata || {},
       blake3Hash: record.blake3Hash,
     }));
