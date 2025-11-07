@@ -27,6 +27,7 @@ export default function MediaGallery({
   >(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
   const [storageType, setStorageType] = useState<"pinata" | "pipe">("pinata");
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Add click handler for media items
   const handleMediaClick = (media: IPFSMedia | PipeGalleryItem) => {
@@ -52,6 +53,21 @@ export default function MediaGallery({
 
     return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
+
+  // Subscribe to real-time gallery updates for Pipe storage
+  useEffect(() => {
+    if (storageType === "pipe") {
+      const unsubscribe = pipeGalleryService.onGalleryUpdate(() => {
+        console.log("📡 Gallery update received, refreshing...");
+        // Trigger a re-fetch by incrementing the refresh trigger
+        setRefreshTrigger(prev => prev + 1);
+      });
+
+      return () => {
+        unsubscribe();
+      };
+    }
+  }, [storageType]);
 
   useEffect(() => {
     let isSubscribed = true;
@@ -161,7 +177,7 @@ export default function MediaGallery({
       isSubscribed = false;
       clearInterval(interval);
     };
-  }, [primaryWallet?.address, mode, maxRecentItems, cameraId, storageType]);
+  }, [primaryWallet?.address, mode, maxRecentItems, cameraId, storageType, refreshTrigger]);
 
   const handleDelete = async (mediaId: string) => {
     if (!primaryWallet?.address) return;

@@ -69,7 +69,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   }, [isCheckedIn, onCheckStatusChange]);
 
-  // Add a more frequent check for session status and active users
+  // Check session status and active users only when modal opens (no polling)
   useEffect(() => {
     if (!isOpen || !camera.id) return;
 
@@ -83,20 +83,17 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     // Always fetch active users (doesn't need wallet)
     fetchActiveUsersForCamera();
 
-    // Also set up a periodic check while the modal is open
+    // Poll active users only (much less frequently - every 15 seconds)
     const intervalId = setInterval(() => {
-      console.log("[CameraModal] Periodic session status and active users check");
-      if (primaryWallet?.address) {
-        checkSessionStatus();
-      }
+      console.log("[CameraModal] Periodic active users check");
       fetchActiveUsersForCamera();
-    }, 3000); // Check every 3 seconds
+    }, 15000); // Check every 15 seconds instead of 3
 
     return () => {
-      console.log("[CameraModal] Cleaning up session status and active users check");
+      console.log("[CameraModal] Cleaning up active users check");
       clearInterval(intervalId);
     };
-  }, [isOpen, camera.id, primaryWallet]);
+  }, [isOpen, camera.id]);
 
   // Clear errors and load configuration when modal opens
   useEffect(() => {

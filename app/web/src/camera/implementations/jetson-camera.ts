@@ -96,14 +96,21 @@ export class JetsonCamera implements ICamera {
     }
   }
 
-  private async makeApiCall(endpoint: string, method: string, data?: any): Promise<Response> {
-    const url = `${this.apiUrl}${endpoint}`;
+  private async makeApiCall(endpoint: string, method: string, data?: any, retryCount = 0): Promise<Response> {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 1000; // 1 second base delay
+
+    // Add cache-busting timestamp for GET requests to prevent connection reuse issues
+    const separator = endpoint.includes('?') ? '&' : '?';
+    const cacheBuster = method === 'GET' ? `${separator}_t=${Date.now()}` : '';
+    const url = `${this.apiUrl}${endpoint}${cacheBuster}`;
+
     this.log(`Making ${method} request to: ${url}`);
-    
+
     if (data) {
       this.log(`Request data:`, data);
     }
-    
+
     try {
       const response = await fetch(url, {
         method,
@@ -112,17 +119,34 @@ export class JetsonCamera implements ICamera {
         },
         mode: 'cors',
         credentials: 'omit',
+        cache: 'no-store', // Force fresh connection (browser-level, doesn't trigger CORS)
         body: method !== 'GET' && data ? JSON.stringify(data) : undefined
       });
-      
+
       this.log(`Response status: ${response.status} ${response.statusText}`);
-      
+
       if (!response.ok) {
         this.log(`HTTP error: ${response.status} ${response.statusText}`);
       }
-      
+
       return response;
     } catch (error) {
+      // Check if it's an SSL/connection error that we can retry
+      const isRetryableError = error instanceof TypeError && (
+        error.message.includes('ERR_SSL_PROTOCOL_ERROR') ||
+        error.message.includes('ERR_CONNECTION') ||
+        error.message.includes('Failed to fetch') ||
+        error.message.includes('network')
+      );
+
+      if (isRetryableError && retryCount < MAX_RETRIES) {
+        const delay = RETRY_DELAY * Math.pow(2, retryCount); // Exponential backoff
+        this.log(`Retryable error, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return this.makeApiCall(endpoint, method, data, retryCount + 1);
+      }
+
       this.log('Fetch error:', error);
       throw error;
     }

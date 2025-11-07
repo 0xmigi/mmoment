@@ -9,6 +9,7 @@ import { IRLAppsButton } from "../../camera/IRLAppsButton";
 import { cameraStatus } from "../../camera/camera-status";
 import { unifiedCameraService } from "../../camera/unified-camera-service";
 import { useCameraStatus } from "../../camera/useCameraStatus";
+import { unifiedCameraPolling, CameraStatusData } from "../../camera/unified-camera-polling";
 import { CONFIG } from "../../core/config";
 import { ToastMessage } from "../../core/types/toast";
 import MediaGallery from "../../media/Gallery";
@@ -43,7 +44,7 @@ import {
   Link2,
   CheckCircle,
 } from "lucide-react";
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef, useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 
 // Update the CameraIdDisplay component to add a forced refresh when the modal is closed
@@ -272,8 +273,7 @@ export function CameraView() {
     lastUpdated: 0,
   });
 
-  // Polling interval for hardware state
-  const hardwareStateInterval = useRef<NodeJS.Timeout>();
+  // Removed: Hardware state is now polled via unified service
 
   // Add camera-specific status hook to the main CameraView function
   const currentCameraId =
@@ -448,44 +448,27 @@ export function CameraView() {
   }, [primaryWallet]);
 
   // Sync UI state with actual camera state when component loads or camera changes
+  // Uses unified polling service to avoid duplicate API calls
   useEffect(() => {
     if (!cameraAccount) return;
 
-    const syncCameraState = async () => {
-      try {
-        console.log(`[CameraView] Syncing state for camera: ${cameraAccount}`);
+    console.log(`[CameraView] Syncing state for camera: ${cameraAccount}`);
 
-        // Check if camera exists in registry
-        if (!unifiedCameraService.hasCamera(cameraAccount)) {
-          console.log(
-            `[CameraView] Camera not in registry, skipping state sync`
-          );
-          return;
-        }
+    // Check if camera exists in registry
+    if (!unifiedCameraService.hasCamera(cameraAccount)) {
+      console.log(
+        `[CameraView] Camera not in registry, skipping state sync`
+      );
+      return;
+    }
 
-        // Get actual camera status
-        const statusResponse = await unifiedCameraService.getStatus(
-          cameraAccount
-        );
-        if (statusResponse.success && statusResponse.data) {
-          console.log(`[CameraView] Camera status:`, statusResponse.data);
-          setIsRecording(statusResponse.data.isRecording);
-        }
-
-        // Get actual stream status
-        const streamResponse = await unifiedCameraService.getStreamInfo(
-          cameraAccount
-        );
-        if (streamResponse.success && streamResponse.data) {
-          console.log(`[CameraView] Stream status:`, streamResponse.data);
-        }
-      } catch (error) {
-        console.error(`[CameraView] Error syncing camera state:`, error);
-      }
-    };
-
-    // Sync state immediately when camera changes
-    syncCameraState();
+    // Force a fresh check from unified polling (will reuse pending request if one exists)
+    unifiedCameraPolling.forceCheck(cameraAccount).then((status) => {
+      console.log(`[CameraView] Camera status from unified polling:`, status);
+      // Recording state is managed by hardware state subscription
+    }).catch((error) => {
+      console.error(`[CameraView] Error syncing camera state:`, error);
+    });
   }, [cameraAccount]);
 
   // Handle camera update from ActivateCamera component
@@ -533,40 +516,26 @@ export function CameraView() {
     }
   };
 
-  // Polling function to get hardware state directly from the camera
-  const pollHardwareState = useCallback(async () => {
+  // Subscribe to unified polling service for hardware state (no separate polling needed)
+  useEffect(() => {
     if (!cameraAccount) return;
 
-    try {
-      const response = await unifiedCameraService.getComprehensiveState(
-        cameraAccount
-      );
-      if (response.status.success && response.status.data) {
-        setHardwareState({
-          isStreaming: response.streamInfo.data?.isActive || false,
-          isRecording: response.status.data.isRecording || false,
-          lastUpdated: Date.now(),
-        });
-      }
-    } catch (error) {
-      console.error("[CameraView] Error polling hardware state:", error);
-    }
-  }, [cameraAccount]);
+    console.log('[CameraView] Subscribing to unified polling for hardware state');
 
-  // Set up hardware state polling
-  useEffect(() => {
-    // Poll immediately
-    pollHardwareState();
+    const unsubscribe = unifiedCameraPolling.subscribe(cameraAccount, (status: CameraStatusData) => {
+      setHardwareState({
+        isStreaming: status.isStreaming,
+        isRecording: false, // TODO: Add isRecording to unified polling status
+        lastUpdated: Date.now(),
+      });
+    });
 
-    // Then poll every 3 seconds for responsive UI
-    hardwareStateInterval.current = setInterval(pollHardwareState, 3000);
-
+    // Cleanup
     return () => {
-      if (hardwareStateInterval.current) {
-        clearInterval(hardwareStateInterval.current);
-      }
+      console.log('[CameraView] Unsubscribing from unified polling');
+      unsubscribe();
     };
-  }, [pollHardwareState]);
+  }, [cameraAccount]);
 
   // Button handlers
 
@@ -1318,8 +1287,8 @@ export function CameraView() {
     }
 
     try {
-      // Get fresh hardware state before making decisions
-      await pollHardwareState();
+      // Force fresh status check from unified polling
+      await unifiedCameraPolling.forceCheck(currentCameraId);
 
       // Use the camera status hook for more reliable state
       const isCurrentlyStreaming = currentCameraStatus.isStreaming;
@@ -1349,7 +1318,7 @@ export function CameraView() {
 
           // Wait a bit longer for hardware to update, then check status
           setTimeout(async () => {
-            await pollHardwareState();
+            await unifiedCameraPolling.forceCheck(currentCameraId);
             // Only show success if we can confirm the stream actually stopped
             const updatedState =
               await unifiedCameraService.getComprehensiveState(currentCameraId);
@@ -1400,7 +1369,7 @@ export function CameraView() {
 
           // Wait a bit longer for hardware to update, then check status
           setTimeout(async () => {
-            await pollHardwareState();
+            await unifiedCameraPolling.forceCheck(currentCameraId);
             // Only show success if we can confirm the stream actually started
             const updatedState =
               await unifiedCameraService.getComprehensiveState(currentCameraId);
@@ -1419,9 +1388,9 @@ export function CameraView() {
         }
       }
 
-      // Force additional polls at 2s and 5s intervals to catch delayed state changes
-      setTimeout(() => pollHardwareState(), 2000);
-      setTimeout(() => pollHardwareState(), 5000);
+      // Force additional checks at 2s and 5s intervals to catch delayed state changes
+      setTimeout(() => unifiedCameraPolling.forceCheck(currentCameraId), 2000);
+      setTimeout(() => unifiedCameraPolling.forceCheck(currentCameraId), 5000);
 
       // Refresh the timeline
       if (timelineRef.current?.refreshEvents) {

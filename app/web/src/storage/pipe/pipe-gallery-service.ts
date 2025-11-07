@@ -30,11 +30,72 @@ export interface PipeGalleryItem {
 
 class PipeGalleryService {
   private backendUrl: string;
+  private galleryUpdateListeners: Set<() => void> = new Set();
+  private socket: any = null;
 
   constructor() {
     // Use the same backend URL that's running on the local network
     this.backendUrl =
       import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
+
+    // Initialize WebSocket connection for real-time gallery updates
+    this.initializeWebSocket();
+  }
+
+  /**
+   * Initialize WebSocket connection to listen for upload completion events
+   */
+  private initializeWebSocket() {
+    // Dynamically import socket.io-client to avoid SSR issues
+    import('socket.io-client').then(({ io }) => {
+      this.socket = io(this.backendUrl, {
+        transports: ['websocket', 'polling'],
+        autoConnect: true,
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+      });
+
+      this.socket.on('connect', () => {
+        console.log('📡 Connected to backend WebSocket for gallery updates');
+      });
+
+      this.socket.on('pipe:upload:complete', (data: any) => {
+        console.log('📸 New media uploaded to Pipe:', data);
+        // Notify all listeners to refresh their galleries
+        this.notifyGalleryUpdate();
+      });
+
+      this.socket.on('disconnect', () => {
+        console.log('📡 Disconnected from backend WebSocket');
+      });
+    }).catch(error => {
+      console.warn('Failed to initialize WebSocket for gallery updates:', error);
+    });
+  }
+
+  /**
+   * Subscribe to gallery update events
+   */
+  onGalleryUpdate(callback: () => void): () => void {
+    this.galleryUpdateListeners.add(callback);
+    // Return unsubscribe function
+    return () => {
+      this.galleryUpdateListeners.delete(callback);
+    };
+  }
+
+  /**
+   * Notify all listeners that the gallery should be refreshed
+   */
+  private notifyGalleryUpdate() {
+    this.galleryUpdateListeners.forEach(listener => {
+      try {
+        listener();
+      } catch (error) {
+        console.error('Error in gallery update listener:', error);
+      }
+    });
   }
 
   /**
