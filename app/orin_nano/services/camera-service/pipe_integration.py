@@ -103,10 +103,11 @@ class PipeStorageManager:
                 }
 
         try:
-            # Generate filename
+            # Generate filename with wallet prefix for client-side filtering
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             camera_id = metadata.get('camera_id', 'jetson01') if metadata else 'jetson01'
-            filename = f"mmoment_{capture_type}_{camera_id}_{timestamp}.jpg"
+            wallet_short = wallet_address[:8]
+            filename = f"{wallet_short}_{capture_type}_{camera_id}_{timestamp}.jpg"
 
             # Upload via backend proxy (handles JWT auth automatically)
             backend_url = f"{self.backend_url}/api/pipe/upload"
