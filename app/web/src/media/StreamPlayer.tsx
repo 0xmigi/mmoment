@@ -1,6 +1,7 @@
 import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from "../anchor/setup";
 import { useCamera } from "../camera/CameraProvider";
 import { unifiedCameraService } from "../camera/unified-camera-service";
+import { unifiedCameraPolling } from "../camera/unified-camera-polling";
 import { WebRTCStreamPlayer } from "./WebRTCStreamPlayer";
 import { Player } from "@livepeer/react";
 import { useState, useEffect, useCallback, useRef, memo } from "react";
@@ -79,35 +80,22 @@ const StreamPlayer = memo(() => {
 
       try {
         console.log(
-          "[StreamPlayer] Fetching comprehensive state for camera:",
+          "[StreamPlayer] Fetching stream info for camera:",
           currentCameraId
         );
 
-        // Use comprehensive state for better state reconciliation
-        const comprehensiveState =
-          await unifiedCameraService.getComprehensiveState(currentCameraId);
+        // Use unified polling to get cached status (prevents duplicate API calls)
+        const cameraStatus = unifiedCameraPolling.getCachedStatus(currentCameraId);
 
-        if (
-          comprehensiveState.streamInfo.success &&
-          comprehensiveState.streamInfo.data
-        ) {
-          const data = comprehensiveState.streamInfo.data;
+        // Also fetch stream-specific info (playbackId, streamUrl) directly
+        const streamResponse = await unifiedCameraService.getStreamInfo(currentCameraId);
 
-          // Log state inconsistencies for debugging
-          if (!comprehensiveState.isConsistent) {
-            console.warn(
-              "[StreamPlayer] ⚠️ Hardware/UI state inconsistency detected:",
-              {
-                hardwareStreaming: comprehensiveState.status.data?.isStreaming,
-                streamActive: data.isActive,
-                cameraId: currentCameraId.slice(0, 8),
-              }
-            );
-          }
+        if (streamResponse.success && streamResponse.data) {
+          const data = streamResponse.data;
 
           const newStreamInfo = {
             playbackId: data.playbackId || "",
-            isActive: data.isActive, // This now comes from actual hardware state
+            isActive: cameraStatus?.isStreaming ?? data.isActive, // Prefer cached status from unified polling
             streamType: data.format,
             streamUrl:
               data.streamUrl ||
@@ -145,8 +133,8 @@ const StreamPlayer = memo(() => {
           setLoadingRetry(0); // Reset retry counter on success
         } else {
           throw new Error(
-            comprehensiveState.streamInfo.error ||
-              "Failed to get comprehensive state"
+            streamResponse.error ||
+              "Failed to get stream info"
           );
         }
       } catch (err) {

@@ -732,6 +732,78 @@ app.get("/api/pipe/jetson/credentials", async (req, res) => {
   }
 });
 
+// Get Pipe account status (balance, storage usage, etc.)
+app.get("/api/pipe/account/status", async (req, res) => {
+  try {
+    console.log('📊 Fetching Pipe account status');
+
+    // Get JWT token
+    const tokenData = await getPipeJWTToken();
+
+    // Fetch account balance
+    const balanceResponse = await fetch('https://us-west-01-firestarter.pipenetwork.com/checkCustomToken', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${tokenData.access_token}`
+      },
+      body: JSON.stringify({
+        user_id: tokenData.user_id
+      })
+    });
+
+    if (!balanceResponse.ok) {
+      throw new Error(`Balance check failed: ${balanceResponse.status}`);
+    }
+
+    const balanceData = await balanceResponse.json();
+    console.log('💰 Pipe balance:', balanceData);
+
+    // Fetch file list to calculate storage usage
+    const filesResponse = await fetch('https://us-west-01-firestarter.pipenetwork.com/list', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${tokenData.access_token}`
+      },
+      body: JSON.stringify({
+        user_id: tokenData.user_id
+      })
+    });
+
+    let totalSize = 0;
+    let fileCount = 0;
+
+    if (filesResponse.ok) {
+      const filesData = await filesResponse.json();
+      if (Array.isArray(filesData.files)) {
+        fileCount = filesData.files.length;
+        totalSize = filesData.files.reduce((sum: number, file: any) => sum + (file.size || 0), 0);
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        username: process.env.PIPE_USERNAME,
+        userId: process.env.PIPE_USER_ID,
+        depositAddress: process.env.PIPE_DEPOSIT_ADDRESS,
+        pipeBalance: parseFloat(balanceData.balance || '0'),
+        solBalance: parseFloat(balanceData.sol_balance || '0'),
+        fileCount,
+        storageUsedBytes: totalSize,
+        storageUsedMB: (totalSize / (1024 * 1024)).toFixed(2)
+      }
+    });
+  } catch (error: any) {
+    console.error('❌ Error fetching Pipe account status:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch account status'
+    });
+  }
+});
+
 // Jetson endpoint: Notify backend after direct upload to Pipe
 app.post("/api/pipe/jetson/upload-complete", async (req, res) => {
   const { txSignature, fileName, fileId, blake3Hash, size, cameraId, fileType, metadata } = req.body;

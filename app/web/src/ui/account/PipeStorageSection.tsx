@@ -4,7 +4,6 @@
  * Shows user's storage balance and allows purchasing more storage
  */
 
-import { pipeService } from "../../storage/pipe/pipe-service";
 import {
   pipeWalletBridge,
   PipeWalletInfo,
@@ -36,6 +35,7 @@ export function PipeStorageSection() {
     userId: string;
     userAppKey: string;
     username?: string;
+    fileCount?: number;
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
@@ -57,35 +57,52 @@ export function PipeStorageSection() {
     }
 
     try {
-      // Ensure Pipe service is initialized first
-      await pipeService.ensureInitialized();
+      console.log("📊 Fetching main Pipe account status...");
 
-      // Always try to create/get account (backend will return existing if it exists)
-      console.log("🔍 Checking for Pipe account...");
-      const credentials = await pipeService.createOrGetAccount(
-        primaryWallet.address
-      );
+      // Fetch status from backend for the main system account
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+      const response = await fetch(`${backendUrl}/api/pipe/account/status`);
 
-      if (credentials) {
-        // Store the credentials for debugging display
+      if (!response.ok) {
+        throw new Error(`Failed to fetch Pipe status: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        const data = result.data;
+
+        // Store credentials for display
         setPipeCredentials({
-          userId: credentials.userId,
-          userAppKey: credentials.userAppKey,
-          username: `mmoment_${primaryWallet.address.slice(0, 16)}`,
+          userId: data.userId,
+          userAppKey: '', // Not exposed from backend for security
+          username: data.username,
+          fileCount: data.fileCount,
         });
 
-        // Now get the wallet info
-        const info = await pipeWalletBridge.getUserPipeInfo(
-          primaryWallet.address
-        );
-        setPipeInfo(info);
+        // Convert to PipeWalletInfo format expected by UI
+        setPipeInfo({
+          pipeWalletAddress: data.depositAddress,
+          solBalance: data.solBalance,
+          pipeBalance: data.pipeBalance,
+          storageUsed: parseFloat(data.storageUsedMB),
+          storageLimit: 1000, // Default limit, can be updated
+        });
+
+        console.log("✅ Loaded main Pipe account info:", {
+          files: data.fileCount,
+          storage: data.storageUsedMB + 'MB',
+          balance: data.pipeBalance
+        });
       } else {
-        console.log("❌ Could not get/create Pipe account");
+        console.log("❌ No Pipe account data available");
         setPipeInfo(null);
         setPipeCredentials(null);
       }
     } catch (error) {
       console.error("Failed to load Pipe info:", error);
+      setPipeInfo(null);
+      setPipeCredentials(null);
     } finally {
       setLoading(false);
     }
@@ -263,6 +280,9 @@ export function PipeStorageSection() {
                 </div>
                 <div>
                   <span className="font-medium">Pipe Wallet:</span> {pipeInfo.pipeWalletAddress}
+                </div>
+                <div>
+                  <span className="font-medium">Total Files:</span> {pipeCredentials.fileCount || 0}
                 </div>
                 <div>
                   <span className="font-medium">Connected Wallet:</span> {primaryWallet?.address?.slice(0, 16)}...

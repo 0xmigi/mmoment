@@ -21,6 +21,13 @@ export class UnifiedCameraService {
   private static instance: UnifiedCameraService | null = null;
   private debugMode = true;
 
+  // Cache for getComprehensiveState to prevent duplicate concurrent requests
+  private comprehensiveStateCache = new Map<string, {
+    promise: Promise<any>;
+    timestamp: number;
+  }>();
+  private readonly COMPREHENSIVE_STATE_CACHE_TTL = 2000; // 2 seconds cache
+
   private constructor() {
     this.log('UnifiedCameraService initialized');
   }
@@ -36,6 +43,26 @@ export class UnifiedCameraService {
     if (this.debugMode) {
       console.log('[UnifiedCameraService]', ...args);
     }
+  }
+
+  private processComprehensiveState(statusResponse: any, streamResponse: any, cameraId: string) {
+    // Check consistency between status and stream info
+    const statusStreaming = statusResponse.success ? statusResponse.data?.isStreaming || false : false;
+    const streamActive = streamResponse.success ? streamResponse.data?.isActive || false : false;
+    const isConsistent = statusStreaming === streamActive;
+
+    if (!isConsistent) {
+      this.log(`⚠️ State inconsistency detected for ${cameraId}:`, {
+        statusStreaming,
+        streamActive
+      });
+    }
+
+    return {
+      status: statusResponse,
+      streamInfo: streamResponse,
+      isConsistent
+    };
   }
 
   /**
@@ -1280,29 +1307,45 @@ export class UnifiedCameraService {
         };
       }
 
-      // Get both status and stream info in parallel
-      const [statusResponse, streamResponse] = await Promise.all([
-        camera.getStatus(),
-        camera.getStreamInfo()
-      ]);
+      // Check cache first to prevent duplicate concurrent requests
+      const now = Date.now();
+      const cached = this.comprehensiveStateCache.get(cameraId);
 
-      // Check consistency between status and stream info
-      const statusStreaming = statusResponse.success ? statusResponse.data?.isStreaming || false : false;
-      const streamActive = streamResponse.success ? streamResponse.data?.isActive || false : false;
-      const isConsistent = statusStreaming === streamActive;
-
-      if (!isConsistent) {
-        this.log(`⚠️ State inconsistency detected for ${cameraId}:`, {
-          statusStreaming,
-          streamActive
-        });
+      if (cached && (now - cached.timestamp) < this.COMPREHENSIVE_STATE_CACHE_TTL) {
+        this.log(`Using cached comprehensive state for ${cameraId}`);
+        return cached.promise;
       }
 
-      return {
-        status: statusResponse,
-        streamInfo: streamResponse,
-        isConsistent
-      };
+      // Create new request and cache it
+      const fetchPromise = (async () => {
+        // Get both status and stream info in parallel
+        const [statusResponse, streamResponse] = await Promise.all([
+          camera.getStatus(),
+          camera.getStreamInfo()
+        ]);
+
+        return { statusResponse, streamResponse };
+      })();
+
+      // Cache the promise
+      this.comprehensiveStateCache.set(cameraId, {
+        promise: fetchPromise.then(({ statusResponse, streamResponse }) => {
+          // Process and return
+          const result = this.processComprehensiveState(statusResponse, streamResponse, cameraId);
+
+          // Clear cache after TTL
+          setTimeout(() => {
+            this.comprehensiveStateCache.delete(cameraId);
+          }, this.COMPREHENSIVE_STATE_CACHE_TTL);
+
+          return result;
+        }),
+        timestamp: now
+      });
+
+      const { statusResponse, streamResponse } = await fetchPromise;
+
+      return this.processComprehensiveState(statusResponse, streamResponse, cameraId);
     } catch (error) {
       this.log(`Error getting comprehensive state for ${cameraId}:`, error);
       
