@@ -46,8 +46,23 @@ const firestarterSDK = createFirestarterSDK({
   baseUrl: "https://us-west-01-firestarter.pipenetwork.com", // Mainnet
 });
 
+// Option A vs Option B configuration
+const USE_SHARED_PIPE_ACCOUNT = process.env.USE_SHARED_PIPE_ACCOUNT === 'true';
+const SHARED_PIPE_USER_ID = process.env.SHARED_PIPE_USER_ID || '';
+const SHARED_PIPE_USER_APP_KEY = process.env.SHARED_PIPE_USER_APP_KEY || '';
+
+console.log(`🔧 Pipe Storage Mode: ${USE_SHARED_PIPE_ACCOUNT ? 'OPTION A (Shared Account)' : 'OPTION B (Per-User Accounts)'}`);
+
+if (USE_SHARED_PIPE_ACCOUNT) {
+  if (!SHARED_PIPE_USER_ID || !SHARED_PIPE_USER_APP_KEY) {
+    console.error('❌ SHARED_PIPE_USER_ID and SHARED_PIPE_USER_APP_KEY must be set when USE_SHARED_PIPE_ACCOUNT=true');
+    process.exit(1);
+  }
+  console.log(`✅ Shared Pipe Account configured: ${SHARED_PIPE_USER_ID.slice(0, 8)}...`);
+}
+
 // In-memory storage for pipe accounts (simple key-value store)
-// The SDK handles auth, we just store the mapping
+// Only used in Option B mode
 const pipeAccounts = new Map<
   string,
   {
@@ -402,7 +417,7 @@ app.post("/api/pipe/proxy/*", async (req: any, res) => {
   }
 });
 
-// Create account endpoint - using FirestarterSDK
+// Create account endpoint - supports both Option A (shared) and Option B (per-user)
 app.post("/api/pipe/create-account", async (req, res) => {
   const { walletAddress } = req.body;
 
@@ -411,22 +426,38 @@ app.post("/api/pipe/create-account", async (req, res) => {
   }
 
   try {
+    // OPTION A: Shared account mode - return same credentials for everyone
+    if (USE_SHARED_PIPE_ACCOUNT) {
+      console.log(
+        `✅ [Option A] Returning shared Pipe account for ${walletAddress.slice(0, 8)}...`,
+      );
+      res.json({
+        userId: SHARED_PIPE_USER_ID,
+        userAppKey: SHARED_PIPE_USER_APP_KEY,
+        existing: true,
+        mode: 'shared',
+      });
+      return;
+    }
+
+    // OPTION B: Per-user account mode - create separate account per wallet
     // Check if account already exists locally
     const existingAccount = pipeAccounts.get(walletAddress);
     if (existingAccount) {
       console.log(
-        `✅ Existing Pipe account found for ${walletAddress.slice(0, 8)}...`,
+        `✅ [Option B] Existing Pipe account found for ${walletAddress.slice(0, 8)}...`,
       );
       res.json({
         userId: existingAccount.userId,
         userAppKey: existingAccount.userAppKey,
         existing: true,
+        mode: 'per-user',
       });
       return;
     }
 
     console.log(
-      `🔄 Creating new Pipe account for wallet: ${walletAddress.slice(0, 8)}...`,
+      `🔄 [Option B] Creating new Pipe account for wallet: ${walletAddress.slice(0, 8)}...`,
     );
 
     // Use the SDK to create or get the user account
@@ -443,12 +474,13 @@ app.post("/api/pipe/create-account", async (req, res) => {
 
     pipeAccounts.set(walletAddress, accountInfo);
 
-    console.log(`✅ Pipe account ready for ${walletAddress.slice(0, 8)}...`);
+    console.log(`✅ [Option B] Pipe account ready for ${walletAddress.slice(0, 8)}...`);
 
     res.json({
       userId: accountInfo.userId,
       userAppKey: accountInfo.userAppKey,
       existing: false,
+      mode: 'per-user',
     });
   } catch (error) {
     console.error("Error creating Pipe account:", error);
@@ -892,79 +924,127 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
 
     const mediaItems = [];
 
-    // Method 1: Get device-signed captures (instant captures, no blockchain tx)
-    const deviceSignatures = walletToSignatures.get(walletAddress) || [];
-    console.log(`   Device-signed captures: ${deviceSignatures.length}`);
+    // OPTION A: Shared account mode - use SDK file listing and filter by wallet prefix
+    if (USE_SHARED_PIPE_ACCOUNT) {
+      console.log(`   [Option A] Fetching from shared Pipe account via SDK...`);
 
-    for (const sig of deviceSignatures) {
-      const mapping = signatureToFileMapping.get(sig);
-      if (mapping) {
-        // Use fileName for download URL (original filename from upload)
-        const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(mapping.fileName)}`;
+      try {
+        // Get ALL files from shared account
+        const allFiles = await firestarterSDK.listUserFiles(walletAddress);
+        console.log(`   Found ${allFiles.length} total files in shared account`);
 
-        mediaItems.push({
-          id: mapping.fileId,
-          fileId: mapping.fileId,
-          fileName: mapping.fileName,
-          url: downloadUrl,
-          type: mapping.fileType,
-          cameraId: mapping.cameraId,
-          uploadedAt: mapping.uploadedAt.toISOString(),
-          txSignature: mapping.signature,
-          signatureType: mapping.signatureType,
-          provider: 'pipe'
-        });
+        // Filter by wallet prefix in filename (e.g., "RsLjCiEi_photo_...")
+        const walletPrefix = walletAddress.slice(0, 8);
+        const userFiles = allFiles.filter(file =>
+          file.storedFileName.startsWith(walletPrefix)
+        );
+
+        console.log(`   Filtered to ${userFiles.length} files for ${walletPrefix}...`);
+
+        // Convert SDK file records to media items
+        for (const file of userFiles) {
+          const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(file.storedFileName)}`;
+
+          mediaItems.push({
+            id: file.fileId,
+            fileId: file.fileId,
+            fileName: file.storedFileName,
+            url: downloadUrl,
+            type: file.storedFileName.includes('video') ? 'video' : 'image',
+            cameraId: file.metadata?.cameraId || 'unknown',
+            uploadedAt: new Date(file.uploadedAt).toISOString(),
+            txSignature: undefined,
+            signatureType: 'shared-account',
+            provider: 'pipe'
+          });
+        }
+      } catch (sdkError) {
+        console.error(`   SDK file listing failed:`, sdkError);
+        // Fall through to legacy method below
       }
     }
 
-    // Method 2: Get blockchain tx captures (legacy/privacy mode captures)
-    try {
-      const userPubkey = new PublicKey(walletAddress);
-      const blockchainSignatures = await connection.getSignaturesForAddress(userPubkey, {
-        limit: 100, // Last 100 transactions
-      });
+    // OPTION B / FALLBACK: Use backend mappings (device signatures + blockchain)
+    if (!USE_SHARED_PIPE_ACCOUNT || mediaItems.length === 0) {
+      console.log(`   [Option B/Fallback] Using backend signature mappings...`);
 
-      console.log(`   Blockchain transactions: ${blockchainSignatures.length}`);
+      // Method 1: Get device-signed captures (instant captures, no blockchain tx)
+      const deviceSignatures = walletToSignatures.get(walletAddress) || [];
+      console.log(`   Device-signed captures: ${deviceSignatures.length}`);
 
-      for (const sig of blockchainSignatures) {
-        const mapping = signatureToFileMapping.get(sig.signature);
-        if (mapping && mapping.signatureType === 'blockchain') {
-          // Avoid duplicates
-          const exists = mediaItems.some(item => item.fileId === mapping.fileId);
-          if (!exists) {
-            // Use fileId (hash) for download URL instead of fileName (which may be placeholder)
-            const downloadUrl = `/api/pipe/download/${walletAddress}/${mapping.fileId}`;
+      for (const sig of deviceSignatures) {
+        const mapping = signatureToFileMapping.get(sig);
+        if (mapping) {
+          // Use fileName for download URL (original filename from upload)
+          const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(mapping.fileName)}`;
 
-            mediaItems.push({
-              id: mapping.fileId,
-              fileId: mapping.fileId,
-              fileName: mapping.fileName,
-              url: downloadUrl,
-              type: mapping.fileType,
-              cameraId: mapping.cameraId,
-              uploadedAt: mapping.uploadedAt.toISOString(),
-              txSignature: mapping.signature,
-              signatureType: mapping.signatureType,
-              provider: 'pipe'
-            });
-          }
+          mediaItems.push({
+            id: mapping.fileId,
+            fileId: mapping.fileId,
+            fileName: mapping.fileName,
+            url: downloadUrl,
+            type: mapping.fileType,
+            cameraId: mapping.cameraId,
+            uploadedAt: mapping.uploadedAt.toISOString(),
+            txSignature: mapping.signature,
+            signatureType: mapping.signatureType,
+            provider: 'pipe'
+          });
         }
       }
-    } catch (blockchainError) {
-      console.log(`   Blockchain query skipped (may be offline):`, blockchainError);
+
+      // Method 2: Get blockchain tx captures (legacy/privacy mode captures)
+      try {
+        const userPubkey = new PublicKey(walletAddress);
+        const blockchainSignatures = await connection.getSignaturesForAddress(userPubkey, {
+          limit: 100, // Last 100 transactions
+        });
+
+        console.log(`   Blockchain transactions: ${blockchainSignatures.length}`);
+
+        for (const sig of blockchainSignatures) {
+          const mapping = signatureToFileMapping.get(sig.signature);
+          if (mapping && mapping.signatureType === 'blockchain') {
+            // Avoid duplicates
+            const exists = mediaItems.some(item => item.fileId === mapping.fileId);
+            if (!exists) {
+              // Use fileId (hash) for download URL instead of fileName (which may be placeholder)
+              const downloadUrl = `/api/pipe/download/${walletAddress}/${mapping.fileId}`;
+
+              mediaItems.push({
+                id: mapping.fileId,
+                fileId: mapping.fileId,
+                fileName: mapping.fileName,
+                url: downloadUrl,
+                type: mapping.fileType,
+                cameraId: mapping.cameraId,
+                uploadedAt: mapping.uploadedAt.toISOString(),
+                txSignature: mapping.signature,
+                signatureType: mapping.signatureType,
+                provider: 'pipe'
+              });
+            }
+          }
+        }
+      } catch (blockchainError) {
+        console.log(`   Blockchain query skipped (may be offline):`, blockchainError);
+      }
     }
 
     // Sort by upload date (newest first)
     mediaItems.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
 
     console.log(`✅ Found ${mediaItems.length} total media items for user`);
-    console.log(`   Device-signed: ${mediaItems.filter(m => m.signatureType === 'device').length}`);
-    console.log(`   Blockchain tx: ${mediaItems.filter(m => m.signatureType === 'blockchain').length}`);
+    if (!USE_SHARED_PIPE_ACCOUNT) {
+      console.log(`   Device-signed: ${mediaItems.filter(m => m.signatureType === 'device').length}`);
+      console.log(`   Blockchain tx: ${mediaItems.filter(m => m.signatureType === 'blockchain').length}`);
+    }
 
     res.json({
       success: true,
       media: mediaItems,
-      count: mediaItems.length
+      count: mediaItems.length,
+      mode: USE_SHARED_PIPE_ACCOUNT ? 'shared' : 'per-user'
     });
 
   } catch (error) {

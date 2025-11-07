@@ -9,6 +9,7 @@ import './core/styles/index.css';
 import { SolanaProvider } from './blockchain/solana-provider';
 import { StorageProvider } from './storage/storage-provider';
 import { WalletProvider } from './auth/WalletProvider';
+import { PipeProvider } from './storage/pipe/PipeProvider';
 
 // Create Livepeer client
 const livepeerClient = createReactClient({
@@ -40,11 +41,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             }
           }}
         >
-          <StorageProvider>
-            <WalletProvider>
-              <App />
-            </WalletProvider>
-          </StorageProvider>
+          <PipeProvider>
+            <StorageProvider>
+              <WalletProvider>
+                <App />
+              </WalletProvider>
+            </StorageProvider>
+          </PipeProvider>
         </DynamicContextProvider>
       </LivepeerConfig>
     </SolanaProvider>
