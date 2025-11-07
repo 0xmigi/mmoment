@@ -859,7 +859,7 @@ app.post("/api/pipe/jetson/upload-complete", async (req, res) => {
     console.log(`   Wallet: ${walletAddress.slice(0, 8)}...`);
     console.log(`   Size: ${size} bytes`);
 
-    // Store signature → file mapping
+    // Store signature → file mapping (RAM - legacy support)
     const mapping: FileMapping = {
       signature: txSignature,
       signatureType,
@@ -873,7 +873,7 @@ app.post("/api/pipe/jetson/upload-complete", async (req, res) => {
 
     signatureToFileMapping.set(txSignature, mapping);
 
-    // Also track by wallet address for gallery queries
+    // Also track by wallet address for gallery queries (RAM - legacy support)
     if (walletAddress !== 'unknown') {
       const existingSignatures = walletToSignatures.get(walletAddress) || [];
       existingSignatures.push(txSignature);
@@ -881,6 +881,31 @@ app.post("/api/pipe/jetson/upload-complete", async (req, res) => {
 
       console.log(`✅ Mapped ${signatureType} signature → file for ${walletAddress.slice(0, 8)}...`);
       console.log(`   Total files for wallet: ${existingSignatures.length}`);
+    }
+
+    // PERSISTENCE FIX: Also save to SDK upload history (survives Railway restarts)
+    try {
+      await (firestarterSDK as any).uploadHistory.recordUpload({
+        fileId: blake3Hash || fileId,
+        originalFileName: fileName,
+        storedFileName: fileName,
+        userId: walletAddress,
+        uploadedAt: mapping.uploadedAt,
+        size: size || 0,
+        blake3Hash: blake3Hash || fileId,
+        mimeType: fileType === 'video' ? 'video/mp4' : 'image/jpeg',
+        metadata: {
+          ...metadata,
+          user_wallet: walletAddress,
+          camera_id: cameraId,
+          signature: txSignature,
+          signatureType
+        }
+      });
+      console.log(`💾 Persisted to upload history for ${walletAddress.slice(0, 8)}...`);
+    } catch (persistError) {
+      console.error('⚠️  Failed to persist to upload history:', persistError);
+      // Don't fail the request if persistence fails
     }
 
     // Notify connected clients via WebSocket
@@ -924,50 +949,40 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
 
     const mediaItems = [];
 
-    // OPTION A: Shared account mode - use SDK file listing and filter by wallet prefix
-    if (USE_SHARED_PIPE_ACCOUNT) {
-      console.log(`   [Option A] Fetching from shared Pipe account via SDK...`);
+    // PRIMARY METHOD: Read from persistent SDK upload history (survives restarts!)
+    console.log(`   Reading from persistent upload history...`);
+    try {
+      const userFiles = await firestarterSDK.listUserFiles(walletAddress);
+      console.log(`   Found ${userFiles.length} files for ${walletAddress.slice(0, 8)}...`);
 
-      try {
-        // Get ALL files from shared account
-        const allFiles = await firestarterSDK.listUserFiles(walletAddress);
-        console.log(`   Found ${allFiles.length} total files in shared account`);
+      // Convert SDK file records to media items
+      for (const file of userFiles) {
+        // IMPORTANT: Pipe /upload stores files by FILENAME (not hash)
+        const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(file.storedFileName)}`;
 
-        // Filter by wallet prefix in filename (e.g., "RsLjCiEi_photo_...")
-        const walletPrefix = walletAddress.slice(0, 8);
-        const userFiles = allFiles.filter(file =>
-          file.storedFileName.startsWith(walletPrefix)
-        );
-
-        console.log(`   Filtered to ${userFiles.length} files for ${walletPrefix}...`);
-
-        // Convert SDK file records to media items
-        for (const file of userFiles) {
-          // IMPORTANT: Pipe /upload stores files by FILENAME (not hash)
-          const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(file.storedFileName)}`;
-
-          mediaItems.push({
-            id: file.fileId,
-            fileId: file.fileId,
-            fileName: file.storedFileName,
-            url: downloadUrl,
-            type: file.storedFileName.includes('video') ? 'video' : 'image',
-            cameraId: file.metadata?.cameraId || 'unknown',
-            uploadedAt: new Date(file.uploadedAt).toISOString(),
-            txSignature: undefined,
-            signatureType: 'shared-account',
-            provider: 'pipe'
-          });
-        }
-      } catch (sdkError) {
-        console.error(`   SDK file listing failed:`, sdkError);
-        // Fall through to legacy method below
+        mediaItems.push({
+          id: file.fileId,
+          fileId: file.fileId,
+          fileName: file.storedFileName,
+          url: downloadUrl,
+          type: file.storedFileName.includes('video') ? 'video' : 'image',
+          cameraId: file.metadata?.camera_id || file.metadata?.cameraId || 'unknown',
+          uploadedAt: file.uploadedAt instanceof Date ? file.uploadedAt.toISOString() : new Date(file.uploadedAt).toISOString(),
+          txSignature: file.metadata?.signature,
+          signatureType: file.metadata?.signatureType || 'persisted',
+          provider: 'pipe'
+        });
       }
+
+      console.log(`✅ Successfully loaded ${mediaItems.length} files from persistent storage`);
+    } catch (sdkError) {
+      console.error(`   Failed to read persistent storage:`, sdkError);
+      // Fall through to legacy RAM method below
     }
 
-    // OPTION B / FALLBACK: Use backend mappings (device signatures + blockchain)
-    if (!USE_SHARED_PIPE_ACCOUNT || mediaItems.length === 0) {
-      console.log(`   [Option B/Fallback] Using backend signature mappings...`);
+    // FALLBACK: Use RAM mappings if persistent storage failed or returned nothing
+    if (mediaItems.length === 0) {
+      console.log(`   [Fallback] Using RAM signature mappings...`);
 
       // Method 1: Get device-signed captures (instant captures, no blockchain tx)
       const deviceSignatures = walletToSignatures.get(walletAddress) || [];
