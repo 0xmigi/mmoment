@@ -642,7 +642,7 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
       `📥 Streaming download ${fileId} for wallet: ${walletAddress.slice(0, 8)}...`,
     );
 
-    // Get JWT token (legacy Pipe account uses JWT Bearer auth, not user_app_key)
+    // Get JWT token (this is what worked yesterday)
     const { access_token } = await getPipeJWTToken();
     const baseUrl = process.env.PIPE_BASE_URL || 'https://us-west-01-firestarter.pipenetwork.com';
 
@@ -943,7 +943,8 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
 
         // Convert SDK file records to media items
         for (const file of userFiles) {
-          const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(file.storedFileName)}`;
+          // IMPORTANT: Pipe stores files by hash, not friendly filename
+          const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(file.fileId)}`;
 
           mediaItems.push({
             id: file.fileId,
@@ -975,8 +976,8 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
       for (const sig of deviceSignatures) {
         const mapping = signatureToFileMapping.get(sig);
         if (mapping) {
-          // Use fileName for download URL (original filename from upload)
-          const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(mapping.fileName)}`;
+          // IMPORTANT: Pipe stores files by hash (fileId), not friendly filename
+          const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(mapping.fileId)}`;
 
           mediaItems.push({
             id: mapping.fileId,
@@ -1031,10 +1032,20 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
       }
     }
 
-    // Sort by upload date (newest first)
-    mediaItems.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+    // Deduplicate by fileId (keep newest entry for each file)
+    const uniqueFiles = new Map<string, typeof mediaItems[0]>();
+    for (const item of mediaItems) {
+      const existing = uniqueFiles.get(item.fileId);
+      if (!existing || new Date(item.uploadedAt) > new Date(existing.uploadedAt)) {
+        uniqueFiles.set(item.fileId, item);
+      }
+    }
+    const deduplicatedItems = Array.from(uniqueFiles.values());
 
-    console.log(`✅ Found ${mediaItems.length} total media items for user`);
+    // Sort by upload date (newest first)
+    deduplicatedItems.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+
+    console.log(`✅ Found ${deduplicatedItems.length} total media items for user (${mediaItems.length - deduplicatedItems.length} duplicates removed)`);
     if (!USE_SHARED_PIPE_ACCOUNT) {
       console.log(`   Device-signed: ${mediaItems.filter(m => m.signatureType === 'device').length}`);
       console.log(`   Blockchain tx: ${mediaItems.filter(m => m.signatureType === 'blockchain').length}`);
@@ -1042,8 +1053,8 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
 
     res.json({
       success: true,
-      media: mediaItems,
-      count: mediaItems.length,
+      media: deduplicatedItems,
+      count: deduplicatedItems.length,
       mode: USE_SHARED_PIPE_ACCOUNT ? 'shared' : 'per-user'
     });
 
