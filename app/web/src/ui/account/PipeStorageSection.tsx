@@ -291,48 +291,50 @@ export function PipeStorageSection() {
             </div>
           )}
 
-          {/* Purchase Options */}
-          <div>
-            <h3 className="text-md font-medium mb-3">Buy More Storage</h3>
-            <div className="space-y-2">
-              {storageOptions.map((option) => (
-                <button
-                  key={option.label}
-                  onClick={() => handlePurchaseStorage(option)}
-                  disabled={purchasing}
-                  className={`w-full p-3 rounded-lg border text-left transition-all ${
-                    option.recommended
-                      ? "border-blue-200 bg-blue-50 hover:bg-blue-100"
-                      : "border-gray-200 bg-white hover:bg-gray-50"
-                  } ${purchasing ? "opacity-50 cursor-not-allowed" : ""}`}
-                >
-                  <div className="flex justify-between items-center">
-                    <div>
+          {/* Purchase Options - Hidden until mainnet */}
+          {false && (
+            <div>
+              <h3 className="text-md font-medium mb-3">Buy More Storage</h3>
+              <div className="space-y-2">
+                {storageOptions.map((option) => (
+                  <button
+                    key={option.label}
+                    onClick={() => handlePurchaseStorage(option)}
+                    disabled={purchasing}
+                    className={`w-full p-3 rounded-lg border text-left transition-all ${
+                      option.recommended
+                        ? "border-blue-200 bg-blue-50 hover:bg-blue-100"
+                        : "border-gray-200 bg-white hover:bg-gray-50"
+                    } ${purchasing ? "opacity-50 cursor-not-allowed" : ""}`}
+                  >
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{option.label}</span>
+                          {option.recommended && (
+                            <span className="px-2 py-0.5 bg-blue-600 text-white text-xs rounded-full">
+                              Recommended
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          {option.priceSol} SOL (
+                          {(option.priceSol / option.sizeGB).toFixed(3)} SOL/GB)
+                        </div>
+                      </div>
                       <div className="flex items-center gap-2">
-                        <span className="font-medium">{option.label}</span>
-                        {option.recommended && (
-                          <span className="px-2 py-0.5 bg-blue-600 text-white text-xs rounded-full">
-                            Recommended
-                          </span>
+                        {purchasing && selectedOption?.label === option.label ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <ShoppingCart className="w-4 h-4" />
                         )}
                       </div>
-                      <div className="text-sm text-gray-600">
-                        {option.priceSol} SOL (
-                        {(option.priceSol / option.sizeGB).toFixed(3)} SOL/GB)
-                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {purchasing && selectedOption?.label === option.label ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <ShoppingCart className="w-4 h-4" />
-                      )}
-                    </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Info Text */}
           <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">

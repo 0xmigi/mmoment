@@ -757,7 +757,7 @@ app.get("/api/pipe/account/status", async (req, res) => {
     }
 
     const balanceData = await balanceResponse.json();
-    console.log('💰 Pipe balance:', balanceData);
+    console.log('💰 Pipe balance response:', JSON.stringify(balanceData, null, 2));
 
     // Fetch file list to calculate storage usage
     const filesResponse = await fetch('https://us-west-01-firestarter.pipenetwork.com/list', {
