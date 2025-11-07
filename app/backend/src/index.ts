@@ -943,8 +943,8 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
 
         // Convert SDK file records to media items
         for (const file of userFiles) {
-          // IMPORTANT: Pipe stores files by hash, not friendly filename
-          const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(file.fileId)}`;
+          // IMPORTANT: Pipe /upload stores files by FILENAME (not hash)
+          const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(file.storedFileName)}`;
 
           mediaItems.push({
             id: file.fileId,
@@ -976,8 +976,8 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
       for (const sig of deviceSignatures) {
         const mapping = signatureToFileMapping.get(sig);
         if (mapping) {
-          // IMPORTANT: Pipe stores files by hash (fileId), not friendly filename
-          const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(mapping.fileId)}`;
+          // IMPORTANT: Pipe /upload stores files by FILENAME (not hash)
+          const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(mapping.fileName)}`;
 
           mediaItems.push({
             id: mapping.fileId,

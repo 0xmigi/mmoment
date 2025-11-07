@@ -123,7 +123,7 @@ class PipeUploader:
         print(f"📤 Uploading {file_path.name} ({file_size / 1024 / 1024:.2f} MB)...")
 
         # Upload to Pipe Network with priority endpoint
-        upload_url = f"{self.base_url}/priorityUpload"
+        upload_url = f"{self.base_url}/upload"
 
         with open(file_path, 'rb') as f:
             files = {'file': (file_path.name, f, 'application/octet-stream')}
