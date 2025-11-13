@@ -28,6 +28,15 @@ export default function MediaViewer({
   const [sharing, setSharing] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
+  // Load Pipe credentials when modal opens and wallet is available
+  useEffect(() => {
+    if (isOpen && primaryWallet?.address && media?.provider === "pipe") {
+      pipeService.loadCredentialsForWallet(primaryWallet.address).catch((err) => {
+        console.error("Failed to load Pipe credentials:", err);
+      });
+    }
+  }, [isOpen, primaryWallet?.address, media?.provider]);
+
   // Scroll to show EXIF just barely peeking when modal opens
   useEffect(() => {
     if (isOpen && scrollContainerRef.current) {
