@@ -222,9 +222,9 @@ export const CONFIG = {
   pdaToSubdomain,
   getCameraUrlWithFallback,
   // Timeline backend is your Railway service
-  BACKEND_URL: isProduction
+  BACKEND_URL: import.meta.env.VITE_BACKEND_URL || (isProduction
     ? "https://mmoment-production.up.railway.app"
-    : "http://localhost:3001",
+    : "http://localhost:3001"),
   isProduction,
   isCloudflareProxy: isCloudflareProxy(),
   isMobileBrowser: isMobileBrowser(),

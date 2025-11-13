@@ -5,6 +5,8 @@
  * Integrates with existing MMOMENT storage provider pattern.
  */
 
+import { CONFIG } from '../../core/config';
+
 export interface PipeMedia {
   id: string;
   url: string;
@@ -60,7 +62,7 @@ export class PipeService implements PipeStorageProvider {
    */
   async loadCredentialsForWallet(walletAddress: string): Promise<void> {
     try {
-      const response = await fetch(`/api/pipe/credentials?wallet=${encodeURIComponent(walletAddress)}`);
+      const response = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/credentials?wallet=${encodeURIComponent(walletAddress)}`);
       if (response.ok) {
         this.credentials = await response.json();
         console.log(`✅ Pipe credentials loaded for ${walletAddress.slice(0, 8)}...`);
@@ -86,7 +88,7 @@ export class PipeService implements PipeStorageProvider {
       );
 
       // Call backend to create Pipe account using wallet address as username
-      const response = await fetch("/api/pipe/create-account", {
+      const response = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/create-account`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -255,7 +257,7 @@ export class PipeService implements PipeStorageProvider {
       console.log(`🗑️ Deleting file ${fileId} from Pipe...`);
 
       // Use backend endpoint which uses the new SDK
-      const response = await fetch(`/api/pipe/delete/${encodeURIComponent(walletAddress)}/${encodeURIComponent(fileId)}`, {
+      const response = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/delete/${encodeURIComponent(walletAddress)}/${encodeURIComponent(fileId)}`, {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
@@ -295,7 +297,7 @@ export class PipeService implements PipeStorageProvider {
     try {
       console.log(`🔗 Creating share link for ${fileId}...`);
 
-      const response = await fetch(`/api/pipe/share/${encodeURIComponent(walletAddress)}/${encodeURIComponent(fileId)}`, {
+      const response = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/share/${encodeURIComponent(walletAddress)}/${encodeURIComponent(fileId)}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -343,7 +345,7 @@ export class PipeService implements PipeStorageProvider {
     try {
       console.log(`🗑️ Deleting share link ${linkHash}...`);
 
-      const response = await fetch(`/api/pipe/share/${encodeURIComponent(walletAddress)}/${encodeURIComponent(linkHash)}`, {
+      const response = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/share/${encodeURIComponent(walletAddress)}/${encodeURIComponent(linkHash)}`, {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
@@ -371,7 +373,7 @@ export class PipeService implements PipeStorageProvider {
 
     try {
       // Check SOL balance via backend proxy to avoid CORS issues
-      const solResponse = await fetch(`/api/pipe/proxy/checkWallet`, {
+      const solResponse = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/proxy/checkWallet`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -394,7 +396,7 @@ export class PipeService implements PipeStorageProvider {
       // Check PIPE token balance via backend proxy
       let pipeBalance = 0;
       try {
-        const pipeResponse = await fetch(`/api/pipe/proxy/checkCustomToken`, {
+        const pipeResponse = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/proxy/checkCustomToken`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -434,7 +436,7 @@ export class PipeService implements PipeStorageProvider {
       console.log(`🔄 Swapping ${solAmount} SOL for PIPE tokens...`);
 
       // Try without token_mint parameter first
-      const response = await fetch(`/api/pipe/proxy/exchangeSolForTokens`, {
+      const response = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/proxy/exchangeSolForTokens`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
