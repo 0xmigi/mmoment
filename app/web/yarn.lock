@@ -10288,12 +10288,13 @@ find-up@^5.0.0:
     locate-path "^6.0.0"
     path-exists "^4.0.0"
 
-"firestarter-sdk@file:../../../firestarter-sdk":
-  version "0.2.0"
+firestarter-sdk@^2.1.7:
+  version "2.1.7"
+  resolved "https://registry.yarnpkg.com/firestarter-sdk/-/firestarter-sdk-2.1.7.tgz#fa746b7d33d845f95fad34c57f8e2b6206d9880f"
+  integrity sha512-q5Dai8hmh+4ewu0Vy408xioaKZWwOT7VI9NsYHwdljtGnzJ7i20+RkxyJcvVVc3anju5XkFXaG/vjqb4hygwgA==
   dependencies:
     "@noble/hashes" "^1.3.0"
     axios "^1.6.0"
-    form-data "^4.0.0"
 
 flat-cache@^3.0.4:
   version "3.2.0"

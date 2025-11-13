@@ -10,8 +10,7 @@
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "build": "tsc",
-    "test": "jest",
-    "postinstall": "cd node_modules/firestarter-sdk && npm run build"
+    "test": "jest"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.29",
@@ -20,7 +19,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "firestarter-sdk": "github:0xmigi/firestarter-sdk",
+    "firestarter-sdk": "^2.1.7",
     "form-data": "^4.0.4",
     "node-fetch": "2",
     "rpc-websockets": "7.10.0",

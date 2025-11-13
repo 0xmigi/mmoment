@@ -246,33 +246,120 @@ export class PipeService implements PipeStorageProvider {
     return response.blob();
   }
 
-  async deleteMedia(fileId: string, _walletAddress: string): Promise<boolean> {
+  async deleteMedia(fileId: string, walletAddress: string): Promise<boolean> {
     if (!this.credentials) {
       throw new Error("Pipe credentials not available");
     }
 
     try {
-      const response = await fetch(`${this.baseUrl}/deleteFile`, {
+      console.log(`🗑️ Deleting file ${fileId} from Pipe...`);
+
+      // Use backend endpoint which uses the new SDK
+      const response = await fetch(`/api/pipe/delete/${encodeURIComponent(walletAddress)}/${encodeURIComponent(fileId)}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(`Failed to delete ${fileId} from Pipe:`, error);
+        return false;
+      }
+
+      const result = await response.json();
+      console.log(`✅ Deleted ${fileId} from Pipe:`, result);
+      return true;
+    } catch (error) {
+      console.error("Error deleting from Pipe:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Create a public share link for a file
+   */
+  async createShareLink(
+    fileId: string,
+    walletAddress: string,
+    options?: { title?: string; description?: string }
+  ): Promise<{ success: boolean; shareUrl?: string; linkHash?: string; error?: string }> {
+    if (!this.credentials) {
+      return {
+        success: false,
+        error: "Pipe credentials not available",
+      };
+    }
+
+    try {
+      console.log(`🔗 Creating share link for ${fileId}...`);
+
+      const response = await fetch(`/api/pipe/share/${encodeURIComponent(walletAddress)}/${encodeURIComponent(fileId)}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          user_id: this.credentials.userId,
-          user_app_key: this.credentials.userAppKey,
-          file_name: fileId,
+          title: options?.title,
+          description: options?.description,
         }),
       });
 
       if (!response.ok) {
-        console.error(`Failed to delete ${fileId} from Pipe`);
+        const error = await response.json();
+        console.error("Failed to create share link:", error);
+        return {
+          success: false,
+          error: error.error || "Failed to create share link",
+        };
+      }
+
+      const result = await response.json();
+      console.log(`✅ Share link created:`, result.shareUrl);
+
+      return {
+        success: true,
+        shareUrl: result.shareUrl,
+        linkHash: result.linkHash,
+      };
+    } catch (error) {
+      console.error("Error creating share link:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to create share link",
+      };
+    }
+  }
+
+  /**
+   * Delete a public share link
+   */
+  async deleteShareLink(linkHash: string, walletAddress: string): Promise<boolean> {
+    if (!this.credentials) {
+      throw new Error("Pipe credentials not available");
+    }
+
+    try {
+      console.log(`🗑️ Deleting share link ${linkHash}...`);
+
+      const response = await fetch(`/api/pipe/share/${encodeURIComponent(walletAddress)}/${encodeURIComponent(linkHash)}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error("Failed to delete share link:", error);
         return false;
       }
 
-      console.log(`✅ Deleted ${fileId} from Pipe`);
+      console.log(`✅ Share link deleted`);
       return true;
     } catch (error) {
-      console.error("Error deleting from Pipe:", error);
+      console.error("Error deleting share link:", error);
       return false;
     }
   }

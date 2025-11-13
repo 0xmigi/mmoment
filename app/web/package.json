@@ -32,7 +32,7 @@
     "buffer": "^6.0.3",
     "crypto-browserify": "^3.12.1",
     "date-fns": "^4.1.0",
-    "firestarter-sdk": "file:../../../firestarter-sdk",
+    "firestarter-sdk": "^2.1.7",
     "framer-motion": "^11.11.11",
     "lucide-react": "^0.453.0",
     "node-fetch": "^3.3.2",

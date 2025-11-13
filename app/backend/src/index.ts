@@ -4,7 +4,7 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import { config } from "dotenv";
-import { createFirestarterSDK } from "firestarter-sdk";
+import { PipeClient, generateCredentialsFromAddress, PipeAccount, UploadResult, FileRecord, Balance, PublicLink } from "firestarter-sdk";
 import dgram from "dgram";
 import net from "net";
 import axios from "axios";
@@ -41,10 +41,40 @@ import {
 
 // Note: Socket.IO server (io) will be passed to session cleanup cron after it's created below
 
-// Initialize the Firestarter SDK with mainnet endpoint
-const firestarterSDK = createFirestarterSDK({
+// Initialize the Firestarter SDK (new PipeClient API)
+const pipeClient = new PipeClient({
   baseUrl: "https://us-west-01-firestarter.pipenetwork.com", // Mainnet
 });
+
+// Cache for PipeAccount objects (wallet address -> PipeAccount)
+const pipeAccountCache = new Map<string, PipeAccount>();
+
+// Helper function to get or create PipeAccount for a wallet
+async function getPipeAccountForWallet(walletAddress: string): Promise<PipeAccount> {
+  // Check cache first
+  const cached = pipeAccountCache.get(walletAddress);
+  if (cached) {
+    return cached;
+  }
+
+  // Generate deterministic credentials from wallet address
+  const credentials = generateCredentialsFromAddress(walletAddress);
+
+  // Try to login first, create if doesn't exist
+  let account: PipeAccount;
+  try {
+    account = await pipeClient.login(credentials.username, credentials.password);
+    console.log(`✅ Logged in to Pipe account for wallet ${walletAddress.slice(0, 8)}...`);
+  } catch (error) {
+    console.log(`📝 Creating new Pipe account for wallet ${walletAddress.slice(0, 8)}...`);
+    account = await pipeClient.createAccount(credentials.username, credentials.password);
+    console.log(`✅ Created new Pipe account for wallet ${walletAddress.slice(0, 8)}...`);
+  }
+
+  // Cache the account
+  pipeAccountCache.set(walletAddress, account);
+  return account;
+}
 
 // Option A vs Option B configuration
 const USE_SHARED_PIPE_ACCOUNT = process.env.USE_SHARED_PIPE_ACCOUNT === 'true';
@@ -297,7 +327,19 @@ app.get("/api/pipe/credentials", async (req, res) => {
   }
 
   try {
-    // Check if we have existing Pipe account for this wallet
+    // Option A: Return shared account credentials
+    if (USE_SHARED_PIPE_ACCOUNT) {
+      console.log(
+        `📦 Returning shared Pipe credentials for wallet: ${walletAddress.slice(0, 8)}...`,
+      );
+      res.json({
+        userId: SHARED_PIPE_USER_ID,
+        userAppKey: SHARED_PIPE_USER_APP_KEY,
+      });
+      return;
+    }
+
+    // Option B: Check if we have existing Pipe account for this wallet
     const account = pipeAccounts.get(walletAddress);
     if (account) {
       console.log(
@@ -323,9 +365,12 @@ app.get("/api/pipe/debug-user/:walletAddress", async (req, res) => {
   try {
     console.log(`\n🔍 Debug user info for wallet: ${walletAddress}`);
 
-    // Check if we have this user
-    const user = await firestarterSDK.createUserAccount(walletAddress);
-    console.log(`👤 SDK User:`, user);
+    // Get or create Pipe account for this wallet
+    const pipeAccount = await getPipeAccountForWallet(walletAddress);
+    console.log(`👤 Pipe Account:`, {
+      username: pipeAccount.username,
+      userId: pipeAccount.userId,
+    });
 
     // Check if we have stored credentials
     const account = pipeAccounts.get(walletAddress);
@@ -333,9 +378,11 @@ app.get("/api/pipe/debug-user/:walletAddress", async (req, res) => {
 
     res.json({
       walletAddress,
-      sdkUser: user,
+      pipeAccount: {
+        username: pipeAccount.username,
+        userId: pipeAccount.userId,
+      },
       storedAccount: account,
-      expectedUsername: `mmoment_${walletAddress.slice(0, 16)}`,
     });
   } catch (error) {
     console.error("Debug user error:", error);
@@ -365,8 +412,9 @@ app.post("/api/pipe/proxy/*", async (req: any, res) => {
 
     // Handle specific endpoints that frontend expects
     if (endpoint === "checkWallet") {
-      // Get balance using SDK
-      const balance = await firestarterSDK.getUserBalance(walletAddress);
+      // Get balance using new SDK
+      const account = await getPipeAccountForWallet(walletAddress);
+      const balance = await pipeClient.getBalance(account);
       res.json({
         balance_sol: balance.sol,
         public_key: balance.publicKey,
@@ -375,8 +423,9 @@ app.post("/api/pipe/proxy/*", async (req: any, res) => {
     }
 
     if (endpoint === "checkCustomToken") {
-      // Get PIPE token balance using SDK
-      const balance = await firestarterSDK.getUserBalance(walletAddress);
+      // Get PIPE token balance using new SDK
+      const account = await getPipeAccountForWallet(walletAddress);
+      const balance = await pipeClient.getBalance(account);
       res.json({
         balance: balance.pipe * 1000000, // Convert to raw units
         ui_amount: balance.pipe,
@@ -385,14 +434,15 @@ app.post("/api/pipe/proxy/*", async (req: any, res) => {
     }
 
     if (endpoint === "exchangeSolForTokens") {
-      // Exchange SOL for PIPE using SDK
+      // Exchange SOL for PIPE using new SDK
       const { amount_sol } = req.body;
       if (!amount_sol) {
         return res.status(400).json({ error: "amount_sol is required" });
       }
 
-      const tokensReceived = await firestarterSDK.exchangeSolForPipe(
-        walletAddress,
+      const account = await getPipeAccountForWallet(walletAddress);
+      const tokensReceived = await pipeClient.exchangeSolForPipe(
+        account,
         amount_sol,
       );
       res.json({
@@ -460,14 +510,13 @@ app.post("/api/pipe/create-account", async (req, res) => {
       `🔄 [Option B] Creating new Pipe account for wallet: ${walletAddress.slice(0, 8)}...`,
     );
 
-    // Use the SDK to create or get the user account
-    // The SDK handles all the JWT setup internally
-    const pipeUser = await firestarterSDK.createUserAccount(walletAddress);
+    // Use the new SDK to get or create the user account
+    const pipeAccount = await getPipeAccountForWallet(walletAddress);
 
-    // Store account info locally for quick access
+    // Store account info locally for quick access (for backward compatibility)
     const accountInfo = {
-      userId: pipeUser.userId,
-      userAppKey: pipeUser.userAppKey || "",
+      userId: pipeAccount.userId,
+      userAppKey: pipeAccount.userAppKey || "",
       walletAddress,
       created: new Date(),
     };
@@ -521,10 +570,12 @@ app.post("/api/pipe/upload", async (req, res) => {
       `📤 Uploading ${filename} to Pipe for ${walletAddress.slice(0, 8)}... (${buffer.length} bytes)`,
     );
 
-    // Use the SDK to upload the file
-    // The SDK handles all auth internally including JWT tokens
-    const uploadResult = await firestarterSDK.uploadFile(
-      walletAddress,
+    // Get the Pipe account for this wallet
+    const account = await getPipeAccountForWallet(walletAddress);
+
+    // Use the new SDK to upload the file
+    const uploadResult = await pipeClient.uploadFile(
+      account,
       buffer,
       filename,
       { metadata },
@@ -572,15 +623,19 @@ app.get("/api/pipe/files/:walletAddress", async (req, res) => {
       `📁 Getting file list for wallet: ${walletAddress.slice(0, 8)}...`,
     );
 
-    // Get files from SDK upload history first
-    const fileRecords = await firestarterSDK.listUserFiles(walletAddress);
+    // Get the Pipe account for this wallet
+    const account = await getPipeAccountForWallet(walletAddress);
+
+    // Note: The new SDK's listFiles() returns empty array (API limitation)
+    // We need to use local file tracking or backend mapping instead
+    const fileRecords = await pipeClient.listFiles(account);
     console.log(
-      `📁 Found ${fileRecords.length} files for wallet ${walletAddress.slice(0, 8)}:`,
-      fileRecords,
+      `📁 SDK returned ${fileRecords.length} files (API may not support listing yet)`,
     );
 
     if (fileRecords.length === 0) {
       // Return empty array if no files
+      // TODO: Consider implementing local file tracking using PipeFileStorage
       return res.json({
         files: [],
         count: 0,
@@ -588,14 +643,11 @@ app.get("/api/pipe/files/:walletAddress", async (req, res) => {
       });
     }
 
-    // Get user credentials to include userAppKey in download URLs
-    const user = await firestarterSDK.createUserAccount(walletAddress);
-
     // For JWT-based downloads, we need to use the SDK's download method instead of direct URLs
     // Transform SDK FileRecord format to frontend PipeFile format
     const files = fileRecords.map((record: any) => ({
       id: record.fileId,
-      name: record.originalFileName,
+      name: record.fileName,
       size: record.size,
       contentType: record.mimeType || "application/octet-stream",
       uploadedAt: record.uploadedAt
@@ -642,7 +694,7 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
       `📥 Streaming download ${fileId} for wallet: ${walletAddress.slice(0, 8)}...`,
     );
 
-    // Get JWT token (this is what worked yesterday)
+    // Get JWT token (legacy Pipe account uses JWT Bearer auth, not user_app_key)
     const { access_token } = await getPipeJWTToken();
     const baseUrl = process.env.PIPE_BASE_URL || 'https://us-west-01-firestarter.pipenetwork.com';
 
@@ -739,6 +791,134 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
         error: error instanceof Error ? error.message : "Download failed",
       });
     }
+  }
+});
+
+// Create public share link endpoint
+app.post("/api/pipe/share/:walletAddress/:fileId", async (req, res) => {
+  const { walletAddress, fileId } = req.params;
+  const { title, description } = req.body;
+
+  if (!walletAddress || !fileId) {
+    return res
+      .status(400)
+      .json({ error: "Wallet address and file ID are required" });
+  }
+
+  try {
+    console.log(
+      `🔗 Creating public share link for ${fileId} from wallet: ${walletAddress.slice(0, 8)}...`,
+    );
+
+    // Get the Pipe account for this wallet
+    const account = await getPipeAccountForWallet(walletAddress);
+
+    // Decode the fileId (it might be URL encoded)
+    const fileName = decodeURIComponent(fileId);
+
+    // Use the new SDK to create a public link
+    const publicLink = await pipeClient.createPublicLink(account, fileName, {
+      customTitle: title,
+      customDescription: description,
+    });
+
+    console.log(
+      `✅ Created public share link for ${fileName}: ${publicLink.shareUrl}`,
+    );
+
+    res.json({
+      success: true,
+      linkHash: publicLink.linkHash,
+      shareUrl: publicLink.shareUrl,
+      fileName: publicLink.fileName,
+    });
+  } catch (error) {
+    console.error("❌ Create share link failed:", error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : "Create share link failed",
+    });
+  }
+});
+
+// Delete public share link endpoint
+app.delete("/api/pipe/share/:walletAddress/:linkHash", async (req, res) => {
+  const { walletAddress, linkHash } = req.params;
+
+  if (!walletAddress || !linkHash) {
+    return res
+      .status(400)
+      .json({ error: "Wallet address and link hash are required" });
+  }
+
+  try {
+    console.log(
+      `🗑️  Deleting public share link ${linkHash} for wallet: ${walletAddress.slice(0, 8)}...`,
+    );
+
+    // Get the Pipe account for this wallet
+    const account = await getPipeAccountForWallet(walletAddress);
+
+    // Use the new SDK to delete the public link
+    await pipeClient.deletePublicLink(account, linkHash);
+
+    console.log(
+      `✅ Successfully deleted public link ${linkHash}`,
+    );
+
+    res.json({
+      success: true,
+      message: "Public link deleted successfully",
+      linkHash,
+    });
+  } catch (error) {
+    console.error("❌ Delete public link failed:", error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : "Delete public link failed",
+    });
+  }
+});
+
+// Delete file endpoint
+app.delete("/api/pipe/delete/:walletAddress/:fileId", async (req, res) => {
+  const { walletAddress, fileId } = req.params;
+
+  if (!walletAddress || !fileId) {
+    return res
+      .status(400)
+      .json({ error: "Wallet address and file ID are required" });
+  }
+
+  try {
+    console.log(
+      `🗑️  Deleting file ${fileId} for wallet: ${walletAddress.slice(0, 8)}...`,
+    );
+
+    // Get the Pipe account for this wallet
+    const account = await getPipeAccountForWallet(walletAddress);
+
+    // Decode the fileId (it might be URL encoded)
+    const fileName = decodeURIComponent(fileId);
+
+    // Use the new SDK to delete the file
+    await pipeClient.deleteFile(account, fileName);
+
+    console.log(
+      `✅ Successfully deleted ${fileName} for ${walletAddress.slice(0, 8)}...`,
+    );
+
+    res.json({
+      success: true,
+      message: "File deleted successfully",
+      fileName,
+    });
+  } catch (error) {
+    console.error("❌ Delete failed:", error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : "Delete failed",
+    });
   }
 });
 
@@ -859,7 +1039,7 @@ app.post("/api/pipe/jetson/upload-complete", async (req, res) => {
     console.log(`   Wallet: ${walletAddress.slice(0, 8)}...`);
     console.log(`   Size: ${size} bytes`);
 
-    // Store signature → file mapping (RAM - legacy support)
+    // Store signature → file mapping
     const mapping: FileMapping = {
       signature: txSignature,
       signatureType,
@@ -873,7 +1053,7 @@ app.post("/api/pipe/jetson/upload-complete", async (req, res) => {
 
     signatureToFileMapping.set(txSignature, mapping);
 
-    // Also track by wallet address for gallery queries (RAM - legacy support)
+    // Also track by wallet address for gallery queries
     if (walletAddress !== 'unknown') {
       const existingSignatures = walletToSignatures.get(walletAddress) || [];
       existingSignatures.push(txSignature);
@@ -881,31 +1061,6 @@ app.post("/api/pipe/jetson/upload-complete", async (req, res) => {
 
       console.log(`✅ Mapped ${signatureType} signature → file for ${walletAddress.slice(0, 8)}...`);
       console.log(`   Total files for wallet: ${existingSignatures.length}`);
-    }
-
-    // PERSISTENCE FIX: Also save to SDK upload history (survives Railway restarts)
-    try {
-      await (firestarterSDK as any).uploadHistory.recordUpload({
-        fileId: blake3Hash || fileId,
-        originalFileName: fileName,
-        storedFileName: fileName,
-        userId: walletAddress,
-        uploadedAt: mapping.uploadedAt,
-        size: size || 0,
-        blake3Hash: blake3Hash || fileId,
-        mimeType: fileType === 'video' ? 'video/mp4' : 'image/jpeg',
-        metadata: {
-          ...metadata,
-          user_wallet: walletAddress,
-          camera_id: cameraId,
-          signature: txSignature,
-          signatureType
-        }
-      });
-      console.log(`💾 Persisted to upload history for ${walletAddress.slice(0, 8)}...`);
-    } catch (persistError) {
-      console.error('⚠️  Failed to persist to upload history:', persistError);
-      // Don't fail the request if persistence fails
     }
 
     // Notify connected clients via WebSocket
@@ -949,40 +1104,52 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
 
     const mediaItems = [];
 
-    // PRIMARY METHOD: Read from persistent SDK upload history (survives restarts!)
-    console.log(`   Reading from persistent upload history...`);
-    try {
-      const userFiles = await firestarterSDK.listUserFiles(walletAddress);
-      console.log(`   Found ${userFiles.length} files for ${walletAddress.slice(0, 8)}...`);
+    // OPTION A: Shared account mode - use SDK file listing and filter by wallet prefix
+    if (USE_SHARED_PIPE_ACCOUNT) {
+      console.log(`   [Option A] Fetching from shared Pipe account via SDK...`);
 
-      // Convert SDK file records to media items
-      for (const file of userFiles) {
-        // IMPORTANT: Pipe /upload stores files by FILENAME (not hash)
-        const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(file.storedFileName)}`;
+      try {
+        // Get the Pipe account for this wallet
+        const account = await getPipeAccountForWallet(walletAddress);
 
-        mediaItems.push({
-          id: file.fileId,
-          fileId: file.fileId,
-          fileName: file.storedFileName,
-          url: downloadUrl,
-          type: file.storedFileName.includes('video') ? 'video' : 'image',
-          cameraId: file.metadata?.camera_id || file.metadata?.cameraId || 'unknown',
-          uploadedAt: file.uploadedAt instanceof Date ? file.uploadedAt.toISOString() : new Date(file.uploadedAt).toISOString(),
-          txSignature: file.metadata?.signature,
-          signatureType: file.metadata?.signatureType || 'persisted',
-          provider: 'pipe'
-        });
+        // Get ALL files from shared account
+        const allFiles = await pipeClient.listFiles(account);
+        console.log(`   Found ${allFiles.length} total files (API may return empty)`);
+
+        // Filter by wallet prefix in filename (e.g., "RsLjCiEi_photo_...")
+        const walletPrefix = walletAddress.slice(0, 8);
+        const userFiles = allFiles.filter((file: any) =>
+          file.fileName.startsWith(walletPrefix)
+        );
+
+        console.log(`   Filtered to ${userFiles.length} files for ${walletPrefix}...`);
+
+        // Convert SDK file records to media items
+        for (const file of userFiles) {
+          const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(file.fileName)}`;
+
+          mediaItems.push({
+            id: file.fileId,
+            fileId: file.fileId,
+            fileName: file.fileName,
+            url: downloadUrl,
+            type: file.fileName.includes('video') ? 'video' : 'image',
+            cameraId: file.metadata?.cameraId || 'unknown',
+            uploadedAt: new Date(file.uploadedAt).toISOString(),
+            txSignature: undefined,
+            signatureType: 'shared-account',
+            provider: 'pipe'
+          });
+        }
+      } catch (sdkError) {
+        console.error(`   SDK file listing failed:`, sdkError);
+        // Fall through to legacy method below
       }
-
-      console.log(`✅ Successfully loaded ${mediaItems.length} files from persistent storage`);
-    } catch (sdkError) {
-      console.error(`   Failed to read persistent storage:`, sdkError);
-      // Fall through to legacy RAM method below
     }
 
-    // FALLBACK: Use RAM mappings if persistent storage failed or returned nothing
-    if (mediaItems.length === 0) {
-      console.log(`   [Fallback] Using RAM signature mappings...`);
+    // OPTION B / FALLBACK: Use backend mappings (device signatures + blockchain)
+    if (!USE_SHARED_PIPE_ACCOUNT || mediaItems.length === 0) {
+      console.log(`   [Option B/Fallback] Using backend signature mappings...`);
 
       // Method 1: Get device-signed captures (instant captures, no blockchain tx)
       const deviceSignatures = walletToSignatures.get(walletAddress) || [];
@@ -991,7 +1158,7 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
       for (const sig of deviceSignatures) {
         const mapping = signatureToFileMapping.get(sig);
         if (mapping) {
-          // IMPORTANT: Pipe /upload stores files by FILENAME (not hash)
+          // Use fileName for download URL (original filename from upload)
           const downloadUrl = `/api/pipe/download/${walletAddress}/${encodeURIComponent(mapping.fileName)}`;
 
           mediaItems.push({
@@ -1047,20 +1214,10 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
       }
     }
 
-    // Deduplicate by fileId (keep newest entry for each file)
-    const uniqueFiles = new Map<string, typeof mediaItems[0]>();
-    for (const item of mediaItems) {
-      const existing = uniqueFiles.get(item.fileId);
-      if (!existing || new Date(item.uploadedAt) > new Date(existing.uploadedAt)) {
-        uniqueFiles.set(item.fileId, item);
-      }
-    }
-    const deduplicatedItems = Array.from(uniqueFiles.values());
-
     // Sort by upload date (newest first)
-    deduplicatedItems.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+    mediaItems.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
 
-    console.log(`✅ Found ${deduplicatedItems.length} total media items for user (${mediaItems.length - deduplicatedItems.length} duplicates removed)`);
+    console.log(`✅ Found ${mediaItems.length} total media items for user`);
     if (!USE_SHARED_PIPE_ACCOUNT) {
       console.log(`   Device-signed: ${mediaItems.filter(m => m.signatureType === 'device').length}`);
       console.log(`   Blockchain tx: ${mediaItems.filter(m => m.signatureType === 'blockchain').length}`);
@@ -1068,8 +1225,8 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
 
     res.json({
       success: true,
-      media: deduplicatedItems,
-      count: deduplicatedItems.length,
+      media: mediaItems,
+      count: mediaItems.length,
       mode: USE_SHARED_PIPE_ACCOUNT ? 'shared' : 'per-user'
     });
 
