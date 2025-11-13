@@ -1,10 +1,11 @@
 import { IPFSMedia } from "../storage/ipfs/ipfs-service";
 import { unifiedIpfsService } from "../storage/ipfs/unified-ipfs-service";
 import { PipeGalleryItem } from "../storage/pipe/pipe-gallery-service";
+import { pipeService } from "../storage/pipe/pipe-service";
 import { TimelineEvent } from "../timeline/timeline-types";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { Dialog } from "@headlessui/react";
-import { ArrowUpRight, Download, Trash2, X } from "lucide-react";
+import { ArrowUpRight, Download, Share2, Trash2, X } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 
 interface MediaViewerProps {
@@ -24,6 +25,7 @@ export default function MediaViewer({
 }: MediaViewerProps) {
   const { user, primaryWallet } = useDynamicContext();
   const [deleting, setDeleting] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Scroll to show EXIF just barely peeking when modal opens
@@ -115,6 +117,23 @@ export default function MediaViewer({
         localStorage.setItem("jetson-videos", JSON.stringify(filteredVideos));
         success = true;
         console.log("Deleted Jetson video from localStorage:", mediaId);
+      } else if (media.provider === "pipe") {
+        console.log("🗑️ Starting Pipe media deletion for:", mediaId);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        success = await pipeService.deleteMedia(
+          mediaId,
+          primaryWallet.address
+        );
+        console.log(
+          "🗑️ Pipe media deletion result:",
+          mediaId,
+          "success:",
+          success
+        );
+
+        if (success) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
       } else {
         console.log("🗑️ Starting IPFS media deletion for:", mediaId);
         await new Promise((resolve) => setTimeout(resolve, 500));
@@ -147,6 +166,41 @@ export default function MediaViewer({
       console.error("🗑️ MEDIA DELETION ERROR (MediaViewer):", err);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  // Function to handle share link creation
+  const handleShare = async () => {
+    if (!primaryWallet?.address || !media || media.provider !== "pipe") return;
+
+    try {
+      setSharing(true);
+      console.log("🔗 Creating share link for:", media.id);
+
+      const result = await pipeService.createShareLink(
+        media.id,
+        primaryWallet.address,
+        {
+          title: `MMOMENT ${media.type}`,
+          description: `Shared from MMOMENT at ${new Date(media.timestamp).toLocaleString()}`,
+        }
+      );
+
+      if (result.success && result.shareUrl) {
+        console.log("✅ Share link created:", result.shareUrl);
+
+        // Copy to clipboard
+        await navigator.clipboard.writeText(result.shareUrl);
+        alert(`Share link copied to clipboard!\n\n${result.shareUrl}`);
+      } else {
+        console.error("❌ Failed to create share link:", result.error);
+        alert(`Failed to create share link: ${result.error || "Unknown error"}`);
+      }
+    } catch (err) {
+      console.error("🔗 SHARE LINK ERROR:", err);
+      alert(`Error creating share link: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setSharing(false);
     }
   };
 
@@ -217,6 +271,20 @@ export default function MediaViewer({
                 >
                   <Download className="w-4 h-4 text-blue-500" />
                 </button>
+                {media.provider === "pipe" && (
+                  <button
+                    onClick={handleShare}
+                    disabled={sharing}
+                    className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-50"
+                    title="Create Public Share Link"
+                  >
+                    <Share2
+                      className={`w-4 h-4 text-green-500 ${
+                        sharing ? "animate-spin" : ""
+                      }`}
+                    />
+                  </button>
+                )}
                 <button
                   onClick={() => handleDelete(media.id)}
                   disabled={deleting}
