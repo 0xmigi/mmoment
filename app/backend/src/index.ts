@@ -4,7 +4,7 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import { config } from "dotenv";
-import { PipeClient, generateCredentialsFromAddress, PipeAccount, UploadResult, FileRecord, Balance, PublicLink, PipeFileStorage } from "firestarter-sdk";
+import { PipeClient, generateCredentialsFromAddress, PipeAccount, UploadResult, FileRecord, Balance, PublicLink } from "firestarter-sdk";
 import dgram from "dgram";
 import net from "net";
 import axios from "axios";
@@ -194,10 +194,6 @@ const walletToSignatures = new Map<string, string[]>();
 
 // Legacy support - keep old variable name for backward compatibility
 const txToFileMapping = signatureToFileMapping;
-
-// PipeFileStorage instance for tracking files persistently
-// Using server-side storage path (customize as needed)
-const pipeFileStorage = new PipeFileStorage('./pipe-storage-data');
 
 const app = express();
 
@@ -908,21 +904,13 @@ app.delete("/api/pipe/delete/:walletAddress/:fileId", async (req, res) => {
     // Use the new SDK to delete the file from Pipe storage
     await pipeClient.deleteFile(account, fileName);
 
-    // Also delete from signature mapping and find the fileId
+    // Also delete from signature mapping
     // Find all signatures for this wallet that map to this fileName
-    let deletedFileId: string | undefined;
     for (const [signature, mapping] of signatureToFileMapping.entries()) {
       if (mapping.fileName === fileName && mapping.walletAddress === walletAddress) {
-        deletedFileId = mapping.fileId;
         signatureToFileMapping.delete(signature);
         console.log(`🗑️  Removed signature mapping: ${signature.slice(0, 8)}...`);
       }
-    }
-
-    // Remove from PipeFileStorage using fileId (like firestarter-demo)
-    if (deletedFileId) {
-      pipeFileStorage.removeFile(deletedFileId);
-      console.log(`🗑️  Removed from PipeFileStorage: ${deletedFileId.slice(0, 8)}...`);
     }
 
     console.log(
@@ -1079,16 +1067,6 @@ app.post("/api/pipe/jetson/upload-complete", async (req, res) => {
       const existingSignatures = walletToSignatures.get(walletAddress) || [];
       existingSignatures.push(txSignature);
       walletToSignatures.set(walletAddress, existingSignatures);
-
-      // Add to PipeFileStorage for persistent tracking (like firestarter-demo)
-      // Using the same format as UploadResult
-      pipeFileStorage.addFile({
-        fileId: mapping.fileId,
-        fileName: mapping.fileName,
-        blake3Hash: mapping.fileId, // Use fileId as blake3Hash (they're the same)
-        size: size,
-        uploadedAt: mapping.uploadedAt,
-      });
 
       console.log(`✅ Mapped ${signatureType} signature → file for ${walletAddress.slice(0, 8)}...`);
       console.log(`   Total files for wallet: ${existingSignatures.length}`);
