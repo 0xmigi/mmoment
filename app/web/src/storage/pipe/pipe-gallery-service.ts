@@ -128,8 +128,8 @@ class PipeGalleryService {
         const isVideo = item.type === 'video';
 
         return {
-          id: item.fileId,
-          cid: item.fileId,
+          id: item.fileName, // Use fileName for delete/share operations (backend expects filename)
+          cid: item.fileId, // Keep hash as cid for content addressing
           name: item.fileName,
           url: `${this.backendUrl}${item.url}`, // Full URL to backend download endpoint
           type: isVideo ? "video" : ("image" as "image" | "video"),
