@@ -39,7 +39,7 @@ interface CameraModalProps {
 export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: CameraModalProps) {
   const { primaryWallet } = useDynamicContext();
   const { connection } = useConnection();
-  const { primaryProfile } = useSocialProfile();
+  const { primaryProfile, loading: profileLoading } = useSocialProfile();
   const [isCheckedIn, setIsCheckedIn] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1108,10 +1108,10 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                 ) : (
                   <button
                     onClick={handleCheckIn}
-                    disabled={loading}
+                    disabled={loading || profileLoading}
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
                   >
-                    {loading ? 'Processing...' : 'Check In'}
+                    {loading ? 'Processing...' : profileLoading ? 'Loading profile...' : 'Check In'}
                   </button>
                 )}
               </>
