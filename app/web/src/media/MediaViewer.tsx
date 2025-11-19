@@ -401,7 +401,11 @@ export default function MediaViewer({
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500">Provider</span>
                     <span className="text-gray-700">
-                      {media.provider === "jetson" ? "Jetson Camera" : "IPFS"}
+                      {media.provider === "pipe"
+                        ? "Pipe Network"
+                        : media.provider === "jetson"
+                        ? "Jetson Camera"
+                        : "IPFS"}
                     </span>
                   </div>
                   <div className="flex justify-between text-sm">
@@ -410,13 +414,32 @@ export default function MediaViewer({
                       {media.type}
                     </span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">Media ID</span>
-                    <span className="text-gray-700 font-mono text-xs">{`${media.id.slice(
-                      0,
-                      8
-                    )}...`}</span>
-                  </div>
+                  {media.provider === "pipe" && "name" in media && media.name && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">File Name</span>
+                      <span className="text-gray-700 font-mono text-xs truncate max-w-[60%]">
+                        {media.name}
+                      </span>
+                    </div>
+                  )}
+                  {media.provider === "pipe" && "cid" in media && media.cid && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Content ID</span>
+                      <span className="text-gray-700 font-mono text-xs">{`${media.cid.slice(
+                        0,
+                        8
+                      )}...${media.cid.slice(-8)}`}</span>
+                    </div>
+                  )}
+                  {media.provider !== "pipe" && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Media ID</span>
+                      <span className="text-gray-700 font-mono text-xs">{`${media.id.slice(
+                        0,
+                        8
+                      )}...`}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
