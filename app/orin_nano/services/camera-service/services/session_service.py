@@ -108,13 +108,27 @@ class SessionService:
         """
         with self._sessions_lock:
             # Check if wallet already has a session
+            existing_profile = None
             if wallet_address in self._wallet_sessions:
                 existing_session_id = self._wallet_sessions[wallet_address]
-                
-                # Remove the existing session if it exists
+
+                # Preserve existing profile data before removing session
                 if existing_session_id in self._sessions:
+                    existing_session = self._sessions[existing_session_id]
+                    existing_profile = getattr(existing_session, 'user_profile', None)
                     logger.info(f"Replacing existing session for wallet {wallet_address}")
                     del self._sessions[existing_session_id]
+
+            # Merge profiles: preserve existing display_name if new one doesn't have it
+            if existing_profile and user_profile:
+                # New profile takes precedence, but fill in missing fields from existing
+                if not user_profile.get('display_name') and existing_profile.get('display_name'):
+                    user_profile['display_name'] = existing_profile['display_name']
+                if not user_profile.get('username') and existing_profile.get('username'):
+                    user_profile['username'] = existing_profile['username']
+            elif existing_profile and not user_profile:
+                # No new profile provided, use existing
+                user_profile = existing_profile
             
             # Clean up if we've reached the maximum number of sessions
             if len(self._sessions) >= self._max_sessions:

@@ -20,6 +20,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 from .identity_tracker import IdentityTracker
+from .identity_store import get_identity_store
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -72,12 +73,11 @@ class GPUFaceService:
         self._last_detection_time = 0
         self._last_recognition_time = 0
         
-        # Face database (blockchain-based)
+        # Get reference to unified IdentityStore (single source of truth)
+        self.identity_store = get_identity_store()
+
+        # Lock for thread safety in recognition results
         self._faces_lock = threading.Lock()
-        self._face_embeddings = {}  # wallet_address -> embedding
-        self._face_names = {}       # wallet_address -> display_name
-        self._face_metadata = {}    # wallet_address -> metadata
-        self._user_profiles = {}    # wallet_address -> user_profile (display_name, username)
         
         # Detection results
         self._results_lock = threading.Lock()
@@ -143,24 +143,68 @@ class GPUFaceService:
             logger.info("Loading InsightFace model on GPU with STRICT validation...")
             try:
                 import insightface
-                
-                # FORCE ONNX Runtime to fail if CUDA unavailable
-                os.environ['ORT_CUDA_UNAVAILABLE'] = '0'
+                import onnxruntime as ort
+
+                # Log available providers
+                available_providers = ort.get_available_providers()
+                logger.info(f"ONNX Runtime available providers: {available_providers}")
+
+                # CRITICAL FIX: Force ONNX Runtime to use GPU for Jetson
+                # InsightFace has a bug where it ignores the providers parameter for individual models
                 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-                
-                # STRICT: Only CUDA provider, WILL FAIL if GPU unavailable
-                providers = ['CUDAExecutionProvider']
-                self.face_embedder = insightface.app.FaceAnalysis(providers=providers)
-                self.face_embedder.prepare(ctx_id=0, det_size=(640, 640))
-                
-                # VALIDATE that CUDA provider is actually being used
-                try:
-                    actual_providers = self.face_embedder.models['det'].get_providers()
-                    if 'CUDAExecutionProvider' not in actual_providers:
-                        raise RuntimeError(f"InsightFace failed to use CUDA! Using: {actual_providers}")
-                    logger.info(f"InsightFace VERIFIED using GPU providers: {actual_providers}")
-                except Exception as validation_error:
-                    logger.warning(f"Could not validate providers: {validation_error}")
+
+                # Check for CUDA provider
+                if 'CUDAExecutionProvider' not in available_providers:
+                    raise RuntimeError("CUDAExecutionProvider not available! InsightFace requires GPU.")
+
+                logger.info("Initializing InsightFace with CUDA provider...")
+
+                # Step 1: Create FaceAnalysis with providers parameter
+                self.face_embedder = insightface.app.FaceAnalysis(providers=['CUDAExecutionProvider'])
+
+                # Step 2: Prepare models (loads ONNX models with ctx_id=0 for GPU)
+                self.face_embedder.prepare(ctx_id=0, det_size=(640, 640), det_thresh=0.3)
+
+                # Step 3: CRITICAL FIX - Force each model to use CUDA after prepare()
+                # InsightFace's prepare() ignores the providers parameter due to a bug
+                # We must manually set providers on each model's ONNX session
+                cuda_count = 0
+                total_models = 0
+
+                for model_name, model in self.face_embedder.models.items():
+                    total_models += 1
+                    try:
+                        # Check current providers
+                        current_providers = model.session.get_providers()
+
+                        # If not using CUDA, recreate session with CUDA
+                        if 'CUDAExecutionProvider' not in current_providers:
+                            logger.warning(f"{model_name} using {current_providers[0]}, forcing CUDA...")
+
+                            # Get model file path
+                            model_file = model.model_file if hasattr(model, 'model_file') else None
+
+                            if model_file and os.path.exists(model_file):
+                                # Recreate ONNX session with CUDA provider
+                                model.session = ort.InferenceSession(
+                                    model_file,
+                                    providers=['CUDAExecutionProvider']
+                                )
+                                logger.info(f"✅ {model_name}: Forced to CUDA")
+                                cuda_count += 1
+                            else:
+                                logger.error(f"❌ {model_name}: Could not find model file")
+                        else:
+                            logger.info(f"✅ {model_name}: Already using CUDA")
+                            cuda_count += 1
+
+                    except Exception as e:
+                        logger.error(f"❌ {model_name}: Failed to set CUDA - {e}")
+
+                if cuda_count == 0:
+                    raise RuntimeError(f"InsightFace CUDA initialization failed! 0/{total_models} models on GPU")
+
+                logger.info(f"✅ InsightFace GPU validation: {cuda_count}/{total_models} models using CUDA")
                 
                 logger.info("InsightFace model loaded successfully on GPU with STRICT validation")
                 
@@ -179,41 +223,43 @@ class GPUFaceService:
 
     def extract_face_embedding(self, face_img: np.ndarray) -> Optional[np.ndarray]:
         """Extract high-quality face embedding using InsightFace"""
-        import sys
-        print(f"🔍 extract_face_embedding called, shape={face_img.shape}", flush=True, file=sys.stderr)
+        logger.info(f"[EXTRACT-EMBEDDING] Called with shape={face_img.shape}")
+
         if not self._models_loaded:
-            print(f"🔍 Models not loaded", flush=True, file=sys.stderr)
+            logger.warning("[EXTRACT-EMBEDDING] Models not loaded!")
             return None
 
         try:
             # Ensure face image is in the right format and size
             if face_img.shape[0] < 50 or face_img.shape[1] < 50:
-                print(f"🔍 Face too small: {face_img.shape}", flush=True, file=sys.stderr)
+                logger.warning(f"[EXTRACT-EMBEDDING] Face region too small: {face_img.shape}")
                 return None
 
             # Convert BGR to RGB if needed (InsightFace expects RGB)
-            print(f"🔍 Converting BGR to RGB...", flush=True, file=sys.stderr)
             if len(face_img.shape) == 3 and face_img.shape[2] == 3:
                 face_rgb = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
             else:
                 face_rgb = face_img
 
+            logger.info(f"[EXTRACT-EMBEDDING] Calling InsightFace.get() on {face_rgb.shape} image...")
+
             # Extract embedding with GPU
-            print(f"🔍 BEFORE InsightFace get()...", flush=True, file=sys.stderr)
             faces = self.face_embedder.get(face_rgb)
-            print(f"🔍 AFTER InsightFace get(): {len(faces)} faces", flush=True, file=sys.stderr)
+
+            logger.info(f"[EXTRACT-EMBEDDING] InsightFace found {len(faces)} faces")
 
             if len(faces) > 0:
                 # Get the largest face (most confident detection)
                 face = max(faces, key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]))
-
-                # Return normalized embedding
                 embedding = face.normed_embedding
+                logger.info(f"[EXTRACT-EMBEDDING] ✅ Successfully extracted embedding, shape={embedding.shape}")
                 return embedding
             else:
+                logger.warning("[EXTRACT-EMBEDDING] InsightFace detected 0 faces in the cropped person region")
                 return None
 
         except Exception as e:
+            logger.error(f"[EXTRACT-EMBEDDING] Exception: {e}", exc_info=True)
             return None
 
     def extract_compact_face_embedding(self, face_img: np.ndarray) -> Optional[np.ndarray]:
@@ -271,9 +317,18 @@ class GPUFaceService:
 
             # CRITICAL FIX: Force YOLOv8 to use GPU for inference
             # YOLOv8 bug: ignores .to('cuda') without explicit device parameter!
-            # Enable tracking with persist=True for identity tracking
+            # Enable tracking with BoT-SORT for appearance-based Re-ID
+            # This prevents creating new track_ids for the same person at different angles
             with torch.cuda.nvtx.range("YOLOv8_inference"):  # GPU profiling marker
-                results = self.face_detector.track(frame, device=0, verbose=False, persist=True)  # device=0 forces GPU, persist enables tracking!
+                results = self.face_detector.track(
+                    frame,
+                    device=0,
+                    verbose=False,
+                    persist=True,
+                    tracker='/app/botsort_reid.yaml',  # BoT-SORT with ReID enabled
+                    conf=0.25,  # Lower confidence for maintaining tracks
+                    iou=0.5  # IoU threshold for matching
+                )
             
             import sys
             for result in results:
@@ -282,9 +337,17 @@ class GPUFaceService:
                     for i, box in enumerate(result.boxes):
                         cls = int(box.cls)
                         conf = float(box.conf)
-                        print(f"🔍 Box {i}: class={cls}, conf={conf}", flush=True, file=sys.stderr)
+
+                        # Get track ID if available
+                        has_track_id = hasattr(box, 'id') and box.id is not None
+
+                        # Use lower confidence for tracked persons (maintains track when turning)
+                        # vs higher confidence for new detections (reduces false positives)
+                        confidence_threshold = 0.25 if has_track_id else 0.5
+
+                        print(f"🔍 Box {i}: class={cls}, conf={conf}, tracked={has_track_id}, thresh={confidence_threshold}", flush=True, file=sys.stderr)
                         # Filter for person class (class 0 in COCO)
-                        if cls == 0 and conf > 0.5:
+                        if cls == 0 and conf > confidence_threshold:
                             print(f"🔍 Person detected! Processing...", flush=True, file=sys.stderr)
                             # Get bounding box coordinates
                             x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
@@ -341,77 +404,102 @@ class GPUFaceService:
         if not self._models_loaded:
             return []
 
-        # Get detections with track IDs
-        detections = self.detect_and_recognize_faces(frame)
+        try:
+            # Get detections with track IDs
+            detections = self.detect_and_recognize_faces(frame)
+            logger.info(f"[IDENTITY-TRACK] Got {len(detections)} detections from detect_and_recognize_faces")
 
-        # Convert to format for identity tracker
-        tracker_detections = []
-        for det in detections:
-            tracker_det = {
-                'class': 'person',
-                'x1': det['box'][0],
-                'y1': det['box'][1],
-                'x2': det['box'][2],
-                'y2': det['box'][3],
-                'confidence': det['confidence'],
-                'track_id': det.get('track_id')
-            }
-            tracker_detections.append(tracker_det)
+            # Convert to format for identity tracker
+            tracker_detections = []
+            for det in detections:
+                tracker_det = {
+                    'class': 'person',
+                    'x1': det['box'][0],
+                    'y1': det['box'][1],
+                    'x2': det['box'][2],
+                    'y2': det['box'][3],
+                    'confidence': det['confidence'],
+                    'track_id': det.get('track_id')
+                }
+                tracker_detections.append(tracker_det)
 
-        # Process through identity tracker for persistent tracking
-        enhanced_detections = self.identity_tracker.process_frame_detections(
-            tracker_detections, frame
-        )
+            logger.info(f"[IDENTITY-TRACK] Processing {len(tracker_detections)} detections through identity tracker")
 
-        # Merge back face recognition data
-        final_detections = []
-        for enhanced, original in zip(enhanced_detections, detections):
-            enhanced['face_data'] = {
-                'recognized_name': original['recognized_name'],
-                'similarity': original['similarity']
-            }
-            # If identity tracker found wallet, use that over face recognition
-            if 'wallet_address' in enhanced:
-                enhanced['identity'] = enhanced['wallet_address']
-                enhanced['tracking_method'] = 'persistent_tracking'
-            elif original['recognized_name']:
-                enhanced['identity'] = original['recognized_name']
-                enhanced['tracking_method'] = 'face_recognition'
-            else:
-                enhanced['identity'] = None
-                enhanced['tracking_method'] = None
+            # Process through identity tracker for persistent tracking
+            enhanced_detections = self.identity_tracker.process_frame_detections(
+                tracker_detections, frame
+            )
 
-            final_detections.append(enhanced)
+            logger.info(f"[IDENTITY-TRACK] Got {len(enhanced_detections)} enhanced detections from tracker")
 
-        return final_detections
+        except Exception as e:
+            logger.error(f"[IDENTITY-TRACK] Error in detection phase: {e}", exc_info=True)
+            return []
+
+        try:
+            # Merge back face recognition data
+            import sys
+            final_detections = []
+            for enhanced, original in zip(enhanced_detections, detections):
+                # Ensure 'box' tuple exists for visualization (visualization expects this format)
+                if 'x1' in enhanced:
+                    enhanced['box'] = (enhanced['x1'], enhanced['y1'], enhanced['x2'], enhanced['y2'])
+                elif 'box' not in enhanced and 'box' in original:
+                    enhanced['box'] = original['box']
+
+                # Merge face recognition data
+                enhanced['recognized_name'] = original.get('recognized_name')
+                enhanced['similarity'] = original.get('similarity', 0.0)
+
+                # If identity tracker found wallet, use that over face recognition
+                if 'wallet_address' in enhanced:
+                    enhanced['identity'] = enhanced['wallet_address']
+                    enhanced['tracking_method'] = 'persistent_tracking'
+                    print(f"[FINAL-DETECTION] Using PERSISTENT TRACKING: wallet={enhanced['wallet_address'][:8]}, track_id={enhanced.get('track_id')}", flush=True, file=sys.stderr)
+                elif original.get('recognized_name'):
+                    enhanced['identity'] = original['recognized_name']
+                    enhanced['tracking_method'] = 'face_recognition'
+                    print(f"[FINAL-DETECTION] Using FACE RECOGNITION: name={original['recognized_name']}, track_id={enhanced.get('track_id')}", flush=True, file=sys.stderr)
+                else:
+                    enhanced['identity'] = None
+                    enhanced['tracking_method'] = None
+                    print(f"[FINAL-DETECTION] NO IDENTITY: track_id={enhanced.get('track_id')}", flush=True, file=sys.stderr)
+
+                final_detections.append(enhanced)
+
+            logger.info(f"[IDENTITY-TRACK] Merged {len(final_detections)} final detections")
+
+            # CV apps disabled - not ready yet
+            # TODO: Re-enable when CV apps service is stable
+
+            return final_detections
+
+        except Exception as e:
+            logger.error(f"[IDENTITY-TRACK] Error in merge phase: {e}", exc_info=True)
+            return []
 
     def recognize_face(self, face_img: np.ndarray) -> Tuple[Optional[str], float]:
         """Recognize a face by comparing embeddings"""
-        # Quick check if we have any embeddings (minimal lock time)
-        with self._faces_lock:
-            if not self._face_embeddings:
-                return None, 0.0
-            # Make a copy of embeddings dict to avoid holding lock during embedding extraction
-            embeddings_copy = self._face_embeddings.copy()
+        # Check if we have any identities
+        if self.identity_store.get_identity_count() == 0:
+            return None, 0.0
 
-        # Extract embedding for input face (outside lock)
+        # Extract embedding for input face
         query_embedding = self.extract_face_embedding(face_img)
         if query_embedding is None:
             return None, 0.0
 
-        # Compare with all database faces using cosine similarity (no lock needed, using copy)
-        best_match = None
-        best_similarity = 0.0
+        # Find match using IdentityStore
+        best_match = self.identity_store.find_by_face(query_embedding, self._similarity_threshold)
 
-        for wallet_address, db_embedding in embeddings_copy.items():
-            # Cosine similarity (higher is better for normalized embeddings)
-            similarity = float(np.dot(query_embedding, db_embedding))
+        if best_match:
+            # Calculate similarity for return value
+            identity = self.identity_store.get_identity(best_match)
+            if identity and identity.face_embedding is not None:
+                similarity = float(np.dot(query_embedding, identity.face_embedding))
+                return best_match, similarity
 
-            if similarity > best_similarity and similarity > self._similarity_threshold:
-                best_similarity = similarity
-                best_match = wallet_address
-
-        return best_match, best_similarity
+        return None, 0.0
 
     def enroll_face(self, frame: np.ndarray, wallet_address: str, metadata: Dict = None) -> Dict:
         """Enroll a face for recognition using current frame"""
@@ -420,21 +508,21 @@ class GPUFaceService:
                 'success': False,
                 'error': 'Models not loaded'
             }
-        
+
         try:
             # Detect faces in the frame
             faces = self.detect_and_recognize_faces(frame)
-            
+
             if not faces:
                 return {
                     'success': False,
                     'error': 'No faces detected in frame'
                 }
-            
+
             # Use the first detected face
             face_data = faces[0]
             face_region = face_data['face_region']
-            
+
             # Extract embedding
             embedding = self.extract_face_embedding(face_region)
             if embedding is None:
@@ -442,33 +530,24 @@ class GPUFaceService:
                     'success': False,
                     'error': 'Failed to extract face embedding'
                 }
-            
-            # Store embedding and metadata
-            with self._faces_lock:
-                            self._face_embeddings[wallet_address] = embedding
-            
-            # Use display name from user profile if available, otherwise use metadata or fallback
-            if wallet_address in self._user_profiles:
-                profile = self._user_profiles[wallet_address]
-                display_name = profile.get('display_name') or profile.get('username') or wallet_address[:8]
-            else:
-                display_name = metadata.get('name', wallet_address[:8]) if metadata else wallet_address[:8]
-            
-            self._face_names[wallet_address] = display_name
-            self._face_metadata[wallet_address] = metadata or {}
-            
-            # Save to disk
-            self.save_face_embedding(wallet_address, embedding, metadata)
-            
+
+            # Build profile from metadata
+            profile = {}
+            if metadata:
+                profile['display_name'] = metadata.get('name') or metadata.get('display_name')
+
+            # Enroll via IdentityStore
+            identity = self.identity_store.check_in(wallet_address, embedding, profile)
+
             logger.info(f"Successfully enrolled face for wallet: {wallet_address}")
-            
+
             return {
                 'success': True,
                 'wallet_address': wallet_address,
                 'embedding_shape': embedding.shape,
-                'metadata': self._face_metadata[wallet_address]
+                'display_name': identity.get_display_name()
             }
-            
+
         except Exception as e:
             logger.error(f"Error enrolling face: {e}")
             return {
@@ -477,65 +556,16 @@ class GPUFaceService:
             }
 
     def save_face_embedding(self, wallet_address: str, embedding: np.ndarray, metadata: Dict = None):
-        """Save face embedding to disk"""
-        try:
-            # Save embedding
-            embedding_path = os.path.join(self._faces_dir, f"{wallet_address}.npy")
-            np.save(embedding_path, embedding)
-            
-            # Save metadata
-            metadata_path = os.path.join(self._faces_dir, f"{wallet_address}_metadata.json")
-            with open(metadata_path, 'w') as f:
-                json.dump(metadata or {}, f)
-                
-            logger.info(f"Saved face embedding: {embedding_path}")
-            
-        except Exception as e:
-            logger.error(f"Failed to save face embedding: {e}")
+        """Save face embedding to disk (handled by IdentityStore now)"""
+        # This is now handled by IdentityStore._save_identity()
+        # Keeping method for API compatibility
+        pass
 
     def load_face_database(self):
         """Load face database from stored embeddings"""
-        with self._faces_lock:
-            self._face_embeddings = {}
-            self._face_names = {}
-            self._face_metadata = {}
-        
-        # Load from .npy files (saved embeddings)
-        for embedding_file in Path(self._faces_dir).glob("*.npy"):
-            try:
-                # Load embedding
-                embedding = np.load(embedding_file)
-                wallet_address = embedding_file.stem
-                
-                # Load metadata if available
-                metadata_file = embedding_file.with_name(f"{wallet_address}_metadata.json")
-                metadata = {}
-                if metadata_file.exists():
-                    with open(metadata_file, 'r') as f:
-                        metadata = json.load(f)
-                
-                with self._faces_lock:
-                                    self._face_embeddings[wallet_address] = embedding
-                
-                # Use display name from user profile if available, otherwise use metadata or fallback
-                if wallet_address in self._user_profiles:
-                    profile = self._user_profiles[wallet_address]
-                    display_name = profile.get('display_name') or profile.get('username') or wallet_address[:8]
-                else:
-                    display_name = metadata.get('name', wallet_address[:8])
-                
-                self._face_names[wallet_address] = display_name
-                self._face_metadata[wallet_address] = metadata
-                
-                logger.info(f"Loaded face embedding: {wallet_address}")
-                
-            except Exception as e:
-                logger.warning(f"Failed to load {embedding_file}: {e}")
-        
-        with self._faces_lock:
-            count = len(self._face_embeddings)
-        
-        logger.info(f"Loaded {count} face embeddings from database")
+        # Delegate to IdentityStore
+        count = self.identity_store.load_from_disk()
+        logger.info(f"Loaded {count} face embeddings via IdentityStore")
 
     def start(self, buffer_service) -> bool:
         """Start the GPU face service with buffer integration"""
@@ -619,13 +649,14 @@ class GPUFaceService:
     def _detect_faces(self, frame: np.ndarray) -> None:
         """Detect faces in frame and update results"""
         try:
-            faces = self.detect_and_recognize_faces(frame)
+            # Use identity tracker for temporal tracking
+            faces = self.detect_and_track_identities(frame)
 
             with self._results_lock:
                 self._detected_faces = faces
 
         except Exception as e:
-            pass  # Silent - logging here causes deadlock
+            logger.error(f"Error in _detect_faces: {e}", exc_info=True)
 
     def _recognize_faces(self, frame: np.ndarray) -> None:
         """Recognize faces in frame and update results"""
@@ -635,18 +666,39 @@ class GPUFaceService:
             
             recognized = {}
             for face in faces:
-                if face.get('recognized_name') and face.get('similarity', 0) > self._similarity_threshold:
+                # Check for persistent tracking first (wallet_address), then face recognition (recognized_name)
+                wallet_address = face.get('wallet_address') or face.get('identity')
+
+                if wallet_address:
+                    # Got identity from persistent tracking
+                    box = face.get('box')
+                    similarity = face.get('similarity', 0)
+                    confidence = face.get('identity_confidence', similarity)
+
+                    recognized[wallet_address] = {
+                        'box': box,
+                        'similarity': confidence,
+                        'name': self.get_user_display_name(wallet_address),
+                        'last_seen': time.time(),
+                        'tracking_method': face.get('tracking_method', 'persistent_tracking')
+                    }
+
+                    self.recognition_count += 1
+                    self.last_recognition = time.time()
+                elif face.get('recognized_name') and face.get('similarity', 0) > self._similarity_threshold:
+                    # Fallback to face recognition
                     wallet_address = face['recognized_name']
                     box = face['box']
                     similarity = face['similarity']
-                    
+
                     recognized[wallet_address] = {
                         'box': box,
                         'similarity': similarity,
                         'name': self.get_user_display_name(wallet_address),
-                        'last_seen': time.time()
+                        'last_seen': time.time(),
+                        'tracking_method': 'face_recognition'
                     }
-                    
+
                     self.recognition_count += 1
                     self.last_recognition = time.time()
             
@@ -706,7 +758,14 @@ class GPUFaceService:
                 if isinstance(face_data, dict) and 'box' in face_data:
                     # Check if this face was already drawn as recognized
                     is_recognized = False
-                    if face_data.get('recognized_name'):
+
+                    # Check persistent tracking (wallet_address/identity) first
+                    wallet_address = face_data.get('wallet_address') or face_data.get('identity')
+                    if wallet_address and wallet_address in self._recognized_faces:
+                        is_recognized = True
+
+                    # Also check face recognition
+                    if not is_recognized and face_data.get('recognized_name'):
                         wallet_address = face_data['recognized_name']
                         if wallet_address in self._recognized_faces:
                             is_recognized = True
@@ -743,13 +802,12 @@ class GPUFaceService:
 
     def get_status(self) -> Dict:
         """Get service status"""
-        with self._faces_lock:
-            enrolled_count = len(self._face_embeddings)
-        
+        enrolled_count = self.identity_store.get_identity_count()
+
         with self._results_lock:
             detected_count = len(self._detected_faces)
             recognized_count = len(self._recognized_faces)
-        
+
         return {
             'gpu_available': torch.cuda.is_available(),
             'models_loaded': self._models_loaded,
@@ -791,91 +849,47 @@ class GPUFaceService:
 
     def get_enrolled_faces(self) -> List[Dict]:
         """Get list of enrolled faces"""
-        with self._faces_lock:
-            faces = []
-            for wallet_address, metadata in self._face_metadata.items():
-                faces.append({
-                    'wallet_address': wallet_address,
-                    'name': self.get_user_display_name(wallet_address),
-                    'metadata': metadata
-                })
-            return faces
+        faces = []
+        for identity in self.identity_store.get_all_identities():
+            faces.append({
+                'wallet_address': identity.wallet_address,
+                'name': identity.get_display_name(),
+                'has_face': identity.face_embedding is not None,
+                'checked_in_at': identity.checked_in_at
+            })
+        return faces
 
     def store_user_profile(self, wallet_address: str, user_profile: Dict) -> None:
         """Store user profile for display name resolution"""
-        with self._faces_lock:
-            self._user_profiles[wallet_address] = user_profile
-            
-            # Update face name with display name if available
-            display_name = user_profile.get('display_name')
-            username = user_profile.get('username')
-            
-            if display_name:
-                self._face_names[wallet_address] = display_name
-            elif username:
-                self._face_names[wallet_address] = username
-            else:
-                self._face_names[wallet_address] = wallet_address[:8]
-                
-            logger.info(f"Stored user profile for {wallet_address}: {display_name or username or wallet_address[:8]}")
+        self.identity_store.update_profile(wallet_address, user_profile)
+        display_name = self.identity_store.get_display_name(wallet_address)
+        logger.info(f"Stored user profile for {wallet_address[:8]}...: {display_name}")
 
     def get_user_profile(self, wallet_address: str) -> Optional[Dict]:
         """Get user profile by wallet address"""
-        with self._faces_lock:
-            return self._user_profiles.get(wallet_address)
+        identity = self.identity_store.get_identity(wallet_address)
+        if identity:
+            return identity.to_dict()
+        return None
 
     def remove_user_profile(self, wallet_address: str) -> bool:
         """Remove user profile (for session cleanup)"""
-        with self._faces_lock:
-            profile_removed = wallet_address in self._user_profiles
-            if profile_removed:
-                self._user_profiles.pop(wallet_address, None)
-                self._face_names.pop(wallet_address, None)
-                logger.info(f"[GPU-FACE] Removed user profile for {wallet_address}")
-            return profile_removed
+        # Full identity removal is done via identity_store.check_out()
+        # This is kept for API compatibility
+        return self.identity_store.is_checked_in(wallet_address)
 
     def get_user_display_name(self, wallet_address: str) -> str:
         """Get the best display name for a wallet address"""
-        import sys
-        with self._faces_lock:
-            # First check if we have a stored user profile
-            if wallet_address in self._user_profiles:
-                profile = self._user_profiles[wallet_address]
-                print(f"🔍 DISPLAY_NAME: Found profile for {wallet_address[:8]}: {profile}", flush=True, file=sys.stderr)
-                if profile.get('display_name'):
-                    print(f"🔍 DISPLAY_NAME: Returning display_name: {profile['display_name']}", flush=True, file=sys.stderr)
-                    return profile['display_name']
-                elif profile.get('username'):
-                    print(f"🔍 DISPLAY_NAME: Returning username: {profile['username']}", flush=True, file=sys.stderr)
-                    return profile['username']
-            else:
-                print(f"🔍 DISPLAY_NAME: No profile for {wallet_address[:8]}, _user_profiles has {len(self._user_profiles)} entries", flush=True, file=sys.stderr)
-
-            # Fallback to stored face names
-            if wallet_address in self._face_names:
-                print(f"🔍 DISPLAY_NAME: Returning from _face_names: {self._face_names[wallet_address]}", flush=True, file=sys.stderr)
-                return self._face_names[wallet_address]
-
-            # Final fallback to shortened wallet address
-            print(f"🔍 DISPLAY_NAME: Fallback to wallet[:8]: {wallet_address[:8]}", flush=True, file=sys.stderr)
-            return wallet_address[:8]
+        return self.identity_store.get_display_name(wallet_address)
 
     def clear_enrolled_faces(self) -> bool:
         """Clear all enrolled faces"""
         try:
-            with self._faces_lock:
-                self._face_embeddings.clear()
-                self._face_names.clear()
-                self._face_metadata.clear()
-                self._user_profiles.clear()
+            # Check out all identities
+            for wallet in self.identity_store.get_checked_in_wallets():
+                self.identity_store.check_out(wallet)
 
-            # Clear database files
-            for file_path in Path(self._faces_dir).glob("*.npy"):
-                file_path.unlink()
-            for file_path in Path(self._faces_dir).glob("*_metadata.json"):
-                file_path.unlink()
-
-            logger.info("Cleared all enrolled faces")
+            logger.info("Cleared all enrolled faces via IdentityStore")
             return True
 
         except Exception as e:
@@ -884,61 +898,23 @@ class GPUFaceService:
 
     def remove_face_embedding(self, wallet_address: str) -> bool:
         """
-        Remove ALL traces of a user's face data from memory and disk.
+        Remove ALL traces of a user's face data.
         Used when a user checks out on-chain.
-
-        Ensures complete "leave no trace" cleanup:
-        - Facial embeddings (memory + disk)
-        - User profiles and display names
-        - Active recognition state
-        - Metadata files
         """
         try:
-            # Remove from memory (all face-related data structures)
-            with self._faces_lock:
-                removed_embedding = self._face_embeddings.pop(wallet_address, None)
-                removed_name = self._face_names.pop(wallet_address, None)
-                removed_metadata = self._face_metadata.pop(wallet_address, None)
-                removed_profile = self._user_profiles.pop(wallet_address, None)
-
             # Remove from active recognition state
             with self._results_lock:
-                removed_recognition = self._recognized_faces.pop(wallet_address, None)
+                self._recognized_faces.pop(wallet_address, None)
 
-            # Remove from disk
-            embedding_path = os.path.join(self._faces_dir, f"{wallet_address}.npy")
-            metadata_path = os.path.join(self._faces_dir, f"{wallet_address}_metadata.json")
+            # Full checkout is handled by IdentityStore
+            stats = self.identity_store.check_out(wallet_address)
 
-            files_removed = 0
-            if os.path.exists(embedding_path):
-                os.unlink(embedding_path)
-                files_removed += 1
-                logger.info(f"🗑️  Removed embedding file: {embedding_path}")
-
-            if os.path.exists(metadata_path):
-                os.unlink(metadata_path)
-                files_removed += 1
-                logger.info(f"🗑️  Removed metadata file: {metadata_path}")
-
-            # Log comprehensive cleanup summary
-            removed_items = {
-                'embedding': removed_embedding is not None,
-                'name': removed_name is not None,
-                'metadata': removed_metadata is not None,
-                'profile': removed_profile is not None,
-                'recognition_state': removed_recognition is not None,
-                'disk_files': files_removed
-            }
-
-            if removed_embedding is not None:
-                logger.info(f"✅ Successfully removed ALL face data for {wallet_address[:8]}... "
-                           f"(embedding: ✓, profile: {'✓' if removed_profile else '✗'}, "
-                           f"recognition: {'✓' if removed_recognition else '✗'}, "
-                           f"disk files: {files_removed})")
+            if stats:
+                logger.info(f"✅ Removed face data for {wallet_address[:8]}...")
                 return True
             else:
-                logger.info(f"ℹ️  No face embedding found for {wallet_address[:8]}... (already clean)")
-                return True  # Consider this success since the goal is achieved
+                logger.info(f"ℹ️  No face data found for {wallet_address[:8]}...")
+                return True  # Goal achieved
 
         except Exception as e:
             logger.error(f"❌ Error removing face embedding for {wallet_address}: {e}")

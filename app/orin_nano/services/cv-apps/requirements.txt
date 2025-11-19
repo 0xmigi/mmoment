@@ -1,0 +1,9 @@
+# Core web framework
+flask==3.0.3
+flask-cors==4.0.1
+
+# Computer vision
+mediapipe==0.10.9
+
+# Utilities
+requests==2.32.3

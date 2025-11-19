@@ -1378,6 +1378,9 @@ def register_routes(app):
         username = data.get('username')
         transaction_signature = data.get('transaction_signature')  # Optional: for verification
 
+        logger.info(f"🔍 [CHECKIN-DEBUG] Raw request data: {data}")
+        logger.info(f"🔍 [CHECKIN-DEBUG] display_name={display_name}, username={username}")
+
         if not wallet_address:
             return jsonify({
                 'success': False,
@@ -1390,7 +1393,7 @@ def register_routes(app):
         try:
             services = get_services()
 
-            # Step 1: Store user profile FIRST (before loading recognition token)
+            # Build user profile
             user_profile = {
                 'wallet_address': wallet_address,
                 'display_name': display_name,
@@ -1400,31 +1403,22 @@ def register_routes(app):
                 'transaction_signature': transaction_signature
             }
 
-            face_service = services['face']
-            face_service.store_user_profile(wallet_address, user_profile)
-
-            if 'gpu_face' in services:
-                gpu_face_service = services['gpu_face']
-                gpu_face_service.store_user_profile(wallet_address, user_profile)
-
             resolved_display_name = display_name or username or wallet_address[:8]
-            logger.info(f"✅ [UNIFIED-CHECKIN] Stored profile for {wallet_address[:8]}...: {resolved_display_name}")
 
-            # Step 2: Create camera session
-            session_service = services['session']
-            session_info = session_service.create_session(wallet_address, user_profile)
-            logger.info(f"✅ [UNIFIED-CHECKIN] Created session {session_info['session_id']} for {wallet_address[:8]}...")
-
-            # Step 3: Enable face boxes
-            face_service.enable_boxes(True)
-            logger.info(f"✅ [UNIFIED-CHECKIN] Face boxes enabled")
-
-            # Step 4: Force immediate blockchain sync to load recognition token
-            # This triggers the recognition token fetch without waiting for polling
+            # Trigger check-in with profile - this handles everything atomically:
+            # - Stores profile in IdentityStore
+            # - Creates session
+            # - Enables face boxes
+            # - Fetches and decrypts recognition token
             from services.blockchain_session_sync import get_blockchain_session_sync
             blockchain_sync = get_blockchain_session_sync()
-            blockchain_sync.force_sync()
-            logger.info(f"✅ [UNIFIED-CHECKIN] Forced immediate blockchain sync for recognition token loading")
+            blockchain_sync.trigger_checkin(wallet_address, user_profile)
+            logger.info(f"✅ [UNIFIED-CHECKIN] Triggered check-in for {resolved_display_name}")
+
+            # Get session info for response
+            session_service = services['session']
+            session = session_service.get_session_by_wallet(wallet_address)
+            session_id = session['session_id'] if session else 'pending'
 
             # Step 5: Pre-authorize Pipe storage session for fast uploads
             import asyncio
@@ -1455,7 +1449,7 @@ def register_routes(app):
                 'success': True,
                 'wallet_address': wallet_address,
                 'display_name': resolved_display_name,
-                'session_id': session_info['session_id'],
+                'session_id': session_id,
                 'camera_pda': camera_pda,
                 'camera_url': f"https://{camera_pda.lower()}.mmoment.xyz/api",
                 'message': 'Check-in successful - camera activated with face recognition'
@@ -2691,6 +2685,14 @@ def register_routes(app):
                 'error': str(e)
             }), 500
 
+    # Register CV Apps routes
+    try:
+        from services.routes_cv_apps import bp as cv_apps_bp
+        app.register_blueprint(cv_apps_bp)
+        logger.info("CV Apps routes registered")
+    except Exception as e:
+        logger.warning(f"Failed to register CV Apps routes: {e}")
+
     # Add resource not found handler
     @app.errorhandler(404)
     def resource_not_found(e):
@@ -2699,4 +2701,39 @@ def register_routes(app):
     # Add internal server error handler
     @app.errorhandler(500)
     def internal_server_error(e):
-        return jsonify(error=str(e)), 500 
+        return jsonify(error=str(e)), 500
+
+    # Debug endpoint for identity tracker
+    @app.route('/api/debug/identity-tracker-checkin', methods=['POST'])
+    def debug_identity_tracker_checkin():
+        """Debug: manually check user into identity tracker"""
+        services = get_services()
+        gpu_face = services.get('gpu_face')
+
+        if not gpu_face:
+            return jsonify({'error': 'GPU face service not available'}), 500
+
+        if not hasattr(gpu_face, 'identity_tracker'):
+            return jsonify({'error': 'Identity tracker not found'}), 500
+
+        wallets = list(gpu_face._face_embeddings.keys())
+        if not wallets:
+            return jsonify({'error': 'No enrolled faces'}), 400
+
+        wallet = wallets[0]
+        embedding = gpu_face._face_embeddings[wallet]
+        display_name = gpu_face._face_names.get(wallet, wallet[:8])
+
+        result = gpu_face.identity_tracker.check_in_user(
+            wallet_address=wallet,
+            face_embedding=embedding,
+            initial_bbox=(0, 0, 100, 100),
+            metadata={'display_name': display_name}
+        )
+
+        return jsonify({
+            'success': True,
+            'wallet': wallet[:16],
+            'result': result,
+            'active_sessions': list(gpu_face.identity_tracker._active_sessions.keys())
+        }) 

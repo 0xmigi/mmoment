@@ -39,6 +39,15 @@ data/device/*
 !data/device/.gitkeep
 data/config/device_config.json
 
+# Prevent Docker from creating empty folders in service directories
+services/*/config/
+services/*/face_embeddings/
+services/*/faces/
+services/*/images/
+services/*/recordings/
+services/*/videos/
+services/*/photos/
+
 # Temporary files
 *.tmp
 *.bak

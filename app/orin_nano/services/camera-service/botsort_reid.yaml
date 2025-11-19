@@ -1,0 +1,14 @@
+# Custom BoT-SORT with ReID enabled for persistent person tracking
+tracker_type: botsort
+track_high_thresh: 0.5  # High confidence detections
+track_low_thresh: 0.1   # Low confidence for maintaining tracks (when turning away)
+new_track_thresh: 0.7   # HIGHER threshold for creating NEW tracks (prevents duplicates)
+track_buffer: 60        # Keep lost tracks for 60 frames (2 seconds)
+match_thresh: 0.7       # LOWER = more lenient matching (same person at different angles)
+fuse_score: True
+
+# BoT-SORT ReID settings
+gmc_method: sparseOptFlow
+proximity_thresh: 0.5
+appearance_thresh: 0.15  # LOWER = match same person with more appearance variation
+with_reid: True          # ENABLE appearance-based Re-ID

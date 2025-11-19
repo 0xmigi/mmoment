@@ -13,6 +13,8 @@ import requests
 import os
 from typing import Dict, Set, Optional
 
+from .identity_store import get_identity_store
+
 logger = logging.getLogger(__name__)
 
 class BlockchainSessionSync:
@@ -38,10 +40,17 @@ class BlockchainSessionSync:
         self.last_seen_at: Dict[str, float] = {}  # wallet_address -> timestamp
         self.auto_checkout_threshold = 1800  # 30 minutes in seconds
 
+        # Track when users checked in via API (to prevent race condition with blockchain polling)
+        self._api_checkin_times: Dict[str, float] = {}  # wallet_address -> timestamp
+        self._api_checkin_grace_period = 30  # seconds to ignore blockchain checkout after API check-in
+
         # Services (will be injected)
         self.session_service = None
         self.face_service = None
-        
+
+        # Get reference to unified IdentityStore
+        self.identity_store = get_identity_store()
+
     def set_services(self, session_service, face_service):
         """Inject required services"""
         self.session_service = session_service
@@ -195,10 +204,26 @@ class BlockchainSessionSync:
                 self.face_service.enable_boxes(True)
                 logger.info(f"✅ Face boxes enabled for checked-in user: {wallet_address}")
 
-            # ✅ NEW: Fetch and decrypt recognition token from on-chain
-            self._fetch_and_decrypt_recognition_token(wallet_address)
+            # Check if user already has identity with profile (from /api/checkin)
+            existing_identity = self.identity_store.get_identity(wallet_address)
+            logger.info(f"🔍 [HANDLE-CHECKIN] existing_identity={existing_identity is not None}, display_name={existing_identity.display_name if existing_identity else 'N/A'}")
+            if existing_identity and existing_identity.display_name:
+                # User already checked in via /api/checkin with profile - just fetch token if needed
+                if existing_identity.face_embedding is None:
+                    logger.info(f"🔐 Fetching token for existing identity: {existing_identity.get_display_name()}")
+                    # Pass existing profile to preserve it
+                    profile = {
+                        'display_name': existing_identity.display_name,
+                        'username': existing_identity.username
+                    }
+                    self._fetch_and_decrypt_recognition_token(wallet_address, profile)
+                else:
+                    logger.info(f"✅ User {existing_identity.get_display_name()} already has face embedding")
+            else:
+                # No existing identity or no profile - this is from blockchain polling (user checked in while camera was offline)
+                self._fetch_and_decrypt_recognition_token(wallet_address)
 
-            # ✅ NEW: Initialize last_seen tracking for face-based auto-checkout
+            # Initialize last_seen tracking for face-based auto-checkout
             self.last_seen_at[wallet_address] = time.time()
 
             # Log for monitoring
@@ -210,23 +235,23 @@ class BlockchainSessionSync:
     def _handle_check_out(self, wallet_address: str):
         """Handle a wallet checking out on-chain"""
         try:
+            # Check if this wallet just checked in via API - prevent race condition
+            api_checkin_time = self._api_checkin_times.get(wallet_address, 0)
+            if time.time() - api_checkin_time < self._api_checkin_grace_period:
+                logger.info(f"⏳ Ignoring blockchain checkout for {wallet_address[:8]}... (within {self._api_checkin_grace_period}s grace period after API check-in)")
+                return
+
             logger.info(f"👋 Wallet {wallet_address} checked out on-chain - disabling camera session")
 
-            # CRITICAL: Clear facial embedding data for security
-            if self.face_service:
-                try:
-                    # Remove this user's facial embedding from memory and disk
-                    if hasattr(self.face_service, 'remove_face_embedding'):
-                        success = self.face_service.remove_face_embedding(wallet_address)
-                        if success:
-                            logger.info(f"🗑️  Cleared facial embedding for {wallet_address[:8]}...")
-                        else:
-                            logger.warning(f"⚠️  Failed to clear facial embedding for {wallet_address[:8]}...")
-                    else:
-                        logger.warning("⚠️  Face service doesn't support individual face removal")
+            # Clear API check-in time tracking
+            self._api_checkin_times.pop(wallet_address, None)
 
-                except Exception as face_error:
-                    logger.error(f"❌ Error clearing facial data for {wallet_address}: {face_error}")
+            # CRITICAL: Clear ALL identity data atomically via IdentityStore
+            stats = self.identity_store.check_out(wallet_address)
+            if stats:
+                logger.info(f"✅ Checkout complete for {wallet_address[:8]}... (duration: {stats['duration']:.1f}s)")
+            else:
+                logger.warning(f"⚠️  User {wallet_address[:8]}... was not in IdentityStore")
 
             # End camera session automatically
             if self.session_service:
@@ -266,10 +291,14 @@ class BlockchainSessionSync:
         except Exception as e:
             logger.error(f"Error handling check-out for {wallet_address}: {e}")
 
-    def _fetch_and_decrypt_recognition_token(self, wallet_address: str):
+    def _fetch_and_decrypt_recognition_token(self, wallet_address: str, profile: dict = None):
         """
         Fetch the user's recognition token (encrypted facial embedding) from on-chain
         and decrypt it for local recognition use.
+
+        Args:
+            wallet_address: User's wallet address
+            profile: Optional profile dict with display_name, username (passed from /api/checkin)
         """
         try:
             logger.info(f"🔐 Fetching recognition token for {wallet_address} from blockchain...")
@@ -347,34 +376,31 @@ class BlockchainSessionSync:
 
             logger.info(f"✅ Successfully decrypted recognition token for {wallet_address}, embedding size: {len(embedding)}")
 
-            # Step 3: Store the embedding locally for recognition
+            # Step 3: Store the embedding via IdentityStore (single source of truth)
             import numpy as np
             embedding_array = np.array(embedding, dtype=np.float32)
 
-            if self.face_service:
-                # ALWAYS get display name from get_user_display_name() which checks _user_profiles first
-                # This ensures display names from check-in are never overwritten with cached values
-                display_name = self.face_service.get_user_display_name(wallet_address)
+            # ALWAYS preserve existing profile data if not provided in this call
+            existing_identity = self.identity_store.get_identity(wallet_address)
+            if existing_identity:
+                # Merge: use passed values if present, otherwise keep existing
+                if not profile:
+                    profile = {}
+                profile = {
+                    'display_name': profile.get('display_name') or existing_identity.display_name,
+                    'username': profile.get('username') or existing_identity.username
+                }
+                logger.info(f"🔍 [DEBUG] Merged profile (preserving existing): {profile}")
+            elif not profile:
+                profile = {}
 
-                # Acquire lock for minimal time - NO LOGGING INSIDE
-                with self.face_service._faces_lock:
-                    self.face_service._face_embeddings[wallet_address] = embedding_array
-                    self.face_service._face_names[wallet_address] = display_name
-                    self.face_service._face_metadata[wallet_address] = {
-                        'source': 'on_chain_recognition_token',
-                        'timestamp': int(time.time()),
-                        'decrypted_on_check_in': True
-                    }
-                # Lock released here - now safe to log
+            logger.info(f"🔍 [DEBUG] check_in profile: {profile}")
 
-                # Save to disk for persistence
-                self.face_service.save_face_embedding(wallet_address, embedding_array, {
-                    'source': 'on_chain_recognition_token',
-                    'timestamp': int(time.time())
-                })
+            # Check user in via IdentityStore with profile
+            identity = self.identity_store.check_in(wallet_address, embedding_array, profile)
 
-                final_display_name = self.face_service._face_names.get(wallet_address, wallet_address[:8])
-                logger.info(f"✅ Recognition token activated for {wallet_address[:8]}... ({final_display_name}) - face recognition enabled!")
+            logger.info(f"✅ Recognition token activated for {wallet_address[:8]}... ({identity.get_display_name()}) - face recognition enabled!")
+            logger.info(f"🔍 [DEBUG] Identity display_name={identity.display_name}, username={identity.username}")
 
             # Clean up biometric session after successful decryption
             requests.post(
@@ -428,10 +454,16 @@ class BlockchainSessionSync:
 
     def _has_local_face_embedding(self, wallet_address: str) -> bool:
         """Check if a user has a face embedding stored locally"""
-        if not self.face_service:
-            return False
+        # Primary: Check IdentityStore
+        identity = self.identity_store.get_identity(wallet_address)
+        if identity and identity.face_embedding is not None:
+            return True
 
-        return wallet_address in self.face_service._face_embeddings
+        # Fallback: Check legacy storage
+        if self.face_service:
+            return wallet_address in self.face_service._face_embeddings
+
+        return False
 
     def _send_checkout_transaction(self, wallet_address: str):
         """
@@ -455,6 +487,37 @@ class BlockchainSessionSync:
         """Force an immediate sync with blockchain state"""
         logger.info("🔄 Force syncing blockchain state...")
         self._sync_blockchain_state()
+
+    def trigger_checkin(self, wallet_address: str, profile: dict = None):
+        """
+        Trigger check-in for a specific wallet with profile data.
+        Called directly by /api/checkin endpoint to ensure profile is passed through.
+
+        Args:
+            wallet_address: User's wallet address
+            profile: Profile dict with display_name, username, etc.
+        """
+        logger.info(f"🎯 Triggered check-in for {wallet_address[:8]}... with profile: {profile}")
+
+        # Add to tracked wallets
+        self.checked_in_wallets.add(wallet_address)
+        self.last_seen_at[wallet_address] = time.time()
+
+        # Record API check-in time to prevent race condition with blockchain polling
+        self._api_checkin_times[wallet_address] = time.time()
+
+        # Create session if not already done
+        if self.session_service:
+            existing = self.session_service.get_session_by_wallet(wallet_address)
+            if not existing:
+                self.session_service.create_session(wallet_address, profile)
+
+        # Enable face boxes
+        if self.face_service:
+            self.face_service.enable_boxes(True)
+
+        # Fetch and decrypt recognition token with profile
+        self._fetch_and_decrypt_recognition_token(wallet_address, profile)
         
     def get_status(self) -> Dict:
         """Get current sync status"""
