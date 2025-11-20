@@ -162,6 +162,11 @@ def register_routes(app):
                 'gesture_current': '/api/gesture/current',
                 'visualization_face': '/api/visualization/face',
                 'visualization_gesture': '/api/visualization/gesture',
+                'visualization_pose': '/api/visualization/pose',
+                'apps_load': '/api/apps/load',
+                'apps_activate': '/api/apps/activate',
+                'apps_deactivate': '/api/apps/deactivate',
+                'apps_status': '/api/apps/status',
                 'device_info': '/api/device-info',
                 'scan_registration_qr': '/api/scan-registration-qr',
                 'wifi_scan': '/api/setup/wifi/scan',
@@ -1236,7 +1241,12 @@ def register_routes(app):
     def api_visualization_gesture():
         """Standardized gesture visualization toggle"""
         return toggle_gesture_visualization()
-    
+
+    @app.route('/api/visualization/pose', methods=['POST'])
+    def api_visualization_pose():
+        """Standardized pose visualization toggle"""
+        return toggle_pose_visualization()
+
     # User Profile Management - Enhanced for Scalable Architecture
     @app.route('/api/user/profile', methods=['POST'])
     def api_update_user_profile():
@@ -2033,6 +2043,134 @@ def register_routes(app):
         return jsonify({
             'success': True,
             'enabled': enabled
+        })
+
+    @app.route('/toggle_pose_visualization', methods=['POST'])
+    def toggle_pose_visualization():
+        """Enable or disable pose skeleton visualization"""
+        data = request.json or {}
+        enabled = data.get('enabled', True)
+
+        services = get_services()
+        if 'pose' not in services:
+            return jsonify({
+                'success': False,
+                'error': 'Pose service not available'
+            }), 404
+
+        pose_service = services['pose']
+        pose_service.visualization_enabled = enabled
+
+        logger.info(f"Pose visualization toggled to: {enabled}")
+
+        return jsonify({
+            'success': True,
+            'enabled': enabled
+        })
+
+    @app.route('/api/apps/load', methods=['POST'])
+    def api_apps_load():
+        """Load a CV app"""
+        data = request.json or {}
+        app_name = data.get('app_name')
+
+        if not app_name:
+            return jsonify({
+                'success': False,
+                'error': 'app_name is required'
+            }), 400
+
+        services = get_services()
+        if 'app_manager' not in services:
+            return jsonify({
+                'success': False,
+                'error': 'App manager not available'
+            }), 404
+
+        app_manager = services['app_manager']
+        success = app_manager.load_app(app_name)
+
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'App {app_name} loaded successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to load app {app_name}'
+            }), 500
+
+    @app.route('/api/apps/activate', methods=['POST'])
+    def api_apps_activate():
+        """Activate a CV app"""
+        data = request.json or {}
+        app_name = data.get('app_name')
+
+        if not app_name:
+            return jsonify({
+                'success': False,
+                'error': 'app_name is required'
+            }), 400
+
+        services = get_services()
+        if 'app_manager' not in services:
+            return jsonify({
+                'success': False,
+                'error': 'App manager not available'
+            }), 404
+
+        app_manager = services['app_manager']
+        success = app_manager.activate_app(app_name)
+
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'App {app_name} activated',
+                'active_app': app_name
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to activate app {app_name}'
+            }), 500
+
+    @app.route('/api/apps/deactivate', methods=['POST'])
+    def api_apps_deactivate():
+        """Deactivate current CV app"""
+        services = get_services()
+        if 'app_manager' not in services:
+            return jsonify({
+                'success': False,
+                'error': 'App manager not available'
+            }), 404
+
+        app_manager = services['app_manager']
+        app_manager.deactivate_app()
+
+        return jsonify({
+            'success': True,
+            'message': 'App deactivated'
+        })
+
+    @app.route('/api/apps/status', methods=['GET'])
+    def api_apps_status():
+        """Get current app status"""
+        services = get_services()
+        if 'app_manager' not in services:
+            return jsonify({
+                'success': False,
+                'error': 'App manager not available'
+            }), 404
+
+        app_manager = services['app_manager']
+        app_state = app_manager.get_active_app_state()
+
+        return jsonify({
+            'success': True,
+            'active_app': app_manager.active_app_name,
+            'loaded_apps': list(app_manager.loaded_apps.keys()),
+            'state': app_state
         })
 
     # Session management routes

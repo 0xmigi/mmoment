@@ -395,39 +395,49 @@ class BufferService:
     def get_latest_frame(self) -> Optional[np.ndarray]:
         """
         Get the latest raw frame from the buffer (for service compatibility).
-        Returns a copy of the frame or None if no frame is available.
+        Returns frame reference (NO COPY for performance - treat as read-only!)
         """
         with self._buffer_lock:
             if self._latest_frame is not None:
-                # Return a copy to prevent external modification
-                return self._latest_frame.copy()
+                # Return reference directly - callers MUST NOT modify
+                # This eliminates 2.76MB copy per call
+                return self._latest_frame
             return None
 
     def get_processed_frame(self) -> Tuple[Optional[np.ndarray], float]:
         """
-        Get the latest frame with processing applied (face detection, gesture, etc).
-        This requires the face and gesture services to be injected.
+        Get the latest frame with processing applied (face detection, gesture, pose, apps).
+        This requires the services to be injected.
         Returns a tuple of (processed_frame, timestamp) or (None, 0) if no frame is available.
+        OPTIMIZED: Only copies frame once at the start, then all services draw on the same copy.
         """
-        frame, timestamp = self.get_frame()
-        
-        if frame is None:
-            return None, 0
-            
-        # Apply processing if the services are available (frame is already a copy from get_frame)
-        processed_frame = frame  # Use the copy from get_frame, don't copy again
-        
+        with self._buffer_lock:
+            if self._latest_frame is None:
+                return None, 0
+            # Single copy for all processing - eliminates 4 extra copies
+            frame = self._latest_frame.copy()
+            timestamp = self._latest_timestamp
+
+        # Apply processing in-place on single copy
         # Services will be injected after initialization
         # GPU face service only (no CPU fallback)
         if hasattr(self, '_gpu_face_service'):
-            processed_frame = self._gpu_face_service.get_processed_frame(processed_frame)
-            
-        if hasattr(self, '_gesture_service'):
-            processed_frame = self._gesture_service.get_processed_frame(processed_frame)
-        
-        return processed_frame, timestamp
+            frame = self._gpu_face_service.get_processed_frame(frame)
 
-    def inject_services(self, gesture_service=None, gpu_face_service=None):
+        if hasattr(self, '_gesture_service'):
+            frame = self._gesture_service.get_processed_frame(frame)
+
+        # Pose service (skeleton visualization)
+        if hasattr(self, '_pose_service'):
+            frame = self._pose_service.get_processed_frame(frame)
+
+        # App manager (app-specific overlays like pushup counter)
+        if hasattr(self, '_app_manager'):
+            frame = self._app_manager.get_processed_frame(frame)
+
+        return frame, timestamp
+
+    def inject_services(self, gesture_service=None, gpu_face_service=None, pose_service=None, app_manager=None):
         """
         Inject services for frame processing.
         This is called after all services are initialized.
@@ -439,6 +449,14 @@ class BufferService:
         if gpu_face_service:
             self._gpu_face_service = gpu_face_service
             logger.info(f"✅ Injected GPU face service: {gpu_face_service}")
+
+        if pose_service:
+            self._pose_service = pose_service
+            logger.info(f"✅ Injected pose service: {pose_service}")
+
+        if app_manager:
+            self._app_manager = app_manager
+            logger.info(f"✅ Injected app manager: {app_manager}")
 
     def get_buffer_frames(self, count: int = 30) -> List[Tuple[np.ndarray, float]]:
         """

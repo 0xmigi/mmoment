@@ -22,9 +22,10 @@ services:
       - ./data/faces:/app/faces
       - ./data/recordings:/app/recordings
       - ./data/config:/app/config
-      - ./data/device:/opt/mmoment  # Persistent device keypair storage
+      - ./data/device:/opt/mmoment/device  # Persistent device keypair storage
       # Development: Mount code for live changes (comment out for production)
       - ./services/camera-service:/app
+      - ./apps:/opt/mmoment/apps  # CV apps directory
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - /dev:/dev
     devices:
@@ -124,34 +125,6 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # ========================================
-  # CV APPS SERVICE (Port 5004)
-  # Computer vision competition apps
-  # Isolated from core camera service for fault isolation
-  # GPU-accelerated pose estimation and tracking
-  # ========================================
-  cv-apps:
-    build:
-      context: ./services/cv-apps
-      dockerfile: Dockerfile
-    network_mode: host
-    volumes:
-      # Mount apps directory for dynamic loading
-      - ./apps:/app/apps
-      # Mount service code for development
-      - ./services/cv-apps:/app
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - PORT=5004
-    runtime: nvidia
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5004/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3

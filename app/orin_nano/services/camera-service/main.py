@@ -120,7 +120,26 @@ def init_services():
     # DISABLED: Gesture service causing excessive CPU usage (200%+)
     logger.info("DISABLED gesture service - was causing 200% CPU usage")
     # gesture_service.start(buffer_service)
-    
+
+    # Initialize pose service for CV apps
+    pose_service = None
+    try:
+        from services.pose_service import get_pose_service
+        pose_service = get_pose_service()
+        pose_service.start()
+        logger.info("Pose service initialized on GPU")
+    except Exception as e:
+        logger.error(f"Failed to initialize pose service: {e}")
+
+    # Initialize app manager for CV apps
+    app_manager = None
+    try:
+        from services.app_manager import get_app_manager
+        app_manager = get_app_manager()
+        logger.info("App manager initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize app manager: {e}")
+
     # Initialize Livepeer service with buffer service
     logger.info("Initializing Livepeer service...")
     livepeer_service.set_buffer_service(buffer_service)
@@ -163,11 +182,21 @@ def init_services():
     device_registration = get_device_registration_service()
     logger.info("📱 Device registration service initialized - ready for QR-based device setup")
     
+    # Inject pose service and app manager into GPU face service (for background processing)
+    if gpu_face_service and (pose_service or app_manager):
+        logger.info("Injecting CV app services into GPU face service...")
+        gpu_face_service.inject_app_services(
+            pose_service=pose_service,
+            app_manager=app_manager
+        )
+
     # Inject services into the buffer service for processing
     logger.info("Injecting services into buffer service...")
     buffer_service.inject_services(
         gesture_service=gesture_service,
-        gpu_face_service=gpu_face_service
+        gpu_face_service=gpu_face_service,
+        pose_service=pose_service,
+        app_manager=app_manager
     )
     
     # Build service dictionary
@@ -193,10 +222,16 @@ def init_services():
         services['deepface'] = deepface_service
         deepface_status = deepface_service.get_status()
         logger.info(f"DeepFace service status: Available={deepface_status['available']}, GPU={deepface_status['gpu_enabled']}, Model={deepface_status['current_model']}")
-    
+
+    # Add pose service and app manager
+    if pose_service:
+        services['pose'] = pose_service
+    if app_manager:
+        services['app_manager'] = app_manager
+
     # Solana integration is handled by the dedicated solana-middleware container
     # Camera service communicates with it via HTTP API calls when needed
-    
+
     return services
 
 # Create Flask application

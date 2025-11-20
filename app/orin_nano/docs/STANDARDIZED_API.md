@@ -32,9 +32,16 @@ All these endpoints are accessible to your frontend application and are the **ON
 - `GET /api/gesture/current` - Get current detected gesture
 - `POST /api/visualization/face` - Toggle face visualization
 - `POST /api/visualization/gesture` - Toggle gesture visualization
+- `POST /api/visualization/pose` - Toggle pose skeleton visualization
+
+### CV Apps (Jetson-specific)
+- `POST /api/apps/load` - Load a CV app (e.g., pushup counter)
+- `POST /api/apps/activate` - Activate a loaded CV app
+- `POST /api/apps/deactivate` - Deactivate current CV app
+- `GET /api/apps/status` - Get current app status and state
 
 ### Facial NFT Endpoints (Jetson-specific)
-- `POST /api/face/enroll/prepare-transaction` - Prepare facial NFT transaction (requires session)
+- `POST /api/face/enroll/prepare-transaction` - Prepare facial  transaction (requires session)
 - `POST /api/face/enroll/confirm` - Confirm facial NFT transaction (requires session)
 
 ### Streaming (Jetson-specific - Livepeer)
@@ -184,7 +191,29 @@ const faceEnroll = await fetch('/api/face/enroll', {
   body: JSON.stringify({ wallet_address: 'your_wallet', session_id: 'session_id' })
 }).then(r => r.json());
 
-// 6. MEDIA ACCESS
+// Toggle pose visualization
+await fetch('/api/visualization/pose', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ enabled: true })
+});
+
+// 6. CV APPS (Jetson Only)
+// Activate pushup counter app
+await fetch('/api/apps/activate', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ app_name: 'pushup' })
+});
+
+// Check app status
+const appStatus = await fetch('/api/apps/status').then(r => r.json());
+// Returns: { success: true, active_app: 'pushup', loaded_apps: ['pushup'], state: {...} }
+
+// Deactivate app
+await fetch('/api/apps/deactivate', { method: 'POST' });
+
+// 7. MEDIA ACCESS
 const photos = await fetch('/api/photos').then(r => r.json());
 const videos = await fetch('/api/videos').then(r => r.json());
 ```

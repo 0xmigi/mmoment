@@ -64,7 +64,7 @@ class DeviceSigner:
         """Load existing hardware-bound keypair or create new one"""
         # Try production path first, fallback to local path for development/testing
         try:
-            keypair_path = Path('/opt/mmoment/device-keypair.enc')
+            keypair_path = Path('/opt/mmoment/device/device-keypair.enc')
             keypair_path.parent.mkdir(parents=True, exist_ok=True)
         except PermissionError:
             # Fallback to local directory for testing/development
