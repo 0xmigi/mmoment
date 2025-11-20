@@ -39,6 +39,25 @@ import {
   getCleanupCronStatus
 } from './session-cleanup-cron';
 
+// Import database module
+import {
+  initializeDatabase,
+  closeDatabase,
+  saveFileMapping,
+  getFileMappingBySignature,
+  getSignaturesForWallet,
+  getFileMappingsForWallet,
+  deleteFileMappingByFileName,
+  loadAllFileMappingsToMaps,
+  saveTimelineEvent,
+  getRecentTimelineEvents,
+  cleanupOldTimelineEvents,
+  loadAllTimelineEventsToArray,
+  getDatabaseStats,
+  FileMapping as DBFileMapping,
+  TimelineEvent as DBTimelineEvent
+} from './database';
+
 // Note: Socket.IO server (io) will be passed to session cleanup cron after it's created below
 
 // Initialize the Firestarter SDK (new PipeClient API)
@@ -186,14 +205,9 @@ interface FileMapping {
   fileType: 'photo' | 'video';
 }
 
+// In-memory caches (backed by SQLite database)
 const signatureToFileMapping = new Map<string, FileMapping>();
-
-// Wallet to signatures mapping (for gallery queries)
-// Maps wallet address → array of signatures (both device and blockchain)
 const walletToSignatures = new Map<string, string[]>();
-
-// Legacy support - keep old variable name for backward compatibility
-const txToFileMapping = signatureToFileMapping;
 
 const app = express();
 
@@ -904,13 +918,21 @@ app.delete("/api/pipe/delete/:walletAddress/:fileId", async (req, res) => {
     // Use the new SDK to delete the file from Pipe storage
     await pipeClient.deleteFile(account, fileName);
 
-    // Also delete from signature mapping
+    // Also delete from signature mapping (in-memory and database)
     // Find all signatures for this wallet that map to this fileName
     for (const [signature, mapping] of signatureToFileMapping.entries()) {
       if (mapping.fileName === fileName && mapping.walletAddress === walletAddress) {
         signatureToFileMapping.delete(signature);
-        console.log(`🗑️  Removed signature mapping: ${signature.slice(0, 8)}...`);
+        console.log(`🗑️  Removed in-memory signature mapping: ${signature.slice(0, 8)}...`);
       }
+    }
+
+    // Delete from database
+    try {
+      const deletedCount = await deleteFileMappingByFileName(fileName, walletAddress);
+      console.log(`💾 Deleted ${deletedCount} file mapping(s) from database`);
+    } catch (dbError) {
+      console.error('Failed to delete file mapping from database:', dbError);
     }
 
     console.log(
@@ -1070,6 +1092,14 @@ app.post("/api/pipe/jetson/upload-complete", async (req, res) => {
 
       console.log(`✅ Mapped ${signatureType} signature → file for ${walletAddress.slice(0, 8)}...`);
       console.log(`   Total files for wallet: ${existingSignatures.length}`);
+    }
+
+    // Save to database for persistence
+    try {
+      await saveFileMapping(mapping);
+      console.log(`💾 Saved file mapping to database`);
+    } catch (dbError) {
+      console.error('Failed to save file mapping to database:', dbError);
     }
 
     // Notify connected clients via WebSocket
@@ -1452,7 +1482,7 @@ app.get("/health", async (req, res) => {
   }
 });
 
-// Timeline events storage (in-memory)
+// Timeline events storage (backed by SQLite database)
 interface TimelineEvent {
   id: string;
   type: string;
@@ -1464,6 +1494,9 @@ interface TimelineEvent {
   cameraId?: string;
 }
 
+// In-memory cache of timeline events
+const timelineEvents: TimelineEvent[] = [];
+
 // Device claim storage (in-memory)
 interface DeviceClaim {
   userWallet: string;
@@ -1474,12 +1507,12 @@ interface DeviceClaim {
   deviceModel?: string;
 }
 
-const timelineEvents: TimelineEvent[] = [];
 const cameraRooms = new Map<string, Set<string>>();
 const pendingClaims = new Map<string, DeviceClaim>();
 
 // Helper function to add timeline events (used by both Socket.IO handlers and cron bot)
-function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: Server) {
+// Now saves to database for persistence
+async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: Server) {
   // Generate unique ID based on timestamp and random string
   const newEvent = {
     ...event,
@@ -1487,10 +1520,24 @@ function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: Server
     timestamp: event.timestamp || Date.now(),
   };
 
-  // Store the event
+  // Store the event in memory
   timelineEvents.push(newEvent);
 
-  // Keep only last 100 events per camera
+  // Save to database for persistence
+  try {
+    await saveTimelineEvent({
+      id: newEvent.id,
+      type: newEvent.type,
+      userAddress: newEvent.user.address,
+      userUsername: newEvent.user.username,
+      timestamp: newEvent.timestamp,
+      cameraId: newEvent.cameraId
+    });
+  } catch (error) {
+    console.error('Failed to save timeline event to database:', error);
+  }
+
+  // Keep only last 100 events per camera in memory
   if (event.cameraId) {
     const cameraEvents = timelineEvents.filter(
       (e) => e.cameraId === event.cameraId,
@@ -1748,6 +1795,28 @@ app.post("/api/pipe/clear-accounts", (_req, res) => {
   const clearedCount = pipeAccounts.size;
   pipeAccounts.clear();
   res.json({ message: `Cleared ${clearedCount} Pipe accounts` });
+});
+
+// Database statistics endpoint
+app.get("/api/database/stats", async (_req, res) => {
+  try {
+    const stats = await getDatabaseStats();
+    res.json({
+      success: true,
+      stats,
+      inMemory: {
+        fileMappings: signatureToFileMapping.size,
+        walletMappings: walletToSignatures.size,
+        timelineEvents: timelineEvents.length
+      }
+    });
+  } catch (error) {
+    console.error('Failed to get database stats:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get stats'
+    });
+  }
 });
 
 // 6. Cleanup endpoint to remove expired claims (optional, for debugging)
@@ -2234,7 +2303,7 @@ app.get("/api/turn/info", (req, res) => {
 
 // Start HTTP server with error handling
 const port = Number(process.env.PORT) || 3001;
-httpServer.listen(port, "0.0.0.0", () => {
+httpServer.listen(port, "0.0.0.0", async () => {
   console.log(`Server running on port ${port}`);
   console.log(`Environment: ${process.env.NODE_ENV}`);
   console.log("Server configuration:", {
@@ -2246,6 +2315,59 @@ httpServer.listen(port, "0.0.0.0", () => {
     turnPort: TURN_PORT,
     turnUsername: TURN_USERNAME,
   });
+
+  // Initialize SQLite database and load persisted data
+  try {
+    console.log('\n📦 Initializing SQLite database...');
+    // Use Railway volume path if available, otherwise local path
+    const dbPath = process.env.DATABASE_PATH ||
+                   (process.env.RAILWAY_ENVIRONMENT ? '/app/data/mmoment.db' : './mmoment.db');
+    console.log(`📍 Database path: ${dbPath}`);
+    await initializeDatabase(dbPath);
+
+    // Load file mappings from database into memory
+    console.log('📥 Loading file mappings from database...');
+    const { signatureToFileMapping: loadedMappings, walletToSignatures: loadedWalletSigs } =
+      await loadAllFileMappingsToMaps();
+
+    // Populate in-memory maps
+    for (const [sig, mapping] of loadedMappings.entries()) {
+      signatureToFileMapping.set(sig, mapping);
+    }
+    for (const [wallet, sigs] of loadedWalletSigs.entries()) {
+      walletToSignatures.set(wallet, sigs);
+    }
+
+    // Load timeline events from database into memory
+    console.log('📥 Loading timeline events from database...');
+    const loadedEvents = await loadAllTimelineEventsToArray();
+    for (const dbEvent of loadedEvents) {
+      timelineEvents.push({
+        id: dbEvent.id,
+        type: dbEvent.type,
+        user: {
+          address: dbEvent.userAddress,
+          username: dbEvent.userUsername
+        },
+        timestamp: dbEvent.timestamp,
+        cameraId: dbEvent.cameraId
+      });
+    }
+
+    // Get database stats
+    const stats = await getDatabaseStats();
+    console.log('📊 Database statistics:', {
+      fileMappings: stats.fileMappings,
+      timelineEvents: stats.timelineEvents,
+      uniqueWallets: stats.uniqueWallets,
+      uniqueCameras: stats.uniqueCameras
+    });
+
+    console.log('✅ Database initialized and data loaded successfully!\n');
+  } catch (dbError) {
+    console.error('❌ Failed to initialize database:', dbError);
+    console.warn('⚠️  Server will continue without persistence');
+  }
 
   // Initialize Gas Sponsorship Service and Session Cleanup Cron after server starts
   if (process.env.FEE_PAYER_SECRET_KEY && process.env.SOLANA_RPC_URL) {
@@ -2264,4 +2386,27 @@ httpServer.listen(port, "0.0.0.0", () => {
   } else {
     console.warn('⚠️  Gas sponsorship and cleanup cron not configured - missing FEE_PAYER_SECRET_KEY or SOLANA_RPC_URL');
   }
+});
+
+// Graceful shutdown - close database connection
+process.on('SIGINT', async () => {
+  console.log('\n🛑 Shutting down gracefully...');
+  try {
+    await closeDatabase();
+    console.log('✅ Database connection closed');
+  } catch (err) {
+    console.error('❌ Error closing database:', err);
+  }
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('\n🛑 Shutting down gracefully...');
+  try {
+    await closeDatabase();
+    console.log('✅ Database connection closed');
+  } catch (err) {
+    console.error('❌ Error closing database:', err);
+  }
+  process.exit(0);
 });

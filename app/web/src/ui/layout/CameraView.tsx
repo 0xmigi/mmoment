@@ -330,18 +330,19 @@ export function CameraView() {
       }
 
       // Get the user's Farcaster profile info if available
-      const farcasterCred = user.verifiedCredentials?.find(
+      const farcasterCred = user?.verifiedCredentials?.find(
         (cred) => cred.oauthProvider === "farcaster"
       );
 
       // Create the timeline event with enriched user info
+      // Try Farcaster first, then fallback to Dynamic user profile
       const event: Omit<TimelineEvent, "id"> = {
         type: eventType,
         user: {
           address: primaryWallet.address,
-          // Include Farcaster profile info if available
-          displayName: farcasterCred?.oauthDisplayName || undefined,
-          username: farcasterCred?.oauthUsername || undefined,
+          // Include profile info - prioritize Farcaster, fallback to Dynamic user
+          displayName: farcasterCred?.oauthDisplayName || user?.alias || user?.email || undefined,
+          username: farcasterCred?.oauthUsername || user?.username || undefined,
           pfpUrl: farcasterCred?.oauthAccountPhotos?.[0] || undefined,
         },
         timestamp: Date.now(),

@@ -39,17 +39,15 @@ interface CameraModalProps {
 export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: CameraModalProps) {
   const { primaryWallet } = useDynamicContext();
   const { connection } = useConnection();
-  const { primaryProfile, loading: profileLoading } = useSocialProfile();
+  const { primaryProfile } = useSocialProfile();
   const [isCheckedIn, setIsCheckedIn] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Configuration states for Jetson camera features
-  const [gestureVisualization, setGestureVisualization] = useState(false);
   const [faceVisualization, setFaceVisualization] = useState(false);
-  const [gestureControls, setGestureControls] = useState(false);
+  const [poseVisualization, setPoseVisualization] = useState(false);
   const [configLoading, setConfigLoading] = useState(false);
-  const [currentGesture, setCurrentGesture] = useState<{ gesture: string; confidence: number } | null>(null);
 
   // State for active users analytics
   const [activeUsersCount, setActiveUsersCount] = useState<number>(0);
@@ -105,34 +103,27 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         if (isJetsonCamera && camera.id) {
           try {
             console.log('[CameraModal] Loading current computer vision state...');
-            
-            // Load gesture controls state from unified service
-            const gestureControlsEnabled = await unifiedCameraService.getGestureControlsStatus(camera.id);
-            setGestureControls(gestureControlsEnabled);
-            console.log('[CameraModal] Gesture controls state:', gestureControlsEnabled);
-            
+
             // Load visualization states from localStorage (persist across modal opens)
-            const storedGestureViz = localStorage.getItem(`jetson_gesture_viz_${camera.id}`) === 'true';
             const storedFaceViz = localStorage.getItem(`jetson_face_viz_${camera.id}`) === 'true';
-            
-            setGestureVisualization(storedGestureViz);
+            const storedPoseViz = localStorage.getItem(`jetson_pose_viz_${camera.id}`) === 'true';
+
             setFaceVisualization(storedFaceViz);
-            
-            console.log('[CameraModal] Loaded visualization states - Gesture:', storedGestureViz, 'Face:', storedFaceViz);
-            
+            setPoseVisualization(storedPoseViz);
+
+            console.log('[CameraModal] Loaded visualization states - Face:', storedFaceViz, 'Pose:', storedPoseViz);
+
             console.log('[CameraModal] Computer vision configuration loaded successfully');
           } catch (error) {
             console.error('Error loading computer vision configuration:', error);
             // Set defaults on error
-            setGestureVisualization(false);
             setFaceVisualization(false);
-            setGestureControls(false);
+            setPoseVisualization(false);
           }
         } else {
           // Reset states for non-Jetson cameras
-          setGestureVisualization(false);
           setFaceVisualization(false);
-          setGestureControls(false);
+          setPoseVisualization(false);
         }
       }
     };
@@ -151,41 +142,6 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     };
   }, [isJetsonCamera, camera.id]);
 
-  // Poll current gesture when modal is open and gesture visualization is enabled
-  useEffect(() => {
-    let intervalId: NodeJS.Timeout;
-    
-    if (isOpen && isJetsonCamera && camera.id && (gestureVisualization || gestureControls)) {
-      const pollGesture = async () => {
-        try {
-          const result = await unifiedCameraService.getCurrentGesture(camera.id);
-          if (result.success && result.data) {
-            setCurrentGesture({
-              gesture: result.data.gesture || 'none',
-              confidence: result.data.confidence || 0
-            });
-          } else {
-            setCurrentGesture(null);
-          }
-        } catch (error) {
-          console.error('Error polling gesture:', error);
-          setCurrentGesture(null);
-        }
-      };
-
-      // Poll immediately and then every 2 seconds
-      pollGesture();
-      intervalId = setInterval(pollGesture, 2000);
-    } else {
-      setCurrentGesture(null);
-    }
-
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
-  }, [isOpen, isJetsonCamera, camera.id, gestureVisualization, gestureControls]);
 
   const checkSessionStatus = async () => {
     if (!camera.id || !primaryWallet?.address || !connection) return;
@@ -367,7 +323,9 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       timelineService.emitEvent({
         type: 'check_out',
         user: {
-          address: primaryWallet.address
+          address: primaryWallet.address,
+          displayName: primaryProfile?.displayName,
+          username: primaryProfile?.username
         },
         timestamp: Date.now(),
         transactionId: transactionId,
@@ -401,43 +359,6 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   };
 
-  // Handle gesture visualization toggle
-  const handleGestureVisualizationToggle = async () => {
-    setConfigLoading(true);
-    try {
-      const newState = !gestureVisualization;
-      console.log('[CameraModal] Toggling gesture visualization to:', newState);
-      
-      const result = await unifiedCameraService.toggleGestureVisualization(camera.id, newState);
-      
-      if (result.success) {
-        setGestureVisualization(newState);
-        // Persist state to localStorage
-        localStorage.setItem(`jetson_gesture_viz_${camera.id}`, newState.toString());
-        console.log('[CameraModal] Gesture visualization toggled successfully to:', newState);
-        
-        // Force refresh the stream to show changes immediately
-        const streamElements = document.querySelectorAll('img[src*="/stream"], video');
-        streamElements.forEach(element => {
-          if (element instanceof HTMLImageElement && element.src.includes('/stream')) {
-            const currentSrc = element.src;
-            element.src = '';
-            setTimeout(() => {
-              element.src = currentSrc + (currentSrc.includes('?') ? '&' : '?') + 't=' + Date.now();
-            }, 100);
-          }
-        });
-      } else {
-        console.error('[CameraModal] Failed to toggle gesture visualization:', result.error);
-        setError(result.error || 'Failed to toggle gesture visualization');
-      }
-    } catch (error) {
-      console.error('[CameraModal] Error toggling gesture visualization:', error);
-      setError(error instanceof Error ? error.message : 'Failed to toggle gesture visualization');
-    } finally {
-      setConfigLoading(false);
-    }
-  };
 
   // Handle face visualization toggle
   const handleFaceVisualizationToggle = async () => {
@@ -477,20 +398,39 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   };
 
-  // Handle gesture controls toggle
-  const handleGestureControlsToggle = async () => {
+  // Handle pose visualization toggle
+  const handlePoseVisualizationToggle = async () => {
     setConfigLoading(true);
     try {
-      const newState = !gestureControls;
-      const result = await unifiedCameraService.toggleGestureControls(camera.id, newState);
-      
+      const newState = !poseVisualization;
+      console.log('[CameraModal] Toggling pose visualization to:', newState);
+
+      const result = await unifiedCameraService.togglePoseVisualization(camera.id, newState);
+
       if (result.success) {
-        setGestureControls(newState);
+        setPoseVisualization(newState);
+        // Persist state to localStorage
+        localStorage.setItem(`jetson_pose_viz_${camera.id}`, newState.toString());
+        console.log('[CameraModal] Pose visualization toggled successfully to:', newState);
+
+        // Force refresh the stream to show changes immediately
+        const streamElements = document.querySelectorAll('img[src*="/stream"], video');
+        streamElements.forEach(element => {
+          if (element instanceof HTMLImageElement && element.src.includes('/stream')) {
+            const currentSrc = element.src;
+            element.src = '';
+            setTimeout(() => {
+              element.src = currentSrc + (currentSrc.includes('?') ? '&' : '?') + 't=' + Date.now();
+            }, 100);
+          }
+        });
       } else {
-        setError(result.error || 'Failed to toggle gesture controls');
+        console.error('[CameraModal] Failed to toggle pose visualization:', result.error);
+        setError(result.error || 'Failed to toggle pose visualization');
       }
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to toggle gesture controls');
+      console.error('[CameraModal] Error toggling pose visualization:', error);
+      setError(error instanceof Error ? error.message : 'Failed to toggle pose visualization');
     } finally {
       setConfigLoading(false);
     }
@@ -648,6 +588,8 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       // 🎉 NEW: Use unified check-in endpoint - no more race conditions!
       // This triggers immediate blockchain sync and recognition token loading
       console.log('🚀 [CameraModal] Calling unified check-in endpoint...');
+      console.log('🔍 [CameraModal] primaryProfile:', primaryProfile);
+      console.log('🔍 [CameraModal] displayName:', primaryProfile?.displayName, 'username:', primaryProfile?.username);
       try {
         const checkinResult = await unifiedCameraService.checkin(camera.id, {
           wallet_address: primaryWallet.address,
@@ -996,15 +938,15 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                       {/* Face Visualization Toggle */}
                       <div className="flex items-center justify-between py-1">
                         <div className="flex-1">
-                          <div className="text-sm font-medium">Face Detection Overlay</div>
-                          <div className="text-xs text-gray-500">Shows face detection boxes</div>
+                          <div className="text-sm font-medium">User Recognition Overlay</div>
+                          <div className="text-xs text-gray-500">Shows body detection and recognizes enrolled users</div>
                         </div>
                         <button
                           onClick={handleFaceVisualizationToggle}
                           disabled={configLoading}
                           className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                            faceVisualization 
-                              ? 'bg-blue-600 hover:bg-blue-700' 
+                            faceVisualization
+                              ? 'bg-blue-600 hover:bg-blue-700'
                               : 'bg-gray-200 hover:bg-gray-300'
                           } ${configLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
@@ -1016,74 +958,28 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                         </button>
                       </div>
 
-                      {/* Gesture Visualization Toggle */}
+                      {/* Pose Visualization Toggle */}
                       <div className="flex items-center justify-between py-1">
                         <div className="flex-1">
-                          <div className="text-sm font-medium">Gesture Detection Overlay</div>
-                          <div className="text-xs text-gray-500">Shows hand gesture tracking</div>
+                          <div className="text-sm font-medium">Pose Skeleton Overlay</div>
+                          <div className="text-xs text-gray-500">Shows body pose skeleton tracking</div>
                         </div>
                         <button
-                          onClick={handleGestureVisualizationToggle}
+                          onClick={handlePoseVisualizationToggle}
                           disabled={configLoading}
                           className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                            gestureVisualization 
-                              ? 'bg-blue-600 hover:bg-blue-700' 
+                            poseVisualization
+                              ? 'bg-blue-600 hover:bg-blue-700'
                               : 'bg-gray-200 hover:bg-gray-300'
                           } ${configLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                           <span
                             className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              gestureVisualization ? 'translate-x-5' : 'translate-x-0.5'
+                              poseVisualization ? 'translate-x-5' : 'translate-x-0.5'
                             }`}
                           />
                         </button>
                       </div>
-
-                      {/* Gesture Controls Toggle */}
-                      <div className="flex items-center justify-between py-1">
-                        <div className="flex-1">
-                          <div className="text-sm font-medium">Gesture Photo/Video Capture</div>
-                          <div className="text-xs text-gray-500">Peace sign = photo, thumbs up = video</div>
-                        </div>
-                        <button
-                          onClick={handleGestureControlsToggle}
-                          disabled={configLoading}
-                          className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
-                            gestureControls 
-                              ? 'bg-green-600 hover:bg-green-700' 
-                              : 'bg-gray-200 hover:bg-gray-300'
-                          } ${configLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              gestureControls ? 'translate-x-5' : 'translate-x-0.5'
-                            }`}
-                          />
-                        </button>
-                      </div>
-
-                      {/* Current Gesture Status - Only when gesture features are enabled */}
-                      {(gestureVisualization || gestureControls) && (
-                        <div className="mt-3 pt-3 border-t border-gray-100">
-                          <div className="text-xs text-gray-500 mb-1">Current Gesture Detected</div>
-                          <div className="flex items-center justify-between">
-                            <div className="text-sm font-medium">
-                              {currentGesture ? (
-                                <span className="capitalize">
-                                  {currentGesture.gesture === 'none' ? 'No gesture detected' : currentGesture.gesture.replace('_', ' ')}
-                                </span>
-                              ) : (
-                                <span className="text-gray-400">Loading...</span>
-                              )}
-                            </div>
-                            {currentGesture && currentGesture.gesture !== 'none' && (
-                              <div className="text-xs text-gray-500">
-                                {Math.round(currentGesture.confidence * 100)}% confidence
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </div>
                 )}
@@ -1108,10 +1004,10 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                 ) : (
                   <button
                     onClick={handleCheckIn}
-                    disabled={loading || profileLoading}
+                    disabled={loading}
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
                   >
-                    {loading ? 'Processing...' : profileLoading ? 'Loading profile...' : 'Check In'}
+                    {loading ? 'Processing...' : 'Check In'}
                   </button>
                 )}
               </>
