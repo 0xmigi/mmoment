@@ -105,6 +105,7 @@ export interface ICamera {
   toggleGestureControls?(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>>;
   toggleFaceVisualization?(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>>;
   toggleGestureVisualization?(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>>;
+  togglePoseVisualization?(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>>;
   checkForGestureTrigger?(): Promise<{
     shouldCapture: boolean;
     gestureType: 'photo' | 'video' | null;

@@ -580,6 +580,35 @@ export class UnifiedCameraService {
   }
 
   /**
+   * Toggle pose visualization (if supported)
+   */
+  public async togglePoseVisualization(cameraId: string, enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.togglePoseVisualization) {
+        return {
+          success: false,
+          error: 'Pose visualization not supported by this camera'
+        };
+      }
+
+      return await camera.togglePoseVisualization(enabled);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to toggle pose visualization'
+      };
+    }
+  }
+
+  /**
    * Enroll face for recognition (if supported)
    */
   public async enrollFace(cameraId: string, walletAddress: string): Promise<CameraActionResponse<{ enrolled: boolean; faceId: string }>> {

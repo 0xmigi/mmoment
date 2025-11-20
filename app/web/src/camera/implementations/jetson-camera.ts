@@ -1113,7 +1113,7 @@ export class JetsonCamera implements ICamera {
     try {
       this.log(`Toggling face visualization: ${enabled}`);
       this.log(`Making API call to: ${this.apiUrl}/api/visualization/face`);
-      
+
       const response = await this.makeApiCall('/api/visualization/face', 'POST', {
         enabled
       });
@@ -1121,10 +1121,10 @@ export class JetsonCamera implements ICamera {
       this.log(`Response status: ${response.status} ${response.statusText}`);
       const data = await response.json();
       this.log(`Response data:`, data);
-      
+
       if (response.ok && data.success) {
         this.log('Face visualization toggled successfully:', data.enabled);
-        return { 
+        return {
           success: true,
           data: { enabled: data.enabled }
         };
@@ -1136,6 +1136,37 @@ export class JetsonCamera implements ICamera {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to toggle face visualization'
+      };
+    }
+  }
+
+  async togglePoseVisualization(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
+    try {
+      this.log(`Toggling pose visualization: ${enabled}`);
+      this.log(`Making API call to: ${this.apiUrl}/api/visualization/pose`);
+
+      const response = await this.makeApiCall('/api/visualization/pose', 'POST', {
+        enabled
+      });
+
+      this.log(`Response status: ${response.status} ${response.statusText}`);
+      const data = await response.json();
+      this.log(`Response data:`, data);
+
+      if (response.ok && data.success) {
+        this.log('Pose visualization toggled successfully:', data.enabled);
+        return {
+          success: true,
+          data: { enabled: data.enabled }
+        };
+      } else {
+        throw new Error(data.error || 'Failed to toggle pose visualization');
+      }
+    } catch (error) {
+      this.log('Pose visualization toggle error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to toggle pose visualization'
       };
     }
   }
