@@ -1513,4 +1513,209 @@ export class JetsonCamera implements ICamera {
     if (score >= 60) return 'poor';
     return 'very_poor';
   }
+
+  /**
+   * Recognize faces in current frame
+   */
+  async recognizeFaces(): Promise<CameraActionResponse<{ recognized_data: Record<string, any> }>> {
+    try {
+      this.log('Recognizing faces in current frame');
+      const response = await this.makeApiCall('/api/face/recognize', 'POST', {});
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            recognized_data: data.recognized_data || {}
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to recognize faces');
+    } catch (error) {
+      this.log('Face recognition error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to recognize faces'
+      };
+    }
+  }
+
+  /**
+   * Load a CV app
+   */
+  async loadApp(appName: string): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      this.log(`Loading CV app: ${appName}`);
+      const response = await this.makeApiCall('/api/apps/load', 'POST', {
+        app_name: appName
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            message: data.message || `App ${appName} loaded successfully`
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to load app');
+    } catch (error) {
+      this.log('Load app error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to load app'
+      };
+    }
+  }
+
+  /**
+   * Activate a CV app
+   */
+  async activateApp(appName: string): Promise<CameraActionResponse<{ active_app: string }>> {
+    try {
+      this.log(`Activating CV app: ${appName}`);
+      const response = await this.makeApiCall('/api/apps/activate', 'POST', {
+        app_name: appName
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            active_app: data.active_app || appName
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to activate app');
+    } catch (error) {
+      this.log('Activate app error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to activate app'
+      };
+    }
+  }
+
+  /**
+   * Deactivate current CV app
+   */
+  async deactivateApp(): Promise<CameraActionResponse> {
+    try {
+      this.log('Deactivating CV app');
+      const response = await this.makeApiCall('/api/apps/deactivate', 'POST', {});
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true
+        };
+      }
+
+      throw new Error(data.error || 'Failed to deactivate app');
+    } catch (error) {
+      this.log('Deactivate app error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to deactivate app'
+      };
+    }
+  }
+
+  /**
+   * Get CV app status
+   */
+  async getAppStatus(): Promise<CameraActionResponse<{ active_app: string | null; loaded_apps: string[]; state: any }>> {
+    try {
+      this.log('Getting CV app status');
+      const response = await this.makeApiCall('/api/apps/status', 'GET');
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            active_app: data.active_app || null,
+            loaded_apps: data.loaded_apps || [],
+            state: data.state || {}
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to get app status');
+    } catch (error) {
+      this.log('Get app status error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get app status'
+      };
+    }
+  }
+
+  /**
+   * Start a competition
+   */
+  async startCompetition(
+    competitors: Array<{ wallet_address: string; display_name: string }>,
+    durationLimit?: number
+  ): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      this.log(`Starting competition with ${competitors.length} competitors`);
+      const response = await this.makeApiCall('/api/apps/competition/start', 'POST', {
+        competitors,
+        duration_limit: durationLimit
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            message: data.message || 'Competition started successfully'
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to start competition');
+    } catch (error) {
+      this.log('Start competition error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to start competition'
+      };
+    }
+  }
+
+  /**
+   * End a competition
+   */
+  async endCompetition(): Promise<CameraActionResponse<{ result: any }>> {
+    try {
+      this.log('Ending competition');
+      const response = await this.makeApiCall('/api/apps/competition/end', 'POST', {});
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            result: data.result || {}
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to end competition');
+    } catch (error) {
+      this.log('End competition error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to end competition'
+      };
+    }
+  }
 } 

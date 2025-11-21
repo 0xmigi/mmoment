@@ -120,10 +120,23 @@ export interface ICamera {
   // Face enrollment transaction flow (two-phase for user wallet payment)
   prepareFaceEnrollmentTransaction?(walletAddress: string): Promise<CameraActionResponse<{ transactionBuffer: string; faceId: string; metadata?: any }>>;
   confirmFaceEnrollmentTransaction?(walletAddress: string, confirmationData: { signedTransaction: string; faceId: string; biometricSessionId?: string }): Promise<CameraActionResponse<{ enrolled: boolean; faceId: string; transactionId?: string }>>;
-  
+
+  // Face recognition
+  recognizeFaces?(): Promise<CameraActionResponse<{ recognized_data: Record<string, any> }>>;
+
+  // CV Apps (Jetson-specific)
+  loadApp?(appName: string): Promise<CameraActionResponse<{ message: string }>>;
+  activateApp?(appName: string): Promise<CameraActionResponse<{ active_app: string }>>;
+  deactivateApp?(): Promise<CameraActionResponse>;
+  getAppStatus?(): Promise<CameraActionResponse<{ active_app: string | null; loaded_apps: string[]; state: any }>>;
+
+  // Competition support (for CompetitionApp types)
+  startCompetition?(competitors: Array<{ wallet_address: string; display_name: string }>, durationLimit?: number): Promise<CameraActionResponse<{ message: string }>>;
+  endCompetition?(): Promise<CameraActionResponse<{ result: any }>>;
+
   // Session management
   getCurrentSession(): CameraSession | null;
-  
+
   // Recording state
   isCurrentlyRecording(): Promise<boolean> | boolean;
 }

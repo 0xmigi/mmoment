@@ -1400,6 +1400,213 @@ export class UnifiedCameraService {
       };
     }
   }
+
+  /**
+   * Recognize faces in current frame (if supported)
+   */
+  public async recognizeFaces(cameraId: string): Promise<CameraActionResponse<{ recognized_data: Record<string, any> }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.recognizeFaces) {
+        return {
+          success: false,
+          error: 'Face recognition not supported by this camera'
+        };
+      }
+
+      return await camera.recognizeFaces();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to recognize faces'
+      };
+    }
+  }
+
+  /**
+   * Load a CV app (if supported)
+   */
+  public async loadApp(cameraId: string, appName: string): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.loadApp) {
+        return {
+          success: false,
+          error: 'CV apps not supported by this camera'
+        };
+      }
+
+      return await camera.loadApp(appName);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to load app'
+      };
+    }
+  }
+
+  /**
+   * Activate a CV app (if supported)
+   */
+  public async activateApp(cameraId: string, appName: string): Promise<CameraActionResponse<{ active_app: string }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.activateApp) {
+        return {
+          success: false,
+          error: 'CV apps not supported by this camera'
+        };
+      }
+
+      return await camera.activateApp(appName);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to activate app'
+      };
+    }
+  }
+
+  /**
+   * Deactivate current CV app (if supported)
+   */
+  public async deactivateApp(cameraId: string): Promise<CameraActionResponse> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.deactivateApp) {
+        return {
+          success: false,
+          error: 'CV apps not supported by this camera'
+        };
+      }
+
+      return await camera.deactivateApp();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to deactivate app'
+      };
+    }
+  }
+
+  /**
+   * Get CV app status (if supported)
+   */
+  public async getAppStatus(cameraId: string): Promise<CameraActionResponse<{ active_app: string | null; loaded_apps: string[]; state: any }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.getAppStatus) {
+        return {
+          success: false,
+          error: 'CV apps not supported by this camera'
+        };
+      }
+
+      return await camera.getAppStatus();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get app status'
+      };
+    }
+  }
+
+  /**
+   * Start a competition (if supported)
+   */
+  public async startCompetition(
+    cameraId: string,
+    competitors: Array<{ wallet_address: string; display_name: string }>,
+    durationLimit?: number
+  ): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.startCompetition) {
+        return {
+          success: false,
+          error: 'Competitions not supported by this camera'
+        };
+      }
+
+      return await camera.startCompetition(competitors, durationLimit);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to start competition'
+      };
+    }
+  }
+
+  /**
+   * End a competition (if supported)
+   */
+  public async endCompetition(cameraId: string): Promise<CameraActionResponse<{ result: any }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.endCompetition) {
+        return {
+          success: false,
+          error: 'Competitions not supported by this camera'
+        };
+      }
+
+      return await camera.endCompetition();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to end competition'
+      };
+    }
+  }
 }
 
 // Export singleton instance

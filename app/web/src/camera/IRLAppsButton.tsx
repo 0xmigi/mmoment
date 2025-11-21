@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Lock, Zap, X, Play, ActivitySquare, UserPlus, TrendingUp } from 'lucide-react';
+import { Lock, Zap, X, Play, ActivitySquare, UserPlus, TrendingUp, Dumbbell } from 'lucide-react';
 import { useFacialEmbeddingStatus } from '../hooks/useFacialEmbeddingStatus';
 import { PhoneSelfieEnrollment } from './PhoneSelfieEnrollment';
+import { PushupConfigModal } from './PushupConfigModal';
 
 interface IRLAppsButtonProps {
   cameraId: string;
@@ -12,6 +13,7 @@ interface IRLAppsButtonProps {
 export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }: IRLAppsButtonProps) {
   const [showAppsModal, setShowAppsModal] = useState(false);
   const [showEnrollment, setShowEnrollment] = useState(false);
+  const [showPushupConfig, setShowPushupConfig] = useState(false);
   const facialEmbeddingStatus = useFacialEmbeddingStatus();
 
 
@@ -22,6 +24,13 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
 
   // Define available CV apps for this camera
   const availableApps = [
+    {
+      id: 'pushup_competition',
+      name: 'Pushup Competition',
+      description: 'Compete in pushup challenges with friends',
+      icon: <Dumbbell className="w-5 h-5" />,
+      enabled: true
+    },
     {
       id: 'basketball_tracker',
       name: 'Basketball Score Tracker',
@@ -54,13 +63,13 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
     <>
       <button
         onClick={handleIRLAppsClick}
-        className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg shadow-lg transition-colors"
+        className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-1.5 py-0.5 rounded shadow-lg transition-colors text-xs"
         title={facialEmbeddingStatus.hasEmbedding ? "Access Apps" : "Create Recognition Token for Apps"}
       >
-        <Zap className="w-4 h-4" />
-        <span className="text-sm">Apps</span>
+        <Zap className="w-3.5 h-3.5" />
+        <span className="font-medium">Apps</span>
         {!facialEmbeddingStatus.hasEmbedding && (
-          <Lock className="w-3 h-3 opacity-70" />
+          <Lock className="w-2.5 h-2.5 opacity-70" />
         )}
       </button>
 
@@ -97,8 +106,13 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
                     <button
                       onClick={() => {
                         if (isAccessible) {
-                          // TODO: Launch app
-                          console.log(`Launching app: ${app.id}`);
+                          if (app.id === 'pushup_competition') {
+                            setShowAppsModal(false);
+                            setShowPushupConfig(true);
+                          } else {
+                            // TODO: Launch other apps
+                            console.log(`Launching app: ${app.id}`);
+                          }
                         }
                       }}
                       disabled={!isAccessible}
@@ -198,6 +212,20 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
             </div>
           </div>
         </>
+      )}
+
+      {/* Pushup Competition Config Modal */}
+      {showPushupConfig && (
+        <PushupConfigModal
+          cameraId={cameraId}
+          walletAddress={walletAddress}
+          isOpen={showPushupConfig}
+          onClose={() => setShowPushupConfig(false)}
+          onStartCompetition={() => {
+            setShowPushupConfig(false);
+            // Return to camera view - app will be loaded
+          }}
+        />
       )}
     </>
   );

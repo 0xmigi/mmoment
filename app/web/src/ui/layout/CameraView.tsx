@@ -6,6 +6,8 @@ import { TransactionModal } from "../../auth/components/TransactionModal";
 import { CameraModal } from "../../camera/CameraModal";
 import { useCamera, CameraData } from "../../camera/CameraProvider";
 import { IRLAppsButton } from "../../camera/IRLAppsButton";
+import { CompetitionScoreboard } from "../../camera/CompetitionScoreboard";
+import { CompetitionControls } from "../../camera/CompetitionControls";
 import { cameraStatus } from "../../camera/camera-status";
 import { unifiedCameraService } from "../../camera/unified-camera-service";
 import { useCameraStatus } from "../../camera/useCameraStatus";
@@ -1590,6 +1592,16 @@ export function CameraView() {
                   </div>
                 </div>
 
+                {/* Competition Scoreboard - Mobile (right below Apps button) */}
+                {currentCameraId && (
+                  <div className="absolute top-10 left-4 right-4 z-50 md:hidden">
+                    <CompetitionScoreboard
+                      cameraId={currentCameraId}
+                      walletAddress={primaryWallet?.address}
+                    />
+                  </div>
+                )}
+
                 {/* Mobile Timeline Overlay - positioned below status badge */}
                 <div className="absolute top-10 left-2 z-30 md:hidden px-2">
                   <Timeline
@@ -1721,6 +1733,13 @@ export function CameraView() {
               </div>
             </div>
 
+            {/* Competition Scoreboard - floats above timeline (Desktop) */}
+            {currentCameraId && (
+              <div className="absolute mt-12 pb-2 px-5 left-0 w-full hidden md:block z-40">
+                <CompetitionScoreboard cameraId={currentCameraId} />
+              </div>
+            )}
+
             <div className="absolute mt-12 pb-20 pl-5 left-0 w-full hidden md:block">
               <Timeline
                 ref={timelineRef}
@@ -1775,6 +1794,11 @@ export function CameraView() {
           defaultDevCamera: "EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA",
         }}
       />
+
+      {/* Competition Start/Stop Controls - Floating at bottom */}
+      {currentCameraId && (
+        <CompetitionControls cameraId={currentCameraId} />
+      )}
     </>
   );
 }
