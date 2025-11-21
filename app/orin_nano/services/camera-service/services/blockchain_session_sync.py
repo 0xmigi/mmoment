@@ -199,11 +199,6 @@ class BlockchainSessionSync:
                 session_info = self.session_service.create_session(wallet_address)
                 logger.info(f"✅ Created camera session {session_info['session_id']} for {wallet_address}")
 
-            # Enable face boxes automatically
-            if self.face_service:
-                self.face_service.enable_boxes(True)
-                logger.info(f"✅ Face boxes enabled for checked-in user: {wallet_address}")
-
             # Check if user already has identity with profile (from /api/checkin)
             existing_identity = self.identity_store.get_identity(wallet_address)
             logger.info(f"🔍 [HANDLE-CHECKIN] existing_identity={existing_identity is not None}, display_name={existing_identity.display_name if existing_identity else 'N/A'}")

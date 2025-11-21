@@ -1,8 +1,8 @@
 """
-Push-up Counter App (SDK v2)
+Push-up Counter App
 
-Simple push-up counting using vertical position tracking (like Clearspace).
-Works from any camera angle - front, side, or angled.
+Angle-based push-up counting that auto-detects viewing angle.
+Uses elbow angles to validate proper form from front, left, or right views.
 """
 
 import sys
@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from sdk import BaseApp
 from sdk.base_app import CompetitionApp
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import numpy as np
 import time
 import logging
@@ -21,32 +21,36 @@ logger = logging.getLogger("PushupApp")
 
 class PushupApp(CompetitionApp):
     """
-    Push-up counter using Y-position tracking.
+    Angle-based push-up counter with automatic view detection.
 
-    Counts reps when nose/shoulders drop below threshold and come back up.
-    Simple, robust, works from any angle.
+    Detects push-ups from front, left, or right camera angles by:
+    1. Auto-detecting which view based on keypoint visibility
+    2. Tracking elbow angles to validate form
+    3. Using state machine to count complete reps
     """
 
     def __init__(self, config: Dict = None):
         super().__init__(config)
 
         # Tracking state per competitor
-        self.competitor_states = {}  # wallet -> PushupState
+        self.competitor_states = {}  # wallet -> state dict
 
-        # Thresholds (will auto-calibrate per person)
-        self.drop_ratio = 0.15  # Drop 15% of standing height to count as "down"
-        self.min_rep_time = 0.5  # Anti-cheat: min time between reps
+        # Thresholds
+        self.elbow_down_angle = 90    # Elbow must bend below 90° for "down"
+        self.elbow_up_angle = 150     # Elbow must extend above 150° for "up"
+        self.min_rep_time = 0.6       # Minimum time between reps (anti-cheat)
+        self.confidence_threshold = 0.4  # Keypoint confidence threshold
 
-        logger.info("PushupApp (v2) initialized with Y-position tracking")
+        logger.info("PushupApp initialized with angle-based detection")
 
     def init_competitor_stats(self) -> Dict:
         """Initialize stats for a competitor"""
         return {
             'reps': 0,
             'last_rep_time': None,
-            'current_y': None,
-            'baseline_y': None,  # Standing position
-            'in_down_position': False
+            'in_down_position': False,
+            'current_angle': None,
+            'view': None,  # 'front', 'left', 'right', or None
         }
 
     def start_competition(self, competitors: List[Dict], duration_limit: int = None):
@@ -56,19 +60,19 @@ class PushupApp(CompetitionApp):
         # Initialize state for each competitor
         for wallet in self.competitors.keys():
             self.competitor_states[wallet] = {
-                'baseline_y': None,
                 'in_down': False,
-                'last_rep_time': None
+                'last_rep_time': None,
+                'view': None
             }
 
     def process(self, frame_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Process frame - count push-ups based on Y-position.
+        Process frame - count push-ups based on elbow angles.
 
         Args:
             frame_data: {
                 'detections': [...],
-                'keypoints': [...],  # List of (17, 3) arrays
+                'keypoints': [...],  # List of pose dicts with 'keypoints' (17, 3) arrays
                 'timestamp': float
             }
         """
@@ -79,16 +83,24 @@ class PushupApp(CompetitionApp):
         all_keypoints = frame_data.get('keypoints', [])
         timestamp = frame_data.get('timestamp', time.time())
 
-        # Match keypoints to competitors
-        for i, detection in enumerate(detections):
+        # Match keypoints to competitors by track_id
+        for detection in detections:
             wallet = detection.get('wallet_address')
             if not wallet or wallet not in self.competitors:
                 continue
 
-            if i >= len(all_keypoints):
+            track_id = detection.get('track_id')
+            if track_id is None:
                 continue
 
-            keypoints = all_keypoints[i]
+            # Find matching pose by track_id
+            pose = self._find_pose_by_track_id(all_keypoints, track_id)
+            if pose is None:
+                continue
+
+            keypoints = pose.get('keypoints')
+            if keypoints is None:
+                continue
 
             # Process this competitor's push-up
             self._process_competitor(wallet, keypoints, timestamp)
@@ -101,89 +113,154 @@ class PushupApp(CompetitionApp):
             'visualization': viz
         }
 
+    def _find_pose_by_track_id(self, all_keypoints: List[Dict], track_id: int) -> Optional[Dict]:
+        """Find pose data matching a track_id"""
+        for pose in all_keypoints:
+            if pose.get('track_id') == track_id:
+                return pose
+        return None
+
     def _process_competitor(self, wallet: str, keypoints: np.ndarray, timestamp: float):
-        """Process push-up for one competitor"""
+        """Process push-up for one competitor using angle detection"""
         competitor = self.competitors[wallet]
         state = self.competitor_states[wallet]
         stats = competitor['stats']
 
-        # Get nose Y-position (keypoint 0)
-        nose = keypoints[0]
-        if nose[2] < 0.5:  # Low confidence
+        # Auto-detect view and get elbow angle
+        view, elbow_angle = self._detect_view_and_angle(keypoints)
+
+        if view is None or elbow_angle is None:
+            # Can't detect view or angle - skip this frame
+            stats['view'] = None
+            stats['current_angle'] = None
             return
 
-        current_y = nose[1]
-
-        # Initialize baseline (standing position) on first valid frame
-        if state['baseline_y'] is None:
-            state['baseline_y'] = current_y
-            logger.info(f"{competitor['display_name']}: Baseline Y = {current_y:.1f}")
-            stats['baseline_y'] = current_y
-            stats['current_y'] = current_y
-            return
-
-        # Calculate drop from baseline
-        drop = current_y - state['baseline_y']
-        drop_threshold = state['baseline_y'] * self.drop_ratio
-
-        stats['current_y'] = current_y
+        # Update stats
+        stats['view'] = view
+        stats['current_angle'] = elbow_angle
 
         # State machine: UP → DOWN → UP (completes rep)
-        if drop > drop_threshold:
-            # Gone down
+        if elbow_angle < self.elbow_down_angle:
+            # Elbows bent - in down position
             if not state['in_down']:
                 state['in_down'] = True
                 stats['in_down_position'] = True
-                logger.info(f"{competitor['display_name']}: DOWN (y={current_y:.1f}, drop={drop:.1f})")
+                logger.info(f"{competitor['display_name']}: DOWN ({view}, angle={elbow_angle:.1f}°)")
 
-        elif drop < drop_threshold * 0.5:
-            # Back up
+        elif elbow_angle > self.elbow_up_angle:
+            # Elbows extended - back up
             if state['in_down']:
-                # Check rep timing
+                # Check rep timing (anti-cheat)
                 if state['last_rep_time'] is None or (timestamp - state['last_rep_time']) >= self.min_rep_time:
                     # Count rep!
                     stats['reps'] += 1
                     state['last_rep_time'] = timestamp
                     stats['last_rep_time'] = timestamp
-                    logger.info(f"{competitor['display_name']}: REP #{stats['reps']}")
+                    logger.info(f"{competitor['display_name']}: REP #{stats['reps']} ({view})")
 
                 state['in_down'] = False
                 stats['in_down_position'] = False
 
+    def _detect_view_and_angle(self, keypoints: np.ndarray) -> tuple[Optional[str], Optional[float]]:
+        """
+        Auto-detect viewing angle and calculate elbow angle.
+
+        Returns:
+            (view, elbow_angle) where view is 'front', 'left', 'right', or None
+        """
+        # Keypoint indices (COCO format):
+        # 5: left_shoulder, 6: right_shoulder
+        # 7: left_elbow, 8: right_elbow
+        # 9: left_wrist, 10: right_wrist
+
+        left_shoulder = keypoints[5]
+        right_shoulder = keypoints[6]
+        left_elbow = keypoints[7]
+        right_elbow = keypoints[8]
+        left_wrist = keypoints[9]
+        right_wrist = keypoints[10]
+
+        # Check confidence
+        conf_thresh = self.confidence_threshold
+        left_conf = min(left_shoulder[2], left_elbow[2], left_wrist[2])
+        right_conf = min(right_shoulder[2], right_elbow[2], right_wrist[2])
+
+        # Determine view based on keypoint visibility
+        left_visible = left_conf > conf_thresh
+        right_visible = right_conf > conf_thresh
+
+        if left_visible and right_visible:
+            # Both sides visible - front view, use average of both elbows
+            left_angle = self._calculate_angle(left_shoulder, left_elbow, left_wrist)
+            right_angle = self._calculate_angle(right_shoulder, right_elbow, right_wrist)
+
+            if left_angle is not None and right_angle is not None:
+                return 'front', (left_angle + right_angle) / 2
+            elif left_angle is not None:
+                return 'front', left_angle
+            elif right_angle is not None:
+                return 'front', right_angle
+            else:
+                return None, None
+
+        elif left_visible:
+            # Only left side visible - left side view
+            angle = self._calculate_angle(left_shoulder, left_elbow, left_wrist)
+            return ('left', angle) if angle is not None else (None, None)
+
+        elif right_visible:
+            # Only right side visible - right side view
+            angle = self._calculate_angle(right_shoulder, right_elbow, right_wrist)
+            return ('right', angle) if angle is not None else (None, None)
+
+        else:
+            # No clear view
+            return None, None
+
+    def _calculate_angle(self, point1: np.ndarray, point2: np.ndarray, point3: np.ndarray) -> Optional[float]:
+        """
+        Calculate angle at point2 formed by point1-point2-point3.
+
+        Args:
+            point1, point2, point3: Keypoints as [x, y, confidence]
+
+        Returns:
+            Angle in degrees, or None if calculation fails
+        """
+        try:
+            # Extract coordinates
+            p1 = point1[:2]
+            p2 = point2[:2]
+            p3 = point3[:2]
+
+            # Create vectors
+            v1 = p1 - p2  # shoulder -> elbow
+            v2 = p3 - p2  # wrist -> elbow
+
+            # Calculate angle using dot product
+            cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+
+            # Clamp to valid range to handle numerical errors
+            cos_angle = np.clip(cos_angle, -1.0, 1.0)
+
+            angle = np.degrees(np.arccos(cos_angle))
+            return float(angle)
+
+        except Exception as e:
+            logger.debug(f"Angle calculation failed: {e}")
+            return None
+
     def _build_visualization(self) -> Dict:
-        """Build visualization commands"""
+        """
+        Build visualization commands.
+
+        Just shows skeleton - no text overlays.
+        Frontend will display stats via API polling.
+        """
         viz = {
-            'skeleton': True,  # Always show skeleton
-            'text': [],
-            'lines': []
+            'skeleton': True,  # Show pose skeleton
+            'text': []  # No text overlays - frontend handles UI
         }
-
-        # Show rep count for each competitor
-        y_offset = 50
-        for wallet, competitor in self.competitors.items():
-            stats = competitor['stats']
-            state = self.competitor_states[wallet]
-
-            # Rep count
-            text = f"{competitor['display_name']}: {stats['reps']} reps"
-            color = (0, 255, 0) if state['in_down'] else (255, 255, 255)
-
-            viz['text'].append({
-                'content': text,
-                'pos': (10, y_offset),
-                'color': color
-            })
-
-            # Show baseline line if calibrated
-            if stats.get('baseline_y'):
-                viz['lines'].append({
-                    'start': (0, int(stats['baseline_y'])),
-                    'end': (1280, int(stats['baseline_y'])),
-                    'color': (255, 255, 0),
-                    'thickness': 1
-                })
-
-            y_offset += 40
 
         return viz
 

@@ -2173,6 +2173,52 @@ def register_routes(app):
             'state': app_state
         })
 
+    @app.route('/api/apps/competition/start', methods=['POST'])
+    def api_apps_competition_start():
+        """Start a competition (for CompetitionApp types)"""
+        data = request.json or {}
+        competitors = data.get('competitors', [])
+        duration_limit = data.get('duration_limit')
+
+        services = get_services()
+        if 'app_manager' not in services:
+            return jsonify({'success': False, 'error': 'App manager not available'}), 404
+
+        app_manager = services['app_manager']
+        if not app_manager.active_app:
+            return jsonify({'success': False, 'error': 'No active app'}), 400
+
+        if not hasattr(app_manager.active_app, 'start_competition'):
+            return jsonify({'success': False, 'error': 'Active app does not support competitions'}), 400
+
+        try:
+            app_manager.active_app.start_competition(competitors, duration_limit)
+            return jsonify({'success': True, 'message': 'Competition started'})
+        except Exception as e:
+            logger.error(f"Failed to start competition: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/apps/competition/end', methods=['POST'])
+    def api_apps_competition_end():
+        """End the current competition"""
+        services = get_services()
+        if 'app_manager' not in services:
+            return jsonify({'success': False, 'error': 'App manager not available'}), 404
+
+        app_manager = services['app_manager']
+        if not app_manager.active_app:
+            return jsonify({'success': False, 'error': 'No active app'}), 400
+
+        if not hasattr(app_manager.active_app, 'end_competition'):
+            return jsonify({'success': False, 'error': 'Active app does not support competitions'}), 400
+
+        try:
+            result = app_manager.active_app.end_competition()
+            return jsonify({'success': True, 'result': result})
+        except Exception as e:
+            logger.error(f"Failed to end competition: {e}", exc_info=True)
+            return jsonify({'success': False, 'error': str(e)}), 500
+
     # Session management routes
     @app.route('/connect', methods=['POST'])
     def connect():

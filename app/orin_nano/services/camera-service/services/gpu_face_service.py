@@ -117,27 +117,9 @@ class GPUFaceService:
             return False
         
         try:
-            # Initialize YOLOv8 for person detection - GPU ONLY
-            logger.info("Loading YOLOv8 detection model on GPU...")
-            from ultralytics import YOLO
-            
-            model_path = os.path.join(os.path.dirname(__file__), '..', 'yolov8n.pt')
-            self.face_detector = YOLO(model_path)
-            
-            # FORCE GPU ONLY - no CPU fallback
-            self.face_detector.to('cuda')
-            
-            # VALIDATE YOLOv8 is actually on GPU
-            import torch
-            if not torch.cuda.is_available():
-                raise RuntimeError("CUDA not available for YOLOv8!")
-            
-            # Check model device
-            model_device = next(self.face_detector.model.parameters()).device
-            if model_device.type != 'cuda':
-                raise RuntimeError(f"YOLOv8 failed to load on GPU! Device: {model_device}")
-            
-            logger.info(f"YOLOv8 VERIFIED on GPU device: {model_device}")
+            # REMOVED: Generic YOLOv8 detection - we reuse pose detections instead
+            # This saves ~100MB GPU memory and eliminates redundant YOLO inference
+            logger.info("Skipping generic YOLO loading - using pose service detections")
             
             # Initialize InsightFace for face embeddings - STRICT GPU ONLY
             logger.info("Loading InsightFace model on GPU with STRICT validation...")
@@ -936,12 +918,12 @@ class GPUFaceService:
         logger.info(f"Face detection {'enabled' if enabled else 'disabled'}")
 
     def enable_visualization(self, enabled: bool) -> None:
-        """Enable/disable visualization"""
+        """Enable/disable face visualization overlay"""
         self._visualization_enabled = enabled
         logger.info(f"Face visualization {'enabled' if enabled else 'disabled'}")
 
     def enable_boxes(self, enabled: bool) -> None:
-        """Enable/disable bounding boxes"""
+        """Enable/disable face bounding boxes"""
         self._boxes_enabled = enabled
         logger.info(f"Face boxes {'enabled' if enabled else 'disabled'}")
 
@@ -1077,21 +1059,24 @@ class GPUFaceService:
                 logger.warning("Models not loaded for face detection")
                 return []
             
-            # Use the existing _detect_faces method logic
-            results = self.face_detector(frame)
-            
+            # Use pose service detections instead of separate YOLO
+            if not hasattr(self, '_pose_service') or self._pose_service is None:
+                logger.warning("Pose service not available for detect_faces()")
+                return []
+
+            pose_detections = self._pose_service.get_poses()
+
             faces = []
-            for result in results:
-                boxes = result.boxes
-                if boxes is not None:
-                    for box in boxes:
-                        conf = box.conf.item()
-                        if conf > 0.5:  # Confidence threshold
-                            x1, y1, x2, y2 = box.xyxy[0].int().tolist()
-                            faces.append({
-                                'box': [x1, y1, x2, y2],
-                                'confidence': conf
-                            })
+            for pose_data in pose_detections:
+                bbox = pose_data.get('bbox')
+                conf = pose_data.get('confidence', 0.5)
+
+                if bbox and conf > 0.5:
+                    x1, y1, x2, y2 = bbox
+                    faces.append({
+                        'box': [int(x1), int(y1), int(x2), int(y2)],
+                        'confidence': float(conf)
+                    })
             
             return faces
             

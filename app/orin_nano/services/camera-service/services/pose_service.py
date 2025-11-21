@@ -89,9 +89,20 @@ class PoseService:
             return False
 
         try:
-            # Load YOLOv8n-pose (nano model for speed)
-            self.pose_model = YOLO('yolov8n-pose.pt')
-            self.pose_model.to('cuda')
+            # Load TensorRT optimized model (FP16) for 2x speed boost
+            import os
+            model_path = os.path.join(os.path.dirname(__file__), '..', 'yolov8n-pose.engine')
+
+            if os.path.exists(model_path):
+                logger.info("Loading TensorRT FP16 pose model for maximum performance...")
+                self.pose_model = YOLO(model_path)
+                logger.info("✅ TensorRT pose model loaded - expect ~2x FPS improvement!")
+            else:
+                # Fallback to PyTorch model if TensorRT not available
+                logger.warning("TensorRT model not found, falling back to PyTorch (.pt)")
+                self.pose_model = YOLO('yolov8n-pose.pt')
+                self.pose_model.to('cuda')
+
             self.enabled = True
             logger.info("Pose detection started on GPU")
             return True

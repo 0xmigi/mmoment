@@ -39,6 +39,8 @@ All these endpoints are accessible to your frontend application and are the **ON
 - `POST /api/apps/activate` - Activate a loaded CV app
 - `POST /api/apps/deactivate` - Deactivate current CV app
 - `GET /api/apps/status` - Get current app status and state
+- `POST /api/apps/competition/start` - Start a competition with recognized users
+- `POST /api/apps/competition/end` - End the current competition
 
 ### Facial NFT Endpoints (Jetson-specific)
 - `POST /api/face/enroll/prepare-transaction` - Prepare facial  transaction (requires session)
@@ -199,18 +201,65 @@ await fetch('/api/visualization/pose', {
 });
 
 // 6. CV APPS (Jetson Only)
-// Activate pushup counter app
+// Load pushup counter app
+await fetch('/api/apps/load', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ app_name: 'pushup' })
+});
+
+// Activate pushup counter app (starts processing frames, shows skeleton)
 await fetch('/api/apps/activate', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ app_name: 'pushup' })
 });
 
-// Check app status
-const appStatus = await fetch('/api/apps/status').then(r => r.json());
-// Returns: { success: true, active_app: 'pushup', loaded_apps: ['pushup'], state: {...} }
+// Start competition (automatically uses currently recognized users)
+await fetch('/api/apps/competition/start', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    competitors: [
+      { wallet_address: 'user_wallet', display_name: 'User Name' }
+    ],
+    duration_limit: 300  // Optional: time limit in seconds
+  })
+});
 
-// Deactivate app
+// Check app status (poll this to get live rep counts)
+const appStatus = await fetch('/api/apps/status').then(r => r.json());
+/* Returns:
+{
+  success: true,
+  active_app: 'pushup',
+  loaded_apps: ['pushup'],
+  state: {
+    active: true,  // Competition running
+    competitors: [
+      {
+        wallet_address: '...',
+        display_name: '...',
+        stats: {
+          reps: 7,
+          in_down_position: false,
+          current_angle: 165,
+          view: 'left',  // 'front', 'left', or 'right'
+          last_rep_time: 1234567890
+        },
+        track_id: 123
+      }
+    ],
+    elapsed: 45.2,  // Seconds elapsed
+    time_remaining: 254.8  // Seconds remaining (if duration_limit set)
+  }
+}
+*/
+
+// End competition
+await fetch('/api/apps/competition/end', { method: 'POST' });
+
+// Deactivate app (stops processing entirely)
 await fetch('/api/apps/deactivate', { method: 'POST' });
 
 // 7. MEDIA ACCESS
