@@ -4,8 +4,12 @@ import { NotificationProvider } from '../ui/feedback/NotificationProvider';
 import { CameraProvider } from '../camera/CameraProvider';
 import { PinataSettings } from '../storage';
 import { CONFIG } from './config';
+import { useProfileSync } from '../auth/useProfileSync';
 
 function App() {
+  // Auto-sync user profile to backend when wallet connects
+  useProfileSync();
+
   // Only show PinataSettings in development mode
   const isDevelopment = !CONFIG.isProduction;
 
