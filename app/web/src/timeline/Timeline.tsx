@@ -8,6 +8,7 @@ import { timelineService } from './timeline-service';
 import { socialService } from '../auth/social/social-service';
 import { TimelineEvent, TimelineEventType, TimelineUser } from './timeline-types';
 import { IPFSMedia } from '../storage/ipfs/ipfs-service';
+import { CONFIG } from '../core/config';
 
 interface TimelineProps {
   filter?: 'all' | 'camera' | 'my';
@@ -83,7 +84,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   const enrichEventWithUserInfo = useCallback((event: TimelineEvent): TimelineEvent => {
     // First check if we have the profile in our userProfiles map
     const storedProfile = userProfiles[event.user.address];
-    
+
     if (storedProfile) {
       return {
         ...event,
@@ -91,7 +92,8 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
           ...event.user,
           displayName: storedProfile.displayName || event.user.displayName,
           username: storedProfile.username || event.user.username,
-          pfpUrl: storedProfile.pfpUrl || event.user.pfpUrl
+          pfpUrl: storedProfile.pfpUrl || event.user.pfpUrl,
+          provider: storedProfile.provider || event.user.provider
         }
       };
     }
@@ -135,7 +137,8 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
               ...event.user,
               displayName: socialCred.oauthDisplayName || event.user.displayName,
               username: socialCred.oauthUsername || event.user.username,
-              pfpUrl: socialCred.oauthAccountPhotos?.[0] || event.user.pfpUrl
+              pfpUrl: socialCred.oauthAccountPhotos?.[0] || event.user.pfpUrl,
+              provider: socialCred.oauthProvider || event.user.provider
             }
           };
         }
@@ -151,68 +154,57 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       // Get unique addresses that we don't already have profiles for
       const addresses = events
         .map(event => event.user.address)
-        .filter((address, index, self) => 
+        .filter((address, index, self) =>
           self.indexOf(address) === index && !userProfiles[address]
         );
-      
-      if (addresses.length === 0) return;
-      
-      // Create a temporary object to store new profiles
-      const newProfiles: Record<string, any> = {};
-      
-      // Process each address
-      for (const address of addresses) {
-        try {
-          // Skip if we already fetched this address
-          if (userProfiles[address]) continue;
-          
-          // Try to get profiles from DynamicAuth verified credentials
-          if (user?.verifiedCredentials) {
-            const matchingCreds = user.verifiedCredentials.filter(
-              cred => cred.address === address
-            );
-            
-            if (matchingCreds.length > 0) {
-              const profiles = socialService.getProfileFromVerifiedCredentials(matchingCreds);
-              if (profiles.length > 0) {
-                newProfiles[address] = {
-                  ...profiles[0],
-                  address
-                };
-                continue;
-              }
-            }
-          }
-          
-          // If we didn't find a profile from DynamicAuth, try fetching from our API
-          const profiles = await socialService.getProfilesByAddress(address);
-          if (profiles.length > 0) {
-            // Use the first profile (prioritizing Farcaster if available)
-            const farcasterProfile = profiles.find(p => p.provider === 'farcaster');
-            const profile = farcasterProfile || profiles[0];
-            
-            newProfiles[address] = {
-              ...profile,
-              address
-            };
-          }
-          
-        } catch (error) {
-          console.error(`Error fetching profile for address ${address}:`, error);
-        }
+
+      if (addresses.length === 0) {
+        return;
       }
-      
-      // Update our profiles state if we found any new ones
-      if (Object.keys(newProfiles).length > 0) {
-        setUserProfiles(prev => ({
-          ...prev,
-          ...newProfiles
-        }));
+
+      try {
+        // Fetch profiles from backend in batch
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/profile/batch`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ walletAddresses: addresses }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch profiles from backend');
+        }
+
+        const data = await response.json();
+        const backendProfiles = data.profiles || {};
+
+        // Convert backend profiles to the format we need
+        const newProfiles: Record<string, any> = {};
+        for (const [address, profile] of Object.entries(backendProfiles)) {
+          newProfiles[address] = {
+            address,
+            displayName: (profile as any).displayName,
+            username: (profile as any).username,
+            pfpUrl: (profile as any).profileImage,
+            provider: (profile as any).provider
+          };
+        }
+
+        // Update our profiles state
+        if (Object.keys(newProfiles).length > 0) {
+          setUserProfiles(prev => ({
+            ...prev,
+            ...newProfiles
+          }));
+        }
+      } catch (error) {
+        console.error('[Timeline] Error fetching profiles from backend:', error);
       }
     };
-    
+
     fetchUserProfiles();
-  }, [events, user?.verifiedCredentials, userProfiles]);
+  }, [events]); // Only depend on events, not userProfiles to avoid infinite loop
 
 
   // Update display count on window resize
@@ -531,6 +523,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
             username: selectedUser.username,
             displayName: selectedUser.displayName,
             pfpUrl: selectedUser.pfpUrl,
+            provider: selectedUser.provider, // Include provider field from backend
             verifiedCredentials: 
               user?.verifiedCredentials?.some(cred => 
                 cred.address === selectedUser.address)

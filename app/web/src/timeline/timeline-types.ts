@@ -16,6 +16,7 @@ export interface TimelineUser {
   username?: string;
   displayName?: string;
   pfpUrl?: string;
+  provider?: string;
 }
 
 export interface TimelineEvent {

@@ -11,6 +11,7 @@ interface ProfileModalProps {
     pfpUrl?: string;
     farcasterUsername?: string;
     bio?: string;
+    provider?: string; // From backend profile (e.g., 'farcaster', 'twitter')
     verifiedCredentials?: {
       oauthProvider: string;
       oauthDisplayName?: string;
@@ -30,11 +31,15 @@ interface ProfileModalProps {
 export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProps) {
   if (!isOpen) return null;
 
-  // Get social identity credentials
+  // Get social identity credentials (from current user's verifiedCredentials)
   const farcasterCred = user?.verifiedCredentials?.find(cred => cred.oauthProvider === 'farcaster');
   const twitterCred = user?.verifiedCredentials?.find(cred => cred.oauthProvider === 'twitter');
-  
-  // Prioritize Farcaster, then Twitter
+
+  // Check if we have backend profile data (for other users)
+  const hasBackendProfile = user.provider && user.username;
+  const backendProvider = user.provider?.toLowerCase();
+
+  // Prioritize Farcaster, then Twitter (from verifiedCredentials)
   const primarySocialCred = farcasterCred || twitterCred;
   
   // Get display information
@@ -122,45 +127,55 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
 
             {/* Connected Accounts */}
             <div className="space-y-2">
-              {/* Farcaster Account */}
-              {farcasterCred && (
+              {/* Farcaster Account - from verifiedCredentials OR backend */}
+              {(farcasterCred || (hasBackendProfile && backendProvider === 'farcaster')) && (
                 <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-medium text-gray-700">Farcaster</span>
-                      {farcasterCred === primarySocialCred && (
+                      {(farcasterCred === primarySocialCred || (hasBackendProfile && backendProvider === 'farcaster')) && (
                         <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">source</span>
                       )}
                     </div>
                     <div className="text-xs text-gray-500">
-                      @{farcasterCred.oauthUsername?.replace('@', '')}
+                      @{farcasterCred?.oauthUsername?.replace('@', '') || user.username?.replace('@', '')}
                     </div>
                   </div>
-                  <button 
-                    onClick={handleWarpcastClick}
+                  <button
+                    onClick={() => {
+                      const username = farcasterCred?.oauthUsername || user.username;
+                      if (username) {
+                        window.open(`https://farcaster.xyz/${username.replace('@', '')}`, '_blank');
+                      }
+                    }}
                     className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
                   >
                     View <ExternalLink className="w-3 h-3" />
                   </button>
                 </div>
               )}
-              
-              {/* Twitter Account */}
-              {twitterCred && (
+
+              {/* Twitter Account - from verifiedCredentials OR backend */}
+              {(twitterCred || (hasBackendProfile && backendProvider === 'twitter')) && (
                 <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-medium text-gray-700">X / Twitter</span>
-                      {primarySocialCred === twitterCred && (
+                      {(primarySocialCred === twitterCred || (hasBackendProfile && backendProvider === 'twitter')) && (
                         <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">source</span>
                       )}
                     </div>
                     <div className="text-xs text-gray-500">
-                      @{twitterCred.oauthUsername?.replace('@', '')}
+                      @{twitterCred?.oauthUsername?.replace('@', '') || user.username?.replace('@', '')}
                     </div>
                   </div>
-                  <button 
-                    onClick={handleTwitterClick}
+                  <button
+                    onClick={() => {
+                      const username = twitterCred?.oauthUsername || user.username;
+                      if (username) {
+                        window.open(`https://twitter.com/${username.replace('@', '')}`, '_blank');
+                      }
+                    }}
                     className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
                   >
                     View <ExternalLink className="w-3 h-3" />

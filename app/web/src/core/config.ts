@@ -189,10 +189,17 @@ const getJetsonCameraUrl = () => {
 
 // Get WebSocket URL for timeline updates from Railway backend
 const getTimelineWebSocketUrl = () => {
+  // Check for environment variable override first
+  const envBackendUrl = import.meta.env.VITE_BACKEND_URL;
+  if (envBackendUrl) {
+    // Convert HTTP URL to WS URL
+    return envBackendUrl.replace('https://', 'wss://').replace('http://', 'ws://');
+  }
+
   // In development, try to connect to the local server first
   if (window.location.hostname.includes('localhost')) {
-    // Use HTTP for health check and WS for socket connection
-    return "ws://192.168.1.232:3001";
+    // Use localhost for local development
+    return "ws://localhost:3001";
   }
   return "wss://mmoment-production.up.railway.app";
 };
