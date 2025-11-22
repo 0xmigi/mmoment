@@ -1567,7 +1567,7 @@ async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: 
       id: newEvent.id,
       type: newEvent.type,
       userAddress: newEvent.user.address,
-      userUsername: enrichedUser.username,
+      userUsername: enrichedUser.username || event.user.username,
       timestamp: newEvent.timestamp,
       cameraId: newEvent.cameraId
     });
