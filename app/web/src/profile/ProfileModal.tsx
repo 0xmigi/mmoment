@@ -49,18 +49,6 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
   // Only use wallet as fallback
   const displayIdentity = displayName || `${user.address.slice(0, 4)}...${user.address.slice(-4)}`;
 
-  const handleWarpcastClick = () => {
-    if (farcasterCred?.oauthUsername) {
-      window.open(`https://warpcast.com/${farcasterCred.oauthUsername.replace('@', '')}`, '_blank');
-    }
-  };
-  
-  const handleTwitterClick = () => {
-    if (twitterCred?.oauthUsername) {
-      window.open(`https://twitter.com/${twitterCred.oauthUsername.replace('@', '')}`, '_blank');
-    }
-  };
-
   const handleExplorerClick = () => {
     if (action?.transactionId) {
       window.open(`https://solscan.io/tx/${action.transactionId}?cluster=devnet`, '_blank');

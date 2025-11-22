@@ -5,7 +5,6 @@ import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { ProfileModal } from '../profile/ProfileModal';
 import MediaViewer from '../media/MediaViewer';
 import { timelineService } from './timeline-service';
-import { socialService } from '../auth/social/social-service';
 import { TimelineEvent, TimelineEventType, TimelineUser } from './timeline-types';
 import { IPFSMedia } from '../storage/ipfs/ipfs-service';
 import { CONFIG } from '../core/config';
