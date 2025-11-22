@@ -55,7 +55,12 @@ import {
   loadAllTimelineEventsToArray,
   getDatabaseStats,
   FileMapping as DBFileMapping,
-  TimelineEvent as DBTimelineEvent
+  TimelineEvent as DBTimelineEvent,
+  saveUserProfile,
+  getUserProfile,
+  getUserProfiles,
+  loadAllUserProfilesToMap,
+  UserProfile as DBUserProfile
 } from './database';
 
 // Note: Socket.IO server (io) will be passed to session cleanup cron after it's created below
@@ -208,6 +213,7 @@ interface FileMapping {
 // In-memory caches (backed by SQLite database)
 const signatureToFileMapping = new Map<string, FileMapping>();
 const walletToSignatures = new Map<string, string[]>();
+const userProfilesCache = new Map<string, DBUserProfile>(); // wallet_address -> profile
 
 const app = express();
 
@@ -1511,11 +1517,43 @@ const cameraRooms = new Map<string, Set<string>>();
 const pendingClaims = new Map<string, DeviceClaim>();
 
 // Helper function to add timeline events (used by both Socket.IO handlers and cron bot)
-// Now saves to database for persistence
+// Now saves to database for persistence and enriches with user profiles
 async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: Server) {
+  // Fetch user profile from database if available
+  let enrichedUser = { ...event.user };
+
+  try {
+    // Check cache first
+    let profile = userProfilesCache.get(event.user.address);
+
+    // If not in cache, fetch from database
+    if (!profile) {
+      const fetchedProfile = await getUserProfile(event.user.address);
+      if (fetchedProfile) {
+        profile = fetchedProfile;
+        userProfilesCache.set(event.user.address, fetchedProfile);
+      }
+    }
+
+    // Enrich user data with profile if found
+    if (profile) {
+      enrichedUser = {
+        address: event.user.address,
+        username: profile.username || profile.displayName || event.user.username,
+        // Pass through any additional fields from the original event
+        ...(event.user as any)
+      };
+
+      console.log(`✅ Enriched timeline event with profile for ${event.user.address.slice(0, 8)}... (${profile.displayName || profile.username})`);
+    }
+  } catch (error) {
+    console.error('Failed to fetch user profile for timeline event:', error);
+  }
+
   // Generate unique ID based on timestamp and random string
   const newEvent = {
     ...event,
+    user: enrichedUser,
     id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     timestamp: event.timestamp || Date.now(),
   };
@@ -1529,7 +1567,7 @@ async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: 
       id: newEvent.id,
       type: newEvent.type,
       userAddress: newEvent.user.address,
-      userUsername: newEvent.user.username,
+      userUsername: enrichedUser.username,
       timestamp: newEvent.timestamp,
       cameraId: newEvent.cameraId
     });
@@ -1807,7 +1845,8 @@ app.get("/api/database/stats", async (_req, res) => {
       inMemory: {
         fileMappings: signatureToFileMapping.size,
         walletMappings: walletToSignatures.size,
-        timelineEvents: timelineEvents.length
+        timelineEvents: timelineEvents.length,
+        userProfiles: userProfilesCache.size
       }
     });
   } catch (error) {
@@ -1815,6 +1854,128 @@ app.get("/api/database/stats", async (_req, res) => {
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to get stats'
+    });
+  }
+});
+
+// ============================================================================
+// USER PROFILE ENDPOINTS (for Camera Service)
+// ============================================================================
+
+// Save or update user profile (called by camera service when users check in)
+app.post("/api/profile/save", async (req, res) => {
+  try {
+    const { walletAddress, displayName, username, profileImage, provider } = req.body;
+
+    if (!walletAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'walletAddress is required'
+      });
+    }
+
+    const profile: DBUserProfile = {
+      walletAddress,
+      displayName,
+      username,
+      profileImage,
+      provider,
+      lastUpdated: new Date()
+    };
+
+    // Save to database
+    await saveUserProfile(profile);
+
+    // Update cache
+    userProfilesCache.set(walletAddress, profile);
+
+    console.log(`✅ Saved user profile for ${walletAddress.slice(0, 8)}... (${displayName || username || 'no name'})`);
+
+    res.json({
+      success: true,
+      message: 'Profile saved successfully'
+    });
+  } catch (error) {
+    console.error('Failed to save user profile:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to save profile'
+    });
+  }
+});
+
+// Get user profile by wallet address
+app.get("/api/profile/:walletAddress", async (req, res) => {
+  try {
+    const { walletAddress } = req.params;
+
+    // Check cache first
+    let profile = userProfilesCache.get(walletAddress);
+
+    // If not in cache, fetch from database
+    if (!profile) {
+      const fetchedProfile = await getUserProfile(walletAddress);
+      if (fetchedProfile) {
+        profile = fetchedProfile;
+        userProfilesCache.set(walletAddress, fetchedProfile);
+      }
+    }
+
+    if (profile) {
+      res.json({
+        success: true,
+        profile
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        error: 'Profile not found'
+      });
+    }
+  } catch (error) {
+    console.error('Failed to get user profile:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get profile'
+    });
+  }
+});
+
+// Get multiple user profiles by wallet addresses (batch query)
+app.post("/api/profile/batch", async (req, res) => {
+  try {
+    const { walletAddresses } = req.body;
+
+    if (!Array.isArray(walletAddresses)) {
+      return res.status(400).json({
+        success: false,
+        error: 'walletAddresses must be an array'
+      });
+    }
+
+    // Fetch profiles from database
+    const profilesMap = await getUserProfiles(walletAddresses);
+
+    // Update cache
+    for (const [address, profile] of profilesMap.entries()) {
+      userProfilesCache.set(address, profile);
+    }
+
+    // Convert map to object for JSON response
+    const profiles: Record<string, DBUserProfile> = {};
+    for (const [address, profile] of profilesMap.entries()) {
+      profiles[address] = profile;
+    }
+
+    res.json({
+      success: true,
+      profiles
+    });
+  } catch (error) {
+    console.error('Failed to get user profiles:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get profiles'
     });
   }
 });
@@ -2354,13 +2515,21 @@ httpServer.listen(port, "0.0.0.0", async () => {
       });
     }
 
+    // Load user profiles from database into memory cache
+    console.log('📥 Loading user profiles from database...');
+    const loadedProfiles = await loadAllUserProfilesToMap();
+    for (const [address, profile] of loadedProfiles.entries()) {
+      userProfilesCache.set(address, profile);
+    }
+
     // Get database stats
     const stats = await getDatabaseStats();
     console.log('📊 Database statistics:', {
       fileMappings: stats.fileMappings,
       timelineEvents: stats.timelineEvents,
       uniqueWallets: stats.uniqueWallets,
-      uniqueCameras: stats.uniqueCameras
+      uniqueCameras: stats.uniqueCameras,
+      userProfiles: stats.userProfiles
     });
 
     console.log('✅ Database initialized and data loaded successfully!\n');

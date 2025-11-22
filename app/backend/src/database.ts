@@ -26,6 +26,16 @@ export interface TimelineEvent {
   cameraId?: string;
 }
 
+// User profile interface
+export interface UserProfile {
+  walletAddress: string;
+  displayName?: string;
+  username?: string;
+  profileImage?: string;
+  provider?: string;
+  lastUpdated: Date;
+}
+
 // Initialize database with tables
 export async function initializeDatabase(dbPath: string = './mmoment.db'): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -76,6 +86,21 @@ export async function initializeDatabase(dbPath: string = './mmoment.db'): Promi
         // Create indexes for timeline_events
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_timeline_camera ON timeline_events(camera_id, timestamp)`);
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_timeline_timestamp ON timeline_events(timestamp)`);
+
+        // Create user_profiles table
+        await runQuery(`
+          CREATE TABLE IF NOT EXISTS user_profiles (
+            wallet_address TEXT PRIMARY KEY,
+            display_name TEXT,
+            username TEXT,
+            profile_image TEXT,
+            provider TEXT,
+            last_updated INTEGER NOT NULL
+          )
+        `);
+
+        // Create index for user_profiles
+        await runQuery(`CREATE INDEX IF NOT EXISTS idx_profiles_updated ON user_profiles(last_updated)`);
 
         console.log('✅ Database tables initialized');
         resolve();
@@ -459,6 +484,7 @@ export async function getDatabaseStats(): Promise<{
   timelineEvents: number;
   uniqueWallets: number;
   uniqueCameras: number;
+  userProfiles: number;
 }> {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -470,7 +496,8 @@ export async function getDatabaseStats(): Promise<{
       fileMappings: 0,
       timelineEvents: 0,
       uniqueWallets: 0,
-      uniqueCameras: 0
+      uniqueCameras: 0,
+      userProfiles: 0
     };
 
     const dbInstance = db;
@@ -495,10 +522,154 @@ export async function getDatabaseStats(): Promise<{
             if (err) { reject(err); return; }
             stats.uniqueCameras = row.count;
 
-            resolve(stats);
+            dbInstance.get('SELECT COUNT(*) as count FROM user_profiles', [], (err, row: any) => {
+              if (err) { reject(err); return; }
+              stats.userProfiles = row.count;
+
+              resolve(stats);
+            });
           });
         });
       });
+    });
+  });
+}
+
+// ============================================================================
+// USER PROFILES OPERATIONS
+// ============================================================================
+
+// Save or update user profile to database
+export async function saveUserProfile(profile: UserProfile): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO user_profiles
+      (wallet_address, display_name, username, profile_image, provider, last_updated)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      profile.walletAddress,
+      profile.displayName || null,
+      profile.username || null,
+      profile.profileImage || null,
+      profile.provider || null,
+      profile.lastUpdated.getTime(),
+      (err: Error | null) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      }
+    );
+
+    stmt.finalize();
+  });
+}
+
+// Get user profile by wallet address
+export async function getUserProfile(walletAddress: string): Promise<UserProfile | null> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    db.get(
+      'SELECT * FROM user_profiles WHERE wallet_address = ?',
+      [walletAddress],
+      (err, row: any) => {
+        if (err) {
+          reject(err);
+        } else if (!row) {
+          resolve(null);
+        } else {
+          resolve({
+            walletAddress: row.wallet_address,
+            displayName: row.display_name || undefined,
+            username: row.username || undefined,
+            profileImage: row.profile_image || undefined,
+            provider: row.provider || undefined,
+            lastUpdated: new Date(row.last_updated)
+          });
+        }
+      }
+    );
+  });
+}
+
+// Get multiple user profiles by wallet addresses
+export async function getUserProfiles(walletAddresses: string[]): Promise<Map<string, UserProfile>> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    if (walletAddresses.length === 0) {
+      resolve(new Map());
+      return;
+    }
+
+    const placeholders = walletAddresses.map(() => '?').join(',');
+    const query = `SELECT * FROM user_profiles WHERE wallet_address IN (${placeholders})`;
+
+    db.all(query, walletAddresses, (err, rows: any[]) => {
+      if (err) {
+        reject(err);
+      } else {
+        const profilesMap = new Map<string, UserProfile>();
+        for (const row of rows) {
+          profilesMap.set(row.wallet_address, {
+            walletAddress: row.wallet_address,
+            displayName: row.display_name || undefined,
+            username: row.username || undefined,
+            profileImage: row.profile_image || undefined,
+            provider: row.provider || undefined,
+            lastUpdated: new Date(row.last_updated)
+          });
+        }
+        resolve(profilesMap);
+      }
+    });
+  });
+}
+
+// Load all user profiles into memory map (for backward compatibility)
+export async function loadAllUserProfilesToMap(): Promise<Map<string, UserProfile>> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    const profilesMap = new Map<string, UserProfile>();
+
+    db.all('SELECT * FROM user_profiles', [], (err, rows: any[]) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+
+      for (const row of rows) {
+        profilesMap.set(row.wallet_address, {
+          walletAddress: row.wallet_address,
+          displayName: row.display_name || undefined,
+          username: row.username || undefined,
+          profileImage: row.profile_image || undefined,
+          provider: row.provider || undefined,
+          lastUpdated: new Date(row.last_updated)
+        });
+      }
+
+      console.log(`✅ Loaded ${profilesMap.size} user profiles from database`);
+      resolve(profilesMap);
     });
   });
 }
