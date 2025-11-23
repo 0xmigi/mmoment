@@ -342,10 +342,11 @@ export function CameraView() {
         type: eventType,
         user: {
           address: primaryWallet.address,
-          // Include profile info - prioritize Farcaster, fallback to Dynamic user
-          displayName: farcasterCred?.oauthDisplayName || user?.alias || user?.email || undefined,
+          // Include profile info - prioritize Farcaster, fallback to Dynamic user (NEVER use email)
+          displayName: farcasterCred?.oauthDisplayName || user?.alias || undefined,
           username: farcasterCred?.oauthUsername || user?.username || undefined,
           pfpUrl: farcasterCred?.oauthAccountPhotos?.[0] || undefined,
+          provider: farcasterCred ? 'farcaster' : undefined,
         },
         timestamp: Date.now(),
         transactionId,
