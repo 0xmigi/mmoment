@@ -1524,6 +1524,36 @@ async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: 
   let enrichedUser = { ...event.user };
 
   try {
+    // Check if incoming event has profile data to save
+    const incomingUser = event.user as any;
+    if (incomingUser.displayName || incomingUser.username || incomingUser.pfpUrl || incomingUser.provider) {
+      // Save or update the user profile in database
+      try {
+        await saveUserProfile({
+          walletAddress: event.user.address,
+          displayName: incomingUser.displayName,
+          username: incomingUser.username,
+          profileImage: incomingUser.pfpUrl,
+          provider: incomingUser.provider,
+          lastUpdated: new Date()
+        });
+
+        // Update cache
+        userProfilesCache.set(event.user.address, {
+          walletAddress: event.user.address,
+          displayName: incomingUser.displayName,
+          username: incomingUser.username,
+          profileImage: incomingUser.pfpUrl,
+          provider: incomingUser.provider,
+          lastUpdated: new Date()
+        });
+
+        console.log(`💾 Saved user profile for ${event.user.address.slice(0, 8)}... (${incomingUser.displayName || incomingUser.username || 'no name'})`);
+      } catch (saveError) {
+        console.error('Failed to save user profile:', saveError);
+      }
+    }
+
     // Check cache first
     let profile = userProfilesCache.get(event.user.address);
 
@@ -1536,16 +1566,22 @@ async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: 
       }
     }
 
-    // Enrich user data with profile if found
+    // Enrich user data with profile if found - preserve all fields from event
     if (profile) {
       enrichedUser = {
         address: event.user.address,
-        username: profile.username || profile.displayName || event.user.username,
+        displayName: profile.displayName || incomingUser.displayName,
+        username: profile.username || incomingUser.username,
+        pfpUrl: profile.profileImage || incomingUser.pfpUrl,
+        provider: profile.provider || incomingUser.provider,
         // Pass through any additional fields from the original event
         ...(event.user as any)
       };
 
       console.log(`✅ Enriched timeline event with profile for ${event.user.address.slice(0, 8)}... (${profile.displayName || profile.username})`);
+    } else {
+      // No profile in DB, just use incoming event data
+      enrichedUser = { ...incomingUser };
     }
   } catch (error) {
     console.error('Failed to fetch user profile for timeline event:', error);
