@@ -1519,6 +1519,25 @@ const pendingClaims = new Map<string, DeviceClaim>();
 // Helper function to add timeline events (used by both Socket.IO handlers and cron bot)
 // Now saves to database for persistence and enriches with user profiles
 async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: Server) {
+  // Defensive logging before any property access
+  console.log(`🔍 addTimelineEvent CALLED`, {
+    hasEvent: !!event,
+    type: event?.type,
+    hasUser: !!event?.user,
+    hasAddress: !!event?.user?.address
+  });
+
+  // Validate event structure
+  if (!event || !event.user || !event.user.address) {
+    console.error(`❌ Invalid event data received:`, {
+      hasEvent: !!event,
+      hasUser: !!event?.user,
+      hasAddress: !!event?.user?.address,
+      eventPreview: JSON.stringify(event).slice(0, 300)
+    });
+    return;
+  }
+
   console.log(`🔍 addTimelineEvent START for ${event.type} from ${event.user.address.slice(0, 8)}`);
   // Fetch user profile from database if available
   let enrichedUser = { ...event.user };
