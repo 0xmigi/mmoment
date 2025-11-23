@@ -1548,7 +1548,12 @@ async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: 
           lastUpdated: new Date()
         });
 
-        console.log(`💾 Saved user profile for ${event.user.address.slice(0, 8)}... (${incomingUser.displayName || incomingUser.username || 'no name'})`);
+        console.log(`💾 Saved user profile for ${event.user.address.slice(0, 8)}...`, {
+          displayName: incomingUser.displayName,
+          username: incomingUser.username,
+          provider: incomingUser.provider,
+          pfpUrl: incomingUser.pfpUrl ? 'present' : 'missing'
+        });
       } catch (saveError) {
         console.error('Failed to save user profile:', saveError);
       }
