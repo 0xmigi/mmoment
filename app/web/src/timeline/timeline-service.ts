@@ -422,7 +422,13 @@ class TimelineService {
     // If connected, emit to server
     if (this.isSocketConnected()) {
       console.log('Emitting timeline event:', eventWithCamera);
+      console.log('[Timeline] Socket state:', {
+        connected: this.socket.connected,
+        id: this.socket.id,
+        transport: this.socket.io.engine?.transport?.name
+      });
       this.socket.emit('newTimelineEvent', eventWithCamera);
+      console.log('[Timeline] Event emitted to socket');
       
       // Don't automatically request recent events after emitting
       // The server will broadcast the event back to us, which is sufficient

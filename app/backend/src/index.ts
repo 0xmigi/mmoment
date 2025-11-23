@@ -1519,6 +1519,7 @@ const pendingClaims = new Map<string, DeviceClaim>();
 // Helper function to add timeline events (used by both Socket.IO handlers and cron bot)
 // Now saves to database for persistence and enriches with user profiles
 async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: Server) {
+  console.log(`🔍 addTimelineEvent START for ${event.type} from ${event.user.address.slice(0, 8)}`);
   // Fetch user profile from database if available
   let enrichedUser = { ...event.user };
 
@@ -2064,9 +2065,13 @@ io.on("connection", (socket) => {
   });
 
   // Handle new timeline events
-  socket.on("newTimelineEvent", (event: Omit<TimelineEvent, "id">) => {
+  socket.on("newTimelineEvent", async (event: Omit<TimelineEvent, "id">) => {
     console.log(`📥 Received newTimelineEvent from socket ${socket.id}:`, event.type, event.user.address.slice(0, 8));
-    addTimelineEvent(event, io);
+    try {
+      await addTimelineEvent(event, io);
+    } catch (error) {
+      console.error(`❌ Failed to add timeline event:`, error);
+    }
   });
 
   // Handle get recent events request
