@@ -351,7 +351,8 @@ export async function loadAllFileMappingsToMaps(): Promise<{
 export async function saveTimelineEvent(event: TimelineEvent): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!db) {
-      reject(new Error('Database not initialized'));
+      console.warn('Database not initialized, skipping timeline event save');
+      resolve();
       return;
     }
 
@@ -577,7 +578,8 @@ export async function saveUserProfile(profile: UserProfile): Promise<void> {
 export async function getUserProfile(walletAddress: string): Promise<UserProfile | null> {
   return new Promise((resolve, reject) => {
     if (!db) {
-      reject(new Error('Database not initialized'));
+      console.warn('Database not initialized, returning null for user profile');
+      resolve(null);
       return;
     }
 
@@ -608,7 +610,8 @@ export async function getUserProfile(walletAddress: string): Promise<UserProfile
 export async function getUserProfiles(walletAddresses: string[]): Promise<Map<string, UserProfile>> {
   return new Promise((resolve, reject) => {
     if (!db) {
-      reject(new Error('Database not initialized'));
+      console.warn('Database not initialized, returning empty map for user profiles');
+      resolve(new Map());
       return;
     }
 
