@@ -331,22 +331,28 @@ export function CameraView() {
         console.warn("Error checking for duplicate events:", e);
       }
 
-      // Get the user's Farcaster profile info if available
+      // Get the user's social credentials - prioritize Farcaster over Twitter
       const farcasterCred = user?.verifiedCredentials?.find(
         (cred) => cred.oauthProvider === "farcaster"
       );
+      const twitterCred = user?.verifiedCredentials?.find(
+        (cred) => cred.oauthProvider === "twitter"
+      );
+
+      // Use Farcaster if available, otherwise Twitter
+      const socialCred = farcasterCred || twitterCred;
 
       // Create the timeline event with enriched user info
-      // Try Farcaster first, then fallback to Dynamic user profile
+      // Try social accounts first, then fallback to Dynamic user profile
       const event: Omit<TimelineEvent, "id"> = {
         type: eventType,
         user: {
           address: primaryWallet.address,
-          // Include profile info - prioritize Farcaster, fallback to Dynamic user (NEVER use email)
-          displayName: farcasterCred?.oauthDisplayName || user?.alias || undefined,
-          username: farcasterCred?.oauthUsername || user?.username || undefined,
-          pfpUrl: farcasterCred?.oauthAccountPhotos?.[0] || undefined,
-          provider: farcasterCred ? 'farcaster' : undefined,
+          // Include profile info - prioritize social accounts, fallback to Dynamic user (NEVER use email)
+          displayName: socialCred?.oauthDisplayName || user?.alias || undefined,
+          username: socialCred?.oauthUsername || user?.username || undefined,
+          pfpUrl: socialCred?.oauthAccountPhotos?.[0] || undefined,
+          provider: socialCred?.oauthProvider,
         },
         timestamp: Date.now(),
         transactionId,
