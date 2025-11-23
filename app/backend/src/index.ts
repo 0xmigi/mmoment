@@ -1589,9 +1589,12 @@ async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: 
       }
     }
     // Broadcast only to sockets in this camera's room
+    const socketsInRoom = cameraRooms.get(event.cameraId);
+    console.log(`📤 Broadcasting timeline event ${newEvent.id} (${newEvent.type}) to camera room ${event.cameraId} (${socketsInRoom?.size || 0} sockets)`);
     socketServer.to(event.cameraId).emit("timelineEvent", newEvent);
   } else {
     // If no cameraId, broadcast to all
+    console.log(`📤 Broadcasting timeline event ${newEvent.id} (${newEvent.type}) to all clients`);
     socketServer.emit("timelineEvent", newEvent);
   }
 
@@ -2062,6 +2065,7 @@ io.on("connection", (socket) => {
 
   // Handle new timeline events
   socket.on("newTimelineEvent", (event: Omit<TimelineEvent, "id">) => {
+    console.log(`📥 Received newTimelineEvent from socket ${socket.id}:`, event.type, event.user.address.slice(0, 8));
     addTimelineEvent(event, io);
   });
 
