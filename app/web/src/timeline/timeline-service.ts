@@ -298,10 +298,18 @@ class TimelineService {
   }
 
   joinCamera(cameraId: string) {
-    if (this.currentCameraId === cameraId) return;
-
     console.log('Joining camera room:', cameraId);
-    
+
+    // If we're already in this camera, just rejoin the socket room to ensure we're connected
+    if (this.currentCameraId === cameraId) {
+      console.log('Already in this camera room, ensuring socket is joined');
+      if (this.isConnected) {
+        this.socket.emit('joinCamera', cameraId);
+        this.requestRecentEvents();
+      }
+      return;
+    }
+
     // Leave current camera room if any
     if (this.currentCameraId && this.isConnected) {
       this.socket.emit('leaveCamera', this.currentCameraId);
@@ -310,14 +318,14 @@ class TimelineService {
     // Join new camera room
     this.currentCameraId = cameraId;
     localStorage.setItem(TIMELINE_CAMERA_ID_KEY, cameraId);
-    
+
     // Try to restore events for this camera from localStorage
     try {
       const savedEventsString = localStorage.getItem(`${TIMELINE_EVENTS_STORAGE_KEY}_${cameraId}`);
       if (savedEventsString) {
         const savedEvents = JSON.parse(savedEventsString) as TimelineEvent[];
         console.log(`Restored ${savedEvents.length} events from localStorage for camera ${cameraId}`);
-        
+
         // If we have saved events, use them and notify listeners
         if (savedEvents.length > 0) {
           this.events = savedEvents;
@@ -333,7 +341,7 @@ class TimelineService {
       console.error('Error restoring events for camera:', error);
       this.events = [];
     }
-    
+
     // If we're connected, join the room
     if (this.isConnected) {
       this.socket.emit('joinCamera', cameraId);
