@@ -2489,9 +2489,9 @@ httpServer.listen(port, "0.0.0.0", async () => {
   // Initialize SQLite database and load persisted data
   try {
     console.log('\n📦 Initializing SQLite database...');
-    // Use Railway volume path if available, otherwise local path
+    // Use Railway's writable /tmp directory for ephemeral storage
     const dbPath = process.env.DATABASE_PATH ||
-                   (process.env.RAILWAY_ENVIRONMENT ? '/app/data/mmoment.db' : './mmoment.db');
+                   (process.env.RAILWAY_ENVIRONMENT ? '/tmp/mmoment.db' : './mmoment.db');
     console.log(`📍 Database path: ${dbPath}`);
     await initializeDatabase(dbPath);
 
