@@ -60,6 +60,7 @@ import {
   getUserProfile,
   getUserProfiles,
   loadAllUserProfilesToMap,
+  deleteUserProfile,
   UserProfile as DBUserProfile,
   saveSessionActivity,
   getSessionActivities,
@@ -1500,6 +1501,9 @@ interface TimelineEvent {
   user: {
     address: string;
     username?: string;
+    displayName?: string;
+    pfpUrl?: string;
+    provider?: string;
   };
   timestamp: number;
   cameraId?: string;
@@ -2115,6 +2119,45 @@ app.post("/api/profile/batch", async (req, res) => {
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to get profiles'
+    });
+  }
+});
+
+// Delete user profile (admin/cleanup)
+app.delete("/api/profile/:walletAddress", async (req, res) => {
+  try {
+    const { walletAddress } = req.params;
+
+    if (!walletAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'walletAddress is required'
+      });
+    }
+
+    // Delete from database
+    const deletedCount = await deleteUserProfile(walletAddress);
+
+    // Remove from cache
+    userProfilesCache.delete(walletAddress);
+
+    if (deletedCount > 0) {
+      console.log(`🗑️  Deleted profile for ${walletAddress.slice(0, 8)}...`);
+      res.json({
+        success: true,
+        message: 'Profile deleted successfully'
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        error: 'Profile not found'
+      });
+    }
+  } catch (error) {
+    console.error('Failed to delete user profile:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to delete profile'
     });
   }
 });
@@ -2794,28 +2837,35 @@ httpServer.listen(port, "0.0.0.0", async () => {
       walletToSignatures.set(wallet, sigs);
     }
 
-    // Load timeline events from database into memory
-    console.log('📥 Loading timeline events from database...');
-    const loadedEvents = await loadAllTimelineEventsToArray();
-    for (const dbEvent of loadedEvents) {
-      timelineEvents.push({
-        id: dbEvent.id,
-        type: dbEvent.type,
-        user: {
-          address: dbEvent.userAddress,
-          username: dbEvent.userUsername
-        },
-        timestamp: dbEvent.timestamp,
-        cameraId: dbEvent.cameraId
-      });
-    }
-
-    // Load user profiles from database into memory cache
+    // Load user profiles FIRST (so we can enrich timeline events)
     console.log('📥 Loading user profiles from database...');
     const loadedProfiles = await loadAllUserProfilesToMap();
     for (const [address, profile] of loadedProfiles.entries()) {
       userProfilesCache.set(address, profile);
     }
+
+    // Load timeline events from database into memory and enrich with profile data
+    console.log('📥 Loading timeline events from database...');
+    const loadedEvents = await loadAllTimelineEventsToArray();
+    for (const dbEvent of loadedEvents) {
+      // Look up profile to enrich the user data
+      const profile = userProfilesCache.get(dbEvent.userAddress);
+
+      timelineEvents.push({
+        id: dbEvent.id,
+        type: dbEvent.type,
+        user: {
+          address: dbEvent.userAddress,
+          username: profile?.username || dbEvent.userUsername,
+          displayName: profile?.displayName,
+          pfpUrl: profile?.profileImage,
+          provider: profile?.provider
+        },
+        timestamp: dbEvent.timestamp,
+        cameraId: dbEvent.cameraId
+      });
+    }
+    console.log(`📊 Enriched ${loadedEvents.filter(e => userProfilesCache.has(e.userAddress)).length}/${loadedEvents.length} events with profile data`);
 
     // Get database stats
     const stats = await getDatabaseStats();

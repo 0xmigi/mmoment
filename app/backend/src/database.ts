@@ -718,6 +718,28 @@ export async function loadAllUserProfilesToMap(): Promise<Map<string, UserProfil
   });
 }
 
+// Delete user profile by wallet address
+export async function deleteUserProfile(walletAddress: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    db.run(
+      'DELETE FROM user_profiles WHERE wallet_address = ?',
+      [walletAddress],
+      function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(this.changes);
+        }
+      }
+    );
+  });
+}
+
 // ============================================================================
 // SESSION ACTIVITY BUFFER OPERATIONS (Privacy-Preserving Timeline)
 // ============================================================================
