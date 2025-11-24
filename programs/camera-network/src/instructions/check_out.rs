@@ -1,17 +1,28 @@
 use anchor_lang::prelude::*;
 use crate::state::{
-    CameraAccount, UserSession,
+    CameraAccount, UserSession, CameraTimeline, ActivityData, EncryptedActivity,
     UserCheckedOut, ActivityType, ActivityRecorded
 };
 use crate::error::CameraNetworkError;
 
 #[derive(Accounts)]
+#[instruction(activities: Vec<ActivityData>)]
 pub struct CheckOut<'info> {
     #[account(mut)]
     pub closer: Signer<'info>,  // User checking out themselves OR anyone if expired
 
     #[account(mut)]
     pub camera: Account<'info, CameraAccount>,
+
+    /// Camera timeline - created lazily on first checkout with activities
+    #[account(
+        init_if_needed,
+        payer = closer,
+        space = 8 + 32 + 4 + 8 + 1 + 10240,  // Start with space for ~30 activities, can be reallocated
+        seeds = [b"camera-timeline", camera.key().as_ref()],
+        bump
+    )]
+    pub camera_timeline: Account<'info, CameraTimeline>,
 
     #[account(
         mut,
@@ -33,9 +44,11 @@ pub struct CheckOut<'info> {
     /// CHECK: Destination for rent reclamation (user if self-checkout, closer if expired cleanup)
     #[account(mut)]
     pub rent_destination: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<CheckOut>) -> Result<()> {
+pub fn handler(ctx: Context<CheckOut>, activities: Vec<ActivityData>) -> Result<()> {
     let closer = &ctx.accounts.closer;
     let camera = &mut ctx.accounts.camera;
     let session = &ctx.accounts.session;
@@ -101,6 +114,38 @@ pub fn handler(ctx: Context<CheckOut>) -> Result<()> {
     } else {
         msg!("User {} checked out from camera {} after {} seconds",
             session.user, camera.key(), session_duration);
+    }
+
+    // Initialize timeline if needed
+    let timeline = &mut ctx.accounts.camera_timeline;
+    if timeline.camera == Pubkey::default() {
+        // First time initialization
+        timeline.camera = camera.key();
+        timeline.activity_count = 0;
+        timeline.bump = ctx.bumps.camera_timeline;
+    }
+
+    // Process activities if any were provided
+    // Activities arrive pre-encrypted from Jetson (which handles AES encryption + access grants)
+    if !activities.is_empty() {
+        msg!("Storing {} encrypted activities to timeline", activities.len());
+
+        // Convert ActivityData (from Jetson) to EncryptedActivity (timeline storage)
+        for activity in activities {
+            let encrypted_activity = EncryptedActivity {
+                timestamp: activity.timestamp,
+                activity_type: activity.activity_type,
+                encrypted_content: activity.encrypted_content,
+                nonce: activity.nonce,
+                access_grants: activity.access_grants,
+            };
+
+            timeline.encrypted_activities.push(encrypted_activity);
+        }
+
+        timeline.activity_count += timeline.encrypted_activities.len() as u64;
+
+        msg!("Timeline now contains {} total activities", timeline.activity_count);
     }
 
     Ok(())

@@ -43,9 +43,9 @@ pub mod camera_network {
         instructions::check_in::handler(ctx, use_face_recognition)
     }
 
-    /// Check out user from a camera
-    pub fn check_out(ctx: Context<CheckOut>) -> Result<()> {
-        instructions::check_out::handler(ctx)
+    /// Check out user from a camera with optional activity bundle
+    pub fn check_out(ctx: Context<CheckOut>, activities: Vec<ActivityData>) -> Result<()> {
+        instructions::check_out::handler(ctx, activities)
     }
     
     /// Create or regenerate a recognition token (stores encrypted facial embedding)

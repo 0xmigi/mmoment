@@ -60,7 +60,12 @@ import {
   getUserProfile,
   getUserProfiles,
   loadAllUserProfilesToMap,
-  UserProfile as DBUserProfile
+  UserProfile as DBUserProfile,
+  saveSessionActivity,
+  getSessionActivities,
+  clearSessionActivities,
+  getSessionBufferStats,
+  SessionActivityBuffer
 } from './database';
 
 // Note: Socket.IO server (io) will be passed to session cleanup cron after it's created below
@@ -1922,6 +1927,76 @@ app.get("/api/database/stats", async (_req, res) => {
   }
 });
 
+// Debug endpoint to inspect actual database contents
+app.get("/api/database/debug", async (_req, res) => {
+  try {
+    // Get recent timeline events
+    const recentTimeline = await getRecentTimelineEvents(undefined, 20);
+
+    // Get file mappings from in-memory (mirrors DB)
+    const fileMappings: any[] = [];
+    signatureToFileMapping.forEach((mapping, sig) => {
+      fileMappings.push({
+        signature: sig.slice(0, 16) + '...',
+        signatureType: mapping.signatureType,
+        walletAddress: mapping.walletAddress.slice(0, 8) + '...',
+        fileName: mapping.fileName,
+        cameraId: mapping.cameraId,
+        uploadedAt: mapping.uploadedAt,
+        fileType: mapping.fileType
+      });
+    });
+
+    // Get user profiles from cache (mirrors DB)
+    const profiles: any[] = [];
+    userProfilesCache.forEach((profile, addr) => {
+      profiles.push({
+        walletAddress: addr.slice(0, 8) + '...',
+        displayName: profile.displayName,
+        username: profile.username,
+        provider: profile.provider,
+        lastUpdated: profile.lastUpdated
+      });
+    });
+
+    // Get session buffer stats
+    const bufferStats = await getSessionBufferStats();
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      databasePath: process.env.DATABASE_PATH || '/tmp/mmoment.db',
+      data: {
+        timelineEvents: {
+          count: recentTimeline.length,
+          items: recentTimeline.map(e => ({
+            id: e.id,
+            type: e.type,
+            userAddress: e.userAddress.slice(0, 8) + '...',
+            timestamp: new Date(e.timestamp).toISOString(),
+            cameraId: e.cameraId
+          }))
+        },
+        fileMappings: {
+          count: fileMappings.length,
+          items: fileMappings.slice(0, 20)
+        },
+        userProfiles: {
+          count: profiles.length,
+          items: profiles.slice(0, 20)
+        },
+        sessionBuffers: bufferStats
+      }
+    });
+  } catch (error) {
+    console.error('Failed to get database debug info:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get debug info'
+    });
+  }
+});
+
 // ============================================================================
 // USER PROFILE ENDPOINTS (for Camera Service)
 // ============================================================================
@@ -2040,6 +2115,157 @@ app.post("/api/profile/batch", async (req, res) => {
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to get profiles'
+    });
+  }
+});
+
+// ============================================================================
+// SESSION ACTIVITY BUFFER ENDPOINTS (Privacy-Preserving Timeline)
+// ============================================================================
+
+// Receive encrypted activity from Jetson (called during active session)
+app.post("/api/session/activity", async (req, res) => {
+  try {
+    const { sessionId, cameraId, userPubkey, timestamp, activityType, encryptedContent, nonce, accessGrants } = req.body;
+
+    // Validate required fields
+    if (!sessionId || !cameraId || !userPubkey || timestamp === undefined || activityType === undefined || !encryptedContent || !nonce || !accessGrants) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: sessionId, cameraId, userPubkey, timestamp, activityType, encryptedContent, nonce, accessGrants'
+      });
+    }
+
+    // Convert base64 strings to buffers
+    const encryptedContentBuffer = Buffer.from(encryptedContent, 'base64');
+    const nonceBuffer = Buffer.from(nonce, 'base64');
+    const accessGrantsBuffer = Buffer.from(JSON.stringify(accessGrants), 'utf-8');
+
+    // Save to database
+    const activity: SessionActivityBuffer = {
+      sessionId,
+      cameraId,
+      userPubkey,
+      timestamp,
+      activityType,
+      encryptedContent: encryptedContentBuffer,
+      nonce: nonceBuffer,
+      accessGrants: accessGrantsBuffer,
+      createdAt: new Date()
+    };
+
+    await saveSessionActivity(activity);
+
+    console.log(`✅ Buffered encrypted activity for session ${sessionId.slice(0, 8)}... (type: ${activityType})`);
+
+    res.json({
+      success: true,
+      message: 'Activity buffered successfully'
+    });
+  } catch (error) {
+    console.error('Failed to buffer session activity:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to buffer activity'
+    });
+  }
+});
+
+// Fetch buffered activities for a session (called by auto-checkout bot)
+app.get("/api/session/activities/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        error: 'sessionId is required'
+      });
+    }
+
+    // Fetch from database
+    const activities = await getSessionActivities(sessionId);
+
+    // Convert buffers to base64 for JSON transport
+    const activitiesForResponse = activities.map(activity => ({
+      sessionId: activity.sessionId,
+      cameraId: activity.cameraId,
+      userPubkey: activity.userPubkey,
+      timestamp: activity.timestamp,
+      activityType: activity.activityType,
+      encryptedContent: activity.encryptedContent.toString('base64'),
+      nonce: activity.nonce.toString('base64'),
+      accessGrants: JSON.parse(activity.accessGrants.toString('utf-8')),
+      createdAt: activity.createdAt.toISOString()
+    }));
+
+    console.log(`📤 Fetched ${activitiesForResponse.length} buffered activities for session ${sessionId.slice(0, 8)}...`);
+
+    res.json({
+      success: true,
+      activities: activitiesForResponse,
+      count: activitiesForResponse.length
+    });
+  } catch (error) {
+    console.error('Failed to fetch session activities:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch activities'
+    });
+  }
+});
+
+// Clear buffered activities after successful checkout (called by auto-checkout bot)
+app.delete("/api/session/activities/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        error: 'sessionId is required'
+      });
+    }
+
+    // Clear from database
+    const deletedCount = await clearSessionActivities(sessionId);
+
+    console.log(`🗑️  Cleared ${deletedCount} buffered activities for session ${sessionId.slice(0, 8)}...`);
+
+    res.json({
+      success: true,
+      message: 'Activities cleared successfully',
+      deletedCount
+    });
+  } catch (error) {
+    console.error('Failed to clear session activities:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to clear activities'
+    });
+  }
+});
+
+// Get session buffer statistics (for monitoring)
+app.get("/api/session/buffer-stats", async (_req, res) => {
+  try {
+    const stats = await getSessionBufferStats();
+
+    res.json({
+      success: true,
+      stats: {
+        totalActivities: stats.totalActivities,
+        uniqueSessions: stats.uniqueSessions,
+        uniqueCameras: stats.uniqueCameras,
+        oldestActivity: stats.oldestActivity?.toISOString() || null,
+        newestActivity: stats.newestActivity?.toISOString() || null
+      }
+    });
+  } catch (error) {
+    console.error('Failed to get session buffer stats:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get buffer stats'
     });
   }
 });

@@ -113,15 +113,57 @@ pub struct AccessGrant {
     pub bump: u8,                // PDA bump
 }
 
+// Camera timeline - stores encrypted activity history for a camera
+// Created lazily on first checkout with activities
+#[account]
+pub struct CameraTimeline {
+    pub camera: Pubkey,                         // Link back to camera account
+    pub encrypted_activities: Vec<EncryptedActivity>, // Growing list of encrypted activities
+    pub activity_count: u64,                    // Total activities (public stat)
+    pub bump: u8,                               // PDA bump
+}
+
+// Space: 8 (discriminator) + 32 (camera) + 4 (vec length) + (N * activity_size) + 8 (count) + 1 (bump)
+// Initial: ~53 bytes + dynamic activity data
+// Seeds: ["camera-timeline", camera.key()]
+
+// Single encrypted activity entry
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct EncryptedActivity {
+    pub timestamp: i64,              // When activity occurred (public for overlap queries)
+    pub activity_type: u8,           // Type of activity (photo, video, etc.) - public
+    pub encrypted_content: Vec<u8>,  // AES-256-GCM encrypted activity data
+    pub nonce: [u8; 12],             // AES-GCM nonce for decryption
+    pub access_grants: Vec<Vec<u8>>, // Encrypted activity key for each user present
+}
+
+// Typical size per activity: 8 + 1 + 4 + ~150 (content) + 12 + 4 + (N_users * 64) bytes
+// Example: 2 users present = ~300 bytes per activity
+
 // Activity types enum (used to interpret last_activity_type)
+// Values 0-49: Core camera activities
+// Values 50-99: CV app results (pushup competition, basketball score, climbing, etc.)
+// Values 100-254: Reserved for future custom CV apps (dynamically mapped)
+// Value 255: Other/Unknown
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Copy)]
 pub enum ActivityType {
+    // Core camera activities (0-49)
     CheckIn = 0,
     CheckOut = 1,
     PhotoCapture = 2,
     VideoRecord = 3,
     LiveStream = 4,
-    FaceRecognition = 5,
+    FaceRecognition = 5,  // User authentication via face recognition
+
+    // CV app activity results (50-99)
+    // Generic type for CV apps - specific app and result data goes in encrypted_content
+    CVAppActivity = 50,
+
+    // Reserved range (100-254): Custom CV app codes
+    // Frontend/Jetson can dynamically map app-specific codes to app names
+    // e.g., 100 = "pushup_competition", 101 = "basketball_2x2", 102 = "bouldering_scorecard"
+    // encrypted_content contains: {app_name, participants[], result, metadata}
+
     Other = 255,
 }
 
@@ -222,4 +264,15 @@ pub struct UpdateCameraArgs {
 pub struct ActivityArgs {
     pub activity_type: u8,
     pub metadata: String,
+}
+
+// Activity data structure for bundled checkout
+// This is passed from Jetson (already encrypted) to the checkout instruction
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct ActivityData {
+    pub timestamp: i64,              // When the activity occurred (public)
+    pub activity_type: u8,           // Type (photo, video, etc.) - public
+    pub encrypted_content: Vec<u8>,  // AES-256-GCM encrypted by Jetson
+    pub nonce: [u8; 12],             // AES-GCM nonce
+    pub access_grants: Vec<Vec<u8>>, // Encrypted AES keys for each user present
 } 

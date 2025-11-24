@@ -36,6 +36,19 @@ export interface UserProfile {
   lastUpdated: Date;
 }
 
+// Session activity buffer interface (for privacy-preserving bundling)
+export interface SessionActivityBuffer {
+  sessionId: string;
+  cameraId: string;
+  userPubkey: string;
+  timestamp: number;
+  activityType: number;
+  encryptedContent: Buffer;  // AES-256-GCM encrypted by Jetson
+  nonce: Buffer;             // 12-byte nonce
+  accessGrants: Buffer;      // JSON array of encrypted keys, serialized
+  createdAt: Date;
+}
+
 // Initialize database with tables
 export async function initializeDatabase(dbPath: string = './mmoment.db'): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -101,6 +114,27 @@ export async function initializeDatabase(dbPath: string = './mmoment.db'): Promi
 
         // Create index for user_profiles
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_profiles_updated ON user_profiles(last_updated)`);
+
+        // Create session_activity_buffers table (for privacy-preserving timeline)
+        await runQuery(`
+          CREATE TABLE IF NOT EXISTS session_activity_buffers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            camera_id TEXT NOT NULL,
+            user_pubkey TEXT NOT NULL,
+            timestamp INTEGER NOT NULL,
+            activity_type INTEGER NOT NULL,
+            encrypted_content BLOB NOT NULL,
+            nonce BLOB NOT NULL,
+            access_grants BLOB NOT NULL,
+            created_at INTEGER NOT NULL
+          )
+        `);
+
+        // Create indexes for session_activity_buffers
+        await runQuery(`CREATE INDEX IF NOT EXISTS idx_session_buffers_session ON session_activity_buffers(session_id)`);
+        await runQuery(`CREATE INDEX IF NOT EXISTS idx_session_buffers_camera ON session_activity_buffers(camera_id, timestamp)`);
+        await runQuery(`CREATE INDEX IF NOT EXISTS idx_session_buffers_created ON session_activity_buffers(created_at)`);
 
         console.log('✅ Database tables initialized');
         resolve();
@@ -486,6 +520,7 @@ export async function getDatabaseStats(): Promise<{
   uniqueWallets: number;
   uniqueCameras: number;
   userProfiles: number;
+  sessionActivityBuffers: number;
 }> {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -498,7 +533,8 @@ export async function getDatabaseStats(): Promise<{
       timelineEvents: 0,
       uniqueWallets: 0,
       uniqueCameras: 0,
-      userProfiles: 0
+      userProfiles: 0,
+      sessionActivityBuffers: 0
     };
 
     const dbInstance = db;
@@ -527,7 +563,12 @@ export async function getDatabaseStats(): Promise<{
               if (err) { reject(err); return; }
               stats.userProfiles = row.count;
 
-              resolve(stats);
+              dbInstance.get('SELECT COUNT(*) as count FROM session_activity_buffers', [], (err, row: any) => {
+                if (err) { reject(err); return; }
+                stats.sessionActivityBuffers = row.count;
+
+                resolve(stats);
+              });
             });
           });
         });
@@ -673,6 +714,178 @@ export async function loadAllUserProfilesToMap(): Promise<Map<string, UserProfil
 
       console.log(`✅ Loaded ${profilesMap.size} user profiles from database`);
       resolve(profilesMap);
+    });
+  });
+}
+
+// ============================================================================
+// SESSION ACTIVITY BUFFER OPERATIONS (Privacy-Preserving Timeline)
+// ============================================================================
+
+// Save encrypted activity to session buffer (called by Jetson during session)
+export async function saveSessionActivity(activity: SessionActivityBuffer): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    const stmt = db.prepare(`
+      INSERT INTO session_activity_buffers
+      (session_id, camera_id, user_pubkey, timestamp, activity_type, encrypted_content, nonce, access_grants, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      activity.sessionId,
+      activity.cameraId,
+      activity.userPubkey,
+      activity.timestamp,
+      activity.activityType,
+      activity.encryptedContent,
+      activity.nonce,
+      activity.accessGrants,
+      activity.createdAt.getTime(),
+      (err: Error | null) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      }
+    );
+
+    stmt.finalize();
+  });
+}
+
+// Get all buffered activities for a session (called by auto-checkout bot)
+export async function getSessionActivities(sessionId: string): Promise<SessionActivityBuffer[]> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    db.all(
+      'SELECT * FROM session_activity_buffers WHERE session_id = ? ORDER BY timestamp ASC',
+      [sessionId],
+      (err, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows.map(row => ({
+            sessionId: row.session_id,
+            cameraId: row.camera_id,
+            userPubkey: row.user_pubkey,
+            timestamp: row.timestamp,
+            activityType: row.activity_type,
+            encryptedContent: row.encrypted_content,
+            nonce: row.nonce,
+            accessGrants: row.access_grants,
+            createdAt: new Date(row.created_at)
+          })));
+        }
+      }
+    );
+  });
+}
+
+// Clear buffered activities after successful checkout (called after blockchain commit)
+export async function clearSessionActivities(sessionId: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    db.run(
+      'DELETE FROM session_activity_buffers WHERE session_id = ?',
+      [sessionId],
+      function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(this.changes);
+        }
+      }
+    );
+  });
+}
+
+// Clean up old orphaned activities (older than 7 days, for crashed sessions)
+export async function cleanupOldSessionActivities(daysOld: number = 7): Promise<number> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    const cutoffTime = Date.now() - (daysOld * 24 * 60 * 60 * 1000);
+
+    db.run(
+      'DELETE FROM session_activity_buffers WHERE created_at < ?',
+      [cutoffTime],
+      function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(this.changes);
+        }
+      }
+    );
+  });
+}
+
+// Get buffer statistics for monitoring
+export async function getSessionBufferStats(): Promise<{
+  totalActivities: number;
+  uniqueSessions: number;
+  uniqueCameras: number;
+  oldestActivity: Date | null;
+  newestActivity: Date | null;
+}> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    const stats = {
+      totalActivities: 0,
+      uniqueSessions: 0,
+      uniqueCameras: 0,
+      oldestActivity: null as Date | null,
+      newestActivity: null as Date | null
+    };
+
+    const dbInstance = db;
+    if (!dbInstance) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    dbInstance.get('SELECT COUNT(*) as count FROM session_activity_buffers', [], (err, row: any) => {
+      if (err) { reject(err); return; }
+      stats.totalActivities = row.count;
+
+      dbInstance.get('SELECT COUNT(DISTINCT session_id) as count FROM session_activity_buffers', [], (err, row: any) => {
+        if (err) { reject(err); return; }
+        stats.uniqueSessions = row.count;
+
+        dbInstance.get('SELECT COUNT(DISTINCT camera_id) as count FROM session_activity_buffers', [], (err, row: any) => {
+          if (err) { reject(err); return; }
+          stats.uniqueCameras = row.count;
+
+          dbInstance.get('SELECT MIN(created_at) as oldest, MAX(created_at) as newest FROM session_activity_buffers', [], (err, row: any) => {
+            if (err) { reject(err); return; }
+            if (row.oldest) stats.oldestActivity = new Date(row.oldest);
+            if (row.newest) stats.newestActivity = new Date(row.newest);
+
+            resolve(stats);
+          });
+        });
+      });
     });
   });
 }
