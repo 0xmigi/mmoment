@@ -66,7 +66,11 @@ import {
   getSessionActivities,
   clearSessionActivities,
   getSessionBufferStats,
-  SessionActivityBuffer
+  getUserSessions,
+  getCameraActivities,
+  getUserActivities,
+  SessionActivityBuffer,
+  SessionSummary
 } from './database';
 
 // Note: Socket.IO server (io) will be passed to session cleanup cron after it's created below
@@ -2309,6 +2313,122 @@ app.get("/api/session/buffer-stats", async (_req, res) => {
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to get buffer stats'
+    });
+  }
+});
+
+// Get sessions for a user (where they have access grants)
+app.get("/api/user/:walletAddress/sessions", async (req, res) => {
+  try {
+    const { walletAddress } = req.params;
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+
+    if (!walletAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'walletAddress is required'
+      });
+    }
+
+    const sessions = await getUserSessions(walletAddress, limit);
+
+    console.log(`📋 Found ${sessions.length} sessions for user ${walletAddress.slice(0, 8)}...`);
+
+    res.json({
+      success: true,
+      sessions
+    });
+  } catch (error) {
+    console.error('Failed to get user sessions:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get user sessions'
+    });
+  }
+});
+
+// Get all activities for a camera
+app.get("/api/camera/:cameraId/activities", async (req, res) => {
+  try {
+    const { cameraId } = req.params;
+    const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+
+    if (!cameraId) {
+      return res.status(400).json({
+        success: false,
+        error: 'cameraId is required'
+      });
+    }
+
+    const activities = await getCameraActivities(cameraId, limit);
+
+    // Convert buffers to base64 for JSON transport
+    const activitiesForResponse = activities.map(activity => ({
+      sessionId: activity.sessionId,
+      cameraId: activity.cameraId,
+      userPubkey: activity.userPubkey,
+      timestamp: activity.timestamp,
+      activityType: activity.activityType,
+      encryptedContent: activity.encryptedContent.toString('base64'),
+      nonce: activity.nonce.toString('base64'),
+      accessGrants: JSON.parse(activity.accessGrants.toString('utf-8')),
+      createdAt: activity.createdAt.toISOString()
+    }));
+
+    console.log(`📸 Found ${activities.length} activities for camera ${cameraId.slice(0, 8)}...`);
+
+    res.json({
+      success: true,
+      activities: activitiesForResponse
+    });
+  } catch (error) {
+    console.error('Failed to get camera activities:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get camera activities'
+    });
+  }
+});
+
+// Get all activities a user has access to
+app.get("/api/user/:walletAddress/activities", async (req, res) => {
+  try {
+    const { walletAddress } = req.params;
+    const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+
+    if (!walletAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'walletAddress is required'
+      });
+    }
+
+    const activities = await getUserActivities(walletAddress, limit);
+
+    // Convert buffers to base64 for JSON transport
+    const activitiesForResponse = activities.map(activity => ({
+      sessionId: activity.sessionId,
+      cameraId: activity.cameraId,
+      userPubkey: activity.userPubkey,
+      timestamp: activity.timestamp,
+      activityType: activity.activityType,
+      encryptedContent: activity.encryptedContent.toString('base64'),
+      nonce: activity.nonce.toString('base64'),
+      accessGrants: JSON.parse(activity.accessGrants.toString('utf-8')),
+      createdAt: activity.createdAt.toISOString()
+    }));
+
+    console.log(`🔐 Found ${activities.length} accessible activities for user ${walletAddress.slice(0, 8)}...`);
+
+    res.json({
+      success: true,
+      activities: activitiesForResponse
+    });
+  } catch (error) {
+    console.error('Failed to get user activities:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get user activities'
     });
   }
 });

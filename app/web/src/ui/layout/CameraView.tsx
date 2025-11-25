@@ -1062,11 +1062,8 @@ export function CameraView() {
     try {
       updateToast("info", "Taking photo...");
 
-      const signature = await sendSimpleTransaction("photo");
-      if (!signature) {
-        updateToast("error", "Failed to create blockchain transaction");
-        return;
-      }
+      // Note: Pre-capture transactions removed - activities are now buffered on Jetson
+      // and committed at checkout via the encrypted activity buffer system
 
       const isConnected = await unifiedCameraService.isConnected(
         currentCameraId
@@ -1089,22 +1086,21 @@ export function CameraView() {
             primaryWallet?.address || "",
             "image",
             {
-              transactionId: signature,
               cameraId: currentCameraId,
             }
           );
 
           if (results.length > 0) {
             updateToast("success", "Photo captured and uploaded to IPFS");
-            addTimelineEvent("photo_captured", signature);
+            addTimelineEvent("photo_captured");
             cameraStatus.setOnline(false);
           } else {
             updateToast("success", "Photo captured (upload to IPFS failed)");
-            addTimelineEvent("photo_captured", signature);
+            addTimelineEvent("photo_captured");
           }
         } catch (uploadError) {
           updateToast("success", "Photo captured (upload to IPFS failed)");
-          addTimelineEvent("photo_captured", signature);
+          addTimelineEvent("photo_captured");
         }
 
         if (timelineRef.current?.refreshEvents) {
@@ -1115,7 +1111,7 @@ export function CameraView() {
           "error",
           `Failed to capture photo: ${response.error || "Unknown error"}`
         );
-        addTimelineEvent("photo_captured", signature);
+        addTimelineEvent("photo_captured");
         if (timelineRef.current?.refreshEvents) {
           timelineRef.current?.refreshEvents();
         }
@@ -1157,18 +1153,12 @@ export function CameraView() {
       return;
     }
 
-    let signature: string | undefined;
+    // Note: Pre-capture transactions removed - activities are now buffered on Jetson
+    // and committed at checkout via the encrypted activity buffer system
 
     try {
       setIsRecording(true);
       updateToast("info", "Starting video recording...");
-
-      signature = await sendSimpleTransaction("video");
-      if (!signature) {
-        updateToast("error", "Failed to create blockchain transaction");
-        setIsRecording(false);
-        return;
-      }
 
       const isConnected = await unifiedCameraService.isConnected(
         currentCameraId
@@ -1244,7 +1234,6 @@ export function CameraView() {
                 primaryWallet.address,
                 "video",
                 {
-                  transactionId: signature,
                   cameraId: currentCameraId,
                 }
               );
@@ -1312,12 +1301,8 @@ export function CameraView() {
         updateToast("info", "Stopping stream...");
         console.log(`🛑 [STREAM DEBUG] Attempting to stop stream...`);
 
-        // First create the blockchain transaction
-        const signature = await sendSimpleTransaction("stream_stop");
-        if (!signature) {
-          updateToast("error", "Failed to create blockchain transaction");
-          return;
-        }
+        // Note: Pre-capture transactions removed - activities are now buffered on Jetson
+        // and committed at checkout via the encrypted activity buffer system
 
         const response = await unifiedCameraService.stopStream(currentCameraId);
         console.log(`🛑 [STREAM DEBUG] Stop stream response:`, response);
@@ -1350,12 +1335,8 @@ export function CameraView() {
         updateToast("info", "Starting stream...");
         console.log(`▶️ [STREAM DEBUG] Attempting to start stream...`);
 
-        // First create the blockchain transaction
-        const signature = await sendSimpleTransaction("stream_start");
-        if (!signature) {
-          updateToast("error", "Failed to create blockchain transaction");
-          return;
-        }
+        // Note: Pre-capture transactions removed - activities are now buffered on Jetson
+        // and committed at checkout via the encrypted activity buffer system
 
         // Connect to camera if not already connected
         const isConnected = await unifiedCameraService.isConnected(

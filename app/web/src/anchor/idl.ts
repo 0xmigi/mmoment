@@ -232,7 +232,7 @@ export type CameraNetwork = {
     {
       "name": "checkOut",
       "docs": [
-        "Check out user from a camera"
+        "Check out user from a camera with optional activity bundle"
       ],
       "accounts": [
         {
@@ -244,6 +244,29 @@ export type CameraNetwork = {
           "name": "camera",
           "isMut": true,
           "isSigner": false
+        },
+        {
+          "name": "cameraTimeline",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Camera timeline - created lazily on first checkout with activities"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "camera-timeline"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "account": "CameraAccount",
+                "path": "camera"
+              }
+            ]
+          }
         },
         {
           "name": "session",
@@ -280,9 +303,23 @@ export type CameraNetwork = {
           "name": "rentDestination",
           "isMut": true,
           "isSigner": false
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "activities",
+          "type": {
+            "vec": {
+              "defined": "ActivityData"
+            }
+          }
+        }
+      ]
     },
     {
       "name": "upsertRecognitionToken",
@@ -645,6 +682,34 @@ export type CameraNetwork = {
           }
         ]
       }
+    },
+    {
+      "name": "cameraTimeline",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "camera",
+            "type": "publicKey"
+          },
+          {
+            "name": "encryptedActivities",
+            "type": {
+              "vec": {
+                "defined": "EncryptedActivity"
+              }
+            }
+          },
+          {
+            "name": "activityCount",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
     }
   ],
   "types": [
@@ -758,6 +823,41 @@ export type CameraNetwork = {
       }
     },
     {
+      "name": "EncryptedActivity",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "activityType",
+            "type": "u8"
+          },
+          {
+            "name": "encryptedContent",
+            "type": "bytes"
+          },
+          {
+            "name": "nonce",
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
+          },
+          {
+            "name": "accessGrants",
+            "type": {
+              "vec": "bytes"
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "RegisterCameraArgs",
       "type": {
         "kind": "struct",
@@ -856,6 +956,41 @@ export type CameraNetwork = {
       }
     },
     {
+      "name": "ActivityData",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "activityType",
+            "type": "u8"
+          },
+          {
+            "name": "encryptedContent",
+            "type": "bytes"
+          },
+          {
+            "name": "nonce",
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
+          },
+          {
+            "name": "accessGrants",
+            "type": {
+              "vec": "bytes"
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "CameraActionType",
       "type": {
         "kind": "enum",
@@ -900,6 +1035,9 @@ export type CameraNetwork = {
           },
           {
             "name": "FaceRecognition"
+          },
+          {
+            "name": "CVAppActivity"
           },
           {
             "name": "Other"
@@ -1435,7 +1573,7 @@ export const IDL: CameraNetwork = {
     {
       "name": "checkOut",
       "docs": [
-        "Check out user from a camera"
+        "Check out user from a camera with optional activity bundle"
       ],
       "accounts": [
         {
@@ -1447,6 +1585,29 @@ export const IDL: CameraNetwork = {
           "name": "camera",
           "isMut": true,
           "isSigner": false
+        },
+        {
+          "name": "cameraTimeline",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Camera timeline - created lazily on first checkout with activities"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "camera-timeline"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "account": "CameraAccount",
+                "path": "camera"
+              }
+            ]
+          }
         },
         {
           "name": "session",
@@ -1483,9 +1644,23 @@ export const IDL: CameraNetwork = {
           "name": "rentDestination",
           "isMut": true,
           "isSigner": false
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "activities",
+          "type": {
+            "vec": {
+              "defined": "ActivityData"
+            }
+          }
+        }
+      ]
     },
     {
       "name": "upsertRecognitionToken",
@@ -1848,6 +2023,34 @@ export const IDL: CameraNetwork = {
           }
         ]
       }
+    },
+    {
+      "name": "cameraTimeline",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "camera",
+            "type": "publicKey"
+          },
+          {
+            "name": "encryptedActivities",
+            "type": {
+              "vec": {
+                "defined": "EncryptedActivity"
+              }
+            }
+          },
+          {
+            "name": "activityCount",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
     }
   ],
   "types": [
@@ -1961,6 +2164,41 @@ export const IDL: CameraNetwork = {
       }
     },
     {
+      "name": "EncryptedActivity",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "activityType",
+            "type": "u8"
+          },
+          {
+            "name": "encryptedContent",
+            "type": "bytes"
+          },
+          {
+            "name": "nonce",
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
+          },
+          {
+            "name": "accessGrants",
+            "type": {
+              "vec": "bytes"
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "RegisterCameraArgs",
       "type": {
         "kind": "struct",
@@ -2059,6 +2297,41 @@ export const IDL: CameraNetwork = {
       }
     },
     {
+      "name": "ActivityData",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "activityType",
+            "type": "u8"
+          },
+          {
+            "name": "encryptedContent",
+            "type": "bytes"
+          },
+          {
+            "name": "nonce",
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
+          },
+          {
+            "name": "accessGrants",
+            "type": {
+              "vec": "bytes"
+            }
+          }
+        ]
+      }
+    },
+    {
       "name": "CameraActionType",
       "type": {
         "kind": "enum",
@@ -2103,6 +2376,9 @@ export const IDL: CameraNetwork = {
           },
           {
             "name": "FaceRecognition"
+          },
+          {
+            "name": "CVAppActivity"
           },
           {
             "name": "Other"

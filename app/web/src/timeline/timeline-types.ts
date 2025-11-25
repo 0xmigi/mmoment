@@ -1,4 +1,24 @@
 // app/web/src/types/timeline.ts
+
+// Re-export encrypted activity types from crypto utils
+export {
+  ACTIVITY_TYPE,
+  type ActivityType,
+  type AccessGrant,
+  type EncryptedActivity,
+  type DecryptedPhotoActivity,
+  type DecryptedVideoActivity,
+  type DecryptedStreamActivity,
+  type DecryptedActivityContent,
+  type TimelineEventFromActivity,
+  decryptActivity,
+  decryptActivities,
+  hasAccessToActivity,
+  getActivityTypeName,
+  activityToTimelineEvent,
+  activitiesToTimelineEvents,
+} from '../utils/activity-crypto';
+
 export type TimelineEventType =
   | 'initialization'
   | 'user_connected'

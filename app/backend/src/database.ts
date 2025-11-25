@@ -911,3 +911,124 @@ export async function getSessionBufferStats(): Promise<{
     });
   });
 }
+
+// Session summary interface for listing
+export interface SessionSummary {
+  sessionId: string;
+  cameraId: string;
+  startTime: number;
+  endTime: number;
+  activityCount: number;
+  activityTypes: number[];  // Unique activity types in this session
+}
+
+// Get all sessions for a user (where user has access grants)
+// This searches the access_grants JSON for the user's pubkey
+export async function getUserSessions(walletAddress: string, limit: number = 50): Promise<SessionSummary[]> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    // Query sessions where the user has an access grant
+    // access_grants is stored as JSON array: [{"pubkey": "...", "encryptedKey": "..."}]
+    db.all(
+      `SELECT
+        session_id,
+        camera_id,
+        MIN(timestamp) as start_time,
+        MAX(timestamp) as end_time,
+        COUNT(*) as activity_count,
+        GROUP_CONCAT(DISTINCT activity_type) as activity_types
+      FROM session_activity_buffers
+      WHERE access_grants LIKE ?
+      GROUP BY session_id
+      ORDER BY MAX(timestamp) DESC
+      LIMIT ?`,
+      [`%"pubkey":"${walletAddress}"%`, limit],
+      (err, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows.map(row => ({
+            sessionId: row.session_id,
+            cameraId: row.camera_id,
+            startTime: row.start_time,
+            endTime: row.end_time,
+            activityCount: row.activity_count,
+            activityTypes: row.activity_types ? row.activity_types.split(',').map(Number) : []
+          })));
+        }
+      }
+    );
+  });
+}
+
+// Get all activities for a camera (most recent first)
+export async function getCameraActivities(cameraId: string, limit: number = 100): Promise<SessionActivityBuffer[]> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    db.all(
+      'SELECT * FROM session_activity_buffers WHERE camera_id = ? ORDER BY timestamp DESC LIMIT ?',
+      [cameraId, limit],
+      (err, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows.map(row => ({
+            sessionId: row.session_id,
+            cameraId: row.camera_id,
+            userPubkey: row.user_pubkey,
+            timestamp: row.timestamp,
+            activityType: row.activity_type,
+            encryptedContent: row.encrypted_content,
+            nonce: row.nonce,
+            accessGrants: row.access_grants,
+            createdAt: new Date(row.created_at)
+          })));
+        }
+      }
+    );
+  });
+}
+
+// Get all activities a user has access to (across all sessions)
+export async function getUserActivities(walletAddress: string, limit: number = 100): Promise<SessionActivityBuffer[]> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    // Query activities where user has an access grant
+    db.all(
+      `SELECT * FROM session_activity_buffers
+       WHERE access_grants LIKE ?
+       ORDER BY timestamp DESC
+       LIMIT ?`,
+      [`%"pubkey":"${walletAddress}"%`, limit],
+      (err, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows.map(row => ({
+            sessionId: row.session_id,
+            cameraId: row.camera_id,
+            userPubkey: row.user_pubkey,
+            timestamp: row.timestamp,
+            activityType: row.activity_type,
+            encryptedContent: row.encrypted_content,
+            nonce: row.nonce,
+            accessGrants: row.access_grants,
+            createdAt: new Date(row.created_at)
+          })));
+        }
+      }
+    );
+  });
+}
