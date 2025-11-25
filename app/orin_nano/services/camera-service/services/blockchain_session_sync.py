@@ -107,6 +107,11 @@ class BlockchainSessionSync:
             if checked_in_wallets is None:
                 return  # Error getting blockchain state
 
+            # ✅ CLEANUP: On first sync (startup/restart), remove stale data for users who checked out while camera was offline
+            is_first_sync = (self.last_sync == 0)
+            if is_first_sync:
+                self._cleanup_stale_identities(checked_in_wallets)
+
             # Compare with current state
             newly_checked_in = checked_in_wallets - self.checked_in_wallets
             newly_checked_out = self.checked_in_wallets - checked_in_wallets
@@ -121,7 +126,6 @@ class BlockchainSessionSync:
 
             # ✅ FIX: On first sync (startup/restart), fetch recognition tokens for all already-checked-in users
             # This ensures users who were already checked-in before camera restart get their tokens loaded
-            is_first_sync = (self.last_sync == 0)
             if is_first_sync and len(checked_in_wallets) > 0:
                 logger.info(f"🔄 First sync detected - fetching recognition tokens for {len(checked_in_wallets)} already checked-in users")
                 for wallet in checked_in_wallets:
@@ -142,7 +146,35 @@ class BlockchainSessionSync:
                 
         except Exception as e:
             logger.error(f"Error syncing blockchain state: {e}")
-            
+
+    def _cleanup_stale_identities(self, checked_in_wallets: Set[str]):
+        """
+        Remove stale identity data for users who checked out while camera was offline.
+
+        This ensures no user data persists on the camera after checkout, even if the
+        camera missed the checkout event due to being offline.
+
+        Args:
+            checked_in_wallets: Set of wallet addresses currently checked in on-chain
+        """
+        try:
+            # Get all wallets that have data stored locally (in memory or on disk)
+            local_wallets = set(self.identity_store.get_checked_in_wallets())
+
+            # Find wallets that are stored locally but NOT checked in on-chain
+            stale_wallets = local_wallets - checked_in_wallets
+
+            if stale_wallets:
+                logger.info(f"🧹 Found {len(stale_wallets)} stale identities - cleaning up data from missed checkouts")
+                for wallet in stale_wallets:
+                    logger.info(f"🗑️  Removing stale data for {wallet[:8]}... (checked out while camera was offline)")
+                    self._handle_check_out(wallet)
+            else:
+                logger.debug("✅ No stale identity data found on startup")
+
+        except Exception as e:
+            logger.error(f"Error cleaning up stale identities: {e}")
+
     def _get_checked_in_wallets(self) -> Optional[Set[str]]:
         """Get list of currently checked-in wallets from blockchain"""
         try:
