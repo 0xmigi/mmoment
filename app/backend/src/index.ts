@@ -2232,6 +2232,42 @@ app.post("/api/session/activity", async (req, res) => {
 
     console.log(`✅ Buffered encrypted activity for session ${sessionId.slice(0, 8)}... (type: ${activityType})`);
 
+    // Also emit a Socket.IO timeline event so frontend sees it in real-time
+    // Map activity type to timeline event type
+    const activityTypeToEventType: Record<number, string> = {
+      0: 'check_in',
+      1: 'check_out',
+      2: 'photo_captured',
+      3: 'video_recorded',
+      4: 'stream_started',
+      5: 'face_enrolled',
+      50: 'cv_activity'
+    };
+
+    const eventType = activityTypeToEventType[activityType] || 'photo_captured';
+
+    // Create timeline event for real-time display
+    const timelineEvent = {
+      id: `activity-${sessionId}-${timestamp}`,
+      type: eventType,
+      user: {
+        address: userPubkey,
+        username: userPubkey.slice(0, 8) + '...'
+      },
+      timestamp: timestamp,
+      cameraId: cameraId,
+      // Include encrypted data reference for decryption
+      encryptedActivity: {
+        encryptedContent,
+        nonce,
+        accessGrants
+      }
+    };
+
+    // Broadcast to camera room
+    console.log(`📤 Broadcasting encrypted activity as timeline event to camera ${cameraId}`);
+    io.to(cameraId).emit("timelineEvent", timelineEvent);
+
     res.json({
       success: true,
       message: 'Activity buffered successfully'
