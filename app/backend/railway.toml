@@ -1,5 +1,5 @@
 [build]
-builder = "NIXPACKS"
+# Removed deprecated NIXPACKS builder - enable Metal in Railway dashboard
 
 [deploy]
 startCommand = "yarn start"
