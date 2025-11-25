@@ -15,6 +15,10 @@ interface TimelineProps {
   variant?: 'camera' | 'full';
   cameraId?: string;
   mobileOverlay?: boolean;
+  /** Pre-populated events for historical/static display (skips real-time subscription) */
+  initialEvents?: TimelineEvent[];
+  /** Whether to show the profile stack at the bottom (default: true for camera variant) */
+  showProfileStack?: boolean;
 }
 
 // Get the display count based on screen width
@@ -66,8 +70,8 @@ const getEventText = (type: TimelineEventType): string => {
   }
 };
 
-export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full', cameraId, mobileOverlay = false }, ref) => {
-  const [events, setEvents] = useState<TimelineEvent[]>([]);
+export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full', cameraId, mobileOverlay = false, initialEvents, showProfileStack }, ref) => {
+  const [events, setEvents] = useState<TimelineEvent[]>(initialEvents || []);
   const [selectedUser, setSelectedUser] = useState<TimelineUser | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -219,9 +223,16 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     return () => window.removeEventListener('resize', handleResize);
   }, [variant]);
 
-  // Timeline service integration
+  // Update events when initialEvents changes (for historical mode)
   useEffect(() => {
-    if (!cameraId) return;
+    if (initialEvents) {
+      setEvents(initialEvents);
+    }
+  }, [initialEvents]);
+
+  // Timeline service integration (skip if using initialEvents for historical display)
+  useEffect(() => {
+    if (!cameraId || initialEvents) return;
 
     // Join the camera room
     timelineService.joinCamera(cameraId);
@@ -457,7 +468,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       </div>
 
       {/* Profile Stack with connected timeline */}
-      {variant === 'camera' && (
+      {(showProfileStack ?? variant === 'camera') && (
         <div className="relative">
           {/* Corner and horizontal line container */}
           <div className="absolute left-0 top-0 w-full">

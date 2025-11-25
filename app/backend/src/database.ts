@@ -997,6 +997,112 @@ export async function getCameraActivities(cameraId: string, limit: number = 100)
   });
 }
 
+// Get all events at a camera during a time window (for historical session timeline)
+// This combines timeline_events (check-ins, etc.) with session_activities (photos, videos)
+export interface SessionTimelineEvent {
+  id: string;
+  type: string;  // TimelineEventType: 'check_in', 'check_out', 'photo_captured', etc.
+  userAddress: string;
+  timestamp: number;
+  cameraId: string;
+  // For encrypted activities
+  encrypted?: {
+    sessionId: string;
+    activityType: number;
+    encryptedContent: string;  // base64
+    nonce: string;  // base64
+    accessGrants: string;  // JSON string
+  };
+}
+
+// Get all events at a camera during a session's time window
+export async function getSessionTimelineEvents(
+  cameraId: string,
+  startTime: number,
+  endTime: number
+): Promise<SessionTimelineEvent[]> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    const dbInstance = db;
+    const events: SessionTimelineEvent[] = [];
+
+    // First, get timeline_events (check-ins, check-outs, etc.)
+    dbInstance.all(
+      `SELECT * FROM timeline_events
+       WHERE camera_id = ? AND timestamp >= ? AND timestamp <= ?
+       ORDER BY timestamp DESC`,
+      [cameraId, startTime, endTime],
+      (err, rows: any[]) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        // Add timeline events
+        for (const row of rows) {
+          events.push({
+            id: row.id,
+            type: row.type,
+            userAddress: row.user_address,
+            timestamp: row.timestamp,
+            cameraId: row.camera_id
+          });
+        }
+
+        // Then get session activities (encrypted photos, videos, streams)
+        dbInstance.all(
+          `SELECT * FROM session_activity_buffers
+           WHERE camera_id = ? AND timestamp >= ? AND timestamp <= ?
+           ORDER BY timestamp DESC`,
+          [cameraId, startTime, endTime],
+          (err, rows: any[]) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+
+            // Map activity_type to event type string
+            const activityTypeToEventType: Record<number, string> = {
+              10: 'photo_captured',
+              20: 'video_recorded',
+              30: 'stream_started',
+              31: 'stream_ended',
+              40: 'cv_app_start',
+              41: 'cv_app_stop'
+            };
+
+            // Add encrypted activities
+            for (const row of rows) {
+              events.push({
+                id: `activity-${row.session_id}-${row.timestamp}`,
+                type: activityTypeToEventType[row.activity_type] || 'unknown',
+                userAddress: row.user_pubkey,
+                timestamp: row.timestamp,
+                cameraId: row.camera_id,
+                encrypted: {
+                  sessionId: row.session_id,
+                  activityType: row.activity_type,
+                  encryptedContent: row.encrypted_content.toString('base64'),
+                  nonce: row.nonce.toString('base64'),
+                  accessGrants: row.access_grants.toString('utf-8')
+                }
+              });
+            }
+
+            // Sort all events by timestamp (newest first)
+            events.sort((a, b) => b.timestamp - a.timestamp);
+            resolve(events);
+          }
+        );
+      }
+    );
+  });
+}
+
 // Get all activities a user has access to (across all sessions)
 export async function getUserActivities(walletAddress: string, limit: number = 100): Promise<SessionActivityBuffer[]> {
   return new Promise((resolve, reject) => {

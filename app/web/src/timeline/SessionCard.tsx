@@ -1,19 +1,39 @@
 /**
  * SessionCard Component
  *
- * Collapsible card showing a session summary with activities.
+ * Collapsible card showing a session summary with full timeline.
+ * When expanded, shows ALL events at the camera during the user's session.
  * Used in the Activities view to show historical sessions.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronUp, Camera, Video, Radio, Clock, MapPin } from 'lucide-react';
+import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { SessionSummary, formatSessionDuration } from '../hooks/useUserSessions';
-import { useEncryptedActivities, DecryptedActivityWithMeta } from '../hooks/useEncryptedActivities';
+import { Timeline } from './Timeline';
+import { TimelineEvent } from './timeline-types';
+import { CONFIG } from '../core/config';
 import { ACTIVITY_TYPE } from '../utils/activity-crypto';
 
 interface SessionCardProps {
   session: SessionSummary;
   defaultExpanded?: boolean;
+}
+
+// Backend response types
+interface SessionTimelineEventFromAPI {
+  id: string;
+  type: string;
+  userAddress: string;
+  timestamp: number;
+  cameraId: string;
+  encrypted?: {
+    sessionId: string;
+    activityType: number;
+    encryptedContent: string;
+    nonce: string;
+    accessGrants: string;
+  };
 }
 
 /**
@@ -37,70 +57,18 @@ function formatTimestamp(timestamp: number): string {
 }
 
 /**
- * Get icon for activity type
+ * Convert API event to Timeline event format
  */
-function ActivityIcon({ type }: { type: number }) {
-  const className = "w-4 h-4";
-
-  switch (type) {
-    case ACTIVITY_TYPE.PHOTO:
-      return <Camera className={className} />;
-    case ACTIVITY_TYPE.VIDEO:
-      return <Video className={className} />;
-    case ACTIVITY_TYPE.STREAM_START:
-    case ACTIVITY_TYPE.STREAM_END:
-      return <Radio className={className} />;
-    default:
-      return <Camera className={className} />;
-  }
-}
-
-/**
- * Activity item within a session
- */
-function ActivityItem({ activity }: { activity: DecryptedActivityWithMeta }) {
-  const content = activity.content;
-
-  // Get display info based on content type
-  let description = '';
-  let fileName = '';
-
-  if ('type' in content) {
-    if (content.type === 'photo') {
-      description = 'Took a photo';
-      fileName = content.filename || content.pipe_file_name;
-    } else if (content.type === 'video') {
-      const duration = 'duration_seconds' in content ? content.duration_seconds : null;
-      description = duration ? `Recorded ${Math.round(duration)}s video` : 'Recorded a video';
-      fileName = content.filename || content.pipe_file_name;
-    } else if (content.type === 'stream_start') {
-      description = 'Started streaming';
-    } else if (content.type === 'stream_end') {
-      const duration = 'duration_seconds' in content ? content.duration_seconds : null;
-      description = duration ? `Streamed for ${Math.round(duration)}s` : 'Ended stream';
-    }
-  }
-
-  return (
-    <div className="flex items-center gap-3 py-2 px-3 hover:bg-gray-50 rounded-lg transition-colors">
-      <div className="flex-shrink-0 w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
-        <ActivityIcon type={activity.activityType} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-900 truncate">
-          {description}
-        </p>
-        {fileName && (
-          <p className="text-xs text-gray-500 truncate">
-            {fileName}
-          </p>
-        )}
-      </div>
-      <div className="flex-shrink-0 text-xs text-gray-400">
-        {new Date(activity.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-      </div>
-    </div>
-  );
+function apiEventToTimelineEvent(event: SessionTimelineEventFromAPI): TimelineEvent {
+  return {
+    id: event.id,
+    type: event.type as TimelineEvent['type'],
+    user: {
+      address: event.userAddress,
+    },
+    timestamp: event.timestamp,
+    cameraId: event.cameraId,
+  };
 }
 
 /**
@@ -108,14 +76,57 @@ function ActivityItem({ activity }: { activity: DecryptedActivityWithMeta }) {
  */
 export function SessionCard({ session, defaultExpanded = false }: SessionCardProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
-  const { activities, isLoading, error, fetchActivities } = useEncryptedActivities();
+  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { primaryWallet } = useDynamicContext();
 
-  // Fetch activities when expanded
-  useEffect(() => {
-    if (isExpanded && activities.length === 0 && !isLoading) {
-      fetchActivities(session.sessionId);
+  // Fetch timeline events when expanded
+  const fetchTimeline = useCallback(async () => {
+    if (!primaryWallet?.address) {
+      setError('Wallet not connected');
+      return;
     }
-  }, [isExpanded, activities.length, isLoading, fetchActivities, session.sessionId]);
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        `${CONFIG.BACKEND_URL}/api/session/${session.sessionId}/timeline?walletAddress=${primaryWallet.address}`
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to fetch timeline');
+      }
+
+      // Convert API events to Timeline format
+      const events: TimelineEvent[] = (data.events || []).map(apiEventToTimelineEvent);
+
+      console.log(`[SessionCard] Loaded ${events.length} timeline events for session ${session.sessionId.slice(0, 8)}...`);
+
+      setTimelineEvents(events);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to fetch timeline';
+      console.error('[SessionCard] Error:', message);
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [primaryWallet?.address, session.sessionId]);
+
+  // Fetch timeline when expanded
+  useEffect(() => {
+    if (isExpanded && timelineEvents.length === 0 && !isLoading && !error) {
+      fetchTimeline();
+    }
+  }, [isExpanded, timelineEvents.length, isLoading, error, fetchTimeline]);
 
   // Count unique activity types
   const uniqueTypes = new Set(session.activityTypes);
@@ -184,28 +195,34 @@ export function SessionCard({ session, defaultExpanded = false }: SessionCardPro
         </div>
       </button>
 
-      {/* Expanded content */}
+      {/* Expanded content - shows full Timeline */}
       {isExpanded && (
-        <div className="border-t border-gray-100 px-4 py-2">
+        <div className="border-t border-gray-100 px-4 py-3">
           {isLoading ? (
             <div className="py-4 text-center text-sm text-gray-500">
               <div className="animate-spin w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full mx-auto mb-2" />
-              Decrypting activities...
+              Loading timeline...
             </div>
           ) : error ? (
             <div className="py-4 text-center text-sm text-red-500">
               {error}
+              <button
+                onClick={fetchTimeline}
+                className="block mx-auto mt-2 text-blue-500 hover:text-blue-600"
+              >
+                Retry
+              </button>
             </div>
-          ) : activities.length === 0 ? (
+          ) : timelineEvents.length === 0 ? (
             <div className="py-4 text-center text-sm text-gray-500">
-              No activities found
+              No activity during this session
             </div>
           ) : (
-            <div className="divide-y divide-gray-50">
-              {activities.map((activity, index) => (
-                <ActivityItem key={`${activity.timestamp}-${index}`} activity={activity} />
-              ))}
-            </div>
+            <Timeline
+              initialEvents={timelineEvents}
+              variant="full"
+              showProfileStack={false}
+            />
           )}
         </div>
       )}

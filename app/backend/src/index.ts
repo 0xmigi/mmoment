@@ -69,8 +69,10 @@ import {
   getUserSessions,
   getCameraActivities,
   getUserActivities,
+  getSessionTimelineEvents,
   SessionActivityBuffer,
-  SessionSummary
+  SessionSummary,
+  SessionTimelineEvent
 } from './database';
 
 // Note: Socket.IO server (io) will be passed to session cleanup cron after it's created below
@@ -2386,6 +2388,66 @@ app.get("/api/camera/:cameraId/activities", async (req, res) => {
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to get camera activities'
+    });
+  }
+});
+
+// Get full timeline events for a session (all events at camera during session time window)
+// This returns ALL events from ALL users at the camera during the user's session
+app.get("/api/session/:sessionId/timeline", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const walletAddress = req.query.walletAddress as string;
+
+    if (!sessionId) {
+      return res.status(400).json({
+        success: false,
+        error: 'sessionId is required'
+      });
+    }
+
+    if (!walletAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'walletAddress query param is required'
+      });
+    }
+
+    // First, get the user's sessions to find the session details
+    const sessions = await getUserSessions(walletAddress, 100);
+    const session = sessions.find(s => s.sessionId === sessionId);
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found or user does not have access'
+      });
+    }
+
+    // Get all timeline events at this camera during the session time window
+    const events = await getSessionTimelineEvents(
+      session.cameraId,
+      session.startTime,
+      session.endTime
+    );
+
+    console.log(`📜 Found ${events.length} timeline events for session ${sessionId.slice(0, 8)}... at camera ${session.cameraId.slice(0, 8)}...`);
+
+    res.json({
+      success: true,
+      session: {
+        sessionId: session.sessionId,
+        cameraId: session.cameraId,
+        startTime: session.startTime,
+        endTime: session.endTime
+      },
+      events
+    });
+  } catch (error) {
+    console.error('Failed to get session timeline:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get session timeline'
     });
   }
 });
