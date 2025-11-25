@@ -11,11 +11,8 @@ import { CONFIG } from '../core/config';
 import {
   EncryptedActivity,
   DecryptedActivityContent,
-  decryptActivity,
   decryptActivities,
   hasAccessToActivity,
-  getActivityTypeName,
-  ACTIVITY_TYPE,
 } from '../utils/activity-crypto';
 
 // Session summary from backend

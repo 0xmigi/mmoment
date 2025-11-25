@@ -39,12 +39,6 @@ interface UseUserSessionsReturn {
  */
 export function getSessionActivitySummary(activityTypes: number[]): string {
   const parts: string[] = [];
-
-  const photoCount = activityTypes.filter(t => t === ACTIVITY_TYPE.PHOTO).length;
-  const videoCount = activityTypes.filter(t => t === ACTIVITY_TYPE.VIDEO).length;
-  const streamCount = activityTypes.filter(t => t === ACTIVITY_TYPE.STREAM_START || t === ACTIVITY_TYPE.STREAM_END).length;
-
-  // For unique counts, use Set
   const uniqueTypes = new Set(activityTypes);
 
   if (uniqueTypes.has(ACTIVITY_TYPE.PHOTO)) parts.push('photos');

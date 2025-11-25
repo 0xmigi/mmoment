@@ -9,7 +9,7 @@ import { useState, useEffect } from 'react';
 import { ChevronDown, ChevronUp, Camera, Video, Radio, Clock, MapPin } from 'lucide-react';
 import { SessionSummary, formatSessionDuration } from '../hooks/useUserSessions';
 import { useEncryptedActivities, DecryptedActivityWithMeta } from '../hooks/useEncryptedActivities';
-import { ACTIVITY_TYPE, getActivityTypeName } from '../utils/activity-crypto';
+import { ACTIVITY_TYPE } from '../utils/activity-crypto';
 
 interface SessionCardProps {
   session: SessionSummary;
