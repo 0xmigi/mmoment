@@ -300,39 +300,9 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   };
 
-  // Add check-in event to timeline
-  const addCheckInEvent = (transactionId: string) => {
-    if (primaryWallet?.address) {
-      timelineService.emitEvent({
-        type: 'check_in',
-        user: {
-          address: primaryWallet.address,
-          displayName: primaryProfile?.displayName,
-          username: primaryProfile?.username
-        },
-        timestamp: Date.now(),
-        transactionId: transactionId,
-        cameraId: camera.id
-      });
-    }
-  };
-
-  // Add check-out event to timeline
-  const addCheckOutEvent = (transactionId: string) => {
-    if (primaryWallet?.address) {
-      timelineService.emitEvent({
-        type: 'check_out',
-        user: {
-          address: primaryWallet.address,
-          displayName: primaryProfile?.displayName,
-          username: primaryProfile?.username
-        },
-        timestamp: Date.now(),
-        transactionId: transactionId,
-        cameraId: camera.id
-      });
-    }
-  };
+  // NOTE: Check-in/check-out timeline events are now created by the Jetson camera
+  // via buffer_checkin_activity() and buffer_checkout_activity() for proper encryption
+  // and privacy-preserving timeline architecture. Frontend no longer emits these directly.
 
   // Test visualization endpoints directly
   const testVisualizationEndpoints = async () => {
@@ -619,10 +589,8 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
 
       setIsCheckedIn(true);
 
-      // Add to timeline
-      addCheckInEvent(signature);
-
-      // Refresh the timeline
+      // NOTE: Check-in timeline event is now created by Jetson via buffer_checkin_activity()
+      // Refresh the timeline to get the new encrypted activity
       timelineService.refreshEvents();
 
       // Refresh active users count
@@ -772,10 +740,8 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
 
       setIsCheckedIn(false);
 
-      // Add to timeline
-      addCheckOutEvent(signature);
-
-      // Refresh the timeline
+      // NOTE: Check-out timeline event is now created by Jetson via buffer_checkout_activity()
+      // Refresh the timeline to get the new encrypted activity
       timelineService.refreshEvents();
 
       // Refresh active users count

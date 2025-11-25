@@ -84,21 +84,7 @@ export async function initializeDatabase(dbPath: string = './mmoment.db'): Promi
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_file_mappings_camera ON file_mappings(camera_id)`);
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_file_mappings_file_name ON file_mappings(file_name)`);
 
-        // Create timeline_events table
-        await runQuery(`
-          CREATE TABLE IF NOT EXISTS timeline_events (
-            id TEXT PRIMARY KEY,
-            type TEXT NOT NULL,
-            user_address TEXT NOT NULL,
-            user_username TEXT,
-            timestamp INTEGER NOT NULL,
-            camera_id TEXT
-          )
-        `);
-
-        // Create indexes for timeline_events
-        await runQuery(`CREATE INDEX IF NOT EXISTS idx_timeline_camera ON timeline_events(camera_id, timestamp)`);
-        await runQuery(`CREATE INDEX IF NOT EXISTS idx_timeline_timestamp ON timeline_events(timestamp)`);
+        // NOTE: timeline_events table has been removed. All events now go to session_activity_buffers.
 
         // Create user_profiles table
         await runQuery(`
@@ -378,145 +364,15 @@ export async function loadAllFileMappingsToMaps(): Promise<{
 }
 
 // ============================================================================
-// TIMELINE EVENTS OPERATIONS
+// TIMELINE EVENTS - REMOVED
 // ============================================================================
-
-// Save timeline event to database
-export async function saveTimelineEvent(event: TimelineEvent): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (!db) {
-      console.warn('Database not initialized, skipping timeline event save');
-      resolve();
-      return;
-    }
-
-    const stmt = db.prepare(`
-      INSERT OR REPLACE INTO timeline_events
-      (id, type, user_address, user_username, timestamp, camera_id)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      event.id,
-      event.type,
-      event.userAddress,
-      event.userUsername || null,
-      event.timestamp,
-      event.cameraId || null,
-      (err: Error | null) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
-      }
-    );
-
-    stmt.finalize();
-  });
-}
-
-// Get recent timeline events for a camera (limit to most recent N)
-export async function getRecentTimelineEvents(cameraId?: string, limit: number = 100): Promise<TimelineEvent[]> {
-  return new Promise((resolve, reject) => {
-    if (!db) {
-      reject(new Error('Database not initialized'));
-      return;
-    }
-
-    let query = 'SELECT * FROM timeline_events';
-    let params: any[] = [];
-
-    if (cameraId) {
-      query += ' WHERE camera_id = ?';
-      params.push(cameraId);
-    }
-
-    query += ' ORDER BY timestamp DESC LIMIT ?';
-    params.push(limit);
-
-    db.all(query, params, (err, rows: any[]) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(rows.map(row => ({
-          id: row.id,
-          type: row.type,
-          userAddress: row.user_address,
-          userUsername: row.user_username || undefined,
-          timestamp: row.timestamp,
-          cameraId: row.camera_id || undefined
-        })));
-      }
-    });
-  });
-}
-
-// Clean up old timeline events (keep only last N per camera)
-export async function cleanupOldTimelineEvents(keepPerCamera: number = 100): Promise<number> {
-  return new Promise((resolve, reject) => {
-    if (!db) {
-      reject(new Error('Database not initialized'));
-      return;
-    }
-
-    // Delete old events, keeping only the most recent N per camera
-    db.run(`
-      DELETE FROM timeline_events
-      WHERE id NOT IN (
-        SELECT id FROM (
-          SELECT id, ROW_NUMBER() OVER (PARTITION BY camera_id ORDER BY timestamp DESC) as rn
-          FROM timeline_events
-        ) WHERE rn <= ?
-      )
-    `, [keepPerCamera], function(err) {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(this.changes);
-      }
-    });
-  });
-}
-
-// Load all timeline events into memory array (for backward compatibility)
-export async function loadAllTimelineEventsToArray(): Promise<TimelineEvent[]> {
-  return new Promise((resolve, reject) => {
-    if (!db) {
-      reject(new Error('Database not initialized'));
-      return;
-    }
-
-    db.all(
-      'SELECT * FROM timeline_events ORDER BY timestamp DESC LIMIT 1000',
-      [],
-      (err, rows: any[]) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-
-        const events = rows.map(row => ({
-          id: row.id,
-          type: row.type,
-          userAddress: row.user_address,
-          userUsername: row.user_username || undefined,
-          timestamp: row.timestamp,
-          cameraId: row.camera_id || undefined
-        }));
-
-        console.log(`✅ Loaded ${events.length} timeline events from database`);
-
-        resolve(events);
-      }
-    );
-  });
-}
+// NOTE: timeline_events table and functions have been removed.
+// All events now use session_activity_buffers with activity_type:
+//   0 = CHECK_IN, 1 = CHECK_OUT, 2 = PHOTO, 3 = VIDEO, 4 = STREAM, 5 = FACE_RECOGNITION, 50 = CV_APP, 255 = OTHER
 
 // Get database statistics
 export async function getDatabaseStats(): Promise<{
   fileMappings: number;
-  timelineEvents: number;
   uniqueWallets: number;
   uniqueCameras: number;
   userProfiles: number;
@@ -530,7 +386,6 @@ export async function getDatabaseStats(): Promise<{
 
     const stats = {
       fileMappings: 0,
-      timelineEvents: 0,
       uniqueWallets: 0,
       uniqueCameras: 0,
       userProfiles: 0,
@@ -547,28 +402,23 @@ export async function getDatabaseStats(): Promise<{
       if (err) { reject(err); return; }
       stats.fileMappings = row.count;
 
-      dbInstance.get('SELECT COUNT(*) as count FROM timeline_events', [], (err, row: any) => {
+      dbInstance.get('SELECT COUNT(DISTINCT wallet_address) as count FROM file_mappings', [], (err, row: any) => {
         if (err) { reject(err); return; }
-        stats.timelineEvents = row.count;
+        stats.uniqueWallets = row.count;
 
-        dbInstance.get('SELECT COUNT(DISTINCT wallet_address) as count FROM file_mappings', [], (err, row: any) => {
+        dbInstance.get('SELECT COUNT(DISTINCT camera_id) as count FROM session_activity_buffers WHERE camera_id IS NOT NULL', [], (err, row: any) => {
           if (err) { reject(err); return; }
-          stats.uniqueWallets = row.count;
+          stats.uniqueCameras = row.count;
 
-          dbInstance.get('SELECT COUNT(DISTINCT camera_id) as count FROM timeline_events WHERE camera_id IS NOT NULL', [], (err, row: any) => {
+          dbInstance.get('SELECT COUNT(*) as count FROM user_profiles', [], (err, row: any) => {
             if (err) { reject(err); return; }
-            stats.uniqueCameras = row.count;
+            stats.userProfiles = row.count;
 
-            dbInstance.get('SELECT COUNT(*) as count FROM user_profiles', [], (err, row: any) => {
+            dbInstance.get('SELECT COUNT(*) as count FROM session_activity_buffers', [], (err, row: any) => {
               if (err) { reject(err); return; }
-              stats.userProfiles = row.count;
+              stats.sessionActivityBuffers = row.count;
 
-              dbInstance.get('SELECT COUNT(*) as count FROM session_activity_buffers', [], (err, row: any) => {
-                if (err) { reject(err); return; }
-                stats.sessionActivityBuffers = row.count;
-
-                resolve(stats);
-              });
+              resolve(stats);
             });
           });
         });
@@ -922,8 +772,20 @@ export interface SessionSummary {
   activityTypes: number[];  // Unique activity types in this session
 }
 
-// Get all sessions for a user (where user has access grants)
-// This searches the access_grants JSON for the user's pubkey
+// Activity type constants (must match Solana ActivityType enum in state.rs)
+const ACTIVITY_TYPE = {
+  CHECK_IN: 0,
+  CHECK_OUT: 1,
+  PHOTO: 2,
+  VIDEO: 3,
+  STREAM: 4,
+  FACE_RECOGNITION: 5,
+  CV_APP: 50,
+  OTHER: 255,
+} as const;
+
+// Get all COMPLETED sessions for a user (check-in to check-out periods)
+// Sessions are defined by CHECK_IN (0) and CHECK_OUT (1) activity types in session_activity_buffers
 export async function getUserSessions(walletAddress: string, limit: number = 50): Promise<SessionSummary[]> {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -931,35 +793,96 @@ export async function getUserSessions(walletAddress: string, limit: number = 50)
       return;
     }
 
-    // Query sessions where the user has an access grant
-    // access_grants is stored as JSON array: [{"pubkey": "...", "encryptedKey": "..."}]
-    db.all(
-      `SELECT
-        session_id,
-        camera_id,
-        MIN(timestamp) as start_time,
-        MAX(timestamp) as end_time,
-        COUNT(*) as activity_count,
-        GROUP_CONCAT(DISTINCT activity_type) as activity_types
-      FROM session_activity_buffers
-      WHERE access_grants LIKE ?
-      GROUP BY session_id
-      ORDER BY MAX(timestamp) DESC
-      LIMIT ?`,
-      [`%"pubkey":"${walletAddress}"%`, limit],
-      (err, rows: any[]) => {
+    const dbInstance = db;
+
+    // Step 1: Get all CHECK_IN activities for this user (activity_type = 0)
+    dbInstance.all(
+      `SELECT id, session_id, camera_id, timestamp
+       FROM session_activity_buffers
+       WHERE user_pubkey = ? AND activity_type = ?
+       ORDER BY timestamp DESC
+       LIMIT ?`,
+      [walletAddress, ACTIVITY_TYPE.CHECK_IN, limit * 2],
+      async (err, checkIns: any[]) => {
         if (err) {
           reject(err);
-        } else {
-          resolve(rows.map(row => ({
-            sessionId: row.session_id,
-            cameraId: row.camera_id,
-            startTime: row.start_time,
-            endTime: row.end_time,
-            activityCount: row.activity_count,
-            activityTypes: row.activity_types ? row.activity_types.split(',').map(Number) : []
-          })));
+          return;
         }
+
+        if (!checkIns || checkIns.length === 0) {
+          console.log(`[getUserSessions] No CHECK_IN activities found for ${walletAddress.slice(0, 8)}...`);
+          resolve([]);
+          return;
+        }
+
+        console.log(`[getUserSessions] Found ${checkIns.length} CHECK_IN activities for ${walletAddress.slice(0, 8)}...`);
+
+        const sessions: SessionSummary[] = [];
+
+        // Step 2: For each check-in, find the corresponding check-out
+        for (const checkIn of checkIns) {
+          if (sessions.length >= limit) break;
+
+          try {
+            // Find the next CHECK_OUT activity for this user at this camera after the check_in
+            const checkOut = await new Promise<any>((res, rej) => {
+              dbInstance.get(
+                `SELECT id, timestamp
+                 FROM session_activity_buffers
+                 WHERE user_pubkey = ?
+                   AND camera_id = ?
+                   AND activity_type = ?
+                   AND timestamp > ?
+                 ORDER BY timestamp ASC
+                 LIMIT 1`,
+                [walletAddress, checkIn.camera_id, ACTIVITY_TYPE.CHECK_OUT, checkIn.timestamp],
+                (err, row) => err ? rej(err) : res(row)
+              );
+            });
+
+            // Only include COMPLETED sessions (with a check-out)
+            if (!checkOut) {
+              console.log(`[getUserSessions] Check-in at ${checkIn.camera_id.slice(0, 8)}... has no check-out yet (active session)`);
+              continue;
+            }
+
+            // Step 3: Get activity stats for this time window (excluding check-in/check-out themselves)
+            const activityStats = await new Promise<any>((res, rej) => {
+              dbInstance.get(
+                `SELECT
+                   COUNT(*) as activity_count,
+                   GROUP_CONCAT(DISTINCT activity_type) as activity_types
+                 FROM session_activity_buffers
+                 WHERE camera_id = ?
+                   AND timestamp >= ?
+                   AND timestamp <= ?
+                   AND activity_type NOT IN (?, ?)`,
+                [checkIn.camera_id, checkIn.timestamp, checkOut.timestamp, ACTIVITY_TYPE.CHECK_IN, ACTIVITY_TYPE.CHECK_OUT],
+                (err, row) => err ? rej(err) : res(row || { activity_count: 0, activity_types: '' })
+              );
+            });
+
+            // Create session with session_id from check-in as sessionId
+            sessions.push({
+              sessionId: checkIn.session_id || `${checkIn.id}`,
+              cameraId: checkIn.camera_id,
+              startTime: checkIn.timestamp,
+              endTime: checkOut.timestamp,
+              activityCount: activityStats.activity_count || 0,
+              activityTypes: activityStats.activity_types
+                ? activityStats.activity_types.split(',').map(Number).filter((n: number) => !isNaN(n))
+                : []
+            });
+
+            console.log(`[getUserSessions] Session: ${checkIn.session_id?.slice(0, 8) || checkIn.id}... at camera ${checkIn.camera_id.slice(0, 8)}... (${activityStats.activity_count} activities)`);
+
+          } catch (error) {
+            console.error('[getUserSessions] Error processing check-in:', error);
+          }
+        }
+
+        console.log(`[getUserSessions] Returning ${sessions.length} completed sessions`);
+        resolve(sessions);
       }
     );
   });
@@ -998,14 +921,14 @@ export async function getCameraActivities(cameraId: string, limit: number = 100)
 }
 
 // Get all events at a camera during a time window (for historical session timeline)
-// This combines timeline_events (check-ins, etc.) with session_activities (photos, videos)
+// All events now come from session_activity_buffers (unified storage)
 export interface SessionTimelineEvent {
   id: string;
   type: string;  // TimelineEventType: 'check_in', 'check_out', 'photo_captured', etc.
   userAddress: string;
   timestamp: number;
   cameraId: string;
-  // For encrypted activities
+  // For encrypted activities (all activities have this now)
   encrypted?: {
     sessionId: string;
     activityType: number;
@@ -1016,6 +939,7 @@ export interface SessionTimelineEvent {
 }
 
 // Get all events at a camera during a session's time window
+// Now queries ONLY session_activity_buffers (single source of truth)
 export async function getSessionTimelineEvents(
   cameraId: string,
   startTime: number,
@@ -1028,11 +952,10 @@ export async function getSessionTimelineEvents(
     }
 
     const dbInstance = db;
-    const events: SessionTimelineEvent[] = [];
 
-    // First, get timeline_events (check-ins, check-outs, etc.)
+    // Get all activities from session_activity_buffers
     dbInstance.all(
-      `SELECT * FROM timeline_events
+      `SELECT * FROM session_activity_buffers
        WHERE camera_id = ? AND timestamp >= ? AND timestamp <= ?
        ORDER BY timestamp DESC`,
       [cameraId, startTime, endTime],
@@ -1042,62 +965,35 @@ export async function getSessionTimelineEvents(
           return;
         }
 
-        // Add timeline events
-        for (const row of rows) {
-          events.push({
-            id: row.id,
-            type: row.type,
-            userAddress: row.user_address,
-            timestamp: row.timestamp,
-            cameraId: row.camera_id
-          });
-        }
+        // Map activity_type to event type string (matches Solana ActivityType enum)
+        const activityTypeToEventType: Record<number, string> = {
+          0: 'check_in',
+          1: 'check_out',
+          2: 'photo_captured',
+          3: 'video_recorded',
+          4: 'stream_started',
+          5: 'face_enrolled',
+          50: 'cv_activity',
+          255: 'other'
+        };
 
-        // Then get session activities (encrypted photos, videos, streams)
-        dbInstance.all(
-          `SELECT * FROM session_activity_buffers
-           WHERE camera_id = ? AND timestamp >= ? AND timestamp <= ?
-           ORDER BY timestamp DESC`,
-          [cameraId, startTime, endTime],
-          (err, rows: any[]) => {
-            if (err) {
-              reject(err);
-              return;
-            }
-
-            // Map activity_type to event type string
-            const activityTypeToEventType: Record<number, string> = {
-              10: 'photo_captured',
-              20: 'video_recorded',
-              30: 'stream_started',
-              31: 'stream_ended',
-              40: 'cv_app_start',
-              41: 'cv_app_stop'
-            };
-
-            // Add encrypted activities
-            for (const row of rows) {
-              events.push({
-                id: `activity-${row.session_id}-${row.timestamp}`,
-                type: activityTypeToEventType[row.activity_type] || 'unknown',
-                userAddress: row.user_pubkey,
-                timestamp: row.timestamp,
-                cameraId: row.camera_id,
-                encrypted: {
-                  sessionId: row.session_id,
-                  activityType: row.activity_type,
-                  encryptedContent: row.encrypted_content.toString('base64'),
-                  nonce: row.nonce.toString('base64'),
-                  accessGrants: row.access_grants.toString('utf-8')
-                }
-              });
-            }
-
-            // Sort all events by timestamp (newest first)
-            events.sort((a, b) => b.timestamp - a.timestamp);
-            resolve(events);
+        // Convert all activities to timeline events
+        const events: SessionTimelineEvent[] = rows.map((row: any) => ({
+          id: `activity-${row.session_id}-${row.timestamp}`,
+          type: activityTypeToEventType[row.activity_type] || 'unknown',
+          userAddress: row.user_pubkey,
+          timestamp: row.timestamp,
+          cameraId: row.camera_id,
+          encrypted: {
+            sessionId: row.session_id,
+            activityType: row.activity_type,
+            encryptedContent: row.encrypted_content.toString('base64'),
+            nonce: row.nonce.toString('base64'),
+            accessGrants: row.access_grants.toString('utf-8')
           }
-        );
+        }));
+
+        resolve(events);
       }
     );
   });

@@ -10,13 +10,21 @@
  * 4. Future: Sealed box encryption with Ed25519→X25519 conversion
  */
 
-// Activity types from Solana program (state.rs)
+// Activity types from Solana program (state.rs) - MUST match ActivityType enum exactly
 export const ACTIVITY_TYPE = {
-  PHOTO: 10,
-  VIDEO: 20,
-  STREAM_START: 30,
-  STREAM_END: 31,
+  // Core camera activities (0-49)
+  CHECK_IN: 0,
+  CHECK_OUT: 1,
+  PHOTO: 2,             // PhotoCapture
+  VIDEO: 3,             // VideoRecord
+  STREAM: 4,            // LiveStream
+  FACE_RECOGNITION: 5,
+
+  // CV app activity results (50-99)
   CV_APP: 50,
+
+  // Other
+  OTHER: 255,
 } as const;
 
 export type ActivityType = typeof ACTIVITY_TYPE[keyof typeof ACTIVITY_TYPE];
@@ -301,16 +309,22 @@ export function hasAccessToActivity(
  */
 export function getActivityTypeName(activityType: ActivityType): string {
   switch (activityType) {
+    case ACTIVITY_TYPE.CHECK_IN:
+      return 'Check In';
+    case ACTIVITY_TYPE.CHECK_OUT:
+      return 'Check Out';
     case ACTIVITY_TYPE.PHOTO:
       return 'Photo';
     case ACTIVITY_TYPE.VIDEO:
       return 'Video';
-    case ACTIVITY_TYPE.STREAM_START:
-      return 'Stream Started';
-    case ACTIVITY_TYPE.STREAM_END:
-      return 'Stream Ended';
+    case ACTIVITY_TYPE.STREAM:
+      return 'Stream';
+    case ACTIVITY_TYPE.FACE_RECOGNITION:
+      return 'Face Recognition';
     case ACTIVITY_TYPE.CV_APP:
       return 'CV Activity';
+    case ACTIVITY_TYPE.OTHER:
+      return 'Other';
     default:
       return 'Unknown';
   }
@@ -321,7 +335,7 @@ export function getActivityTypeName(activityType: ActivityType): string {
  */
 export interface TimelineEventFromActivity {
   id: string;
-  type: 'photo_captured' | 'video_recorded' | 'stream_started' | 'stream_ended';
+  type: 'check_in' | 'check_out' | 'photo_captured' | 'video_recorded' | 'stream_started' | 'face_enrolled' | 'cv_activity';
   user: {
     address: string;
     username?: string;
@@ -346,14 +360,20 @@ function activityTypeToEventType(
   activityType: ActivityType
 ): TimelineEventFromActivity['type'] {
   switch (activityType) {
+    case ACTIVITY_TYPE.CHECK_IN:
+      return 'check_in';
+    case ACTIVITY_TYPE.CHECK_OUT:
+      return 'check_out';
     case ACTIVITY_TYPE.PHOTO:
       return 'photo_captured';
     case ACTIVITY_TYPE.VIDEO:
       return 'video_recorded';
-    case ACTIVITY_TYPE.STREAM_START:
+    case ACTIVITY_TYPE.STREAM:
       return 'stream_started';
-    case ACTIVITY_TYPE.STREAM_END:
-      return 'stream_ended';
+    case ACTIVITY_TYPE.FACE_RECOGNITION:
+      return 'face_enrolled';
+    case ACTIVITY_TYPE.CV_APP:
+      return 'cv_activity';
     default:
       return 'photo_captured'; // Fallback
   }

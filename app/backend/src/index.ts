@@ -49,13 +49,8 @@ import {
   getFileMappingsForWallet,
   deleteFileMappingByFileName,
   loadAllFileMappingsToMaps,
-  saveTimelineEvent,
-  getRecentTimelineEvents,
-  cleanupOldTimelineEvents,
-  loadAllTimelineEventsToArray,
   getDatabaseStats,
   FileMapping as DBFileMapping,
-  TimelineEvent as DBTimelineEvent,
   saveUserProfile,
   getUserProfile,
   getUserProfiles,
@@ -1637,18 +1632,48 @@ async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: 
   // Store the event in memory
   timelineEvents.push(newEvent);
 
-  // Save to database for persistence
+  // Save to session_activity_buffers for persistence
+  // Map event type to activity_type (matches Solana ActivityType enum)
+  const eventTypeToActivityType: Record<string, number> = {
+    'check_in': 0,
+    'check_out': 1,
+    'auto_check_out': 1,  // Same as check_out
+    'photo_captured': 2,
+    'video_recorded': 3,
+    'stream_started': 4,
+    'face_enrolled': 5,
+    'cv_activity': 50,
+    'initialization': 255,
+    'user_connected': 255,
+    'other': 255
+  };
+
+  const activityType = eventTypeToActivityType[newEvent.type] ?? 255;
+
+  // For frontend events, store content as unencrypted JSON
+  // (Jetson events come pre-encrypted via /api/session/activity)
+  const eventContent = {
+    type: newEvent.type,
+    user: enrichedUser,
+    timestamp: newEvent.timestamp,
+    transactionId: (newEvent as any).transactionId
+  };
+
   try {
-    await saveTimelineEvent({
-      id: newEvent.id,
-      type: newEvent.type,
-      userAddress: newEvent.user.address,
-      userUsername: enrichedUser.username || event.user.username,
+    await saveSessionActivity({
+      sessionId: newEvent.id,  // Use event ID as session ID for frontend events
+      cameraId: newEvent.cameraId || 'unknown',
+      userPubkey: newEvent.user.address,
       timestamp: newEvent.timestamp,
-      cameraId: newEvent.cameraId
+      activityType,
+      encryptedContent: Buffer.from(JSON.stringify(eventContent), 'utf-8'),  // Not actually encrypted for frontend events
+      nonce: Buffer.alloc(12),  // Empty nonce for unencrypted content
+      accessGrants: Buffer.from('[]', 'utf-8'),  // Empty grants - content is public
+      createdAt: new Date()
     });
+    console.log(`💾 Saved activity to session_activity_buffers: type=${activityType} (${newEvent.type})`);
   } catch (error) {
-    console.error('Failed to save timeline event to database:', error);
+    console.error('Failed to save activity to session_activity_buffers:', error);
   }
 
   // Keep only last 100 events per camera in memory
@@ -1940,8 +1965,8 @@ app.get("/api/database/stats", async (_req, res) => {
 // Debug endpoint to inspect actual database contents
 app.get("/api/database/debug", async (_req, res) => {
   try {
-    // Get recent timeline events
-    const recentTimeline = await getRecentTimelineEvents(undefined, 20);
+    // Get recent timeline events from in-memory array
+    const recentTimeline = timelineEvents.slice(0, 20);
 
     // Get file mappings from in-memory (mirrors DB)
     const fileMappings: any[] = [];
@@ -1977,12 +2002,12 @@ app.get("/api/database/debug", async (_req, res) => {
       timestamp: new Date().toISOString(),
       databasePath: process.env.DATABASE_PATH || '/tmp/mmoment.db',
       data: {
-        timelineEvents: {
+        realtimeEvents: {
           count: recentTimeline.length,
-          items: recentTimeline.map(e => ({
+          items: recentTimeline.map((e: any) => ({
             id: e.id,
             type: e.type,
-            userAddress: e.userAddress.slice(0, 8) + '...',
+            userAddress: e.user?.address?.slice(0, 8) + '...',
             timestamp: new Date(e.timestamp).toISOString(),
             cameraId: e.cameraId
           }))
@@ -2576,8 +2601,18 @@ io.on("connection", (socket) => {
   });
 
   // Handle new timeline events
+  // NOTE: check_in, check_out, and auto_check_out events are BLOCKED from this shortcut
+  // They MUST come from the Jetson camera via /api/session/activity with proper encryption
   socket.on("newTimelineEvent", async (event: Omit<TimelineEvent, "id">) => {
-    console.log(`📥 Received newTimelineEvent from socket ${socket.id}:`, event.type, event.user.address.slice(0, 8));
+    console.log(`📥 Received newTimelineEvent from socket ${socket.id}:`, event.type, event.user?.address?.slice(0, 8) || 'unknown');
+
+    // Block check-in/check-out events - these must go through Jetson for proper encryption
+    const blockedEventTypes = ['check_in', 'check_out', 'auto_check_out'];
+    if (blockedEventTypes.includes(event.type)) {
+      console.warn(`⚠️  BLOCKED ${event.type} event via WebSocket shortcut - must go through Jetson for encryption`);
+      return; // Silently drop - Jetson will create the proper encrypted activity
+    }
+
     try {
       await addTimelineEvent(event, io);
     } catch (error) {
@@ -3026,37 +3061,19 @@ httpServer.listen(port, "0.0.0.0", async () => {
       userProfilesCache.set(address, profile);
     }
 
-    // Load timeline events from database into memory and enrich with profile data
-    console.log('📥 Loading timeline events from database...');
-    const loadedEvents = await loadAllTimelineEventsToArray();
-    for (const dbEvent of loadedEvents) {
-      // Look up profile to enrich the user data
-      const profile = userProfilesCache.get(dbEvent.userAddress);
-
-      timelineEvents.push({
-        id: dbEvent.id,
-        type: dbEvent.type,
-        user: {
-          address: dbEvent.userAddress,
-          username: profile?.username || dbEvent.userUsername,
-          displayName: profile?.displayName,
-          pfpUrl: profile?.profileImage,
-          provider: profile?.provider
-        },
-        timestamp: dbEvent.timestamp,
-        cameraId: dbEvent.cameraId
-      });
-    }
-    console.log(`📊 Enriched ${loadedEvents.filter(e => userProfilesCache.has(e.userAddress)).length}/${loadedEvents.length} events with profile data`);
+    // NOTE: Timeline events are now persisted in session_activity_buffers
+    // The in-memory timelineEvents array is only for real-time WebSocket broadcasting
+    // It starts empty on server restart - historical data is queried from session_activity_buffers
+    console.log('📥 Timeline events use session_activity_buffers for persistence');
 
     // Get database stats
     const stats = await getDatabaseStats();
     console.log('📊 Database statistics:', {
       fileMappings: stats.fileMappings,
-      timelineEvents: stats.timelineEvents,
       uniqueWallets: stats.uniqueWallets,
       uniqueCameras: stats.uniqueCameras,
-      userProfiles: stats.userProfiles
+      userProfiles: stats.userProfiles,
+      sessionActivityBuffers: stats.sessionActivityBuffers
     });
 
     console.log('✅ Database initialized and data loaded successfully!\n');

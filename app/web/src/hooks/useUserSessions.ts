@@ -43,7 +43,7 @@ export function getSessionActivitySummary(activityTypes: number[]): string {
 
   if (uniqueTypes.has(ACTIVITY_TYPE.PHOTO)) parts.push('photos');
   if (uniqueTypes.has(ACTIVITY_TYPE.VIDEO)) parts.push('videos');
-  if (uniqueTypes.has(ACTIVITY_TYPE.STREAM_START)) parts.push('streams');
+  if (uniqueTypes.has(ACTIVITY_TYPE.STREAM)) parts.push('streams');
 
   return parts.join(', ') || 'activities';
 }

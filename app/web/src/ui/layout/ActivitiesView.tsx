@@ -12,11 +12,11 @@ import { RefreshCw, Calendar, Filter } from 'lucide-react';
 import { useUserSessions } from '../../hooks/useUserSessions';
 import { SessionCard } from '../../timeline/SessionCard';
 
-type FilterType = 'all' | 'photos' | 'videos' | 'streams';
+type FilterType = 'all' | 'with_media' | 'this_camera';
 
 export function ActivitiesView() {
   const { primaryWallet } = useDynamicContext();
-  const { cameraId } = useParams<{ cameraId?: string }>();
+  const { cameraId: routeCameraId } = useParams<{ cameraId?: string }>();
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
 
   const { sessions, isLoading, error, fetchSessions } = useUserSessions();
@@ -30,24 +30,22 @@ export function ActivitiesView() {
 
   // Filter sessions based on selected filter
   const filteredSessions = sessions.filter(session => {
-    // If cameraId is provided, only show sessions for that camera
-    if (cameraId && session.cameraId !== cameraId) {
+    // If viewing from a specific camera route, show only that camera
+    if (routeCameraId && session.cameraId !== routeCameraId) {
       return false;
     }
 
-    // Filter by activity type
+    // Apply user filter
     if (activeFilter === 'all') return true;
-    if (activeFilter === 'photos') return session.activityTypes.includes(10); // PHOTO
-    if (activeFilter === 'videos') return session.activityTypes.includes(20); // VIDEO
-    if (activeFilter === 'streams') return session.activityTypes.includes(30); // STREAM_START
+    if (activeFilter === 'with_media') return session.activityCount > 0;
+    if (activeFilter === 'this_camera') return routeCameraId ? session.cameraId === routeCameraId : true;
     return true;
   });
 
+  // Dynamic filters based on context
   const filters: Array<{ id: FilterType; label: string }> = [
-    { id: 'all', label: 'All' },
-    { id: 'photos', label: 'Photos' },
-    { id: 'videos', label: 'Videos' },
-    { id: 'streams', label: 'Streams' },
+    { id: 'all', label: 'All Sessions' },
+    { id: 'with_media', label: 'With Media' },
   ];
 
   return (
@@ -56,9 +54,9 @@ export function ActivitiesView() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Activities</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Sessions</h1>
             <p className="text-sm text-gray-500 mt-1">
-              Your session history and captured moments
+              Camera sessions you've participated in
             </p>
           </div>
           <button
@@ -118,12 +116,12 @@ export function ActivitiesView() {
           <div className="bg-gray-50 rounded-xl p-8 text-center">
             <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">
-              No sessions yet
+              No completed sessions
             </h3>
             <p className="text-sm text-gray-500">
               {activeFilter !== 'all'
-                ? `No ${activeFilter} found. Try a different filter.`
-                : 'Check in to a camera and capture some moments to see them here.'}
+                ? 'No sessions match this filter. Try a different filter.'
+                : 'Sessions appear here after you check out from a camera. Complete a session by checking out to see it here.'}
             </p>
           </div>
         ) : (

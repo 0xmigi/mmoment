@@ -10,12 +10,15 @@ Activities are:
 3. Buffered to backend during session
 4. Committed to blockchain at checkout (bundled into single tx)
 
-Activity Types (from state.rs):
-- Photo = 10
-- Video = 20
-- StreamStart = 30
-- StreamEnd = 31
+Activity Types (from Solana state.rs - MUST match exactly):
+- CheckIn = 0
+- CheckOut = 1
+- PhotoCapture = 2
+- VideoRecord = 3
+- LiveStream = 4
+- FaceRecognition = 5
 - CVAppActivity = 50
+- Other = 255
 """
 
 import json
@@ -26,12 +29,15 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("TimelineActivityService")
 
-# Activity type enums (matching Solana program state.rs)
-ACTIVITY_TYPE_PHOTO = 10
-ACTIVITY_TYPE_VIDEO = 20
-ACTIVITY_TYPE_STREAM_START = 30
-ACTIVITY_TYPE_STREAM_END = 31
+# Activity type enums - MUST match Solana program state.rs ActivityType enum
+ACTIVITY_TYPE_CHECK_IN = 0
+ACTIVITY_TYPE_CHECK_OUT = 1
+ACTIVITY_TYPE_PHOTO = 2
+ACTIVITY_TYPE_VIDEO = 3
+ACTIVITY_TYPE_STREAM = 4  # LiveStream
+ACTIVITY_TYPE_FACE_RECOGNITION = 5
 ACTIVITY_TYPE_CV_APP = 50
+ACTIVITY_TYPE_OTHER = 255
 
 
 def _get_camera_pda() -> str:
@@ -204,6 +210,92 @@ class TimelineActivityService:
             self._errors += 1
             return False
 
+    def buffer_checkin_activity(
+        self,
+        wallet_address: str,
+        session_id: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Buffer a check-in activity.
+
+        Called when a user successfully checks in at this camera.
+
+        Args:
+            wallet_address: User's wallet address
+            session_id: Session ID from check-in
+            metadata: Optional additional metadata (tx_signature, etc.)
+
+        Returns:
+            True if buffered successfully
+        """
+        metadata = metadata or {}
+
+        activity_content = {
+            "type": "check_in",
+            "session_id": session_id,
+            "camera_id": self._camera_id,
+            "user": wallet_address,
+            "timestamp": metadata.get("timestamp", int(time.time() * 1000)),
+            "tx_signature": metadata.get("tx_signature"),
+        }
+
+        success = self._buffer_activity(
+            wallet_address, activity_content, ACTIVITY_TYPE_CHECK_IN
+        )
+
+        if success:
+            logger.info(
+                f"✅ Check-in activity buffered for {wallet_address[:8]}... session={session_id[:16]}..."
+            )
+
+        return success
+
+    def buffer_checkout_activity(
+        self,
+        wallet_address: str,
+        session_id: str,
+        duration_seconds: Optional[float] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Buffer a check-out activity.
+
+        Called when a user checks out from this camera.
+
+        Args:
+            wallet_address: User's wallet address
+            session_id: Session ID from check-in
+            duration_seconds: Session duration in seconds
+            metadata: Optional additional metadata (tx_signature, activity_count, etc.)
+
+        Returns:
+            True if buffered successfully
+        """
+        metadata = metadata or {}
+
+        activity_content = {
+            "type": "check_out",
+            "session_id": session_id,
+            "camera_id": self._camera_id,
+            "user": wallet_address,
+            "timestamp": metadata.get("timestamp", int(time.time() * 1000)),
+            "duration_seconds": duration_seconds,
+            "tx_signature": metadata.get("tx_signature"),
+            "activity_count": metadata.get("activity_count"),
+        }
+
+        success = self._buffer_activity(
+            wallet_address, activity_content, ACTIVITY_TYPE_CHECK_OUT
+        )
+
+        if success:
+            logger.info(
+                f"👋 Check-out activity buffered for {wallet_address[:8]}... session={session_id[:16]}... ({duration_seconds}s)"
+            )
+
+        return success
+
     def buffer_photo_activity(
         self,
         wallet_address: str,
@@ -337,7 +429,7 @@ class TimelineActivityService:
         }
 
         success = self._buffer_activity(
-            wallet_address, activity_content, ACTIVITY_TYPE_STREAM_START
+            wallet_address, activity_content, ACTIVITY_TYPE_STREAM
         )
 
         if success:
@@ -386,7 +478,7 @@ class TimelineActivityService:
         }
 
         success = self._buffer_activity(
-            wallet_address, activity_content, ACTIVITY_TYPE_STREAM_END
+            wallet_address, activity_content, ACTIVITY_TYPE_STREAM
         )
 
         if success:

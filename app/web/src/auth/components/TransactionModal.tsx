@@ -188,21 +188,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         }
       }
       
-      // Add to timeline
-      if (primaryWallet?.address) {
-        timelineService.emitEvent({
-          type: 'check_in',
-          user: {
-            address: primaryWallet.address,
-            displayName: primaryProfile?.displayName,
-            username: primaryProfile?.username
-          },
-          timestamp: Date.now(),
-          transactionId: signature,
-          cameraId: transactionData.cameraAccount
-        } as any);
-      }
-      
+      // NOTE: Check-in timeline event is now created by Jetson via buffer_checkin_activity()
+      // for proper encryption and privacy-preserving timeline architecture
+
       setIsCheckedIn(true);
       setCheckInSuccess(true);
       timelineService.refreshEvents();

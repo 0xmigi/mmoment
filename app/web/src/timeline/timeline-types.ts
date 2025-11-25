@@ -29,7 +29,9 @@ export type TimelineEventType =
   | 'check_in'
   | 'check_out'
   | 'auto_check_out'
-  | 'face_enrolled';
+  | 'face_enrolled'
+  | 'cv_activity'
+  | 'other';
 
 export interface TimelineUser {
   address: string;

@@ -56,9 +56,7 @@ const getEventText = (type: TimelineEventType): string => {
     case 'user_connected':
       return 'connected';
     case 'stream_started':
-      return 'started the stream';
-    case 'stream_ended':
-      return 'ended the stream';
+      return 'started a stream';
     case 'check_in':
       return 'checked in to the camera';
     case 'check_out':
@@ -67,6 +65,12 @@ const getEventText = (type: TimelineEventType): string => {
       return 'was checked out by cleanup bot';
     case 'face_enrolled':
       return 'enrolled their face';
+    case 'cv_activity':
+      return 'completed a CV activity';
+    case 'other':
+      return 'performed an action';
+    default:
+      return 'performed an action';
   }
 };
 
@@ -329,8 +333,6 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
         return <Video className={iconClass} />;
       case 'stream_started':
         return <Radio className={`${iconClass} ${isOverlay ? '' : 'text-red-500'}`} />;
-      case 'stream_ended':
-        return <Signal className={`${iconClass} ${isOverlay ? '' : 'text-gray-400'}`} />;
       case 'check_in':
         return <User className={`${iconClass} ${isOverlay ? '' : 'text-green-500'}`} />;
       case 'check_out':
@@ -339,6 +341,8 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
         return <User className={`${iconClass} ${isOverlay ? '' : 'text-orange-500'}`} />;
       case 'face_enrolled':
         return <User className={`${iconClass} ${isOverlay ? '' : 'text-blue-500'}`} />;
+      case 'cv_activity':
+        return <Signal className={`${iconClass} ${isOverlay ? '' : 'text-purple-500'}`} />;
       default:
         return <User className={iconClass} />;
     }

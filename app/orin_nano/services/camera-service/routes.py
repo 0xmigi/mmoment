@@ -1792,6 +1792,26 @@ def register_routes(app):
             )
             pipe_auth_thread.start()
 
+            # Buffer CHECK_IN activity for the privacy-preserving timeline
+            # This creates an encrypted activity that all checked-in users can decrypt
+            try:
+                from services.timeline_activity_service import (
+                    get_timeline_activity_service,
+                )
+
+                timeline_service = get_timeline_activity_service()
+                timeline_service.buffer_checkin_activity(
+                    wallet_address=wallet_address,
+                    session_id=session_id,
+                    metadata={
+                        "timestamp": int(time.time() * 1000),
+                        "tx_signature": transaction_signature,
+                    },
+                )
+            except Exception as e:
+                # Non-fatal - check-in succeeds even if activity buffering fails
+                logger.warning(f"⚠️  [UNIFIED-CHECKIN] Failed to buffer check-in activity: {e}")
+
             logger.info(
                 f"🎉 [UNIFIED-CHECKIN] Complete! User {resolved_display_name} successfully checked in"
             )

@@ -286,6 +286,28 @@ class BlockchainSessionSync:
                 session = self.session_service.get_session_by_wallet(wallet_address)
                 if session:
                     session_id = session['session_id']
+
+                    # Buffer CHECK_OUT activity BEFORE ending the session
+                    # This creates an encrypted activity for the privacy-preserving timeline
+                    try:
+                        from services.timeline_activity_service import (
+                            get_timeline_activity_service,
+                        )
+
+                        timeline_service = get_timeline_activity_service()
+                        duration_seconds = stats.get('duration') if stats else None
+                        timeline_service.buffer_checkout_activity(
+                            wallet_address=wallet_address,
+                            session_id=session_id,
+                            duration_seconds=duration_seconds,
+                            metadata={
+                                "timestamp": int(time.time() * 1000),
+                            },
+                        )
+                    except Exception as e:
+                        # Non-fatal - checkout continues even if activity buffering fails
+                        logger.warning(f"⚠️  Failed to buffer check-out activity: {e}")
+
                     success = self.session_service.end_session(session_id, wallet_address)
                     if success:
                         logger.info(f"✅ Ended camera session for {wallet_address}")

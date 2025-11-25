@@ -132,7 +132,7 @@ export function SessionCard({ session, defaultExpanded = false }: SessionCardPro
   const uniqueTypes = new Set(session.activityTypes);
   const hasPhotos = uniqueTypes.has(ACTIVITY_TYPE.PHOTO);
   const hasVideos = uniqueTypes.has(ACTIVITY_TYPE.VIDEO);
-  const hasStreams = uniqueTypes.has(ACTIVITY_TYPE.STREAM_START);
+  const hasStreams = uniqueTypes.has(ACTIVITY_TYPE.STREAM);
 
   // Format camera ID for display
   const shortCameraId = session.cameraId.slice(0, 8) + '...' + session.cameraId.slice(-4);
