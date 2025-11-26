@@ -144,6 +144,9 @@ app/orin_nano/camera_service_new/test_results/
 
 # Credentials
 *.json
+!app/backend/src/idl.json
+!app/web/src/anchor/*.json
+!target/idl/*.json
 *.pem
 *.key
 
