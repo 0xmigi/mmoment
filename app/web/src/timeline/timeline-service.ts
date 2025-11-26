@@ -32,13 +32,14 @@ class TimelineService {
   private forceFallback: boolean = false; // Flag to use local storage only when socket consistently fails
 
   constructor() {
-    // Try to restore events from local storage
-    this.restoreFromLocalStorage();
+    // Don't restore from localStorage - old session events shouldn't appear in live timeline
+    // Historical events belong in Activities view, not the live camera timeline
+    // this.restoreFromLocalStorage();
 
     // Initialize the socket connection
     this.initializeSocket();
-    
-    // Setup heartbeat for Chrome mobile
+
+    // Setup heartbeat for Chrome mobile (for connection health only)
     if (this.isChromeOnMobile) {
       this.setupHeartbeat();
     }
@@ -49,19 +50,18 @@ class TimelineService {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
     }
-    
-    // Set up heartbeat to periodically check connection and refresh in Chrome mobile
+
+    // Set up heartbeat to check connection health in Chrome mobile
+    // Don't request recent events - they include old sessions from backend memory
     this.heartbeatInterval = setInterval(() => {
       if (document.visibilityState === 'visible' && this.currentCameraId) {
-        if (this.isConnected) {
-          // Request recent events to force synchronization in Chrome mobile
-          this.requestRecentEvents();
-        } else if (this.forceFallback) {
-          // If in fallback mode, just check if we can reconnect
+        if (!this.isConnected || this.forceFallback) {
+          // If disconnected or in fallback mode, try to reconnect
           this.tryReconnect();
         }
+        // Don't request recent events - live timeline should only show current session
       }
-    }, 30000); // Every 30 seconds (reduced from 10s to prevent excessive polling)
+    }, 30000); // Every 30 seconds
   }
 
   private tryReconnect() {
@@ -105,17 +105,11 @@ class TimelineService {
         this.connectionErrorCount = 0;
         this.forceFallback = false;
         console.log('[Timeline] Connected to timeline service');
-        
+
         if (this.currentCameraId) {
           this.joinCamera(this.currentCameraId);
-          
-          // Check if we have any pending local events to sync
-          const pendingEvents = this.events.filter(e => e.id.startsWith('local-'));
-          if (pendingEvents.length > 0) {
-            console.log(`[Timeline] Syncing ${pendingEvents.length} pending local events`);
-            // We'll just request recent events which should include server-generated IDs
-            this.requestRecentEvents();
-          }
+          // Don't request recent events - they include old sessions
+          // Live timeline should only show events from current session going forward
         }
       });
 

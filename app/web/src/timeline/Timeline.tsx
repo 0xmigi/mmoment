@@ -235,10 +235,12 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   }, [initialEvents]);
 
   // Timeline service integration (skip if using initialEvents for historical display)
+  // Note: We intentionally exclude enrichEventWithUserInfo from deps to avoid infinite loops
+  // Profile enrichment happens separately via displayEvents useMemo
   useEffect(() => {
     if (!cameraId || initialEvents) return;
 
-    // Join the camera room
+    // Join the camera room (only once per cameraId)
     timelineService.joinCamera(cameraId);
 
     // Initialize with existing events from the service (for when navigating back)
@@ -246,31 +248,30 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     const existingState = timelineService.getState();
     if (existingState.events.length > 0 && existingState.currentCameraId === cameraId) {
       console.log(`[Timeline] Restoring ${existingState.events.length} existing events for camera ${cameraId}`);
-      setEvents(existingState.events.map(enrichEventWithUserInfo));
+      setEvents(existingState.events);
     }
 
     // Subscribe to timeline events
     const unsubscribe = timelineService.subscribe((event) => {
       console.log('Timeline event received:', event);
-      const enrichedEvent = enrichEventWithUserInfo(event);
       setEvents(prev => {
         // Find the correct position to insert the event (newest first)
         const index = prev.findIndex(e => e.timestamp < event.timestamp);
         const newEvents = [...prev];
-        
+
         // Remove any existing event with the same ID
         const existingIndex = newEvents.findIndex(e => e.id === event.id);
         if (existingIndex !== -1) {
           newEvents.splice(existingIndex, 1);
         }
-        
+
         // Insert the event at the correct position
         if (index === -1) {
-          newEvents.push(enrichedEvent);
+          newEvents.push(event);
         } else {
-          newEvents.splice(index, 0, enrichedEvent);
+          newEvents.splice(index, 0, event);
         }
-        
+
         // Keep only the last 100 events
         return newEvents.slice(0, 100);
       });
@@ -284,10 +285,6 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
         },
         refreshTimeline: () => {
           timelineService.refreshEvents();
-          // Also request from server if connected
-          if (cameraId) {
-            timelineService.joinCamera(cameraId);
-          }
         }
       };
     }
@@ -295,7 +292,8 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     return () => {
       unsubscribe();
     };
-  }, [cameraId, enrichEventWithUserInfo]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraId, initialEvents]);
 
   // Filter events based on selected filter
   const filteredEvents = useMemo(() => {
