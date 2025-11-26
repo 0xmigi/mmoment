@@ -598,11 +598,13 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         // Don't fail the overall check-in if this fails
       }
 
+      // Clear old session events before starting new session
+      // This prevents ghost checkouts from previous sessions appearing
+      timelineService.clearForNewSession();
+
       setIsCheckedIn(true);
 
-      // NOTE: Check-in timeline event is now created by Jetson via buffer_checkin_activity()
-      // Refresh the timeline to get the new encrypted activity
-      timelineService.refreshEvents();
+      // NOTE: Check-in timeline event will arrive via real-time WebSocket from Jetson
 
       // Refresh active users count
       await fetchActiveUsersForCamera();
@@ -817,6 +819,9 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
 
       setIsCheckedIn(false);
 
+      // End the timeline session - clears localStorage so old events won't appear on next visit
+      timelineService.endSession();
+
       // Refresh active users count
       await fetchActiveUsersForCamera();
 
@@ -824,7 +829,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       if (onCheckStatusChange) {
         onCheckStatusChange(false);
       }
-      
+
     } catch (error) {
       console.error('Check-out error:', error);
       

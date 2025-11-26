@@ -6,6 +6,7 @@ import { CONFIG, timelineConfig } from '../core/config';
 // Key for local storage to persist events
 const TIMELINE_EVENTS_STORAGE_KEY = 'timeline_events';
 const TIMELINE_CAMERA_ID_KEY = 'timeline_camera_id';
+const TIMELINE_SESSION_START_KEY = 'timeline_session_start'; // Timestamp when current session started
 
 // Helper to detect Chrome on mobile
 const isChromeOnMobile = () => {
@@ -32,9 +33,30 @@ class TimelineService {
   private forceFallback: boolean = false; // Flag to use local storage only when socket consistently fails
 
   constructor() {
-    // Don't restore from localStorage - old session events shouldn't appear in live timeline
-    // Historical events belong in Activities view, not the live camera timeline
-    // this.restoreFromLocalStorage();
+    // Restore camera ID from localStorage so we can detect same-camera refresh
+    const storedCameraId = localStorage.getItem(TIMELINE_CAMERA_ID_KEY);
+    const sessionStartStr = localStorage.getItem(TIMELINE_SESSION_START_KEY);
+    const sessionStart = sessionStartStr ? parseInt(sessionStartStr, 10) : null;
+
+    if (storedCameraId && sessionStart) {
+      this.currentCameraId = storedCameraId;
+      // Restore events for this camera, but ONLY events from current session
+      const storedEvents = localStorage.getItem(`${TIMELINE_EVENTS_STORAGE_KEY}_${storedCameraId}`);
+      if (storedEvents) {
+        try {
+          const allEvents: TimelineEvent[] = JSON.parse(storedEvents);
+          // Filter to only events from AFTER the session started (prevents ghost checkouts)
+          this.events = allEvents.filter(e => e.timestamp >= sessionStart);
+          console.log(`[Timeline] Restored ${this.events.length}/${allEvents.length} events for current session (started ${new Date(sessionStart).toLocaleTimeString()})`);
+        } catch (e) {
+          console.error('[Timeline] Failed to parse stored events:', e);
+          this.events = [];
+        }
+      }
+    } else {
+      // No active session - don't restore any events
+      console.log('[Timeline] No active session found, starting fresh');
+    }
 
     // Initialize the socket connection
     this.initializeSocket();
@@ -383,6 +405,30 @@ class TimelineService {
     // Don't request recent events - they include old sessions from backend memory
     // Current session events come through real-time WebSocket subscription
     console.log('[Timeline] refreshEvents disabled - live timeline only shows current session');
+  }
+
+  // Clear all events and start a fresh session
+  // Call this on check-in to remove any old session events
+  clearForNewSession() {
+    const now = Date.now();
+    console.log('[Timeline] Starting new session at', new Date(now).toLocaleTimeString());
+    this.events = [];
+    // Set session start timestamp - only events after this will be restored on refresh
+    localStorage.setItem(TIMELINE_SESSION_START_KEY, now.toString());
+    if (this.currentCameraId) {
+      localStorage.removeItem(`${TIMELINE_EVENTS_STORAGE_KEY}_${this.currentCameraId}`);
+    }
+  }
+
+  // End session - clears session marker so old events won't be restored
+  // Call this on checkout
+  endSession() {
+    console.log('[Timeline] Ending session');
+    localStorage.removeItem(TIMELINE_SESSION_START_KEY);
+    if (this.currentCameraId) {
+      localStorage.removeItem(`${TIMELINE_EVENTS_STORAGE_KEY}_${this.currentCameraId}`);
+    }
+    this.events = [];
   }
 
   // For debugging: create a test event
