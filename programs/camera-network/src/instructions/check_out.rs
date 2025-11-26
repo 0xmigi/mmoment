@@ -18,7 +18,7 @@ pub struct CheckOut<'info> {
     #[account(
         init_if_needed,
         payer = closer,
-        space = 8 + 32 + 4 + 8 + 1 + 10240,  // Start with space for ~30 activities, can be reallocated
+        space = 8 + 32 + 4 + 8 + 1 + 10187,  // 10240 bytes total (Solana's max for init_if_needed in CPI)
         seeds = [b"camera-timeline", camera.key().as_ref()],
         bump
     )]

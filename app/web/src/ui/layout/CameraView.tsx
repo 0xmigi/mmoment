@@ -1092,17 +1092,17 @@ export function CameraView() {
 
           if (results.length > 0) {
             updateToast("success", "Photo captured and uploaded to IPFS");
-            addTimelineEvent("photo_captured");
+            // Note: Timeline event is handled by Jetson's timeline_activity_service
+            // via buffer_photo_activity() - no frontend emission needed
             cameraStatus.setOnline(false);
           } else {
             updateToast("success", "Photo captured (upload to IPFS failed)");
-            addTimelineEvent("photo_captured");
           }
         } catch (uploadError) {
           updateToast("success", "Photo captured (upload to IPFS failed)");
-          addTimelineEvent("photo_captured");
         }
 
+        // Refresh timeline to show event buffered by Jetson
         if (timelineRef.current?.refreshEvents) {
           timelineRef.current?.refreshEvents();
         }
@@ -1111,10 +1111,8 @@ export function CameraView() {
           "error",
           `Failed to capture photo: ${response.error || "Unknown error"}`
         );
-        addTimelineEvent("photo_captured");
-        if (timelineRef.current?.refreshEvents) {
-          timelineRef.current?.refreshEvents();
-        }
+        // Note: Don't emit "photo_captured" when capture FAILED - the photo wasn't captured!
+        // Jetson only buffers activities for successful captures
       }
     } catch (error) {
       updateToast(

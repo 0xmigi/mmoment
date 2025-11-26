@@ -2215,12 +2215,16 @@ app.post("/api/session/activity", async (req, res) => {
     const nonceBuffer = Buffer.from(nonce, 'base64');
     const accessGrantsBuffer = Buffer.from(JSON.stringify(accessGrants), 'utf-8');
 
+    // Normalize timestamp: detect seconds vs milliseconds
+    // Timestamps in seconds are < 10000000000 (year 2286 in seconds, but year 1970 + 4 months in ms)
+    const normalizedTimestamp = timestamp < 10000000000 ? timestamp * 1000 : timestamp;
+
     // Save to database
     const activity: SessionActivityBuffer = {
       sessionId,
       cameraId,
       userPubkey,
-      timestamp,
+      timestamp: normalizedTimestamp,
       activityType,
       encryptedContent: encryptedContentBuffer,
       nonce: nonceBuffer,
@@ -2248,13 +2252,13 @@ app.post("/api/session/activity", async (req, res) => {
 
     // Create timeline event for real-time display
     const timelineEvent = {
-      id: `activity-${sessionId}-${timestamp}`,
+      id: `activity-${sessionId}-${normalizedTimestamp}`,
       type: eventType,
       user: {
         address: userPubkey,
         username: userPubkey.slice(0, 8) + '...'
       },
-      timestamp: timestamp,
+      timestamp: normalizedTimestamp,
       cameraId: cameraId,
       // Include encrypted data reference for decryption
       encryptedActivity: {

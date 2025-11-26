@@ -1,9 +1,10 @@
 // Session Cleanup Cron Job
 // Automatically checks out expired sessions and collects rent as reward
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
-import { Program, AnchorProvider, Wallet } from '@coral-xyz/anchor';
+import { Program, AnchorProvider, Wallet, BN } from '@coral-xyz/anchor';
 import { IDL } from './idl';
 import { Server } from 'socket.io';
+import { getSessionActivities, clearSessionActivities } from './database';
 
 const CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const PROGRAM_ID = new PublicKey('E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL');
@@ -145,9 +146,37 @@ async function runCleanup() {
           console.log(`      Expired at: ${new Date(session.autoCheckoutAt.toNumber() * 1000).toISOString()}`);
 
           try {
-            // Build check-out transaction
+            // Fetch buffered activities for this session from the database
+            const sessionPdaString = sessionPubkey.toString();
+            let activitiesForCheckout: any[] = [];
+
+            try {
+              const bufferedActivities = await getSessionActivities(sessionPdaString);
+
+              if (bufferedActivities.length > 0) {
+                console.log(`      📦 Found ${bufferedActivities.length} buffered activities to commit`);
+
+                // Convert to Solana ActivityData format
+                activitiesForCheckout = bufferedActivities.map(a => ({
+                  timestamp: new BN(a.timestamp),
+                  activityType: a.activityType,
+                  encryptedContent: a.encryptedContent, // Already a Buffer
+                  nonce: Array.from(a.nonce), // Convert Buffer to u8 array
+                  accessGrants: JSON.parse(a.accessGrants.toString()).map(
+                    (g: string) => Array.from(Buffer.from(g, 'base64'))
+                  )
+                }));
+              } else {
+                console.log(`      📭 No buffered activities for this session`);
+              }
+            } catch (fetchErr: any) {
+              console.log(`      ⚠️  Could not fetch buffered activities: ${fetchErr.message}`);
+              // Continue with empty activities - session cleanup is more important
+            }
+
+            // Build check-out transaction with activities
             const checkOutTx = await program.methods
-              .checkOut()
+              .checkOut(activitiesForCheckout) // Include buffered activities for on-chain commit!
               .accounts({
                 closer: cronBotKeypair.publicKey,
                 camera: session.camera,
@@ -169,6 +198,17 @@ async function runCleanup() {
             cleanedCount++;
             console.log(`      ✅ Cleaned up! Tx: ${signature.slice(0, 8)}...`);
             console.log(`         Rent collected by cron bot`);
+
+            // Clear the activity buffer after successful on-chain commit
+            if (activitiesForCheckout.length > 0) {
+              try {
+                const cleared = await clearSessionActivities(sessionPdaString);
+                console.log(`         🗑️  Cleared ${cleared} buffered activities from database`);
+              } catch (clearErr: any) {
+                console.error(`         ⚠️  Failed to clear activity buffer: ${clearErr.message}`);
+                // Non-fatal: activities committed on-chain, just orphaned in DB (will be cleaned by 7-day cleanup)
+              }
+            }
 
             // Add timeline event for auto-checkout using the shared helper function
             if (io && addTimelineEventFn) {

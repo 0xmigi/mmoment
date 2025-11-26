@@ -4,7 +4,7 @@ import { Dialog } from '@headlessui/react';
 import { X, ExternalLink, Camera, User } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
-import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, ComputeBudgetProgram } from '@solana/web3.js';
 import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import { IDL } from '../anchor/idl';
 import { CAMERA_ACTIVATION_PROGRAM_ID } from '../anchor/setup';
@@ -437,15 +437,23 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         if (sessionAccountInfo) {
           console.log('[CameraModal] Existing session found, checking out first');
 
+        // Derive cameraTimeline PDA for checkout
+        const [cameraTimelinePda] = PublicKey.findProgramAddressSync(
+          [Buffer.from('camera-timeline'), cameraPublicKey.toBuffer()],
+          CAMERA_ACTIVATION_PROGRAM_ID
+        );
+
         // Check out existing session
         const checkOutIx = await program.methods
-          .checkOut()
+          .checkOut([]) // Empty activities array
           .accounts({
             closer: userPublicKey,
             camera: cameraPublicKey,
+            cameraTimeline: cameraTimelinePda,
             session: sessionPda,
             sessionUser: userPublicKey,
             rentDestination: userPublicKey, // Rent goes back to user
+            systemProgram: SystemProgram.programId,
           })
           .instruction();
 
@@ -557,12 +565,15 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
 
       // 🎉 NEW: Use unified check-in endpoint - no more race conditions!
       // This triggers immediate blockchain sync and recognition token loading
+      // CRITICAL: Pass sessionPda so Jetson uses the Solana PDA for activity buffering
       console.log('🚀 [CameraModal] Calling unified check-in endpoint...');
       console.log('🔍 [CameraModal] primaryProfile:', primaryProfile);
       console.log('🔍 [CameraModal] displayName:', primaryProfile?.displayName, 'username:', primaryProfile?.username);
+      console.log('🔍 [CameraModal] sessionPda:', sessionPda.toString());
       try {
         const checkinResult = await unifiedCameraService.checkin(camera.id, {
           wallet_address: primaryWallet.address,
+          session_pda: sessionPda.toString(),  // CRITICAL: Solana session PDA for activity buffering
           display_name: primaryProfile?.displayName,
           username: primaryProfile?.username,
           transaction_signature: signature
@@ -663,16 +674,54 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         checkInTime: new Date(sessionAccount.checkInTime.toNumber() * 1000).toISOString(),
       });
 
-      // Build check-out transaction function
+      // Fetch buffered activities from backend using Solana session PDA
+      const sessionPdaString = sessionPda.toString();
+      let activitiesForCheckout: any[] = [];
+
+      try {
+        console.log(`[CameraModal] Fetching buffered activities for session: ${sessionPdaString.slice(0, 16)}...`);
+        const activitiesResponse = await fetch(`${CONFIG.BACKEND_URL}/api/session/activities/${sessionPdaString}`);
+        const activitiesData = await activitiesResponse.json();
+
+        if (activitiesData.success && activitiesData.activities?.length > 0) {
+          console.log(`[CameraModal] Found ${activitiesData.activities.length} buffered activities to commit on-chain`);
+
+          // Convert backend activities to Solana ActivityData format
+          activitiesForCheckout = activitiesData.activities.map((a: any) => ({
+            timestamp: new BN(a.timestamp),
+            activityType: a.activityType,
+            encryptedContent: Buffer.from(a.encryptedContent, 'base64'),
+            nonce: Array.from(Buffer.from(a.nonce, 'base64')),
+            accessGrants: a.accessGrants.map((g: string) => Array.from(Buffer.from(g, 'base64')))
+          }));
+        } else {
+          console.log('[CameraModal] No buffered activities found for this session');
+        }
+      } catch (fetchErr) {
+        console.warn('[CameraModal] Failed to fetch buffered activities, proceeding with empty array:', fetchErr);
+        // Continue with empty activities - don't fail checkout
+      }
+
+      // Build check-out transaction function with activities
       const buildCheckOutTx = async () => {
+        // Derive cameraTimeline PDA
+        const [cameraTimelinePda] = PublicKey.findProgramAddressSync(
+          [Buffer.from('camera-timeline'), cameraPublicKey.toBuffer()],
+          CAMERA_ACTIVATION_PROGRAM_ID
+        );
+
+        console.log(`[CameraModal] Building checkout with ${activitiesForCheckout.length} activities`);
+
         const ix = await program.methods
-          .checkOut()
+          .checkOut(activitiesForCheckout) // Include buffered activities for on-chain commit!
           .accounts({
             closer: userPublicKey,
             camera: cameraPublicKey,
+            cameraTimeline: cameraTimelinePda,
             session: sessionPda,
             sessionUser: sessionAccount.user as PublicKey,  // Use actual session user
             rentDestination: userPublicKey, // Rent goes back to user on self-checkout
+            systemProgram: SystemProgram.programId,
           })
           .instruction();
 
@@ -723,6 +772,18 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         signature = await connection.sendRawTransaction(signedTx.serialize());
         await connection.confirmTransaction(signature, 'confirmed');
         console.log('✅ [CameraModal] Check-out transaction confirmed successfully:', signature);
+      }
+
+      // Clear the buffered activities after successful checkout
+      if (activitiesForCheckout.length > 0) {
+        try {
+          console.log(`[CameraModal] Clearing ${activitiesForCheckout.length} buffered activities from backend...`);
+          await fetch(`${CONFIG.BACKEND_URL}/api/session/activities/${sessionPdaString}`, { method: 'DELETE' });
+          console.log('[CameraModal] Buffered activities cleared successfully');
+        } catch (clearErr) {
+          console.warn('[CameraModal] Failed to clear buffered activities:', clearErr);
+          // Non-fatal - activities were already committed on-chain
+        }
       }
 
       // Remove user profile from camera after successful check-out

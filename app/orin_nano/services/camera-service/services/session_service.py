@@ -94,15 +94,16 @@ class SessionService:
         
         logger.info("SessionService initialized")
     
-    def create_session(self, wallet_address: str, user_profile: Dict = None) -> Dict:
+    def create_session(self, wallet_address: str, user_profile: Dict = None, session_pda: str = None) -> Dict:
         """
         Create a new session for the specified wallet address.
         If a session already exists for this wallet, it will be replaced.
-        
+
         Args:
             wallet_address: The wallet address to create a session for
             user_profile: Optional user profile information (display_name, username, etc.)
-            
+            session_pda: Optional Solana session PDA - REQUIRED for activity buffering to work correctly
+
         Returns:
             Dict with session information
         """
@@ -150,15 +151,19 @@ class SessionService:
                         del self._sessions[oldest_session_id]
                         del self._wallet_sessions[oldest_session.wallet_address]
             
-            # Create a new session
-            session = Session(wallet_address, user_profile=user_profile)
-            
+            # Create a new session with Solana PDA if provided
+            # If no session_pda provided, falls back to random UUID (but activity buffering won't work!)
+            if not session_pda:
+                logger.warning(f"⚠️  No session_pda provided for {wallet_address[:8]}... - activity buffering may not work correctly")
+            session = Session(wallet_address, session_id=session_pda, user_profile=user_profile)
+
             # Store the session
             self._sessions[session.session_id] = session
             self._wallet_sessions[wallet_address] = session.session_id
-            
+
             display_name = user_profile.get('display_name') if user_profile else None
-            logger.info(f"Created new session {session.session_id} for wallet {wallet_address} ({display_name or 'no display name'})")
+            pda_info = f"PDA={session_pda[:16]}..." if session_pda else "NO PDA (random UUID)"
+            logger.info(f"Created new session {session.session_id[:16]}... for wallet {wallet_address[:8]}... ({display_name or 'no display name'}) - {pda_info}")
             
             return {
                 "success": True,

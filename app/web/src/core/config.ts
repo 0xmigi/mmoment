@@ -239,17 +239,16 @@ export const CONFIG = {
   TIMELINE_WS_URL: getTimelineWebSocketUrl(),
   CAMERA_PDA: import.meta.env.VITE_CAMERA_PDA || 'EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA',
   // Jetson camera PDA
-  JETSON_CAMERA_PDA: 'FZ4DgqxLCNpLp1vyvvSZ5A24uyBEUdavvkm5qFE6D54t',
+  JETSON_CAMERA_PDA: 'EjKtdbaugXikzxy4ALGxfJ7JQ8GCobpmGJFsFnkqCiQA',
   isUsingDifferentLocalPorts: isUsingDifferentLocalPorts(),
   
   // Known camera configurations with PDA-based URLs
   KNOWN_CAMERAS: {
-    // Jetson Orin Nano
-    'H1WoNBkWJgNcePeyr65xEEwjFgGDboSpL5UbJan5VyhG': {
+    // Jetson Orin Nano (new PDA)
+    'EjKtdbaugXikzxy4ALGxfJ7JQ8GCobpmGJFsFnkqCiQA': {
       type: 'jetson',
       name: 'Jetson Orin Nano Camera',
       description: 'NVIDIA Jetson Orin Nano with advanced computer vision',
-      // Legacy URL for backward compatibility
       legacyUrl: 'https://jetson.mmoment.xyz'
     },
     // Pi5 Camera

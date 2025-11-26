@@ -874,22 +874,29 @@ export function SolDevNetDebug() {
       const connection = await primaryWallet.getConnection();
         
       try {
-        // MATCH THE EXACT APPROACH FROM THE JAVASCRIPT TEST SCRIPTS
-        // Create a method call like in the test script
-        const methodCall = program.methods.checkOut();
-        
-        // Define the accounts like in the test script
+        // Derive cameraTimeline PDA
+        const [cameraTimelinePda] = PublicKey.findProgramAddressSync(
+          [Buffer.from('camera-timeline'), cameraPublicKey.toBuffer()],
+          CAMERA_ACTIVATION_PROGRAM_ID
+        );
+
+        // Create a method call with empty activities array
+        const methodCall = program.methods.checkOut([]);
+
+        // Define the accounts
         const accountsObj: Record<string, PublicKey> = {
           closer: userPublicKey,
           camera: cameraPublicKey,
+          cameraTimeline: cameraTimelinePda,
           session: sessionPda,
           sessionUser: userPublicKey,
           rentDestination: userPublicKey, // Rent goes back to user
+          systemProgram: SystemProgram.programId,
         };
-        
+
         console.log('Check-out accounts:', accountsObj);
-        
-        // Directly send the transaction using the RPC method like in the test scripts
+
+        // Directly send the transaction using the RPC method
         const tx = await methodCall
           .accounts(accountsObj)
         .rpc();

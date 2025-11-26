@@ -847,6 +847,7 @@ export async function getUserSessions(walletAddress: string, limit: number = 50)
             }
 
             // Step 3: Get activity stats for this time window (excluding check-in/check-out themselves)
+            // IMPORTANT: Filter by user_pubkey to only count THIS user's activities, not all users at the camera
             const activityStats = await new Promise<any>((res, rej) => {
               dbInstance.get(
                 `SELECT
@@ -854,10 +855,11 @@ export async function getUserSessions(walletAddress: string, limit: number = 50)
                    GROUP_CONCAT(DISTINCT activity_type) as activity_types
                  FROM session_activity_buffers
                  WHERE camera_id = ?
+                   AND user_pubkey = ?
                    AND timestamp >= ?
                    AND timestamp <= ?
                    AND activity_type NOT IN (?, ?)`,
-                [checkIn.camera_id, checkIn.timestamp, checkOut.timestamp, ACTIVITY_TYPE.CHECK_IN, ACTIVITY_TYPE.CHECK_OUT],
+                [checkIn.camera_id, walletAddress, checkIn.timestamp, checkOut.timestamp, ACTIVITY_TYPE.CHECK_IN, ACTIVITY_TYPE.CHECK_OUT],
                 (err, row) => err ? rej(err) : res(row || { activity_count: 0, activity_types: '' })
               );
             });

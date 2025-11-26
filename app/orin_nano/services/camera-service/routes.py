@@ -1700,9 +1700,19 @@ def register_routes(app):
         Called by frontend after on-chain check-in transaction confirms.
 
         No more race conditions - this triggers immediate blockchain sync and recognition token loading.
+
+        Expected body:
+        {
+            "wallet_address": "...",           # Required
+            "session_pda": "...",              # Required - Solana session PDA for activity buffering
+            "display_name": "...",             # Optional
+            "username": "...",                 # Optional
+            "transaction_signature": "..."     # Optional - for verification
+        }
         """
         data = request.json or {}
         wallet_address = data.get("wallet_address")
+        session_pda = data.get("session_pda")  # Solana session PDA - CRITICAL for activity buffering
         display_name = data.get("display_name")
         username = data.get("username")
         transaction_signature = data.get(
@@ -1711,7 +1721,7 @@ def register_routes(app):
 
         logger.info(f"🔍 [CHECKIN-DEBUG] Raw request data: {data}")
         logger.info(
-            f"🔍 [CHECKIN-DEBUG] display_name={display_name}, username={username}"
+            f"🔍 [CHECKIN-DEBUG] display_name={display_name}, username={username}, session_pda={session_pda[:16] if session_pda else 'NONE'}..."
         )
 
         if not wallet_address:
@@ -1719,9 +1729,15 @@ def register_routes(app):
                 {"success": False, "error": "Wallet address is required"}
             ), 400
 
+        # Warn if no session_pda provided - activity buffering won't work correctly!
+        if not session_pda:
+            logger.warning(
+                f"⚠️  [UNIFIED-CHECKIN] No session_pda provided for {wallet_address[:8]}... - activity buffering may not work!"
+            )
+
         camera_pda = get_camera_pda()
         logger.info(
-            f"🎉 [UNIFIED-CHECKIN] User {wallet_address[:8]}... checking in to camera {camera_pda[:8]}..."
+            f"🎉 [UNIFIED-CHECKIN] User {wallet_address[:8]}... checking in to camera {camera_pda[:8]}... with session_pda={session_pda[:16] if session_pda else 'NONE'}..."
         )
 
         try:
@@ -1752,10 +1768,22 @@ def register_routes(app):
                 f"✅ [UNIFIED-CHECKIN] Triggered check-in for {resolved_display_name}"
             )
 
-            # Get session info for response
+            # Create session with Solana PDA if provided
+            # This ensures activity buffering uses the correct session ID
             session_service = services["session"]
+            if session_pda:
+                # Create/update session with the Solana PDA as session_id
+                session_service.create_session(wallet_address, {
+                    "wallet_address": wallet_address,
+                    "display_name": display_name,
+                    "username": username,
+                }, session_pda=session_pda)
+                logger.info(f"✅ [UNIFIED-CHECKIN] Created session with Solana PDA: {session_pda[:16]}...")
+
+            # Get session info for response
             session = session_service.get_session_by_wallet(wallet_address)
-            session_id = session["session_id"] if session else "pending"
+            # Use Solana PDA as session_id for activity buffering (this is the critical part!)
+            session_id = session_pda if session_pda else (session["session_id"] if session else "pending")
 
             # Step 5: Pre-authorize Pipe storage session for fast uploads
             import asyncio
@@ -2649,9 +2677,18 @@ def register_routes(app):
         """
         Connect a wallet to the camera
         Creates a new session for the wallet
+
+        Expected body:
+        {
+            "wallet_address": "...",         # Required
+            "session_pda": "...",            # Required for activity buffering (Solana session PDA)
+            "display_name": "...",           # Optional
+            "username": "..."                # Optional
+        }
         """
         data = request.json or {}
         wallet_address = data.get("wallet_address")
+        session_pda = data.get("session_pda")  # Solana session PDA for activity buffering
         display_name = data.get("display_name")  # Optional display name from frontend
         username = data.get("username")  # Optional username from frontend
 
@@ -2667,10 +2704,11 @@ def register_routes(app):
             "username": username,
         }
 
-        # Create a session with user profile
+        # Create a session with user profile and Solana PDA
+        # The session_pda is critical for linking buffered activities to the on-chain session
         services = get_services()
         session_service = services["session"]
-        session_info = session_service.create_session(wallet_address, user_profile)
+        session_info = session_service.create_session(wallet_address, user_profile, session_pda=session_pda)
 
         # Store user profile in both face services for labeling
         face_service = services["face"]

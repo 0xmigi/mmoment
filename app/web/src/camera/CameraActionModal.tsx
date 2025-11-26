@@ -165,15 +165,23 @@ export const CameraActionModal = ({
         const existingSession = await program.account.userSession.fetch(sessionPda);
         console.log('[CameraActionModal] Existing session found, checking out first:', existingSession);
 
+        // Derive cameraTimeline PDA
+        const [cameraTimelinePda] = PublicKey.findProgramAddressSync(
+          [Buffer.from('camera-timeline'), cameraPublicKey.toBuffer()],
+          CAMERA_ACTIVATION_PROGRAM_ID
+        );
+
         // Check out existing session
         const checkOutIx = await program.methods
-          .checkOut()
+          .checkOut([]) // Empty activities array
           .accounts({
             closer: userPublicKey,
             camera: cameraPublicKey,
+            cameraTimeline: cameraTimelinePda,
             session: sessionPda,
             sessionUser: userPublicKey,
             rentDestination: userPublicKey, // Rent goes back to user
+            systemProgram: SystemProgram.programId,
           })
           .instruction();
 
@@ -328,15 +336,23 @@ export const CameraActionModal = ({
       // Fetch session to get the original user (for rent reclamation)
       const sessionAccount = await program.account.userSession.fetch(sessionPda) as any;
 
+      // Derive cameraTimeline PDA
+      const [cameraTimelinePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('camera-timeline'), cameraPublicKey.toBuffer()],
+        CAMERA_ACTIVATION_PROGRAM_ID
+      );
+
       // Create check-out instruction
       const ix = await program.methods
-        .checkOut()
+        .checkOut([]) // Empty activities array
         .accounts({
           closer: userPublicKey,  // Changed from 'user' to 'closer'
           camera: cameraPublicKey,
+          cameraTimeline: cameraTimelinePda,
           session: sessionPda,
           sessionUser: sessionAccount.user as PublicKey,  // Original session creator
           rentDestination: userPublicKey,  // Rent goes back to user
+          systemProgram: SystemProgram.programId,
         })
         .instruction();
 

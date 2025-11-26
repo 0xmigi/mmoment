@@ -774,9 +774,14 @@ export class UnifiedCameraService {
   /**
    * Unified check-in - handles everything in one atomic operation
    * Eliminates race conditions by triggering immediate blockchain sync
+   *
+   * @param cameraId - Camera PDA
+   * @param profile - Check-in profile with wallet, display name, etc.
+   * @param profile.session_pda - CRITICAL: Solana session PDA for activity buffering
    */
   public async checkin(cameraId: string, profile: {
     wallet_address: string;
+    session_pda?: string;  // Solana session PDA - CRITICAL for activity buffering
     display_name?: string;
     username?: string;
     transaction_signature?: string;

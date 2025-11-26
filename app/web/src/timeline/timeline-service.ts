@@ -61,7 +61,7 @@ class TimelineService {
           this.tryReconnect();
         }
       }
-    }, 10000); // Every 10 seconds
+    }, 30000); // Every 30 seconds (reduced from 10s to prevent excessive polling)
   }
 
   private tryReconnect() {
@@ -180,31 +180,28 @@ class TimelineService {
         
         if (relevantEvents.length === 0) return;
 
+        // Track existing event IDs BEFORE merging to identify truly new events
+        const existingEventIds = new Set(this.events.map(e => e.id));
+
         // For Chrome mobile, we want to be more careful with event merging
         // to ensure we don't miss any events
         const mergedEvents = this.mergeEvents(this.events, relevantEvents);
-        
+
         // Check if we have new events
         const hasNewEvents = mergedEvents.length !== this.events.length ||
           mergedEvents.some(e1 => !this.events.some(e2 => e2.id === e1.id));
-          
+
         // Update events if we have new ones
         if (hasNewEvents) {
           this.events = mergedEvents;
-          
+
           // Save to localStorage
           this.saveToLocalStorage();
-          
-          // Notify listeners of all new events
-          if (this.isChromeOnMobile) {
-            // For Chrome mobile, notify about all events to ensure consistency
-            this.events.forEach(event => this.notifyListeners(event));
-          } else {
-            // For other browsers, only notify about events that the client doesn't already have
-            relevantEvents
-              .filter(event => !this.events.some(e => e.id === event.id && e !== event))
-              .forEach(event => this.notifyListeners(event));
-          }
+
+          // Notify listeners only about NEW events (not previously seen)
+          // This fixes phantom timeline events on Chrome Mobile
+          const newEvents = relevantEvents.filter(e => !existingEventIds.has(e.id));
+          newEvents.forEach(event => this.notifyListeners(event));
         }
       });
 
@@ -377,20 +374,12 @@ class TimelineService {
 
   subscribe(callback: (event: TimelineEvent) => void) {
     this.listeners.add(callback);
-    
-    // Immediately send existing events to the new listener
-    if (this.events.length > 0) {
-      setTimeout(() => {
-        this.events.forEach(event => {
-          try {
-            callback(event);
-          } catch (error) {
-            console.error('Error sending existing events to new listener:', error);
-          }
-        });
-      }, 0);
-    }
-    
+
+    // Note: We do NOT send existing events to new listeners anymore.
+    // This was causing phantom timeline events (100+ duplicate notifications).
+    // Components should use getEvents() to fetch initial data, then
+    // subscribe() for LIVE updates only. Events arrive via Socket.IO.
+
     // Return unsubscribe function
     return () => {
       this.listeners.delete(callback);
