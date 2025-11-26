@@ -298,11 +298,13 @@ class TimelineService {
     console.log('Joining camera room:', cameraId);
 
     // If we're already in this camera, just rejoin the socket room to ensure we're connected
+    // Keep existing events (for when navigating away and back within current session)
     if (this.currentCameraId === cameraId) {
-      console.log('Already in this camera room, ensuring socket is joined');
+      console.log('Already in this camera room, keeping current session events');
       if (this.isConnected) {
         this.socket.emit('joinCamera', cameraId);
-        this.requestRecentEvents();
+        // Don't request recent events - they include old sessions from backend memory
+        // Current session events are already in this.events
       }
       return;
     }
@@ -312,38 +314,22 @@ class TimelineService {
       this.socket.emit('leaveCamera', this.currentCameraId);
     }
 
-    // Join new camera room
+    // Join new camera room - start fresh (no old session events)
+    // The live timeline should only show current session, not historical events
+    // Historical events belong in Activities view
     this.currentCameraId = cameraId;
     localStorage.setItem(TIMELINE_CAMERA_ID_KEY, cameraId);
 
-    // Try to restore events for this camera from localStorage
-    try {
-      const savedEventsString = localStorage.getItem(`${TIMELINE_EVENTS_STORAGE_KEY}_${cameraId}`);
-      if (savedEventsString) {
-        const savedEvents = JSON.parse(savedEventsString) as TimelineEvent[];
-        console.log(`Restored ${savedEvents.length} events from localStorage for camera ${cameraId}`);
-
-        // If we have saved events, use them and notify listeners
-        if (savedEvents.length > 0) {
-          this.events = savedEvents;
-          setTimeout(() => {
-            this.events.forEach(event => this.notifyListeners(event));
-          }, 0);
-        }
-      } else {
-        // Clear events if we don't have saved events for this camera
-        this.events = [];
-      }
-    } catch (error) {
-      console.error('Error restoring events for camera:', error);
-      this.events = [];
-    }
+    // Clear events - start fresh for new camera/session
+    // Don't restore from localStorage as those are from old sessions
+    this.events = [];
+    console.log('Starting fresh timeline for camera:', cameraId);
 
     // If we're connected, join the room
     if (this.isConnected) {
       this.socket.emit('joinCamera', cameraId);
-      // Request recent events for this camera
-      this.requestRecentEvents();
+      // Don't request recent events from backend - they include old sessions
+      // We only want real-time events from the current session going forward
     }
   }
 

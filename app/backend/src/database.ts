@@ -818,10 +818,19 @@ export async function getUserSessions(walletAddress: string, limit: number = 50)
         console.log(`[getUserSessions] Found ${checkIns.length} CHECK_IN activities for ${walletAddress.slice(0, 8)}...`);
 
         const sessions: SessionSummary[] = [];
+        const seenSessionIds = new Set<string>(); // Track already processed session IDs to prevent duplicates
 
         // Step 2: For each check-in, find the corresponding check-out
         for (const checkIn of checkIns) {
           if (sessions.length >= limit) break;
+
+          // Skip if we've already processed this session_id (prevents duplicate sessions)
+          const sessionId = checkIn.session_id || `${checkIn.id}`;
+          if (seenSessionIds.has(sessionId)) {
+            console.log(`[getUserSessions] Skipping duplicate session_id: ${sessionId.slice(0, 8)}...`);
+            continue;
+          }
+          seenSessionIds.add(sessionId);
 
           try {
             // Find the next CHECK_OUT activity for this user at this camera after the check_in
@@ -866,7 +875,7 @@ export async function getUserSessions(walletAddress: string, limit: number = 50)
 
             // Create session with session_id from check-in as sessionId
             sessions.push({
-              sessionId: checkIn.session_id || `${checkIn.id}`,
+              sessionId, // Use the already-derived sessionId
               cameraId: checkIn.camera_id,
               startTime: checkIn.timestamp,
               endTime: checkOut.timestamp,
@@ -876,7 +885,7 @@ export async function getUserSessions(walletAddress: string, limit: number = 50)
                 : []
             });
 
-            console.log(`[getUserSessions] Session: ${checkIn.session_id?.slice(0, 8) || checkIn.id}... at camera ${checkIn.camera_id.slice(0, 8)}... (${activityStats.activity_count} activities)`);
+            console.log(`[getUserSessions] Session: ${sessionId.slice(0, 8)}... at camera ${checkIn.camera_id.slice(0, 8)}... (${activityStats.activity_count} activities)`);
 
           } catch (error) {
             console.error('[getUserSessions] Error processing check-in:', error);

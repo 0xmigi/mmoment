@@ -241,6 +241,14 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     // Join the camera room
     timelineService.joinCamera(cameraId);
 
+    // Initialize with existing events from the service (for when navigating back)
+    // This fixes events disappearing when switching tabs and coming back
+    const existingState = timelineService.getState();
+    if (existingState.events.length > 0 && existingState.currentCameraId === cameraId) {
+      console.log(`[Timeline] Restoring ${existingState.events.length} existing events for camera ${cameraId}`);
+      setEvents(existingState.events.map(enrichEventWithUserInfo));
+    }
+
     // Subscribe to timeline events
     const unsubscribe = timelineService.subscribe((event) => {
       console.log('Timeline event received:', event);
