@@ -155,7 +155,11 @@ class TimelineActivityService:
         return f"{self._camera_id}-{int(time.time() // 86400)}"
 
     def _buffer_activity(
-        self, wallet_address: str, activity_content: Dict[str, Any], activity_type: int
+        self,
+        wallet_address: str,
+        activity_content: Dict[str, Any],
+        activity_type: int,
+        transaction_signature: Optional[str] = None,
     ) -> bool:
         """
         Internal method to encrypt and buffer an activity.
@@ -164,6 +168,7 @@ class TimelineActivityService:
             wallet_address: User who triggered the activity
             activity_content: Activity data to encrypt
             activity_type: Activity type enum
+            transaction_signature: Optional Solana tx signature for Solscan link
 
         Returns:
             True if buffered successfully
@@ -198,6 +203,7 @@ class TimelineActivityService:
                 camera_id=self._camera_id,
                 user_pubkey=wallet_address,
                 encrypted_activity=encrypted,
+                transaction_signature=transaction_signature,
             )
 
             logger.info(
@@ -231,17 +237,23 @@ class TimelineActivityService:
         """
         metadata = metadata or {}
 
+        # Extract transaction signature for Solscan link (passed separately, not encrypted)
+        tx_signature = metadata.get("tx_signature")
+
         activity_content = {
             "type": "check_in",
             "session_id": session_id,
             "camera_id": self._camera_id,
             "user": wallet_address,
             "timestamp": metadata.get("timestamp", int(time.time() * 1000)),
-            "tx_signature": metadata.get("tx_signature"),
+            "tx_signature": tx_signature,
         }
 
         success = self._buffer_activity(
-            wallet_address, activity_content, ACTIVITY_TYPE_CHECK_IN
+            wallet_address,
+            activity_content,
+            ACTIVITY_TYPE_CHECK_IN,
+            transaction_signature=tx_signature,  # Pass separately for timeline event
         )
 
         if success:
@@ -274,6 +286,9 @@ class TimelineActivityService:
         """
         metadata = metadata or {}
 
+        # Extract transaction signature for Solscan link (passed separately, not encrypted)
+        tx_signature = metadata.get("tx_signature")
+
         activity_content = {
             "type": "check_out",
             "session_id": session_id,
@@ -281,12 +296,15 @@ class TimelineActivityService:
             "user": wallet_address,
             "timestamp": metadata.get("timestamp", int(time.time() * 1000)),
             "duration_seconds": duration_seconds,
-            "tx_signature": metadata.get("tx_signature"),
+            "tx_signature": tx_signature,
             "activity_count": metadata.get("activity_count"),
         }
 
         success = self._buffer_activity(
-            wallet_address, activity_content, ACTIVITY_TYPE_CHECK_OUT
+            wallet_address,
+            activity_content,
+            ACTIVITY_TYPE_CHECK_OUT,
+            transaction_signature=tx_signature,  # Pass separately for timeline event
         )
 
         if success:

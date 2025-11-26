@@ -2218,7 +2218,8 @@ app.delete("/api/profile/:walletAddress", async (req, res) => {
 // Receive encrypted activity from Jetson (called during active session)
 app.post("/api/session/activity", async (req, res) => {
   try {
-    const { sessionId, cameraId, userPubkey, timestamp, activityType, encryptedContent, nonce, accessGrants } = req.body;
+    // transactionSignature is optional - included for check_in/check_out to show Solscan link
+    const { sessionId, cameraId, userPubkey, timestamp, activityType, encryptedContent, nonce, accessGrants, transactionSignature } = req.body;
 
     // Validate required fields
     if (!sessionId || !cameraId || !userPubkey || timestamp === undefined || activityType === undefined || !encryptedContent || !nonce || !accessGrants) {
@@ -2269,7 +2270,7 @@ app.post("/api/session/activity", async (req, res) => {
     const eventType = activityTypeToEventType[activityType] || 'photo_captured';
 
     // Create timeline event for real-time display
-    const timelineEvent = {
+    const timelineEvent: Record<string, any> = {
       id: `activity-${sessionId}-${normalizedTimestamp}`,
       type: eventType,
       user: {
@@ -2285,6 +2286,12 @@ app.post("/api/session/activity", async (req, res) => {
         accessGrants
       }
     };
+
+    // Include transaction signature for check_in/check_out events (for Solscan link)
+    if (transactionSignature) {
+      timelineEvent.transactionId = transactionSignature;
+      console.log(`   📝 Including transaction signature: ${transactionSignature.slice(0, 8)}...`);
+    }
 
     // Broadcast to camera room
     console.log(`📤 Broadcasting encrypted activity as timeline event to camera ${cameraId}`);

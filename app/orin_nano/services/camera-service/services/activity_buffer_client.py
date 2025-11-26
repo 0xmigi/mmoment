@@ -133,7 +133,8 @@ class ActivityBufferClient:
         session_id: str,
         camera_id: str,
         user_pubkey: str,
-        encrypted_activity: Dict[str, Any]
+        encrypted_activity: Dict[str, Any],
+        transaction_signature: Optional[str] = None
     ) -> bool:
         """
         Queue an encrypted activity for buffering.
@@ -151,6 +152,7 @@ class ActivityBufferClient:
                 - accessGrants: list of {pubkey, encryptedKey}
                 - activityType: activity type enum
                 - timestamp: millisecond timestamp
+            transaction_signature: Optional Solana transaction signature for Solscan link
 
         Returns:
             True if queued successfully
@@ -167,6 +169,10 @@ class ActivityBufferClient:
                 'nonce': encrypted_activity.get('nonce', ''),
                 'accessGrants': encrypted_activity.get('accessGrants', [])
             }
+
+            # Include transaction signature if provided (for check_in/check_out Solscan links)
+            if transaction_signature:
+                activity['transactionSignature'] = transaction_signature
 
             # Queue for async sending
             self._queue.put(activity)

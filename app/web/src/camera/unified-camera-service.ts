@@ -842,6 +842,68 @@ export class UnifiedCameraService {
   }
 
   /**
+   * Notify Jetson about checkout - passes transaction signature for Solscan link
+   *
+   * @param cameraId - Camera PDA
+   * @param data - Checkout data with wallet address and transaction signature
+   */
+  public async checkout(cameraId: string, data: {
+    wallet_address: string;
+    transaction_signature: string;
+  }): Promise<CameraActionResponse<{
+    wallet_address: string;
+    session_id: string;
+    message: string;
+  }>> {
+    try {
+      this.log(`[DEBUG] Checkout notification to camera: ${cameraId}`, data);
+
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        this.log(`[ERROR] Camera not found: ${cameraId}`);
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const apiUrl = (camera as any).apiUrl;
+      const url = `${apiUrl}/api/checkout`;
+      this.log(`[DEBUG] Making checkout notification request to: ${url}`);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        credentials: 'omit',
+        body: JSON.stringify(data)
+      });
+
+      this.log(`[DEBUG] Response status: ${response.status}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.log(`[ERROR] HTTP error response: ${errorText}`);
+        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      this.log(`[SUCCESS] Checkout notification successful for ${cameraId}`, result);
+
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      this.log(`[ERROR] Error during checkout notification to ${cameraId}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Checkout notification failed'
+      };
+    }
+  }
+
+  /**
    * Get user profile from camera
    */
   public async getUserProfile(cameraId: string, walletAddress: string): Promise<CameraActionResponse<{

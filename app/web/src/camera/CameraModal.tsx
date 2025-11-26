@@ -786,6 +786,22 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         }
       }
 
+      // Notify Jetson about checkout with transaction signature for Solscan link
+      try {
+        const checkoutResult = await unifiedCameraService.checkout(camera.id, {
+          wallet_address: primaryWallet.address,
+          transaction_signature: signature
+        });
+        if (checkoutResult.success) {
+          console.log('[CameraModal] Checkout notification sent to Jetson');
+        } else {
+          console.warn('[CameraModal] Failed to notify Jetson about checkout:', checkoutResult.error);
+        }
+      } catch (err) {
+        console.warn('[CameraModal] Failed to notify Jetson about checkout:', err);
+        // Non-fatal - checkout timeline event will still be created by blockchain sync
+      }
+
       // Remove user profile from camera after successful check-out
       try {
         const removeResult = await unifiedCameraService.removeUserProfile(camera.id, primaryWallet.address);
@@ -800,10 +816,6 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       }
 
       setIsCheckedIn(false);
-
-      // NOTE: Check-out timeline event is now created by Jetson via buffer_checkout_activity()
-      // Refresh the timeline to get the new encrypted activity
-      timelineService.refreshEvents();
 
       // Refresh active users count
       await fetchActiveUsersForCamera();

@@ -163,40 +163,12 @@ class TimelineService {
         }
       });
 
+      // DISABLED: Don't process bulk historical events from backend memory
+      // This fixes ghost checkouts from old sessions appearing in live timeline
+      // Live timeline only shows real-time events via 'timelineEvent' subscription
       this.socket.on('recentEvents', (events: TimelineEvent[]) => {
-        console.log('Received recent events:', events);
-        if (!events || events.length === 0) return;
-        
-        // Filter for current camera and sort by timestamp (newest first)
-        const relevantEvents = this.currentCameraId
-          ? events.filter(event => event.cameraId === this.currentCameraId)
-          : events;
-        
-        if (relevantEvents.length === 0) return;
-
-        // Track existing event IDs BEFORE merging to identify truly new events
-        const existingEventIds = new Set(this.events.map(e => e.id));
-
-        // For Chrome mobile, we want to be more careful with event merging
-        // to ensure we don't miss any events
-        const mergedEvents = this.mergeEvents(this.events, relevantEvents);
-
-        // Check if we have new events
-        const hasNewEvents = mergedEvents.length !== this.events.length ||
-          mergedEvents.some(e1 => !this.events.some(e2 => e2.id === e1.id));
-
-        // Update events if we have new ones
-        if (hasNewEvents) {
-          this.events = mergedEvents;
-
-          // Save to localStorage
-          this.saveToLocalStorage();
-
-          // Notify listeners only about NEW events (not previously seen)
-          // This fixes phantom timeline events on Chrome Mobile
-          const newEvents = relevantEvents.filter(e => !existingEventIds.has(e.id));
-          newEvents.forEach(event => this.notifyListeners(event));
-        }
+        console.log('[Timeline] Ignoring recentEvents - live mode only (received', events?.length || 0, 'events)');
+        // Do nothing - we only want real-time events from current session
       });
 
       this.socket.on('disconnect', () => {
@@ -233,24 +205,6 @@ class TimelineService {
     }
   }
 
-  // Method to merge events, avoiding duplicates by ID
-  private mergeEvents(existingEvents: TimelineEvent[], newEvents: TimelineEvent[]): TimelineEvent[] {
-    const eventMap = new Map<string, TimelineEvent>();
-    
-    // Add existing events to the map
-    existingEvents.forEach(event => {
-      eventMap.set(event.id, event);
-    });
-    
-    // Add or update with new events
-    newEvents.forEach(event => {
-      eventMap.set(event.id, event);
-    });
-    
-    // Convert map back to array and sort by timestamp (newest first)
-    return Array.from(eventMap.values())
-      .sort((a, b) => b.timestamp - a.timestamp);
-  }
 
   // Method to save events to localStorage
   private saveToLocalStorage() {
@@ -302,14 +256,6 @@ class TimelineService {
       this.socket.emit('joinCamera', cameraId);
       // Don't request recent events from backend - they include old sessions
       // We only want real-time events from the current session going forward
-    }
-  }
-
-  private requestRecentEvents() {
-    // Only request if we're connected
-    if (this.isSocketConnected() && this.currentCameraId) {
-      console.log('Requesting recent events for camera:', this.currentCameraId);
-      this.socket.emit('getRecentEvents', { cameraId: this.currentCameraId });
     }
   }
 
@@ -431,11 +377,12 @@ class TimelineService {
     return this.isSocketConnected();
   }
   
-  // Public method that can be called to force refresh for Chrome mobile
+  // Public method - disabled to prevent loading old session events
+  // Live timeline should only show real-time events from current session
   refreshEvents() {
-    if (this.isSocketConnected() && this.currentCameraId) {
-      this.requestRecentEvents();
-    }
+    // Don't request recent events - they include old sessions from backend memory
+    // Current session events come through real-time WebSocket subscription
+    console.log('[Timeline] refreshEvents disabled - live timeline only shows current session');
   }
 
   // For debugging: create a test event

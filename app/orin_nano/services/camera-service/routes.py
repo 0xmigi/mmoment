@@ -1867,6 +1867,91 @@ def register_routes(app):
                 {"success": False, "error": f"Check-in failed: {str(e)}"}
             ), 500
 
+    @app.route("/api/checkout", methods=["POST"])
+    def api_checkout_notification():
+        """
+        Checkout notification endpoint - called by frontend after checkout tx confirms.
+        This allows passing the transaction signature for Solscan verification links.
+
+        Expected body:
+        {
+            "wallet_address": "...",           # Required
+            "transaction_signature": "..."     # Required - checkout tx signature for Solscan link
+        }
+        """
+        data = request.json or {}
+        wallet_address = data.get("wallet_address")
+        transaction_signature = data.get("transaction_signature")
+
+        if not wallet_address:
+            return jsonify(
+                {"success": False, "error": "Wallet address is required"}
+            ), 400
+
+        if not transaction_signature:
+            return jsonify(
+                {"success": False, "error": "Transaction signature is required"}
+            ), 400
+
+        logger.info(
+            f"👋 [CHECKOUT-NOTIFY] User {wallet_address[:8]}... checked out with tx {transaction_signature[:8]}..."
+        )
+
+        try:
+            services = get_services()
+            session_service = services["session"]
+
+            # Find the session for this wallet
+            session = session_service.get_session_by_wallet(wallet_address)
+            if not session:
+                logger.warning(
+                    f"⚠️  [CHECKOUT-NOTIFY] No session found for {wallet_address[:8]}..."
+                )
+                return jsonify(
+                    {"success": True, "message": "No active session found (already cleaned up)"}
+                )
+
+            session_id = session["session_id"]
+
+            # Buffer the checkout activity with the transaction signature
+            try:
+                from services.timeline_activity_service import (
+                    get_timeline_activity_service,
+                )
+
+                timeline_service = get_timeline_activity_service()
+                timeline_service.buffer_checkout_activity(
+                    wallet_address=wallet_address,
+                    session_id=session_id,
+                    duration_seconds=session.get("duration"),
+                    metadata={
+                        "timestamp": int(time.time() * 1000),
+                        "tx_signature": transaction_signature,
+                    },
+                )
+                logger.info(
+                    f"✅ [CHECKOUT-NOTIFY] Checkout activity buffered with tx signature"
+                )
+            except Exception as e:
+                logger.warning(f"⚠️  [CHECKOUT-NOTIFY] Failed to buffer checkout activity: {e}")
+
+            return jsonify(
+                {
+                    "success": True,
+                    "wallet_address": wallet_address,
+                    "session_id": session_id,
+                    "message": "Checkout notification received",
+                }
+            )
+
+        except Exception as e:
+            logger.error(
+                f"❌ [CHECKOUT-NOTIFY] Error: {e}"
+            )
+            return jsonify(
+                {"success": False, "error": f"Checkout notification failed: {str(e)}"}
+            ), 500
+
     @app.route("/api/camera/info", methods=["GET"])
     @sign_response
     def api_camera_info():
