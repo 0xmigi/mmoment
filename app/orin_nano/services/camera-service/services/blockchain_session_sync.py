@@ -503,14 +503,10 @@ class BlockchainSessionSync:
 
     def _has_local_face_embedding(self, wallet_address: str) -> bool:
         """Check if a user has a face embedding stored locally"""
-        # Primary: Check IdentityStore
+        # Check IdentityStore (unified storage for all identities)
         identity = self.identity_store.get_identity(wallet_address)
         if identity and identity.face_embedding is not None:
             return True
-
-        # Fallback: Check legacy storage
-        if self.face_service:
-            return wallet_address in self.face_service._face_embeddings
 
         return False
 
