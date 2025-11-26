@@ -141,6 +141,9 @@ let cachedPipeToken: {
   expires_at: number; // timestamp
 } | null = null;
 
+// Pending login promise to prevent concurrent login attempts (causes 429 rate limits)
+let pendingLoginPromise: Promise<{ access_token: string; user_id: string }> | null = null;
+
 // Helper function to get or refresh Pipe JWT token
 async function getPipeJWTToken(): Promise<{ access_token: string; user_id: string }> {
   const now = Date.now();
@@ -154,53 +157,68 @@ async function getPipeJWTToken(): Promise<{ access_token: string; user_id: strin
     };
   }
 
-  // Token expired or doesn't exist - login fresh
-  const pipeUsername = process.env.PIPE_USERNAME || "wallettest1762286471";
-  const pipePassword = process.env.PIPE_PASSWORD || "StrongPass123!@#";
-
-  console.log(`🔄 Fetching fresh Pipe JWT token...`);
-
-  const loginResp = await fetch("https://us-west-01-firestarter.pipenetwork.com/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: pipeUsername, password: pipePassword })
-  });
-
-  if (!loginResp.ok) {
-    throw new Error(`Login failed: ${loginResp.status}`);
+  // If a login is already in progress, wait for it instead of starting another one
+  if (pendingLoginPromise) {
+    console.log(`⏳ Login already in progress, waiting...`);
+    return pendingLoginPromise;
   }
 
-  const tokens = await loginResp.json();
+  // Start a new login and store the promise so concurrent requests can wait on it
+  pendingLoginPromise = (async () => {
+    try {
+      const pipeUsername = process.env.PIPE_USERNAME || "wallettest1762286471";
+      const pipePassword = process.env.PIPE_PASSWORD || "StrongPass123!@#";
 
-  // Get user_id
-  const walletResp = await fetch("https://us-west-01-firestarter.pipenetwork.com/checkWallet", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${tokens.access_token}`
-    },
-    body: JSON.stringify({})
-  });
+      console.log(`🔄 Fetching fresh Pipe JWT token...`);
 
-  if (!walletResp.ok) {
-    throw new Error(`checkWallet failed: ${walletResp.status}`);
-  }
+      const loginResp = await fetch("https://us-west-01-firestarter.pipenetwork.com/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: pipeUsername, password: pipePassword })
+      });
 
-  const walletData = await walletResp.json();
+      if (!loginResp.ok) {
+        throw new Error(`Login failed: ${loginResp.status}`);
+      }
 
-  // Cache the token (assume 1 hour expiry)
-  cachedPipeToken = {
-    access_token: tokens.access_token,
-    user_id: walletData.user_id,
-    expires_at: now + 60 * 60 * 1000 // 1 hour from now
-  };
+      const tokens = await loginResp.json();
 
-  console.log(`✅ Fresh Pipe token cached (user: ${walletData.user_id.slice(0, 20)}...)`);
+      // Get user_id
+      const walletResp = await fetch("https://us-west-01-firestarter.pipenetwork.com/checkWallet", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${tokens.access_token}`
+        },
+        body: JSON.stringify({})
+      });
 
-  return {
-    access_token: tokens.access_token,
-    user_id: walletData.user_id
-  };
+      if (!walletResp.ok) {
+        throw new Error(`checkWallet failed: ${walletResp.status}`);
+      }
+
+      const walletData = await walletResp.json();
+
+      // Cache the token (assume 1 hour expiry)
+      cachedPipeToken = {
+        access_token: tokens.access_token,
+        user_id: walletData.user_id,
+        expires_at: Date.now() + 60 * 60 * 1000 // 1 hour from now
+      };
+
+      console.log(`✅ Fresh Pipe token cached (user: ${walletData.user_id.slice(0, 20)}...)`);
+
+      return {
+        access_token: tokens.access_token,
+        user_id: walletData.user_id
+      };
+    } finally {
+      // Clear the pending promise so future requests can start a new login if needed
+      pendingLoginPromise = null;
+    }
+  })();
+
+  return pendingLoginPromise;
 }
 
 // Device signature to file mapping (privacy-preserving)

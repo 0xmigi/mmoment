@@ -1,6 +1,6 @@
 // Session Cleanup Cron Job
 // Automatically checks out expired sessions and collects rent as reward
-import { Connection, Keypair, PublicKey } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet, BN } from '@coral-xyz/anchor';
 import { IDL } from './idl';
 import { Server } from 'socket.io';
@@ -174,15 +174,23 @@ async function runCleanup() {
               // Continue with empty activities - session cleanup is more important
             }
 
+            // Derive the cameraTimeline PDA
+            const [cameraTimelinePda] = PublicKey.findProgramAddressSync(
+              [Buffer.from('camera-timeline'), session.camera.toBuffer()],
+              PROGRAM_ID
+            );
+
             // Build check-out transaction with activities
             const checkOutTx = await program.methods
               .checkOut(activitiesForCheckout) // Include buffered activities for on-chain commit!
               .accounts({
                 closer: cronBotKeypair.publicKey,
                 camera: session.camera,
+                cameraTimeline: cameraTimelinePda,
                 session: sessionPubkey,
                 sessionUser: session.user,
                 rentDestination: cronBotKeypair.publicKey, // Cron bot collects rent!
+                systemProgram: SystemProgram.programId,
               })
               .transaction();
 
