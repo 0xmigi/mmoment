@@ -266,28 +266,6 @@ class TimelineService {
     }
   }
 
-  // Method to restore events from localStorage
-  private restoreFromLocalStorage() {
-    try {
-      // Try to restore camera ID first
-      const savedCameraId = localStorage.getItem(TIMELINE_CAMERA_ID_KEY);
-      if (savedCameraId) {
-        this.currentCameraId = savedCameraId;
-        console.log(`Restored camera ID from localStorage: ${savedCameraId}`);
-        
-        // Now try to restore events for this camera
-        const savedEventsString = localStorage.getItem(`${TIMELINE_EVENTS_STORAGE_KEY}_${savedCameraId}`);
-        if (savedEventsString) {
-          const savedEvents = JSON.parse(savedEventsString) as TimelineEvent[];
-          this.events = savedEvents;
-          console.log(`Restored ${savedEvents.length} events from localStorage for camera ${savedCameraId}`);
-        }
-      }
-    } catch (error) {
-      console.error('Error restoring timeline events from localStorage:', error);
-    }
-  }
-
   joinCamera(cameraId: string) {
     console.log('Joining camera room:', cameraId);
 
