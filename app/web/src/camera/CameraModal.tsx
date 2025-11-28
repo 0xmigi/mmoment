@@ -3,17 +3,10 @@ import { useState, useEffect } from 'react';
 import { Dialog } from '@headlessui/react';
 import { X, ExternalLink, Camera, User } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { useConnection } from '@solana/wallet-adapter-react';
-import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
-import { Program, AnchorProvider, BN } from '@coral-xyz/anchor';
-import { IDL } from '../anchor/idl';
-import { CAMERA_ACTIVATION_PROGRAM_ID } from '../anchor/setup';
-import { isSolanaWallet } from '@dynamic-labs/solana';
 import { timelineService } from '../timeline/timeline-service';
 import { unifiedCameraService } from './unified-camera-service';
 import { useSocialProfile } from '../auth/social/useSocialProfile';
 import { CONFIG } from '../core/config';
-import { buildAndSponsorTransaction } from '../services/gas-sponsorship';
 
 interface CameraModalProps {
   isOpen: boolean;
@@ -38,7 +31,6 @@ interface CameraModalProps {
 
 export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: CameraModalProps) {
   const { primaryWallet } = useDynamicContext();
-  const { connection } = useConnection();
   const { primaryProfile } = useSocialProfile();
   const [isCheckedIn, setIsCheckedIn] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -143,138 +135,68 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
   }, [isJetsonCamera, camera.id]);
 
 
+  // NEW PRIVACY ARCHITECTURE: Sessions are now managed off-chain by Jetson
+  // Check session status via localStorage (set when user checks in/out)
   const checkSessionStatus = async () => {
-    if (!camera.id || !primaryWallet?.address || !connection) return;
-    
+    if (!camera.id || !primaryWallet?.address) return;
+
     try {
-      const program = await initializeProgram();
-      const userPublicKey = new PublicKey(primaryWallet.address);
-      const cameraPublicKey = new PublicKey(camera.id);
+      // Check local session state (persisted across page refreshes)
+      const sessionKey = `mmoment_session_${primaryWallet.address}_${camera.id}`;
+      const storedSession = localStorage.getItem(sessionKey);
 
-      // Find the session PDA
-      const [sessionPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from('session'),
-          userPublicKey.toBuffer(),
-          cameraPublicKey.toBuffer()
-        ],
-        CAMERA_ACTIVATION_PROGRAM_ID
-      );
+      if (storedSession) {
+        const session = JSON.parse(storedSession);
+        // Check if session is still valid (within last 24 hours)
+        const sessionAge = Date.now() - session.timestamp;
+        const maxAge = 24 * 60 * 60 * 1000; // 24 hours
 
-      // Check if session account exists (use getAccountInfo to avoid decode errors from old sessions)
-      try {
-        const sessionAccountInfo = await connection.getAccountInfo(sessionPda);
-        if (sessionAccountInfo && sessionAccountInfo.data.length === 102) {
-          // New session structure (102 bytes) - try to decode
-          try {
-            await program.account.userSession.fetch(sessionPda);
-            console.log("[CameraModal] Session exists, setting checked-in: true");
-            setIsCheckedIn(true);
-          } catch (decodeErr) {
-            console.log("[CameraModal] Session exists but can't decode, setting checked-in: false");
-            setIsCheckedIn(false);
-          }
-        } else if (sessionAccountInfo) {
-          // Old session structure - consider not checked in
-          console.log("[CameraModal] Old session structure detected, setting checked-in: false");
-          setIsCheckedIn(false);
+        if (sessionAge < maxAge) {
+          console.log("[CameraModal] Found valid local session, setting checked-in: true");
+          setIsCheckedIn(true);
+          return;
         } else {
-          console.log("[CameraModal] No session found, setting checked-in: false");
-          setIsCheckedIn(false);
+          // Session expired, clear it
+          console.log("[CameraModal] Local session expired, clearing");
+          localStorage.removeItem(sessionKey);
         }
-      } catch (err) {
-        console.log("[CameraModal] Error checking session, setting checked-in: false");
-        setIsCheckedIn(false);
       }
+
+      console.log("[CameraModal] No local session found, setting checked-in: false");
+      setIsCheckedIn(false);
     } catch (err) {
       console.error('[CameraModal] Error checking session status:', err);
       setIsCheckedIn(false);
     }
   };
 
-  // Function to fetch active users count for this specific camera
+  // NEW PRIVACY ARCHITECTURE: Sessions are managed off-chain by Jetson
+  // Active users count comes from Jetson's session management
   const fetchActiveUsersForCamera = async () => {
-    if (!camera.id || !connection) return;
+    if (!camera.id) return;
 
     try {
       setLoadingActiveUsers(true);
-      console.log('[CameraModal] Fetching active users for camera:', camera.id);
+      console.log('[CameraModal] Fetching active users from Jetson for camera:', camera.id);
 
-      // Create a read-only program instance (no wallet needed for reading data)
-      const provider = new AnchorProvider(
-        connection,
-        {} as any, // No wallet needed for read-only operations
-        { commitment: 'confirmed' }
-      );
-      const program = new Program(IDL as any, CAMERA_ACTIVATION_PROGRAM_ID, provider);
+      // Try to get active session count from Jetson
+      // This will be implemented in Phase 3 - for now, use camera status
+      const statusResult = await unifiedCameraService.getStatus(camera.id);
 
-      // Fetch only NEW session accounts (102 bytes) to avoid decode errors from old sessions (94 bytes)
-      const sessionAccounts = await connection.getProgramAccounts(program.programId, {
-        filters: [
-          { dataSize: 102 }  // New session structure size
-        ]
-      });
-
-      console.log('[CameraModal] Found', sessionAccounts.length, 'new session accounts (102 bytes)');
-
-      // Count sessions for this specific camera
-      let count = 0;
-      for (const accountInfo of sessionAccounts) {
-        try {
-          const session = program.coder.accounts.decode('userSession', accountInfo.account.data);
-          const sessionCameraKey = session.camera.toString();
-
-          console.log('[CameraModal] Session decoded - Camera:', sessionCameraKey, 'Looking for:', camera.id);
-
-          if (sessionCameraKey === camera.id) {
-            count++;
-            console.log('[CameraModal] ✅ Found active session for this camera');
-          }
-        } catch (error) {
-          console.error('[CameraModal] ❌ Failed to decode session:', error);
-          continue;
-        }
+      if (statusResult.success && statusResult.data) {
+        // Jetson returns active session count in status (to be added in Phase 3)
+        const count = (statusResult.data as any).activeSessionCount || 0;
+        setActiveUsersCount(count);
+        console.log('[CameraModal] Active users count from Jetson:', count);
+      } else {
+        console.log('[CameraModal] Could not fetch active users from Jetson');
+        setActiveUsersCount(0);
       }
-      
-      setActiveUsersCount(count);
-      console.log('[CameraModal] Active users count for this camera:', count);
     } catch (error) {
       console.error('[CameraModal] Error fetching active users:', error);
       // Don't reset count on error - keep showing last known state
     } finally {
       setLoadingActiveUsers(false);
-    }
-  };
-
-  // Initialize program when needed
-  const initializeProgram = async () => {
-    if (!primaryWallet?.address || !connection) {
-      throw new Error('Wallet or connection not available');
-    }
-
-    // Check if it's a Solana wallet
-    if (!isSolanaWallet(primaryWallet)) {
-      throw new Error('This is not a Solana wallet');
-    }
-
-    try {
-      // Create a provider using the connection and wallet
-      const provider = new AnchorProvider(
-        connection,
-        {
-          publicKey: new PublicKey(primaryWallet.address),
-          // We'll handle signing separately
-          signTransaction: async (tx: Transaction) => tx,
-          signAllTransactions: async (txs: Transaction[]) => txs,
-        } as any,
-        { commitment: 'confirmed' }
-      );
-
-      // Create the program
-      return new Program(IDL as any, CAMERA_ACTIVATION_PROGRAM_ID, provider);
-    } catch (error) {
-      console.error('Error initializing program:', error);
-      throw new Error('Failed to initialize Solana program');
     }
   };
 
@@ -406,7 +328,8 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   };
 
-  // Handle check-in
+  // NEW PRIVACY ARCHITECTURE: Check-in is now fully off-chain via Jetson
+  // No more on-chain UserSession PDA - sessions are managed by Jetson
   const handleCheckIn = async () => {
     if (!camera.id || !primaryWallet?.address) {
       setError('No camera or wallet available');
@@ -417,223 +340,66 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     setError(null);
 
     try {
-      const program = await initializeProgram();
-      const userPublicKey = new PublicKey(primaryWallet.address);
-      const cameraPublicKey = new PublicKey(camera.id);
+      console.log('🚀 [CameraModal] Starting off-chain check-in via Jetson...');
+      console.log('🔍 [CameraModal] primaryProfile:', primaryProfile);
 
-      // Find the session PDA
-      const [sessionPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from('session'),
-          userPublicKey.toBuffer(),
-          cameraPublicKey.toBuffer()
-        ],
-        CAMERA_ACTIVATION_PROGRAM_ID
-      );
+      // Generate a unique session ID for this check-in
+      const sessionId = `${primaryWallet.address}_${camera.id}_${Date.now()}`;
 
-      // Check if user already has an active session - if so, check out first
-      try {
-        const sessionAccountInfo = await connection.getAccountInfo(sessionPda);
-        if (sessionAccountInfo) {
-          console.log('[CameraModal] Existing session found, checking out first');
+      // Call Jetson check-in endpoint (no blockchain transaction needed!)
+      const checkinResult = await unifiedCameraService.checkin(camera.id, {
+        wallet_address: primaryWallet.address,
+        display_name: primaryProfile?.displayName,
+        username: primaryProfile?.username
+        // Note: No session_pda or transaction_signature - this is now off-chain
+      });
 
-        // Derive cameraTimeline PDA for checkout
-        const [cameraTimelinePda] = PublicKey.findProgramAddressSync(
-          [Buffer.from('camera-timeline'), cameraPublicKey.toBuffer()],
-          CAMERA_ACTIVATION_PROGRAM_ID
-        );
+      if (checkinResult.success) {
+        console.log('✅ [CameraModal] Off-chain check-in successful!', checkinResult.data);
+        console.log(`   Display name: ${checkinResult.data?.display_name}`);
+        console.log(`   Session ID: ${checkinResult.data?.session_id}`);
 
-        // Check out existing session
-        const checkOutIx = await program.methods
-          .checkOut([]) // Empty activities array
-          .accounts({
-            closer: userPublicKey,
-            camera: cameraPublicKey,
-            cameraTimeline: cameraTimelinePda,
-            session: sessionPda,
-            sessionUser: userPublicKey,
-            rentDestination: userPublicKey, // Rent goes back to user
-            systemProgram: SystemProgram.programId,
-          })
-          .instruction();
+        // Store session locally for persistence across page refreshes
+        const sessionKey = `mmoment_session_${primaryWallet.address}_${camera.id}`;
+        localStorage.setItem(sessionKey, JSON.stringify({
+          sessionId: checkinResult.data?.session_id || sessionId,
+          timestamp: Date.now(),
+          cameraId: camera.id,
+          walletAddress: primaryWallet.address
+        }));
 
-        const checkOutTx = new Transaction().add(checkOutIx);
-        const { blockhash: checkOutBlockhash } = await connection.getLatestBlockhash();
-        checkOutTx.recentBlockhash = checkOutBlockhash;
-        checkOutTx.feePayer = userPublicKey;
+        // Clear old session events before starting new session
+        timelineService.clearForNewSession();
 
-        // Sign and send checkout transaction
-        let signedCheckOutTx;
-        if (typeof (primaryWallet as any).getSigner === 'function') {
-          const signer = await (primaryWallet as any).getSigner();
-          signedCheckOutTx = await signer.signTransaction(checkOutTx);
-        } else {
-          signedCheckOutTx = await (primaryWallet as any).signTransaction(checkOutTx);
-        }
+        setIsCheckedIn(true);
 
-          const checkOutSig = await connection.sendRawTransaction(signedCheckOutTx.serialize());
-          await connection.confirmTransaction(checkOutSig, 'confirmed');
-          console.log('[CameraModal] Checked out existing session:', checkOutSig);
-        }
-      } catch (err) {
-        // No existing session - this is fine, continue with check-in
-        console.log('[CameraModal] No existing session found, proceeding with check-in');
-      }
+        // Refresh active users count
+        await fetchActiveUsersForCamera();
 
-      // Derive recognition token PDA and check if it exists
-      const [recognitionTokenPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('recognition-token'), userPublicKey.toBuffer()],
-        program.programId
-      );
-
-      // Check if recognition token account exists
-      let hasRecognitionToken = false;
-      try {
-        await program.account.recognitionToken.fetch(recognitionTokenPda);
-        hasRecognitionToken = true;
-        console.log('[CameraModal] Recognition token found for user');
-      } catch (err) {
-        console.log('[CameraModal] No recognition token found for user');
-      }
-
-      // Create the accounts object for check-in
-      // NOTE: payer will be set to the fee payer (gas sponsor) in the transaction
-      const accounts: any = {
-        user: userPublicKey,
-        payer: userPublicKey, // This will be overridden by the fee payer in gas sponsorship
-        camera: cameraPublicKey,
-        recognitionToken: hasRecognitionToken ? recognitionTokenPda : null, // Pass null for optional accounts that don't exist
-        session: sessionPda,
-        systemProgram: SystemProgram.programId
-      };
-
-      // Build check-in transaction function
-      const buildCheckInTx = async () => {
-        const ix = await program.methods
-          .checkIn(false) // false = don't require face recognition
-          .accounts(accounts)
-          .instruction();
-
-        return new Transaction().add(ix);
-      };
-
-      // Check if user has enabled sponsored gas
-      const sponsoredGasEnabled = localStorage.getItem('sponsoredGasEnabled') === 'true';
-      let signature: string;
-
-      if (sponsoredGasEnabled) {
-        // Use sponsored gas if enabled
-        console.log('[CameraModal] Attempting sponsored check-in...');
-        const signer = await (primaryWallet as any).getSigner();
-        const sponsorResult = await buildAndSponsorTransaction(
-          userPublicKey,
-          signer,
-          buildCheckInTx,
-          'check_in',
-          connection
-        );
-
-        if (!sponsorResult.success) {
-          // Fallback to regular transaction if sponsorship fails
-          console.log('[CameraModal] Sponsorship failed, falling back to regular transaction');
-          const checkInTx = await buildCheckInTx();
-          const { blockhash } = await connection.getLatestBlockhash();
-          checkInTx.recentBlockhash = blockhash;
-          checkInTx.feePayer = userPublicKey;
-
-          const signedTx = await signer.signTransaction(checkInTx);
-          signature = await connection.sendRawTransaction(signedTx.serialize());
-          await connection.confirmTransaction(signature, 'confirmed');
-        } else {
-          signature = sponsorResult.signature!;
-          console.log('✅ [CameraModal] Sponsored check-in successful!', signature);
+        // Notify parent component
+        if (onCheckStatusChange) {
+          onCheckStatusChange(true);
         }
       } else {
-        // Use regular self-paid transaction
-        console.log('[CameraModal] Executing regular check-in transaction...');
-        const checkInTx = await buildCheckInTx();
-        const { blockhash } = await connection.getLatestBlockhash();
-        checkInTx.recentBlockhash = blockhash;
-        checkInTx.feePayer = userPublicKey;
-
-        const signer = await (primaryWallet as any).getSigner();
-        const signedTx = await signer.signTransaction(checkInTx);
-        signature = await connection.sendRawTransaction(signedTx.serialize());
-        await connection.confirmTransaction(signature, 'confirmed');
-        console.log('✅ [CameraModal] Check-in transaction confirmed successfully:', signature);
+        console.error('❌ [CameraModal] Off-chain check-in failed:', checkinResult.error);
+        setError(checkinResult.error || 'Failed to check in to camera');
       }
 
-      // 🎉 NEW: Use unified check-in endpoint - no more race conditions!
-      // This triggers immediate blockchain sync and recognition token loading
-      // CRITICAL: Pass sessionPda so Jetson uses the Solana PDA for activity buffering
-      console.log('🚀 [CameraModal] Calling unified check-in endpoint...');
-      console.log('🔍 [CameraModal] primaryProfile:', primaryProfile);
-      console.log('🔍 [CameraModal] displayName:', primaryProfile?.displayName, 'username:', primaryProfile?.username);
-      console.log('🔍 [CameraModal] sessionPda:', sessionPda.toString());
-      try {
-        const checkinResult = await unifiedCameraService.checkin(camera.id, {
-          wallet_address: primaryWallet.address,
-          session_pda: sessionPda.toString(),  // CRITICAL: Solana session PDA for activity buffering
-          display_name: primaryProfile?.displayName,
-          username: primaryProfile?.username,
-          transaction_signature: signature
-        });
-
-        if (checkinResult.success) {
-          console.log('✅ [CameraModal] Unified check-in successful!', checkinResult.data);
-          console.log(`   Display name: ${checkinResult.data?.display_name}`);
-          console.log(`   Session ID: ${checkinResult.data?.session_id}`);
-        } else {
-          console.warn('⚠️  [CameraModal] Unified check-in failed:', checkinResult.error);
-          // Fall back to old method if unified check-in fails
-          console.log('📤 [CameraModal] Falling back to separate profile send...');
-          await unifiedCameraService.sendUserProfile(camera.id, {
-            wallet_address: primaryWallet.address,
-            display_name: primaryProfile?.displayName,
-            username: primaryProfile?.username
-          });
-        }
-      } catch (err) {
-        console.error('❌ [CameraModal] Unified check-in error:', err);
-        // Don't fail the overall check-in if this fails
-      }
-
-      // Clear old session events before starting new session
-      // This prevents ghost checkouts from previous sessions appearing
-      timelineService.clearForNewSession();
-
-      setIsCheckedIn(true);
-
-      // NOTE: Check-in timeline event will arrive via real-time WebSocket from Jetson
-
-      // Refresh active users count
-      await fetchActiveUsersForCamera();
-
-      // Notify parent component
-      if (onCheckStatusChange) {
-        onCheckStatusChange(true);
-      }
-      
     } catch (error) {
       console.error('Check-in error:', error);
-      
+
       if (error instanceof Error) {
         let errorMsg = error.message;
-        
+
         // Check for common error messages and provide more user-friendly versions
-        if (errorMsg.includes('custom program error: 0x64')) {
-          errorMsg = 'Program error: The camera may not be configured correctly.';
-        } else if (errorMsg.includes('insufficient funds')) {
-          errorMsg = 'Insufficient SOL in your wallet. Please add more SOL and try again.';
-        } else if (errorMsg.includes('already in use')) {
+        if (errorMsg.includes('already checked in')) {
           errorMsg = 'You are already checked in to this camera.';
           setIsCheckedIn(true);
           return;
         } else if (errorMsg.length > 150) {
-          // If the error message is too long, provide a shorter, more general message
           errorMsg = 'An error occurred during check-in. Please check the console for details.';
         }
-        
+
         setError(errorMsg);
       } else {
         setError('Unknown error during check-in');
@@ -643,7 +409,10 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   };
 
-  // Handle check-out
+  // NEW PRIVACY ARCHITECTURE: Check-out is now off-chain via Jetson
+  // Jetson will handle:
+  // 1. Writing encrypted activities to CameraTimeline (no user info)
+  // 2. Sending access keys to backend for UserSessionChain storage
   const handleCheckOut = async () => {
     if (!camera.id || !primaryWallet?.address) {
       setError('No camera or wallet available');
@@ -654,185 +423,52 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     setError(null);
 
     try {
-      const program = await initializeProgram();
-      const userPublicKey = new PublicKey(primaryWallet.address);
-      const cameraPublicKey = new PublicKey(camera.id);
+      console.log('🚀 [CameraModal] Starting off-chain check-out via Jetson...');
 
-      // Find the session PDA
-      const [sessionPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from('session'),
-          userPublicKey.toBuffer(),
-          cameraPublicKey.toBuffer()
-        ],
-        CAMERA_ACTIVATION_PROGRAM_ID
-      );
-
-      // Fetch the session account to get the actual user
-      const sessionAccount = await program.account.userSession.fetch(sessionPda) as any;
-      console.log('[CameraModal] Session account data:', {
-        user: sessionAccount.user.toString(),
-        camera: sessionAccount.camera.toString(),
-        checkInTime: new Date(sessionAccount.checkInTime.toNumber() * 1000).toISOString(),
+      // Call Jetson checkout endpoint
+      // Jetson will handle timeline writes and access key delivery to backend
+      const checkoutResult = await unifiedCameraService.checkout(camera.id, {
+        wallet_address: primaryWallet.address,
+        transaction_signature: '' // No transaction in new architecture
       });
 
-      // Fetch buffered activities from backend using Solana session PDA
-      const sessionPdaString = sessionPda.toString();
-      let activitiesForCheckout: any[] = [];
+      if (checkoutResult.success) {
+        console.log('✅ [CameraModal] Off-chain check-out successful!', checkoutResult.data);
 
-      try {
-        console.log(`[CameraModal] Fetching buffered activities for session: ${sessionPdaString.slice(0, 16)}...`);
-        const activitiesResponse = await fetch(`${CONFIG.BACKEND_URL}/api/session/activities/${sessionPdaString}`);
-        const activitiesData = await activitiesResponse.json();
+        // Clear local session state
+        const sessionKey = `mmoment_session_${primaryWallet.address}_${camera.id}`;
+        localStorage.removeItem(sessionKey);
 
-        if (activitiesData.success && activitiesData.activities?.length > 0) {
-          console.log(`[CameraModal] Found ${activitiesData.activities.length} buffered activities to commit on-chain`);
-
-          // Convert backend activities to Solana ActivityData format
-          activitiesForCheckout = activitiesData.activities.map((a: any) => ({
-            timestamp: new BN(a.timestamp),
-            activityType: a.activityType,
-            encryptedContent: Buffer.from(a.encryptedContent, 'base64'),
-            nonce: Array.from(Buffer.from(a.nonce, 'base64')),
-            accessGrants: a.accessGrants.map((g: string) => Array.from(Buffer.from(g, 'base64')))
-          }));
-        } else {
-          console.log('[CameraModal] No buffered activities found for this session');
+        // Remove user profile from camera
+        try {
+          const removeResult = await unifiedCameraService.removeUserProfile(camera.id, primaryWallet.address);
+          if (removeResult.success) {
+            console.log('[CameraModal] User profile removed successfully from camera');
+          }
+        } catch (err) {
+          console.warn('[CameraModal] Failed to remove user profile:', err);
         }
-      } catch (fetchErr) {
-        console.warn('[CameraModal] Failed to fetch buffered activities, proceeding with empty array:', fetchErr);
-        // Continue with empty activities - don't fail checkout
-      }
 
-      // Build check-out transaction function with activities
-      const buildCheckOutTx = async () => {
-        // Derive cameraTimeline PDA
-        const [cameraTimelinePda] = PublicKey.findProgramAddressSync(
-          [Buffer.from('camera-timeline'), cameraPublicKey.toBuffer()],
-          CAMERA_ACTIVATION_PROGRAM_ID
-        );
+        setIsCheckedIn(false);
 
-        console.log(`[CameraModal] Building checkout with ${activitiesForCheckout.length} activities`);
+        // End the timeline session
+        timelineService.endSession();
 
-        const ix = await program.methods
-          .checkOut(activitiesForCheckout) // Include buffered activities for on-chain commit!
-          .accounts({
-            closer: userPublicKey,
-            camera: cameraPublicKey,
-            cameraTimeline: cameraTimelinePda,
-            session: sessionPda,
-            sessionUser: sessionAccount.user as PublicKey,  // Use actual session user
-            rentDestination: userPublicKey, // Rent goes back to user on self-checkout
-            systemProgram: SystemProgram.programId,
-          })
-          .instruction();
+        // Refresh active users count
+        await fetchActiveUsersForCamera();
 
-        return new Transaction().add(ix);
-      };
-
-      // Check if user has enabled sponsored gas
-      const sponsoredGasEnabled = localStorage.getItem('sponsoredGasEnabled') === 'true';
-      let signature: string;
-
-      if (sponsoredGasEnabled) {
-        // Use sponsored gas if enabled
-        console.log('[CameraModal] Attempting sponsored check-out...');
-        const signer = await (primaryWallet as any).getSigner();
-        const sponsorResult = await buildAndSponsorTransaction(
-          userPublicKey,
-          signer,
-          buildCheckOutTx,
-          'check_out',
-          connection
-        );
-
-        if (!sponsorResult.success) {
-          // Fallback to regular transaction if sponsorship fails
-          console.log('[CameraModal] Sponsorship failed, falling back to regular transaction');
-          const checkOutTx = await buildCheckOutTx();
-          const { blockhash } = await connection.getLatestBlockhash();
-          checkOutTx.recentBlockhash = blockhash;
-          checkOutTx.feePayer = userPublicKey;
-
-          const signedTx = await signer.signTransaction(checkOutTx);
-          signature = await connection.sendRawTransaction(signedTx.serialize());
-          await connection.confirmTransaction(signature, 'confirmed');
-        } else {
-          signature = sponsorResult.signature!;
-          console.log('✅ [CameraModal] Sponsored check-out successful!', signature);
+        // Notify parent component
+        if (onCheckStatusChange) {
+          onCheckStatusChange(false);
         }
       } else {
-        // Use regular self-paid transaction
-        console.log('[CameraModal] Executing regular check-out transaction...');
-        const checkOutTx = await buildCheckOutTx();
-        const { blockhash } = await connection.getLatestBlockhash();
-        checkOutTx.recentBlockhash = blockhash;
-        checkOutTx.feePayer = userPublicKey;
-
-        const signer = await (primaryWallet as any).getSigner();
-        const signedTx = await signer.signTransaction(checkOutTx);
-        signature = await connection.sendRawTransaction(signedTx.serialize());
-        await connection.confirmTransaction(signature, 'confirmed');
-        console.log('✅ [CameraModal] Check-out transaction confirmed successfully:', signature);
-      }
-
-      // Clear the buffered activities after successful checkout
-      if (activitiesForCheckout.length > 0) {
-        try {
-          console.log(`[CameraModal] Clearing ${activitiesForCheckout.length} buffered activities from backend...`);
-          await fetch(`${CONFIG.BACKEND_URL}/api/session/activities/${sessionPdaString}`, { method: 'DELETE' });
-          console.log('[CameraModal] Buffered activities cleared successfully');
-        } catch (clearErr) {
-          console.warn('[CameraModal] Failed to clear buffered activities:', clearErr);
-          // Non-fatal - activities were already committed on-chain
-        }
-      }
-
-      // Notify Jetson about checkout with transaction signature for Solscan link
-      try {
-        const checkoutResult = await unifiedCameraService.checkout(camera.id, {
-          wallet_address: primaryWallet.address,
-          transaction_signature: signature
-        });
-        if (checkoutResult.success) {
-          console.log('[CameraModal] Checkout notification sent to Jetson');
-        } else {
-          console.warn('[CameraModal] Failed to notify Jetson about checkout:', checkoutResult.error);
-        }
-      } catch (err) {
-        console.warn('[CameraModal] Failed to notify Jetson about checkout:', err);
-        // Non-fatal - checkout timeline event will still be created by blockchain sync
-      }
-
-      // Remove user profile from camera after successful check-out
-      try {
-        const removeResult = await unifiedCameraService.removeUserProfile(camera.id, primaryWallet.address);
-        if (removeResult.success) {
-          console.log('[CameraModal] User profile removed successfully from camera');
-        } else {
-          console.warn('[CameraModal] Failed to remove user profile from camera:', removeResult.error);
-        }
-      } catch (err) {
-        console.warn('[CameraModal] Failed to remove user profile from camera:', err);
-        // Don't fail the check-out if this fails
-      }
-
-      setIsCheckedIn(false);
-
-      // End the timeline session - clears localStorage so old events won't appear on next visit
-      timelineService.endSession();
-
-      // Refresh active users count
-      await fetchActiveUsersForCamera();
-
-      // Notify parent component
-      if (onCheckStatusChange) {
-        onCheckStatusChange(false);
+        console.error('❌ [CameraModal] Off-chain check-out failed:', checkoutResult.error);
+        setError(checkoutResult.error || 'Failed to check out from camera');
       }
 
     } catch (error) {
       console.error('Check-out error:', error);
-      
+
       if (error instanceof Error) {
         setError(error.message);
       } else {

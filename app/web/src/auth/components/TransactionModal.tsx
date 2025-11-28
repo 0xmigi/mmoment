@@ -1,13 +1,7 @@
 import { Dialog } from '@headlessui/react';
 import { X, CheckCircle } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { useConnection } from '@solana/wallet-adapter-react';
-import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from '../../anchor/setup';
-import { SystemProgram, PublicKey, ComputeBudgetProgram, Transaction } from '@solana/web3.js';
 import { useState, useEffect } from 'react';
-import { isSolanaWallet } from '@dynamic-labs/solana';
-import { Program, AnchorProvider } from '@coral-xyz/anchor';
-import { IDL } from '../../anchor/idl';
 import { timelineService } from '../../timeline/timeline-service';
 import { unifiedCameraService } from '../../camera/unified-camera-service';
 import { useSocialProfile } from '../social/useSocialProfile';
@@ -29,8 +23,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   onSuccess
 }) => {
   const { primaryWallet } = useDynamicContext();
-  const { connection } = useConnection();
-  const { program } = useProgram();
   const { primaryProfile } = useSocialProfile();
   const [status, setStatus] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -39,188 +31,102 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [isCheckedIn, setIsCheckedIn] = useState<boolean>(false);
   const [isCheckingIn, setIsCheckingIn] = useState<boolean>(false);
   const [checkInSuccess, setCheckInSuccess] = useState<boolean>(false);
-  
+
   // Check if user is already checked in
   useEffect(() => {
-    if (isOpen && transactionData?.cameraAccount && primaryWallet?.address && connection) {
+    if (isOpen && transactionData?.cameraAccount && primaryWallet?.address) {
       checkSessionStatus();
     }
-  }, [isOpen, transactionData, primaryWallet, connection]);
-  
-  // Function to check if user is already checked in
+  }, [isOpen, transactionData, primaryWallet]);
+
+  // NEW PRIVACY ARCHITECTURE: Check session via localStorage (off-chain)
   const checkSessionStatus = async () => {
-    if (!transactionData?.cameraAccount || !primaryWallet?.address || !connection) return;
-    
+    if (!transactionData?.cameraAccount || !primaryWallet?.address) return;
+
     try {
-      // Initialize program
-      const provider = new AnchorProvider(
-        connection,
-        {
-          publicKey: new PublicKey(primaryWallet.address),
-          signTransaction: async (tx: Transaction) => tx,
-          signAllTransactions: async (txs: Transaction[]) => txs,
-        } as any,
-        { commitment: 'confirmed' }
-      );
-      
-      const program = new Program(IDL as any, CAMERA_ACTIVATION_PROGRAM_ID, provider);
-      
-      // Find the session PDA
-      const [sessionPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from('session'),
-          new PublicKey(primaryWallet.address).toBuffer(),
-          new PublicKey(transactionData.cameraAccount).toBuffer()
-        ],
-        CAMERA_ACTIVATION_PROGRAM_ID
-      );
-      
-      // Try to fetch the session account
-      try {
-        await program.account.userSession.fetch(sessionPda);
-        setIsCheckedIn(true);
-      } catch (err) {
-        setIsCheckedIn(false);
+      const sessionKey = `mmoment_session_${primaryWallet.address}_${transactionData.cameraAccount}`;
+      const storedSession = localStorage.getItem(sessionKey);
+
+      if (storedSession) {
+        const session = JSON.parse(storedSession);
+        const sessionAge = Date.now() - session.timestamp;
+        const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+
+        if (sessionAge < maxAge) {
+          setIsCheckedIn(true);
+          return;
+        } else {
+          localStorage.removeItem(sessionKey);
+        }
       }
+
+      setIsCheckedIn(false);
     } catch (err) {
       console.error('Error checking session status:', err);
       setIsCheckedIn(false);
     }
   };
   
-  // Function to handle check-in
+  // NEW PRIVACY ARCHITECTURE: Check-in is now off-chain via Jetson
   const handleCheckIn = async () => {
-    if (!transactionData?.cameraAccount || !primaryWallet?.address || !connection) {
+    if (!transactionData?.cameraAccount || !primaryWallet?.address) {
       setError('Wallet not connected or missing data');
       return;
     }
-    
+
     setIsCheckingIn(true);
     setError(null);
-    
+
     try {
-      // Initialize program
-      const provider = new AnchorProvider(
-        connection,
-        {
-          publicKey: new PublicKey(primaryWallet.address),
-          signTransaction: async (tx: Transaction) => tx,
-          signAllTransactions: async (txs: Transaction[]) => txs,
-        } as any,
-        { commitment: 'confirmed' }
-      );
-      
-      const program = new Program(IDL as any, CAMERA_ACTIVATION_PROGRAM_ID, provider);
-      const userPublicKey = new PublicKey(primaryWallet.address);
-      const cameraPublicKey = new PublicKey(transactionData.cameraAccount);
-      
-      // Find the session PDA
-      const [sessionPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from('session'),
-          userPublicKey.toBuffer(),
-          cameraPublicKey.toBuffer()
-        ],
-        CAMERA_ACTIVATION_PROGRAM_ID
-      );
+      console.log('[TransactionModal] Starting off-chain check-in...');
 
-      // Derive recognition token PDA and check if it exists
-      const [recognitionTokenPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('recognition-token'), userPublicKey.toBuffer()],
-        CAMERA_ACTIVATION_PROGRAM_ID
-      );
+      // Call Jetson check-in endpoint (no blockchain transaction!)
+      const checkinResult = await unifiedCameraService.checkin(transactionData.cameraAccount, {
+        wallet_address: primaryWallet.address,
+        display_name: primaryProfile?.displayName,
+        username: primaryProfile?.username
+      });
 
-      // Check if recognition token account exists
-      let hasRecognitionToken = false;
-      try {
-        await (program.account as any).recognitionToken.fetch(recognitionTokenPda);
-        hasRecognitionToken = true;
-      } catch (err) {
-        // No token - that's fine
-      }
+      if (checkinResult.success) {
+        console.log('[TransactionModal] Off-chain check-in successful!', checkinResult.data);
 
-      // Build accounts object
-      const checkInAccounts: any = {
-        user: userPublicKey,
-        camera: cameraPublicKey,
-        session: sessionPda,
-        systemProgram: SystemProgram.programId
-      };
+        // Store session locally
+        const sessionKey = `mmoment_session_${primaryWallet.address}_${transactionData.cameraAccount}`;
+        localStorage.setItem(sessionKey, JSON.stringify({
+          sessionId: checkinResult.data?.session_id,
+          timestamp: Date.now(),
+          cameraId: transactionData.cameraAccount,
+          walletAddress: primaryWallet.address
+        }));
 
-      // Only include recognition token if it exists
-      if (hasRecognitionToken) {
-        checkInAccounts.recognitionToken = recognitionTokenPda;
-      }
+        setIsCheckedIn(true);
+        setCheckInSuccess(true);
+        timelineService.refreshEvents();
 
-      // Create check-in instruction (without face recognition for simplicity)
-      const ix = await program.methods
-        .checkIn(false) // No face recognition for simplicity in this flow
-        .accounts(checkInAccounts)
-        .instruction();
-      
-      // Create transaction
-      const tx = new Transaction().add(ix);
-      const { blockhash } = await connection.getLatestBlockhash();
-      tx.recentBlockhash = blockhash;
-      tx.feePayer = userPublicKey;
-      
-      // Use wallet to sign and send
-      if (!isSolanaWallet(primaryWallet)) {
-        throw new Error('Not a Solana wallet');
-      }
-      
-      const signer = await primaryWallet.getSigner();
-      const signedTx = await signer.signTransaction(tx);
-      const signature = await connection.sendRawTransaction(signedTx.serialize());
-      await connection.confirmTransaction(signature, 'confirmed');
-      
-      // Send user profile to camera for display name labeling
-      if (primaryProfile?.displayName || primaryProfile?.username) {
-        try {
-          await unifiedCameraService.sendUserProfile(transactionData.cameraAccount, {
-            wallet_address: primaryWallet.address,
-            display_name: primaryProfile.displayName,
-            username: primaryProfile.username
-          });
-        } catch (err) {
-          console.warn('Failed to send display name to camera:', err);
-          // Don't fail the check-in if this fails
+        // Automatically execute the camera action after successful check-in
+        if (transactionData.type) {
+          setTimeout(() => {
+            handleCameraAction(checkinResult.data?.session_id || 'off_chain_session');
+          }, 500);
         }
+      } else {
+        throw new Error(checkinResult.error || 'Check-in failed');
       }
-      
-      // NOTE: Check-in timeline event is now created by Jetson via buffer_checkin_activity()
-      // for proper encryption and privacy-preserving timeline architecture
 
-      setIsCheckedIn(true);
-      setCheckInSuccess(true);
-      timelineService.refreshEvents();
-      
-      // Automatically execute the camera action after successful check-in
-      if (transactionData.type) {
-        setTimeout(() => {
-          handleCameraAction(signature);
-        }, 500);
-      }
-      
     } catch (error) {
       console.error('Check-in error:', error);
-      
+
       if (error instanceof Error) {
         let errorMsg = error.message;
-        
-        // Check for common error messages
-        if (errorMsg.includes('custom program error: 0x64')) {
-          errorMsg = 'Program error: The camera may not be configured correctly.';
-        } else if (errorMsg.includes('insufficient funds')) {
-          errorMsg = 'Insufficient SOL in your wallet. Please add more SOL and try again.';
-        } else if (errorMsg.includes('already in use')) {
+
+        if (errorMsg.includes('already checked in')) {
           errorMsg = 'You are already checked in to this camera.';
           setIsCheckedIn(true);
           return;
         } else if (errorMsg.length > 150) {
           errorMsg = 'An error occurred during check-in. Please check the console for details.';
         }
-        
+
         setError(errorMsg);
       } else {
         setError('Unknown error during check-in');
@@ -277,8 +183,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     }
   };
 
+  // NEW PRIVACY ARCHITECTURE: No blockchain transaction needed for camera actions
+  // User is already checked in off-chain, just execute the camera action
   const handleConfirmTransaction = async () => {
-    if (!primaryWallet?.address || !program || !transactionData) {
+    if (!primaryWallet?.address || !transactionData) {
       setError('Wallet not connected or missing data');
       return;
     }
@@ -287,107 +195,27 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     setError('');
 
     try {
-      const cameraPublicKey = new PublicKey(transactionData.cameraAccount);
-      
-      const userPublicKey = new PublicKey(primaryWallet.address);
+      setStatus('Executing camera action...');
 
-      // Find the session PDA for the transaction
-      const [sessionPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from('session'),
-          userPublicKey.toBuffer(),
-          cameraPublicKey.toBuffer()
-        ],
-        program.programId
-      );
+      // Get session ID from localStorage
+      const sessionKey = `mmoment_session_${primaryWallet.address}_${transactionData.cameraAccount}`;
+      const storedSession = localStorage.getItem(sessionKey);
+      const sessionId = storedSession ? JSON.parse(storedSession).sessionId : 'session';
 
-      // Derive recognition token PDA and check if it exists
-      const [recognitionTokenPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('recognition-token'), userPublicKey.toBuffer()],
-        program.programId
-      );
-
-      // Check if recognition token account exists
-      let hasRecognitionToken = false;
-      try {
-        await (program.account as any).recognitionToken.fetch(recognitionTokenPda);
-        hasRecognitionToken = true;
-      } catch (err) {
-        // No token - that's fine
-      }
-
-      setStatus('Preparing transaction...');
-
-      // Check if it's a Solana wallet
-      if (!isSolanaWallet(primaryWallet)) {
-        throw new Error('This is not a Solana wallet');
-      }
-
-      // Build accounts object
-      const checkInAccounts: any = {
-        user: userPublicKey,
-        camera: cameraPublicKey,
-        session: sessionPda,
-        systemProgram: SystemProgram.programId,
-      };
-
-      // Only include recognition token if it exists
-      if (hasRecognitionToken) {
-        checkInAccounts.recognitionToken = recognitionTokenPda;
-      }
-
-      // Instead of recordActivity (which doesn't exist), use checkIn with useFaceRecognition=false
-      const ix = await program.methods
-        .checkIn(false)
-        .accounts(checkInAccounts)
-        .instruction();
-      
-      // Add priority fee
-      const addPriorityFee = ComputeBudgetProgram.setComputeUnitPrice({
-        microLamports: 375000, // 0.375 lamports per compute unit
-      });
-      
-      // Set compute unit limit
-      const modifyComputeUnits = ComputeBudgetProgram.setComputeUnitLimit({
-        units: 200000,
-      });
-      
-      // Create new transaction and add instructions
-      const transaction = new Transaction();
-      transaction.add(addPriorityFee, modifyComputeUnits, ix);
-      
-      setStatus('Signing transaction...');
-      
-      // Get the signer
-      const signer = await primaryWallet.getSigner();
-      
-      // Set recent blockhash and fee payer
-      const walletConnection = await primaryWallet.getConnection();
-      transaction.recentBlockhash = (await walletConnection.getLatestBlockhash()).blockhash;
-      transaction.feePayer = new PublicKey(primaryWallet.address);
-      
-      // Sign and send the transaction
-      const result = await signer.signAndSendTransaction(transaction);
-      const signature = result.signature;
-      
-      setStatus('Transaction confirmed');
-      
-      // Automatically execute the camera action
+      // Execute the camera action directly
       if (transactionData.type) {
-        setTimeout(() => {
-          handleCameraAction(signature);
-        }, 500);
+        await handleCameraAction(sessionId);
       } else {
         // If no camera action needed, just pass success
         onSuccess?.({
-          transactionId: signature,
+          transactionId: sessionId,
           cameraId: transactionData.cameraAccount
         });
         onClose();
       }
     } catch (err) {
-      console.error('Transaction error:', err);
-      setError(err instanceof Error ? err.message : 'Transaction failed');
+      console.error('Action error:', err);
+      setError(err instanceof Error ? err.message : 'Action failed');
     } finally {
       setLoading(false);
     }

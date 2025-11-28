@@ -1,15 +1,24 @@
-// Session Cleanup Cron Job
-// Automatically checks out expired sessions and collects rent as reward
+// Session Access Key Storage Service
+// In the new privacy architecture, sessions are managed off-chain by Jetson.
+// This service stores access keys for users when sessions end (fallback for when user doesn't store their own keys).
 import { Connection, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet, BN } from '@coral-xyz/anchor';
 import { IDL } from './idl';
 import { Server } from 'socket.io';
-import { getSessionActivities, clearSessionActivities } from './database';
 
-const CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const PROGRAM_ID = new PublicKey('E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL');
+const RETRY_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes for retrying pending keys
 
-// Type for timeline event without ID
+// Pending access keys to be stored (received from Jetson on session end)
+interface PendingAccessKey {
+  userPubkey: string;
+  keyCiphertext: number[];
+  nonce: number[];
+  timestamp: number;
+  retryCount: number;
+}
+
+// Type for timeline event without ID (kept for backwards compatibility)
 type TimelineEventWithoutId = {
   type: string;
   user: {
@@ -25,9 +34,12 @@ type AddTimelineEventFn = (event: TimelineEventWithoutId, socketServer: Server) 
 let connection: Connection | null = null;
 let cronBotKeypair: Keypair | null = null;
 let program: Program | null = null;
-let cleanupIntervalId: NodeJS.Timeout | null = null;
+let retryIntervalId: NodeJS.Timeout | null = null;
 let io: Server | null = null;
 let addTimelineEventFn: AddTimelineEventFn | null = null;
+
+// Queue of pending access keys to store (keyed by user pubkey)
+const pendingKeys: Map<string, PendingAccessKey[]> = new Map();
 
 export function initializeSessionCleanupCron(
   rpcUrl: string,
@@ -44,7 +56,7 @@ export function initializeSessionCleanupCron(
     // Store Socket.IO server reference and timeline event handler
     if (socketServer) {
       io = socketServer;
-      console.log('   Socket.IO server connected for timeline events');
+      console.log('   Socket.IO server connected for session events');
     }
     if (addTimelineEvent) {
       addTimelineEventFn = addTimelineEvent;
@@ -56,220 +68,206 @@ export function initializeSessionCleanupCron(
     const provider = new AnchorProvider(connection, wallet, { commitment: 'confirmed' });
     program = new Program(IDL as any, PROGRAM_ID, provider);
 
-    console.log('✅ Session Cleanup Cron Initialized');
-    console.log(`   Cron Bot: ${cronBotKeypair.publicKey.toString()}`);
-    console.log(`   Cleanup Interval: ${CLEANUP_INTERVAL_MS / 1000 / 60} minutes`);
+    console.log('✅ Session Access Key Service Initialized');
+    console.log(`   Cron Bot (Authority): ${cronBotKeypair.publicKey.toString()}`);
+    console.log('   NOTE: Sessions are now managed off-chain by Jetson');
+    console.log('   This service stores access keys as fallback when users don\'t store their own');
 
-    // Start the cron job
-    startCleanupCron();
+    // Start retry interval for pending keys
+    startRetryInterval();
 
     return true;
   } catch (error) {
-    console.error('❌ Failed to initialize Session Cleanup Cron:', error);
+    console.error('❌ Failed to initialize Session Access Key Service:', error);
     return false;
   }
 }
 
-function startCleanupCron() {
-  if (cleanupIntervalId) {
-    console.log('⚠️  Cleanup cron already running');
+function startRetryInterval() {
+  if (retryIntervalId) {
+    console.log('⚠️  Retry interval already running');
     return;
   }
 
-  // Run immediately on start
-  runCleanup();
+  // Retry pending keys periodically
+  retryIntervalId = setInterval(() => {
+    processAllPendingKeys();
+  }, RETRY_INTERVAL_MS);
 
-  // Then run every interval
-  cleanupIntervalId = setInterval(() => {
-    runCleanup();
-  }, CLEANUP_INTERVAL_MS);
-
-  console.log('🤖 Session cleanup cron started');
+  console.log('🔄 Access key retry interval started');
 }
 
 export function stopCleanupCron() {
-  if (cleanupIntervalId) {
-    clearInterval(cleanupIntervalId);
-    cleanupIntervalId = null;
-    console.log('🛑 Session cleanup cron stopped');
+  if (retryIntervalId) {
+    clearInterval(retryIntervalId);
+    retryIntervalId = null;
+    console.log('🛑 Session Access Key Service stopped');
   }
 }
 
-async function runCleanup() {
+/**
+ * Queue an access key to be stored for a user
+ * Called by Jetson when a session ends
+ */
+export async function queueAccessKeyForUser(
+  userPubkey: string,
+  keyCiphertext: number[],
+  nonce: number[],
+  timestamp: number
+): Promise<boolean> {
+  const key: PendingAccessKey = {
+    userPubkey,
+    keyCiphertext,
+    nonce,
+    timestamp,
+    retryCount: 0
+  };
+
+  if (!pendingKeys.has(userPubkey)) {
+    pendingKeys.set(userPubkey, []);
+  }
+  pendingKeys.get(userPubkey)!.push(key);
+
+  console.log(`📥 Queued access key for user ${userPubkey.slice(0, 8)}...`);
+
+  // Try to store immediately
+  return await processAccessKeyForUser(userPubkey);
+}
+
+/**
+ * Process pending access keys for a user
+ */
+async function processAccessKeyForUser(userPubkey: string): Promise<boolean> {
   if (!connection || !cronBotKeypair || !program) {
-    console.error('Cleanup cron not initialized');
-    return;
+    console.error('Session Access Key Service not initialized');
+    return false;
+  }
+
+  const keys = pendingKeys.get(userPubkey);
+  if (!keys || keys.length === 0) {
+    return true; // Nothing to process
   }
 
   try {
-    console.log('\n🧹 [Cleanup Cron] Starting session cleanup scan...');
-    const now = Math.floor(Date.now() / 1000);
+    const userKey = new PublicKey(userPubkey);
 
-    // Fetch all session accounts (102 bytes)
-    const sessionAccounts = await connection.getProgramAccounts(PROGRAM_ID, {
-      filters: [
-        { dataSize: 102 } // UserSession size
-      ]
-    });
+    // Derive the UserSessionChain PDA
+    const [userSessionChainPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from('user-session-chain'), userKey.toBuffer()],
+      PROGRAM_ID
+    );
 
-    console.log(`   Found ${sessionAccounts.length} total sessions`);
-    console.log(`   Current time: ${now} (${new Date(now * 1000).toISOString()})`);
+    // Check if user's session chain exists
+    const chainAccount = await connection.getAccountInfo(userSessionChainPda);
 
-    let expiredCount = 0;
-    let cleanedCount = 0;
-    let errorCount = 0;
-
-    // Check each session for expiration
-    for (const accountInfo of sessionAccounts) {
-      try {
-        const session = program.coder.accounts.decode('userSession', accountInfo.account.data);
-        const sessionPubkey = accountInfo.pubkey;
-
-        // Debug: Log session details
-        const expiresAt = session.autoCheckoutAt.toNumber();
-        const expiresDate = new Date(expiresAt * 1000);
-        const isExpired = now > expiresAt;
-
-        console.log(`   Session ${sessionPubkey.toString().slice(0, 8)}...`);
-        console.log(`      User: ${session.user.toString().slice(0, 8)}...`);
-        console.log(`      Expires at: ${expiresDate.toISOString()} (${expiresAt})`);
-        console.log(`      Now: ${new Date(now * 1000).toISOString()} (${now})`);
-        console.log(`      Is expired: ${isExpired}`);
-
-        // Check if expired
-        if (isExpired) {
-          expiredCount++;
-
-          console.log(`   📤 Cleaning up expired session:`);
-          console.log(`      Session: ${sessionPubkey.toString().slice(0, 8)}...`);
-          console.log(`      User: ${session.user.toString().slice(0, 8)}...`);
-          console.log(`      Expired at: ${new Date(session.autoCheckoutAt.toNumber() * 1000).toISOString()}`);
-
-          try {
-            // Fetch buffered activities for this session from the database
-            const sessionPdaString = sessionPubkey.toString();
-            let activitiesForCheckout: any[] = [];
-
-            try {
-              const bufferedActivities = await getSessionActivities(sessionPdaString);
-
-              if (bufferedActivities.length > 0) {
-                console.log(`      📦 Found ${bufferedActivities.length} buffered activities to commit`);
-
-                // Convert to Solana ActivityData format
-                activitiesForCheckout = bufferedActivities.map(a => ({
-                  timestamp: new BN(a.timestamp),
-                  activityType: a.activityType,
-                  encryptedContent: a.encryptedContent, // Already a Buffer
-                  nonce: Array.from(a.nonce), // Convert Buffer to u8 array
-                  accessGrants: JSON.parse(a.accessGrants.toString()).map(
-                    (g: string) => Array.from(Buffer.from(g, 'base64'))
-                  )
-                }));
-              } else {
-                console.log(`      📭 No buffered activities for this session`);
-              }
-            } catch (fetchErr: any) {
-              console.log(`      ⚠️  Could not fetch buffered activities: ${fetchErr.message}`);
-              // Continue with empty activities - session cleanup is more important
-            }
-
-            // Derive the cameraTimeline PDA
-            const [cameraTimelinePda] = PublicKey.findProgramAddressSync(
-              [Buffer.from('camera-timeline'), session.camera.toBuffer()],
-              PROGRAM_ID
-            );
-
-            // Build check-out transaction with activities
-            const checkOutTx = await program.methods
-              .checkOut(activitiesForCheckout) // Include buffered activities for on-chain commit!
-              .accounts({
-                closer: cronBotKeypair.publicKey,
-                camera: session.camera,
-                cameraTimeline: cameraTimelinePda,
-                session: sessionPubkey,
-                sessionUser: session.user,
-                rentDestination: cronBotKeypair.publicKey, // Cron bot collects rent!
-                systemProgram: SystemProgram.programId,
-              })
-              .transaction();
-
-            // Sign and send
-            const { blockhash } = await connection.getLatestBlockhash();
-            checkOutTx.recentBlockhash = blockhash;
-            checkOutTx.feePayer = cronBotKeypair.publicKey;
-            checkOutTx.sign(cronBotKeypair);
-
-            const signature = await connection.sendRawTransaction(checkOutTx.serialize());
-            await connection.confirmTransaction(signature, 'confirmed');
-
-            cleanedCount++;
-            console.log(`      ✅ Cleaned up! Tx: ${signature.slice(0, 8)}...`);
-            console.log(`         Rent collected by cron bot`);
-
-            // Clear the activity buffer after successful on-chain commit
-            if (activitiesForCheckout.length > 0) {
-              try {
-                const cleared = await clearSessionActivities(sessionPdaString);
-                console.log(`         🗑️  Cleared ${cleared} buffered activities from database`);
-              } catch (clearErr: any) {
-                console.error(`         ⚠️  Failed to clear activity buffer: ${clearErr.message}`);
-                // Non-fatal: activities committed on-chain, just orphaned in DB (will be cleaned by 7-day cleanup)
-              }
-            }
-
-            // Add timeline event for auto-checkout using the shared helper function
-            if (io && addTimelineEventFn) {
-              const timelineEvent = {
-                type: 'auto_check_out',
-                user: {
-                  address: session.user.toString(),
-                },
-                timestamp: Date.now(),
-                cameraId: session.camera.toString(),
-                transactionId: signature,
-              };
-
-              // Use the shared helper function to properly store and broadcast the event
-              addTimelineEventFn(timelineEvent, io);
-              console.log(`      📡 Timeline event added and broadcast for auto-checkout to camera ${session.camera.toString().slice(0, 8)}...`);
-            }
-
-          } catch (cleanupError: any) {
-            errorCount++;
-            console.error(`      ❌ Failed to cleanup:`, cleanupError.message);
-          }
-        }
-      } catch (decodeError: any) {
-        // Skip sessions we can't decode (old format, etc.)
-        console.log(`   ⚠️  Could not decode session:`, decodeError.message);
-        continue;
-      }
+    if (!chainAccount) {
+      console.log(`   ⚠️ User ${userPubkey.slice(0, 8)}... has no session chain. Keys held in queue.`);
+      // User needs to create their session chain first
+      // Keep keys in queue for retry
+      return false;
     }
 
-    console.log(`\n   Summary:`);
-    console.log(`   - Total sessions: ${sessionAccounts.length}`);
-    console.log(`   - Expired: ${expiredCount}`);
-    console.log(`   - Cleaned up: ${cleanedCount}`);
-    console.log(`   - Errors: ${errorCount}`);
-    console.log(`   🏁 Cleanup scan complete\n`);
+    // Convert keys to the format expected by the program
+    const keysToStore = keys.map(k => ({
+      keyCiphertext: Buffer.from(k.keyCiphertext),
+      nonce: k.nonce,
+      timestamp: new BN(k.timestamp),
+    }));
 
-  } catch (error) {
-    console.error('Error during cleanup scan:', error);
+    // Build store_session_access_keys transaction
+    const tx = await program.methods
+      .storeSessionAccessKeys(keysToStore)
+      .accounts({
+        signer: cronBotKeypair.publicKey,
+        user: userKey,
+        userSessionChain: userSessionChainPda,
+        systemProgram: SystemProgram.programId,
+      })
+      .transaction();
+
+    // Sign and send
+    const { blockhash } = await connection.getLatestBlockhash();
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = cronBotKeypair.publicKey;
+    tx.sign(cronBotKeypair);
+
+    const signature = await connection.sendRawTransaction(tx.serialize());
+    await connection.confirmTransaction(signature, 'confirmed');
+
+    console.log(`   ✅ Stored ${keys.length} access key(s) for user ${userPubkey.slice(0, 8)}...`);
+    console.log(`      Tx: ${signature.slice(0, 8)}...`);
+
+    // Clear processed keys
+    pendingKeys.delete(userPubkey);
+
+    return true;
+
+  } catch (error: any) {
+    console.error(`   ❌ Failed to store access keys for user ${userPubkey.slice(0, 8)}...:`, error.message);
+
+    // Increment retry count for all keys
+    const updatedKeys = keys.map(k => ({ ...k, retryCount: k.retryCount + 1 }));
+
+    // Remove keys that have failed too many times (5 retries)
+    const retryableKeys = updatedKeys.filter(k => k.retryCount < 5);
+    if (retryableKeys.length < keys.length) {
+      console.log(`   🗑️ Dropped ${keys.length - retryableKeys.length} keys after max retries`);
+    }
+
+    if (retryableKeys.length > 0) {
+      pendingKeys.set(userPubkey, retryableKeys);
+    } else {
+      pendingKeys.delete(userPubkey);
+    }
+
+    return false;
   }
 }
 
-// Export for manual trigger (useful for testing)
-export async function triggerManualCleanup() {
-  console.log('🔧 Manual cleanup triggered');
-  await runCleanup();
+/**
+ * Process all pending access keys (called periodically or on demand)
+ */
+export async function processAllPendingKeys() {
+  if (pendingKeys.size === 0) {
+    return;
+  }
+
+  console.log('\n🔄 Processing all pending access keys...');
+
+  const users = Array.from(pendingKeys.keys());
+  console.log(`   ${users.length} users with pending keys`);
+
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const userPubkey of users) {
+    const success = await processAccessKeyForUser(userPubkey);
+    if (success) {
+      successCount++;
+    } else {
+      failCount++;
+    }
+  }
+
+  console.log(`   ✅ Processed: ${successCount} success, ${failCount} pending`);
 }
 
-// Get cron status
+// Get service status
 export function getCleanupCronStatus() {
   return {
-    running: cleanupIntervalId !== null,
+    running: cronBotKeypair !== null,
     cronBot: cronBotKeypair?.publicKey.toString() || null,
-    intervalMinutes: CLEANUP_INTERVAL_MS / 1000 / 60
+    pendingKeysCount: Array.from(pendingKeys.values()).reduce((sum, keys) => sum + keys.length, 0),
+    usersWithPendingKeys: pendingKeys.size,
+    retryIntervalMinutes: RETRY_INTERVAL_MS / 1000 / 60
   };
 }
+
+// For backwards compatibility and manual trigger
+export async function triggerManualCleanup() {
+  console.log('🔧 Manual key processing triggered');
+  await processAllPendingKeys();
+}
+
+// Alias for clearer naming
+export { triggerManualCleanup as runCleanup };

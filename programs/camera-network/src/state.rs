@@ -44,29 +44,9 @@ pub struct CameraFeatures {
     pub messaging: bool,         // Whether messaging is available
 }
 
-// User session account for check-in/check-out
-#[account]
-pub struct UserSession {
-    pub user: Pubkey,            // The user who is checked in
-    pub camera: Pubkey,          // The camera they're checked into
-    pub check_in_time: i64,      // When the session started
-    pub last_activity: i64,      // Last activity timestamp
-    pub auto_checkout_at: i64,   // Unix timestamp when session expires (2 hour fallback)
-    pub enabled_features: SessionFeatures, // What features are enabled for this session
-    pub bump: u8,                // PDA bump
-}
-
-// Updated space: 8 + 32 + 32 + 8 + 8 + 8 + 5 + 1 = 102 bytes
-
-// Features that can be enabled during a session
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
-pub struct SessionFeatures {
-    pub face_recognition: bool,  // Whether face recognition is being used
-    pub gesture_control: bool,   // Whether gesture control is being used
-    pub video_recording: bool,   // Whether video recording is enabled
-    pub live_streaming: bool,    // Whether live streaming is enabled
-    pub messaging: bool,         // Whether messaging is enabled
-}
+// NOTE: UserSession removed - sessions are now managed off-chain by Jetson
+// Check-in is an ed25519 handshake, checkout writes to CameraTimeline + UserSessionChain
+// This breaks the visible on-chain user↔camera link
 
 // Recognition token - stores encrypted facial embedding for user authentication
 #[account]
@@ -140,6 +120,33 @@ pub struct EncryptedActivity {
 // Typical size per activity: 8 + 1 + 4 + ~150 (content) + 12 + 4 + (N_users * 64) bytes
 // Example: 2 users present = ~300 bytes per activity
 
+// User session chain - stores encrypted access keys to camera session history
+// This is the user's "keychain" for accessing their sessions across cameras
+// Seeds: ["user-session-chain", user.key()]
+#[account]
+pub struct UserSessionChain {
+    pub user: Pubkey,                               // 32 bytes - owner of this chain
+    pub authority: Pubkey,                          // 32 bytes - mmoment cron bot (can write as fallback)
+    pub encrypted_keys: Vec<EncryptedSessionKey>,   // Dynamic - encrypted access keys to sessions
+    pub session_count: u64,                         // 8 bytes - total sessions recorded
+    pub bump: u8,                                   // 1 byte - PDA bump
+}
+
+// Space: 8 (discriminator) + 32 (user) + 32 (authority) + 4 (vec length) + (N * key_size) + 8 (count) + 1 (bump)
+// Initial: ~85 bytes + dynamic key data
+// Writable by: user OR authority (cron bot)
+
+// Single encrypted session access key
+// Each key unlocks a portion of a camera's encrypted timeline
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct EncryptedSessionKey {
+    pub key_ciphertext: Vec<u8>,    // Encrypted AES key that decrypts activities
+    pub nonce: [u8; 12],            // Nonce used for key encryption
+    pub timestamp: i64,             // When this session occurred (for ordering)
+}
+
+// Typical size per key: 4 + ~48 (ciphertext) + 12 + 8 = ~72 bytes
+
 // Activity types enum (used to interpret last_activity_type)
 // Values 0-49: Core camera activities
 // Values 50-99: CV app results (pushup competition, basketball score, climbing, etc.)
@@ -177,33 +184,8 @@ pub struct CameraRegistered {
     pub timestamp: i64,          // When the camera was registered
 }
 
-// Event emitted when a user checks in
-#[event]
-pub struct UserCheckedIn {
-    pub user: Pubkey,            // The user public key
-    pub camera: Pubkey,          // The camera public key
-    pub session: Pubkey,         // The session public key
-    pub timestamp: i64,          // When the check-in occurred
-}
-
-// Event emitted when a user checks out
-#[event]
-pub struct UserCheckedOut {
-    pub user: Pubkey,            // The user public key
-    pub camera: Pubkey,          // The camera public key
-    pub session: Pubkey,         // The session public key
-    pub duration: i64,           // Session duration in seconds
-    pub timestamp: i64,          // When the check-out occurred
-}
-
-// Event for camera activity
-#[event]
-pub struct ActivityRecorded {
-    pub camera: Pubkey,          // The camera public key
-    pub user: Pubkey,            // The user public key (if applicable)
-    pub activity_type: u8,       // Type of activity
-    pub timestamp: i64,          // When the activity occurred
-}
+// NOTE: UserCheckedIn, UserCheckedOut, ActivityRecorded events removed
+// These exposed user↔camera links. Timeline updates are now anonymous via TimelineUpdated event.
 
 // Event emitted when a recognition token is created or regenerated
 #[event]
@@ -224,15 +206,7 @@ pub struct RecognitionTokenDeleted {
     pub timestamp: i64,          // When the token was deleted
 }
 
-// Event emitted when a session auto-checks out
-#[event]
-pub struct SessionAutoCheckout {
-    pub user: Pubkey,            // The user who was checked out
-    pub camera: Pubkey,          // The camera public key
-    pub session: Pubkey,         // The session public key
-    pub reason: String,          // Reason: "expired" or "face_timeout"
-    pub timestamp: i64,          // When the auto checkout occurred
-}
+// NOTE: SessionAutoCheckout event removed - exposed user↔camera links
 
 // Remove unused seed helper functions, keep only the essential ones
 pub fn camera_registry_seeds() -> &'static [u8] {
@@ -259,14 +233,7 @@ pub struct UpdateCameraArgs {
     pub features: Option<CameraFeatures>,
 }
 
-// Camera activity arguments
-#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
-pub struct ActivityArgs {
-    pub activity_type: u8,
-    pub metadata: String,
-}
-
-// Activity data structure for bundled checkout
+// Activity data structure for timeline writes
 // This is passed from Jetson (already encrypted) to the checkout instruction
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct ActivityData {
