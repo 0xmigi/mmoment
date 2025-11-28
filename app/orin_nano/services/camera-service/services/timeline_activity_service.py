@@ -177,13 +177,14 @@ class TimelineActivityService:
             # Get all checked-in users for access grants
             checked_in_users = self._get_checked_in_users()
 
+            # Ensure the triggering user is included in access grants
+            # (Important: Do this BEFORE the empty check so their own activities are always buffered)
+            if wallet_address not in checked_in_users:
+                checked_in_users.append(wallet_address)
+
             if not checked_in_users:
                 logger.debug("No users checked in, skipping activity buffer")
                 return False
-
-            # Ensure the triggering user is included in access grants
-            if wallet_address not in checked_in_users:
-                checked_in_users.append(wallet_address)
 
             # Encrypt activity for all checked-in users
             encryption_service = self._get_encryption_service()

@@ -1932,6 +1932,10 @@ def register_routes(app):
                 logger.info(
                     f"✅ [CHECKOUT-NOTIFY] Checkout activity buffered with tx signature"
                 )
+
+                # Mark checkout as already buffered to prevent duplicate from blockchain sync
+                blockchain_sync = get_blockchain_session_sync()
+                blockchain_sync.mark_checkout_activity_buffered(wallet_address)
             except Exception as e:
                 logger.warning(f"⚠️  [CHECKOUT-NOTIFY] Failed to buffer checkout activity: {e}")
 

@@ -44,6 +44,10 @@ class BlockchainSessionSync:
         self._api_checkin_times: Dict[str, float] = {}  # wallet_address -> timestamp
         self._api_checkin_grace_period = 30  # seconds to ignore blockchain checkout after API check-in
 
+        # Track when checkout activity was already buffered via API (to prevent duplicate checkout events)
+        self._api_checkout_buffered: Dict[str, float] = {}  # wallet_address -> timestamp
+        self._api_checkout_grace_period = 60  # seconds to skip re-buffering checkout activity
+
         # Services (will be injected)
         self.session_service = None
         self.face_service = None
@@ -204,18 +208,18 @@ class BlockchainSessionSync:
                 else:
                     error_msg = data.get('error', 'Unknown error from Solana middleware')
                     logger.error(f"🔗 Solana middleware returned error: {error_msg}")
-                    return set()  # Return empty set on error, no fallbacks
-                    
+                    return None  # Return None on error to skip sync (prevents ghost checkouts)
+
             else:
                 logger.error(f"🔗 Failed to get checked-in users from Solana middleware: HTTP {response.status_code}")
-                return set()  # Return empty set on error, no fallbacks
-                
+                return None  # Return None on error to skip sync (prevents ghost checkouts)
+
         except requests.exceptions.RequestException as e:
             logger.error(f"🔗 Network error connecting to Solana middleware: {e}")
-            return set()  # Return empty set on error, no fallbacks
+            return None  # Return None on error to skip sync (prevents ghost checkouts)
         except Exception as e:
             logger.error(f"Error getting checked-in wallets from blockchain: {e}")
-            return set()  # Return empty set on error, no fallbacks
+            return None  # Return None on error to skip sync (prevents ghost checkouts)
             
     def _get_hardcoded_wallets(self) -> Set[str]:
         """REMOVED - No more hardcoded fallbacks"""
@@ -288,25 +292,32 @@ class BlockchainSessionSync:
                     session_id = session['session_id']
 
                     # Buffer CHECK_OUT activity BEFORE ending the session
-                    # This creates an encrypted activity for the privacy-preserving timeline
-                    try:
-                        from services.timeline_activity_service import (
-                            get_timeline_activity_service,
-                        )
+                    # BUT skip if already buffered via API (prevents duplicate checkout events)
+                    api_checkout_time = self._api_checkout_buffered.get(wallet_address, 0)
+                    if time.time() - api_checkout_time < self._api_checkout_grace_period:
+                        logger.info(f"⏭️  Skipping checkout activity buffer for {wallet_address[:8]}... (already buffered via API)")
+                        # Clean up the tracking
+                        self._api_checkout_buffered.pop(wallet_address, None)
+                    else:
+                        # This creates an encrypted activity for the privacy-preserving timeline
+                        try:
+                            from services.timeline_activity_service import (
+                                get_timeline_activity_service,
+                            )
 
-                        timeline_service = get_timeline_activity_service()
-                        duration_seconds = stats.get('duration') if stats else None
-                        timeline_service.buffer_checkout_activity(
-                            wallet_address=wallet_address,
-                            session_id=session_id,
-                            duration_seconds=duration_seconds,
-                            metadata={
-                                "timestamp": int(time.time() * 1000),
-                            },
-                        )
-                    except Exception as e:
-                        # Non-fatal - checkout continues even if activity buffering fails
-                        logger.warning(f"⚠️  Failed to buffer check-out activity: {e}")
+                            timeline_service = get_timeline_activity_service()
+                            duration_seconds = stats.get('duration') if stats else None
+                            timeline_service.buffer_checkout_activity(
+                                wallet_address=wallet_address,
+                                session_id=session_id,
+                                duration_seconds=duration_seconds,
+                                metadata={
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                            )
+                        except Exception as e:
+                            # Non-fatal - checkout continues even if activity buffering fails
+                            logger.warning(f"⚠️  Failed to buffer check-out activity: {e}")
 
                     success = self.session_service.end_session(session_id, wallet_address)
                     if success:
@@ -563,7 +574,17 @@ class BlockchainSessionSync:
 
         # Fetch and decrypt recognition token with profile
         self._fetch_and_decrypt_recognition_token(wallet_address, profile)
-        
+
+    def mark_checkout_activity_buffered(self, wallet_address: str):
+        """
+        Mark that a checkout activity was already buffered via API.
+        This prevents duplicate checkout events when blockchain sync runs.
+
+        Called from /api/checkout-notify after buffering the checkout activity.
+        """
+        self._api_checkout_buffered[wallet_address] = time.time()
+        logger.info(f"📝 Marked checkout activity as buffered for {wallet_address[:8]}...")
+
     def get_status(self) -> Dict:
         """Get current sync status"""
         return {
