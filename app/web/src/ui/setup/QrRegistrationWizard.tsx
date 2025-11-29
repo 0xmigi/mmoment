@@ -36,7 +36,7 @@ interface ClaimStatus {
 export function QrRegistrationWizard({ 
   onComplete, 
   onError,
-  backendUrl = 'https://mmoment-backend-production.up.railway.app'
+  backendUrl = 'https://mmoment-production.up.railway.app'
 }: QrRegistrationProps): JSX.Element {
   // Wizard state
   const [currentStep, setCurrentStep] = useState<QrStep>('wifi');
