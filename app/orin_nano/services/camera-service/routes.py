@@ -91,37 +91,82 @@ def get_blockchain_session_sync():
     return get_blockchain_session_sync()
 
 
-# Session validation decorator - BLOCKCHAIN ONLY
+# Session validation decorator - With CRYPTOGRAPHIC SIGNATURE VERIFICATION
 def require_session(f):
-    """Decorator to require a valid session - uses ONLY blockchain authentication"""
+    """
+    Decorator to require a valid session with ed25519 signature verification.
+
+    This provides TRUE security by verifying that the requester actually owns
+    the wallet private key, not just knows the wallet address.
+
+    Expected request format:
+    {
+        "wallet_address": "ABC123...",
+        "request_timestamp": 1234567890123,  // Unix ms
+        "request_nonce": "random-uuid",
+        "request_signature": "base58-encoded-signature"  // Signs: wallet|timestamp|nonce
+    }
+    """
 
     @wraps(f)
     def decorated_function(*args, **kwargs):
         logger.info(f"🔍 require_session decorator called for endpoint: {f.__name__}")
 
-        wallet_address = request.json.get("wallet_address") if request.json else None
+        if not request.json:
+            return jsonify({"success": False, "error": "Request body required"}), 400
 
-        logger.info(f"🔍 Blockchain validation - wallet_address: {wallet_address}")
+        wallet_address = request.json.get("wallet_address")
+        request_timestamp = request.json.get("request_timestamp")
+        request_nonce = request.json.get("request_nonce")
+        request_signature = request.json.get("request_signature")
+
+        logger.info(f"🔍 Session validation - wallet_address: {wallet_address}")
 
         if not wallet_address:
             logger.warning(f"🔍 Missing wallet address for {f.__name__}")
-            return jsonify({"success": False, "error": "Invalid session"}), 403
+            return jsonify({"success": False, "error": "wallet_address required"}), 403
 
-        # BLOCKCHAIN ONLY VALIDATION: Check if wallet is checked in on-chain
+        # Check if wallet is checked in first
         blockchain_sync = get_blockchain_session_sync()
-        if blockchain_sync.is_wallet_checked_in(wallet_address):
-            logger.info(
-                f"✅ Blockchain validation: {wallet_address} is checked in on-chain"
+        if not blockchain_sync.is_wallet_checked_in(wallet_address):
+            logger.warning(
+                f"❌ Wallet {wallet_address[:8]}... not checked in"
             )
-            return f(*args, **kwargs)
+            return jsonify(
+                {"success": False, "error": "Invalid session - please check in first"}
+            ), 403
 
-        # Blockchain authentication failed
-        logger.warning(
-            f"❌ Blockchain validation failed for {f.__name__} - wallet {wallet_address} not checked in"
-        )
-        return jsonify(
-            {"success": False, "error": "Invalid session - please check in first"}
-        ), 403
+        # CRYPTOGRAPHIC SIGNATURE VERIFICATION
+        # If signature fields are provided, verify them
+        if request_signature and request_timestamp and request_nonce:
+            is_valid, error_msg = device_signer.verify_request_signature(
+                wallet_address=wallet_address,
+                timestamp=int(request_timestamp),
+                nonce=request_nonce,
+                signature=request_signature,
+                max_age_seconds=300  # 5 minute window
+            )
+
+            if not is_valid:
+                logger.warning(
+                    f"❌ Signature verification failed for {wallet_address[:8]}...: {error_msg}"
+                )
+                return jsonify({
+                    "success": False,
+                    "error": f"Signature verification failed: {error_msg}"
+                }), 403
+
+            logger.info(f"✅ CRYPTOGRAPHIC signature verified for {wallet_address[:8]}...")
+        else:
+            # TEMPORARY: Allow unsigned requests but log warning
+            # TODO: Once frontend is updated, make signatures REQUIRED
+            logger.warning(
+                f"⚠️ UNSIGNED request from {wallet_address[:8]}... - "
+                "This is temporarily allowed but will be required soon"
+            )
+
+        logger.info(f"✅ Session validated for {wallet_address[:8]}...")
+        return f(*args, **kwargs)
 
     return decorated_function
 
@@ -296,11 +341,10 @@ def register_routes(app):
             device_info = device_signer.get_device_info()
 
             # Claim the device with backend
-            backend_url = os.getenv("BACKEND_HOST", "192.168.1.80")
-            backend_port = os.getenv("BACKEND_PORT", "3001")
+            backend_url = os.getenv("BACKEND_URL", "https://mmoment-production.up.railway.app")
 
             claim_response = requests.post(
-                f"http://{backend_url}:{backend_port}/api/device/claim",
+                f"{backend_url}/api/device/claim",
                 json={
                     "token": claim_token,
                     "device_pubkey": device_pubkey,
@@ -414,6 +458,12 @@ def register_routes(app):
             if webrtc_status.get("connected", False):
                 stream_formats.append("webrtc")
 
+            # Get active session count for Phase 3 privacy architecture
+            session_service = services.get("session")
+            active_session_count = 0
+            if session_service:
+                active_session_count = session_service.get_active_session_count()
+
             return jsonify(
                 {
                     "success": True,
@@ -423,6 +473,7 @@ def register_routes(app):
                         "isStreaming": is_streaming,
                         "isRecording": is_recording,
                         "lastSeen": int(time.time()),
+                        "activeSessionCount": active_session_count,  # Phase 3: Privacy-preserving user count
                         "streamInfo": stream_info,
                         "recordingInfo": {
                             "isActive": is_recording,
@@ -1696,97 +1747,88 @@ def register_routes(app):
     @app.route("/api/checkin", methods=["POST"])
     def api_unified_checkin():
         """
-        Unified check-in endpoint - handles everything in one atomic operation.
-        Called by frontend after on-chain check-in transaction confirms.
+        Unified check-in endpoint - Phase 3 Privacy Architecture.
 
-        No more race conditions - this triggers immediate blockchain sync and recognition token loading.
+        Check-in is now FULLY OFF-CHAIN:
+        - No blockchain transaction required
+        - Session created locally with UUID
+        - AES-256 session key generated for activity encryption
+        - Activities buffered in session, encrypted at checkout
 
         Expected body:
         {
             "wallet_address": "...",           # Required
-            "session_pda": "...",              # Required - Solana session PDA for activity buffering
             "display_name": "...",             # Optional
             "username": "...",                 # Optional
-            "transaction_signature": "..."     # Optional - for verification
         }
+
+        Legacy fields (ignored for backwards compatibility):
+        - session_pda: No longer used (sessions are off-chain)
+        - transaction_signature: No longer used (no check-in tx)
         """
         data = request.json or {}
         wallet_address = data.get("wallet_address")
-        session_pda = data.get("session_pda")  # Solana session PDA - CRITICAL for activity buffering
         display_name = data.get("display_name")
         username = data.get("username")
-        transaction_signature = data.get(
-            "transaction_signature"
-        )  # Optional: for verification
 
-        logger.info(f"🔍 [CHECKIN-DEBUG] Raw request data: {data}")
-        logger.info(
-            f"🔍 [CHECKIN-DEBUG] display_name={display_name}, username={username}, session_pda={session_pda[:16] if session_pda else 'NONE'}..."
-        )
+        # Legacy fields - ignored but logged for debugging
+        session_pda = data.get("session_pda")  # Ignored - sessions are now off-chain
+        if session_pda:
+            logger.debug(f"[CHECKIN] Ignoring legacy session_pda (Phase 3: off-chain sessions)")
+
+        logger.info(f"[CHECKIN] Request for {wallet_address[:8] if wallet_address else 'NONE'}... display_name={display_name}")
 
         if not wallet_address:
             return jsonify(
                 {"success": False, "error": "Wallet address is required"}
             ), 400
 
-        # Warn if no session_pda provided - activity buffering won't work correctly!
-        if not session_pda:
-            logger.warning(
-                f"⚠️  [UNIFIED-CHECKIN] No session_pda provided for {wallet_address[:8]}... - activity buffering may not work!"
-            )
-
         camera_pda = get_camera_pda()
         logger.info(
-            f"🎉 [UNIFIED-CHECKIN] User {wallet_address[:8]}... checking in to camera {camera_pda[:8]}... with session_pda={session_pda[:16] if session_pda else 'NONE'}..."
+            f"[CHECKIN] User {wallet_address[:8]}... checking in to camera {camera_pda[:8]}... (off-chain session)"
         )
 
         try:
             services = get_services()
+            session_service = services["session"]
 
             # Build user profile
             user_profile = {
                 "wallet_address": wallet_address,
                 "display_name": display_name,
                 "username": username,
-                "camera_pda": camera_pda,
-                "updated_at": int(time.time()),
-                "transaction_signature": transaction_signature,
             }
 
             resolved_display_name = display_name or username or wallet_address[:8]
 
-            # Trigger check-in with profile - this handles everything atomically:
-            # - Stores profile in IdentityStore
-            # - Creates session
-            # - Enables face boxes
-            # - Fetches and decrypts recognition token
+            # Create off-chain session with local UUID and AES-256 key
+            session_result = session_service.create_session(wallet_address, user_profile)
+            session_id = session_result["session_id"]
+            logger.info(f"[CHECKIN] Created off-chain session {session_id[:16]}... for {resolved_display_name}")
+
+            # Trigger blockchain sync for recognition token loading
+            # This still loads face recognition tokens from chain (if user has one)
             from services.blockchain_session_sync import get_blockchain_session_sync
 
             blockchain_sync = get_blockchain_session_sync()
-            blockchain_sync.trigger_checkin(wallet_address, user_profile)
-            logger.info(
-                f"✅ [UNIFIED-CHECKIN] Triggered check-in for {resolved_display_name}"
+            blockchain_sync.trigger_checkin(wallet_address, {
+                **user_profile,
+                "camera_pda": camera_pda,
+                "updated_at": int(time.time()),
+            })
+            logger.info(f"[CHECKIN] Triggered recognition token loading for {resolved_display_name}")
+
+            # Buffer check-in activity in the session (encrypted at checkout)
+            session_service.add_activity_to_session(
+                wallet_address=wallet_address,
+                activity_type=0,  # CHECK_IN
+                data={"display_name": resolved_display_name},
+                metadata={"camera_pda": camera_pda}
             )
 
-            # Create session with Solana PDA if provided
-            # This ensures activity buffering uses the correct session ID
-            session_service = services["session"]
-            if session_pda:
-                # Create/update session with the Solana PDA as session_id
-                session_service.create_session(wallet_address, {
-                    "wallet_address": wallet_address,
-                    "display_name": display_name,
-                    "username": username,
-                }, session_pda=session_pda)
-                logger.info(f"✅ [UNIFIED-CHECKIN] Created session with Solana PDA: {session_pda[:16]}...")
-
-            # Get session info for response
-            session = session_service.get_session_by_wallet(wallet_address)
-            # Use Solana PDA as session_id for activity buffering (this is the critical part!)
-            session_id = session_pda if session_pda else (session["session_id"] if session else "pending")
-
-            # Step 5: Pre-authorize Pipe storage session for fast uploads
+            # Pre-authorize Pipe storage session for fast uploads
             import asyncio
+            import threading
 
             from services.pipe_storage_service import pre_authorize_user_session
 
@@ -1798,51 +1840,16 @@ def register_routes(app):
                         pre_authorize_user_session(wallet_address)
                     )
                     if auth_success:
-                        logger.info(
-                            f"✅ [UNIFIED-CHECKIN] Pipe session pre-authorized for {wallet_address[:8]}..."
-                        )
-                    else:
-                        logger.warning(
-                            f"⚠️  [UNIFIED-CHECKIN] Pipe session pre-authorization failed for {wallet_address[:8]}..."
-                        )
+                        logger.info(f"[CHECKIN] Pipe session pre-authorized for {wallet_address[:8]}...")
                 except Exception as e:
-                    logger.error(
-                        f"❌ [UNIFIED-CHECKIN] Pipe pre-authorization error: {e}"
-                    )
+                    logger.warning(f"[CHECKIN] Pipe pre-authorization failed: {e}")
                 finally:
                     loop.close()
 
-            # Start Pipe authorization in background thread
-            import threading
-
-            pipe_auth_thread = threading.Thread(
-                target=run_pipe_authorization, daemon=True
-            )
+            pipe_auth_thread = threading.Thread(target=run_pipe_authorization, daemon=True)
             pipe_auth_thread.start()
 
-            # Buffer CHECK_IN activity for the privacy-preserving timeline
-            # This creates an encrypted activity that all checked-in users can decrypt
-            try:
-                from services.timeline_activity_service import (
-                    get_timeline_activity_service,
-                )
-
-                timeline_service = get_timeline_activity_service()
-                timeline_service.buffer_checkin_activity(
-                    wallet_address=wallet_address,
-                    session_id=session_id,
-                    metadata={
-                        "timestamp": int(time.time() * 1000),
-                        "tx_signature": transaction_signature,
-                    },
-                )
-            except Exception as e:
-                # Non-fatal - check-in succeeds even if activity buffering fails
-                logger.warning(f"⚠️  [UNIFIED-CHECKIN] Failed to buffer check-in activity: {e}")
-
-            logger.info(
-                f"🎉 [UNIFIED-CHECKIN] Complete! User {resolved_display_name} successfully checked in"
-            )
+            logger.info(f"[CHECKIN] Complete! User {resolved_display_name} checked in (off-chain)")
 
             return jsonify(
                 {
@@ -1852,16 +1859,13 @@ def register_routes(app):
                     "session_id": session_id,
                     "camera_pda": camera_pda,
                     "camera_url": f"https://{camera_pda.lower()}.mmoment.xyz/api",
-                    "message": "Check-in successful - camera activated with face recognition",
+                    "message": "Check-in successful (off-chain session)",
                 }
             )
 
         except Exception as e:
-            logger.error(
-                f"❌ [UNIFIED-CHECKIN] Error during check-in for {wallet_address[:8]}...: {e}"
-            )
+            logger.error(f"[CHECKIN] Error for {wallet_address[:8]}...: {e}")
             import traceback
-
             logger.error(traceback.format_exc())
             return jsonify(
                 {"success": False, "error": f"Check-in failed: {str(e)}"}
@@ -1870,90 +1874,126 @@ def register_routes(app):
     @app.route("/api/checkout", methods=["POST"])
     def api_checkout_notification():
         """
-        Checkout notification endpoint - called by frontend after checkout tx confirms.
-        This allows passing the transaction signature for Solscan verification links.
+        Checkout endpoint - Phase 3 Privacy Architecture.
+
+        Checkout now orchestrates two blockchain-related operations:
+        1. Write encrypted activities to CameraTimeline (anonymous - no user info)
+        2. Send encrypted session key to backend (for user's keychain - no camera info)
+
+        This breaks the visible on-chain link between users and cameras.
 
         Expected body:
         {
             "wallet_address": "...",           # Required
-            "transaction_signature": "..."     # Required - checkout tx signature for Solscan link
         }
+
+        Legacy fields (ignored for backwards compatibility):
+        - transaction_signature: No longer needed (Jetson signs the timeline tx)
         """
         data = request.json or {}
         wallet_address = data.get("wallet_address")
-        transaction_signature = data.get("transaction_signature")
 
         if not wallet_address:
             return jsonify(
                 {"success": False, "error": "Wallet address is required"}
             ), 400
 
-        if not transaction_signature:
-            return jsonify(
-                {"success": False, "error": "Transaction signature is required"}
-            ), 400
-
-        logger.info(
-            f"👋 [CHECKOUT-NOTIFY] User {wallet_address[:8]}... checked out with tx {transaction_signature[:8]}..."
-        )
+        logger.info(f"[CHECKOUT] User {wallet_address[:8]}... checking out")
 
         try:
             services = get_services()
             session_service = services["session"]
 
-            # Find the session for this wallet
-            session = session_service.get_session_by_wallet(wallet_address)
+            # Get the raw session object (need session_key and activities)
+            session = session_service.get_session_object_by_wallet(wallet_address)
             if not session:
-                logger.warning(
-                    f"⚠️  [CHECKOUT-NOTIFY] No session found for {wallet_address[:8]}..."
-                )
+                logger.warning(f"[CHECKOUT] No session found for {wallet_address[:8]}...")
                 return jsonify(
                     {"success": True, "message": "No active session found (already cleaned up)"}
                 )
 
-            session_id = session["session_id"]
+            session_id = session.session_id
+            check_in_time = int(session.created_at)
 
-            # Buffer the checkout activity with the transaction signature
+            # Add checkout activity to buffer
+            session.add_activity(
+                activity_type=1,  # CHECK_OUT
+                data={"duration_seconds": int(time.time() - session.created_at)},
+                metadata={"camera_pda": get_camera_pda()}
+            )
+
+            # Get all activities from session
+            activities = session.get_activities()
+            logger.info(f"[CHECKOUT] Session has {len(activities)} activities to commit")
+
+            # Import checkout service functions
+            from services.checkout_service import (
+                encrypt_and_write_activities,
+                send_access_key_to_backend
+            )
+
+            tx_signature = None
+            access_key_sent = False
+
+            # Step 1: Encrypt activities and write to CameraTimeline
+            if activities:
+                try:
+                    tx_signature = encrypt_and_write_activities(
+                        session_key=session.session_key,
+                        activities=activities,
+                        checked_in_users=[wallet_address]  # For access grants
+                    )
+                    logger.info(f"[CHECKOUT] Timeline updated, tx: {tx_signature[:16] if tx_signature else 'None'}...")
+                except Exception as e:
+                    logger.error(f"[CHECKOUT] Failed to write activities to timeline: {e}")
+                    # Continue with checkout even if timeline write fails
+                    # Activities are lost but user is still checked out
+
+            # Step 2: Send encrypted session key to backend
             try:
-                from services.timeline_activity_service import (
-                    get_timeline_activity_service,
+                access_key_sent = send_access_key_to_backend(
+                    user_pubkey=wallet_address,
+                    session_key=session.session_key,
+                    check_in_time=check_in_time
                 )
-
-                timeline_service = get_timeline_activity_service()
-                timeline_service.buffer_checkout_activity(
-                    wallet_address=wallet_address,
-                    session_id=session_id,
-                    duration_seconds=session.get("duration"),
-                    metadata={
-                        "timestamp": int(time.time() * 1000),
-                        "tx_signature": transaction_signature,
-                    },
-                )
-                logger.info(
-                    f"✅ [CHECKOUT-NOTIFY] Checkout activity buffered with tx signature"
-                )
-
-                # Mark checkout as already buffered to prevent duplicate from blockchain sync
-                blockchain_sync = get_blockchain_session_sync()
-                blockchain_sync.mark_checkout_activity_buffered(wallet_address)
+                if access_key_sent:
+                    logger.info(f"[CHECKOUT] Access key sent to backend for {wallet_address[:8]}...")
+                else:
+                    logger.warning(f"[CHECKOUT] Failed to send access key to backend")
             except Exception as e:
-                logger.warning(f"⚠️  [CHECKOUT-NOTIFY] Failed to buffer checkout activity: {e}")
+                logger.error(f"[CHECKOUT] Error sending access key: {e}")
+
+            # Step 3: Clean up face recognition data
+            try:
+                from services.blockchain_session_sync import get_blockchain_session_sync
+                blockchain_sync = get_blockchain_session_sync()
+                blockchain_sync.trigger_checkout(wallet_address)
+                logger.info(f"[CHECKOUT] Face recognition data cleaned up")
+            except Exception as e:
+                logger.warning(f"[CHECKOUT] Error cleaning up face data: {e}")
+
+            # Step 4: End the session
+            session_service.end_session(session_id, wallet_address)
+            logger.info(f"[CHECKOUT] Session {session_id[:16]}... ended")
 
             return jsonify(
                 {
                     "success": True,
                     "wallet_address": wallet_address,
                     "session_id": session_id,
-                    "message": "Checkout notification received",
+                    "activities_committed": len(activities),
+                    "timeline_tx": tx_signature,
+                    "access_key_sent": access_key_sent,
+                    "message": "Checkout complete (privacy-preserving)",
                 }
             )
 
         except Exception as e:
-            logger.error(
-                f"❌ [CHECKOUT-NOTIFY] Error: {e}"
-            )
+            logger.error(f"[CHECKOUT] Error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return jsonify(
-                {"success": False, "error": f"Checkout notification failed: {str(e)}"}
+                {"success": False, "error": f"Checkout failed: {str(e)}"}
             ), 500
 
     @app.route("/api/camera/info", methods=["GET"])

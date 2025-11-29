@@ -113,6 +113,8 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./data/config:/app/config  # Share device config with camera service
+      - ./data/device:/opt/mmoment/device  # Device keypair for Phase 3 timeline signing
+      - /etc/machine-id:/etc/machine-id:ro  # Hardware ID for keypair decryption
     networks:
       mmoment-network:
         ipv4_address: 172.20.0.2

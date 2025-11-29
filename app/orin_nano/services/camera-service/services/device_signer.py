@@ -187,3 +187,87 @@ class DeviceSigner:
             'version': '1.0',
             'ready_for_onchain': True
         }
+
+    def verify_wallet_signature(self, wallet_address: str, message: str, signature: str) -> bool:
+        """
+        Verify an ed25519 signature from a Solana wallet.
+
+        This is the CRITICAL security function that proves a request actually
+        came from the owner of the wallet, not just someone who knows the address.
+
+        Args:
+            wallet_address: Base58-encoded Solana public key
+            message: The message that was signed (typically wallet_address|timestamp|nonce)
+            signature: Base58-encoded ed25519 signature
+
+        Returns:
+            True if signature is valid, False otherwise
+        """
+        try:
+            import base58
+            from nacl.signing import VerifyKey
+            from nacl.exceptions import BadSignature
+
+            # Decode wallet address (Solana pubkey is ed25519 public key)
+            pubkey_bytes = base58.b58decode(wallet_address)
+
+            # Decode signature
+            signature_bytes = base58.b58decode(signature)
+
+            # Create verify key from wallet public key
+            verify_key = VerifyKey(pubkey_bytes)
+
+            # Verify the signature
+            verify_key.verify(message.encode(), signature_bytes)
+
+            logger.info(f"✅ Wallet signature verified for {wallet_address[:8]}...")
+            return True
+
+        except BadSignature:
+            logger.warning(f"❌ Invalid signature from wallet {wallet_address[:8]}...")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Signature verification error: {e}")
+            return False
+
+    def verify_request_signature(
+        self,
+        wallet_address: str,
+        timestamp: int,
+        nonce: str,
+        signature: str,
+        max_age_seconds: int = 300
+    ) -> tuple[bool, str]:
+        """
+        Verify a signed request from a wallet with replay attack protection.
+
+        Args:
+            wallet_address: Wallet making the request
+            timestamp: Unix timestamp (milliseconds) when request was signed
+            nonce: Random nonce to prevent replay attacks
+            signature: Base58-encoded signature of "wallet_address|timestamp|nonce"
+            max_age_seconds: Maximum allowed age of request (default 5 minutes)
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        import time
+
+        # Check timestamp isn't too old (prevent replay attacks)
+        current_time = int(time.time() * 1000)
+        age_ms = current_time - timestamp
+
+        if age_ms < 0:
+            return False, "Request timestamp is in the future"
+
+        if age_ms > (max_age_seconds * 1000):
+            return False, f"Request too old ({age_ms // 1000}s > {max_age_seconds}s)"
+
+        # Construct the message that should have been signed
+        message = f"{wallet_address}|{timestamp}|{nonce}"
+
+        # Verify the signature
+        if not self.verify_wallet_signature(wallet_address, message, signature):
+            return False, "Invalid signature"
+
+        return True, "OK"

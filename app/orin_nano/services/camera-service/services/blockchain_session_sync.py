@@ -1,9 +1,16 @@
 """
 Blockchain Session Sync Service
 
-Automatically syncs on-chain check-in/check-out state with camera sessions.
-Enables visual effects for users who are checked in via the blockchain.
-The camera becomes a stateless PDA validator.
+Phase 3 Privacy Architecture:
+- Check-ins are now fully OFF-CHAIN (no blockchain polling for sessions)
+- Still loads recognition tokens from blockchain when users check in
+- Provides trigger_checkin() and trigger_checkout() for the new flow
+- Maintains face-based auto-checkout monitoring
+
+Key methods:
+- trigger_checkin(wallet, profile): Load recognition token, enable face boxes
+- trigger_checkout(wallet): Clean up face data, disable boxes if no users
+- update_user_seen(wallet): Track when user's face is seen for auto-checkout
 """
 
 import time
@@ -583,7 +590,54 @@ class BlockchainSessionSync:
         Called from /api/checkout-notify after buffering the checkout activity.
         """
         self._api_checkout_buffered[wallet_address] = time.time()
-        logger.info(f"📝 Marked checkout activity as buffered for {wallet_address[:8]}...")
+        logger.info(f"[CHECKOUT] Marked checkout activity as buffered for {wallet_address[:8]}...")
+
+    def trigger_checkout(self, wallet_address: str):
+        """
+        Trigger checkout cleanup for a specific wallet.
+        Phase 3 Privacy Architecture: Called from /api/checkout endpoint.
+
+        This handles:
+        - Removing face recognition data from IdentityStore
+        - Clearing tracking state
+        - Disabling face boxes if no users remain
+
+        Args:
+            wallet_address: User's wallet address
+        """
+        logger.info(f"[CHECKOUT] Triggered cleanup for {wallet_address[:8]}...")
+
+        # Remove from tracked wallets
+        self.checked_in_wallets.discard(wallet_address)
+        self.last_seen_at.pop(wallet_address, None)
+        self._api_checkin_times.pop(wallet_address, None)
+        self._api_checkout_buffered.pop(wallet_address, None)
+
+        # Remove face data from IdentityStore
+        if self.identity_store:
+            try:
+                stats = self.identity_store.check_out(wallet_address)
+                if stats:
+                    logger.info(f"[CHECKOUT] Removed identity data for {wallet_address[:8]}... (session duration: {stats.get('duration', 'unknown')}s)")
+                else:
+                    logger.debug(f"[CHECKOUT] No identity data found for {wallet_address[:8]}...")
+            except Exception as e:
+                logger.warning(f"[CHECKOUT] Error removing identity data: {e}")
+
+        # Check if this was the last user - disable face boxes if so
+        if self.session_service and self.face_service:
+            active_sessions = self.session_service.get_all_sessions()
+            if len(active_sessions) == 0:
+                self.face_service.enable_boxes(False)
+                logger.info("[CHECKOUT] Face boxes disabled - no users checked in")
+
+                # Clear all facial embeddings for security when no users present
+                try:
+                    if hasattr(self.face_service, 'clear_enrolled_faces'):
+                        self.face_service.clear_enrolled_faces()
+                        logger.info("[CHECKOUT] Cleared all facial embeddings")
+                except Exception as e:
+                    logger.warning(f"[CHECKOUT] Error clearing facial data: {e}")
 
     def get_status(self) -> Dict:
         """Get current sync status"""

@@ -457,6 +457,15 @@ export function CameraView() {
     }
   }, [primaryWallet]);
 
+  // Set wallet on CameraRegistry for request signing (ed25519 authentication)
+  useEffect(() => {
+    if (primaryWallet) {
+      const { CameraRegistry } = require("../../camera/camera-registry");
+      CameraRegistry.getInstance().setWallet(primaryWallet);
+      console.log("[CameraView] Wallet set for request signing");
+    }
+  }, [primaryWallet]);
+
   // Sync UI state with actual camera state when component loads or camera changes
   // Uses unified polling service to avoid duplicate API calls
   useEffect(() => {

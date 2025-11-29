@@ -5,28 +5,30 @@
  * the standardized camera interface.
  */
 
-import { 
-  ICamera, 
-  CameraCapabilities, 
-  CameraStatus, 
-  CameraStreamInfo, 
-  CameraActionResponse, 
-  CameraMediaResponse, 
-  CameraGestureResponse, 
-  CameraSession 
+import {
+  ICamera,
+  CameraCapabilities,
+  CameraStatus,
+  CameraStreamInfo,
+  CameraActionResponse,
+  CameraMediaResponse,
+  CameraGestureResponse,
+  CameraSession
 } from '../camera-interface';
 import { DeviceSignedResponse } from '../camera-types';
 import { hasValidDeviceSignature, logDeviceSignature } from '../device-signature-utils';
+import { createSignedRequest, SignedRequestParams } from '../request-signer';
 
 export class JetsonCamera implements ICamera {
   public readonly cameraId: string;
   public readonly cameraType: string = 'jetson';
   public apiUrl: string;
-  
+
   private debugMode = true;
   private currentSession: CameraSession | null = null;
   private lastStreamingStatus: boolean | undefined;
   private lastStreamInfo: CameraStreamInfo | null = null;
+  private primaryWallet: any = null; // Dynamic Labs wallet for request signing
 
   // CURRENT LIVEPEER ACCOUNT (1000 minutes remaining)
   private static readonly CURRENT_PLAYBACK_ID = '6315myh7iojrn5uk';
@@ -44,6 +46,15 @@ export class JetsonCamera implements ICamera {
     this.cameraId = cameraId;
     this.apiUrl = apiUrl;
     this.log('JetsonCamera initialized for:', cameraId, 'at', apiUrl);
+  }
+
+  /**
+   * Set the wallet for request signing (ed25519 authentication)
+   * This enables cryptographic proof that requests come from the wallet owner
+   */
+  setWallet(wallet: any): void {
+    this.primaryWallet = wallet;
+    this.log('Wallet set for request signing:', wallet?.address?.slice(0, 8) + '...');
   }
 
   private log(...args: any[]) {
@@ -107,8 +118,24 @@ export class JetsonCamera implements ICamera {
 
     this.log(`Making ${method} request to: ${url}`);
 
-    if (data) {
-      this.log(`Request data:`, data);
+    // Sign the request if wallet is available (for POST/PUT requests with data)
+    let signedData = data;
+    if (method !== 'GET' && data && this.primaryWallet) {
+      try {
+        const signedParams = await createSignedRequest(this.primaryWallet);
+        if (signedParams) {
+          signedData = { ...data, ...signedParams };
+          this.log('✅ Request signed with ed25519');
+        } else {
+          this.log('⚠️ Request signing unavailable, sending unsigned');
+        }
+      } catch (signError) {
+        this.log('⚠️ Request signing failed:', signError);
+      }
+    }
+
+    if (signedData) {
+      this.log(`Request data:`, signedData);
     }
 
     try {
@@ -120,7 +147,7 @@ export class JetsonCamera implements ICamera {
         mode: 'cors',
         credentials: 'omit',
         cache: 'no-store', // Force fresh connection (browser-level, doesn't trigger CORS)
-        body: method !== 'GET' && data ? JSON.stringify(data) : undefined
+        body: method !== 'GET' && signedData ? JSON.stringify(signedData) : undefined
       });
 
       this.log(`Response status: ${response.status} ${response.statusText}`);
