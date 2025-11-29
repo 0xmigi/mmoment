@@ -180,7 +180,10 @@ export function QrRegistrationWizard({
       setClaimExpiry(expiresAt);
       setQrCodeData(qrString);
       setCurrentStep('qr');
-      setProgressMessage('QR code generated - ready for device scanning');
+      setProgressMessage('Show this QR code to your camera');
+
+      // Start polling immediately - don't wait for user to click another button
+      startDevicePollingWithToken(claimToken);
 
     } catch (err) {
       console.error('Error creating claim token:', err);
@@ -193,17 +196,16 @@ export function QrRegistrationWizard({
   };
 
   /**
-   * Step 2: Start polling for device claim
+   * Step 2: Start polling for device claim (with token parameter for immediate use)
    */
-  const startDevicePolling = () => {
-    setCurrentStep('scanning');
-    setProgressMessage('Show the QR code to your camera. Waiting for device to scan...');
-    
+  const startDevicePollingWithToken = (token: string) => {
+    setProgressMessage('Waiting for camera to scan QR code...');
+
     // Start polling every 2 seconds
     pollIntervalRef.current = setInterval(async () => {
       try {
-        console.log(`Polling claim status: ${backendUrl}/api/claim/${claimToken}/status`);
-        const response = await fetch(`${backendUrl}/api/claim/${claimToken}/status`);
+        console.log(`Polling claim status: ${backendUrl}/api/claim/${token}/status`);
+        const response = await fetch(`${backendUrl}/api/claim/${token}/status`);
         if (!response.ok) {
           console.log('Polling response not ok:', response.status);
           return;
@@ -431,35 +433,42 @@ export function QrRegistrationWizard({
       case 'qr':
         return (
           <div className="text-center">
-            <h3 className="text-lg font-semibold mb-4">Show QR Code to Camera</h3>
-            <p className="text-gray-600 mb-6">
-              Point your MMOMENT camera at this QR code. The camera will automatically:
-              <br />• Connect to your WiFi network
-              <br />• Register itself to your account
-            </p>
-            
-            <div className="bg-white p-4 rounded-lg border-2 border-gray-200 inline-block mb-6">
+            <h3 className="text-lg font-semibold mb-2">Show QR Code to Camera</h3>
+
+            {/* QR Code - prominently displayed */}
+            <div className="bg-white p-4 rounded-lg border-2 border-gray-200 inline-block mb-4">
               <img src={qrCodeData} alt="Device Setup QR Code" className="mx-auto" />
             </div>
-            
-            <div className="space-y-3">
-              <button
-                onClick={startDevicePolling}
-                className="w-full bg-green-600 text-white py-3 px-4 rounded-md hover:bg-green-700"
-              >
-                📱 Ready - Camera Can Scan Now
-              </button>
-              
-              <button
-                onClick={() => setCurrentStep('wifi')}
-                className="w-full bg-gray-200 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-300"
-              >
-                ← Back to WiFi Settings
-              </button>
+
+            {/* Scanning indicator */}
+            <div className="flex items-center justify-center gap-2 mb-4">
+              <div className="animate-pulse flex items-center gap-2 text-blue-600">
+                <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span className="font-medium">Waiting for camera to scan...</span>
+              </div>
             </div>
-            
-            <div className="mt-4 p-3 bg-yellow-50 rounded-lg text-sm text-yellow-800">
-              QR code expires in {Math.ceil((claimExpiry - Date.now()) / 60000)} minutes
+
+            <p className="text-gray-600 text-sm mb-4">
+              Hold this QR code in front of your camera. It will automatically connect to WiFi and register.
+            </p>
+
+            <button
+              onClick={() => {
+                if (pollIntervalRef.current) {
+                  clearInterval(pollIntervalRef.current);
+                }
+                setCurrentStep('wifi');
+              }}
+              className="text-gray-500 text-sm hover:text-gray-700"
+            >
+              ← Change WiFi settings
+            </button>
+
+            <div className="mt-4 p-2 bg-yellow-50 rounded text-xs text-yellow-700">
+              Expires in {Math.ceil((claimExpiry - Date.now()) / 60000)} min
             </div>
           </div>
         );
@@ -553,23 +562,22 @@ export function QrRegistrationWizard({
       {/* Progress indicator */}
       <div className="mb-6">
         <div className="flex items-center justify-between text-sm text-gray-500 mb-2">
-          <span className={currentStep === 'wifi' ? 'text-blue-600 font-medium' : ''}>WiFi</span>
-          <span className={currentStep === 'qr' ? 'text-blue-600 font-medium' : ''}>QR Code</span>
-          <span className={currentStep === 'scanning' ? 'text-blue-600 font-medium' : ''}>Scan</span>
-          <span className={currentStep === 'register' ? 'text-blue-600 font-medium' : ''}>Register</span>
-          <span className={currentStep === 'complete' ? 'text-green-600 font-medium' : ''}>Done</span>
+          <span className={currentStep === 'wifi' ? 'text-blue-600 font-medium' : ''}>1. WiFi</span>
+          <span className={currentStep === 'qr' || currentStep === 'scanning' ? 'text-blue-600 font-medium' : ''}>2. Scan</span>
+          <span className={currentStep === 'register' ? 'text-blue-600 font-medium' : ''}>3. Register</span>
+          <span className={currentStep === 'complete' ? 'text-green-600 font-medium' : ''}>4. Done</span>
         </div>
         <div className="w-full bg-gray-200 rounded-full h-2">
-          <div 
+          <div
             className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-            style={{ 
+            style={{
               width: `${
-                currentStep === 'wifi' ? '20%' :
-                currentStep === 'qr' ? '40%' :
-                currentStep === 'scanning' ? '60%' :
-                currentStep === 'register' ? '80%' :
+                currentStep === 'wifi' ? '25%' :
+                currentStep === 'qr' ? '50%' :
+                currentStep === 'scanning' ? '50%' :
+                currentStep === 'register' ? '75%' :
                 currentStep === 'complete' ? '100%' : '0%'
-              }` 
+              }`
             }}
           />
         </div>
