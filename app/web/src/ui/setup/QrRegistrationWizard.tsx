@@ -36,7 +36,7 @@ interface ClaimStatus {
 export function QrRegistrationWizard({ 
   onComplete, 
   onError,
-  backendUrl = process.env.NODE_ENV === 'development' ? 'http://192.168.1.80:3001' : 'https://mmoment-backend-production.up.railway.app'
+  backendUrl = 'https://mmoment-backend-production.up.railway.app'
 }: QrRegistrationProps): JSX.Element {
   // Wizard state
   const [currentStep, setCurrentStep] = useState<QrStep>('wifi');

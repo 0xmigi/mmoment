@@ -17,6 +17,7 @@ import {
   AlertCircle,
   Loader2,
   ChevronRight,
+  Camera,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -375,6 +376,17 @@ export function AccountPage() {
             </div>
           </div>
         )}
+
+        {/* Register Camera Link */}
+        <div className="bg-gray-50 rounded-xl px-4 py-4 mb-4">
+          <button
+            onClick={() => navigate('/app/register')}
+            className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-gray-800 text-white rounded-lg text-sm font-medium hover:bg-gray-900 transition-colors"
+          >
+            <Camera className="w-4 h-4" />
+            Register New Camera
+          </button>
+        </div>
 
         {/* Sign Out Button - responsive padding */}
         <div className="bg-gray-50 rounded-xl px-4 py-4 mb-8">
