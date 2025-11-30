@@ -2311,6 +2311,43 @@ app.post("/api/session/activity", async (req, res) => {
   }
 });
 
+// DEBUG: Test Socket.IO broadcast to a camera room
+app.post("/api/debug/broadcast-test", (req, res) => {
+  const { cameraId, message } = req.body;
+
+  if (!cameraId) {
+    return res.status(400).json({ success: false, error: 'cameraId required' });
+  }
+
+  const testEvent = {
+    id: `debug-${Date.now()}`,
+    type: 'check_in',
+    user: {
+      address: 'DEBUG_TEST_USER',
+      username: 'debug_test'
+    },
+    timestamp: Date.now(),
+    cameraId: cameraId,
+    message: message || 'Debug broadcast test'
+  };
+
+  // Log room info
+  const room = io.sockets.adapter.rooms.get(cameraId);
+  const socketsInRoom = room ? room.size : 0;
+
+  console.log(`🧪 DEBUG BROADCAST: cameraId=${cameraId}, socketsInRoom=${socketsInRoom}`);
+  console.log(`🧪 Broadcasting test event:`, testEvent);
+
+  io.to(cameraId).emit("timelineEvent", testEvent);
+
+  res.json({
+    success: true,
+    message: `Broadcast sent to ${socketsInRoom} sockets in room ${cameraId}`,
+    socketsInRoom,
+    event: testEvent
+  });
+});
+
 // Fetch buffered activities for a session (called by auto-checkout bot)
 app.get("/api/session/activities/:sessionId", async (req, res) => {
   try {
