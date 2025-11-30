@@ -1749,41 +1749,63 @@ def register_routes(app):
         """
         Unified check-in endpoint - Phase 3 Privacy Architecture.
 
-        Check-in is now FULLY OFF-CHAIN:
-        - No blockchain transaction required
-        - Session created locally with UUID
-        - AES-256 session key generated for activity encryption
-        - Activities buffered in session, encrypted at checkout
+        Check-in is a CRYPTOGRAPHIC HANDSHAKE (single-shot):
+        - Client signs message: "{wallet_address}|{timestamp}|{nonce}"
+        - Jetson verifies Ed25519 signature using wallet as pubkey
+        - Only if valid → session is created
 
         Expected body:
         {
-            "wallet_address": "...",           # Required
+            "wallet_address": "...",           # Required - base58 Solana pubkey
+            "request_signature": "...",        # Required - base58 Ed25519 signature
+            "request_timestamp": 1234567890123,# Required - Unix ms when signed
+            "request_nonce": "...",            # Required - random string for uniqueness
             "display_name": "...",             # Optional
             "username": "...",                 # Optional
         }
-
-        Legacy fields (ignored for backwards compatibility):
-        - session_pda: No longer used (sessions are off-chain)
-        - transaction_signature: No longer used (no check-in tx)
         """
         data = request.json or {}
         wallet_address = data.get("wallet_address")
+        # Accept both field name formats (request_* from frontend or simple names)
+        signature = data.get("request_signature") or data.get("signature")
+        timestamp = data.get("request_timestamp") or data.get("timestamp")
+        nonce = data.get("request_nonce") or data.get("nonce")
         display_name = data.get("display_name")
         username = data.get("username")
 
-        # Legacy fields - ignored but logged for debugging
-        session_pda = data.get("session_pda")  # Ignored - sessions are now off-chain
-        if session_pda:
-            logger.debug(f"[CHECKIN] Ignoring legacy session_pda (Phase 3: off-chain sessions)")
-
         logger.info(f"[CHECKIN] Request for {wallet_address[:8] if wallet_address else 'NONE'}... display_name={display_name}")
 
+        # Validate required fields
         if not wallet_address:
-            return jsonify(
-                {"success": False, "error": "Wallet address is required"}
-            ), 400
+            return jsonify({"success": False, "error": "wallet_address is required"}), 400
+        if not signature:
+            return jsonify({"success": False, "error": "request_signature is required (Ed25519 signed message)"}), 400
+        if not timestamp:
+            return jsonify({"success": False, "error": "request_timestamp is required"}), 400
+        if not nonce:
+            return jsonify({"success": False, "error": "request_nonce is required"}), 400
 
         camera_pda = get_camera_pda()
+
+        # VERIFY ED25519 SIGNATURE - the core of check-in security
+        from services.device_signer import DeviceSigner
+        device_signer = DeviceSigner()
+
+        # Verify signature with replay attack protection (5 min max age)
+        # Message format: "{wallet_address}|{timestamp}|{nonce}"
+        is_valid, error_msg = device_signer.verify_request_signature(
+            wallet_address=wallet_address,
+            timestamp=timestamp,
+            nonce=nonce,
+            signature=signature,
+            max_age_seconds=300
+        )
+
+        if not is_valid:
+            logger.warning(f"[CHECKIN] ❌ Signature verification failed for {wallet_address[:8]}...: {error_msg}")
+            return jsonify({"success": False, "error": f"Signature verification failed: {error_msg}"}), 401
+
+        logger.info(f"[CHECKIN] ✅ Signature verified for {wallet_address[:8]}...")
         logger.info(
             f"[CHECKIN] User {wallet_address[:8]}... checking in to camera {camera_pda[:8]}... (off-chain session)"
         )
@@ -1818,13 +1840,30 @@ def register_routes(app):
             })
             logger.info(f"[CHECKIN] Triggered recognition token loading for {resolved_display_name}")
 
-            # Buffer check-in activity in the session (encrypted at checkout)
-            session_service.add_activity_to_session(
-                wallet_address=wallet_address,
-                activity_type=0,  # CHECK_IN
-                data={"display_name": resolved_display_name},
-                metadata={"camera_pda": camera_pda}
-            )
+            # Tell backend about check-in (simple synchronous POST - no queues!)
+            backend_url = os.environ.get('BACKEND_URL', 'https://mmoment-production.up.railway.app')
+            try:
+                import requests as req
+                activity_response = req.post(
+                    f"{backend_url}/api/session/activity",
+                    json={
+                        "sessionId": session_id,
+                        "cameraId": camera_pda,
+                        "userPubkey": wallet_address,
+                        "activityType": 0,  # CHECK_IN
+                        "timestamp": int(time.time() * 1000),
+                        "displayName": resolved_display_name,
+                        "username": username
+                    },
+                    timeout=5
+                )
+                if activity_response.status_code == 200:
+                    result = activity_response.json()
+                    logger.info(f"[CHECKIN] ✅ Timeline notified! Sockets in room: {result.get('socketsInRoom', '?')}")
+                else:
+                    logger.warning(f"[CHECKIN] Timeline notification failed: HTTP {activity_response.status_code}")
+            except Exception as e:
+                logger.warning(f"[CHECKIN] Timeline notification failed (non-blocking): {e}")
 
             # Pre-authorize Pipe storage session for fast uploads
             import asyncio
