@@ -36,7 +36,8 @@ import {
   initializeSessionCleanupCron,
   stopCleanupCron,
   triggerManualCleanup,
-  getCleanupCronStatus
+  getCleanupCronStatus,
+  queueAccessKeyForUser
 } from './session-cleanup-cron';
 
 // Import database module
@@ -2405,6 +2406,59 @@ app.get("/api/session/buffer-stats", async (_req, res) => {
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to get buffer stats'
+    });
+  }
+});
+
+// Receive encrypted session access key from Jetson at checkout
+// This stores the key so users can decrypt their session activities later
+app.post("/api/session/access-key", async (req, res) => {
+  try {
+    const { user_pubkey, key_ciphertext, nonce, timestamp } = req.body;
+
+    // Validate required fields
+    if (!user_pubkey || !key_ciphertext || !nonce) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: user_pubkey, key_ciphertext, nonce'
+      });
+    }
+
+    // Validate array types
+    if (!Array.isArray(key_ciphertext) || !Array.isArray(nonce)) {
+      return res.status(400).json({
+        success: false,
+        error: 'key_ciphertext and nonce must be arrays'
+      });
+    }
+
+    // Queue the access key for blockchain storage
+    const success = await queueAccessKeyForUser(
+      user_pubkey,
+      key_ciphertext,
+      nonce,
+      timestamp || Math.floor(Date.now() / 1000)
+    );
+
+    if (success) {
+      console.log(`✅ Access key queued for user ${user_pubkey.slice(0, 8)}...`);
+      res.json({
+        success: true,
+        message: 'Access key received and queued for storage'
+      });
+    } else {
+      // Still return success - key is queued for retry even if immediate storage failed
+      console.log(`⏳ Access key queued for user ${user_pubkey.slice(0, 8)}... (pending retry)`);
+      res.json({
+        success: true,
+        message: 'Access key received and queued for storage (pending)'
+      });
+    }
+  } catch (error) {
+    console.error('Failed to receive access key:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to receive access key'
     });
   }
 });

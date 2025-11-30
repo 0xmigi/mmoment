@@ -19,6 +19,30 @@ import threading
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 
+# Lazy imports for activity encryption and buffer (avoid circular imports)
+_activity_encryption_service = None
+_activity_buffer_client = None
+
+def get_activity_encryption():
+    """Lazy load activity encryption service to avoid circular imports."""
+    global _activity_encryption_service
+    if _activity_encryption_service is None:
+        from services.activity_encryption_service import get_activity_encryption_service
+        _activity_encryption_service = get_activity_encryption_service()
+    return _activity_encryption_service
+
+def get_activity_buffer():
+    """Lazy load activity buffer client to avoid circular imports."""
+    global _activity_buffer_client
+    if _activity_buffer_client is None:
+        from services.activity_buffer_client import get_activity_buffer_client
+        _activity_buffer_client = get_activity_buffer_client()
+    return _activity_buffer_client
+
+def get_camera_pda_for_session() -> str:
+    """Get camera PDA from environment."""
+    return os.environ.get("CAMERA_PDA", "unknown")
+
 # Session timeout: 3 hours (matches Phase 3 architecture)
 SESSION_TIMEOUT_SECONDS = 3 * 60 * 60  # 10800 seconds
 
@@ -425,15 +449,17 @@ class SessionService:
             return expired
 
     def add_activity_to_session(self, wallet_address: str, activity_type: int,
-                                 data: Dict = None, metadata: Dict = None) -> bool:
+                                 data: Dict = None, metadata: Dict = None,
+                                 send_to_backend: bool = True) -> bool:
         """
-        Add an activity to a user's session buffer.
+        Add an activity to a user's session buffer and optionally send to backend for real-time display.
 
         Args:
             wallet_address: The wallet address of the session
             activity_type: Activity type code (0=checkin, 1=checkout, 2=photo, etc.)
             data: Activity-specific data
             metadata: Additional metadata
+            send_to_backend: Whether to send encrypted activity to backend for real-time display
 
         Returns:
             True if activity was added, False if no session found
@@ -443,7 +469,49 @@ class SessionService:
             logger.warning(f"No session found for {wallet_address[:8]}... to add activity")
             return False
 
+        # Add activity to local buffer
         session.add_activity(activity_type, data, metadata)
+
+        # Send to backend for real-time timeline display
+        if send_to_backend:
+            try:
+                # Get all checked-in users for access grants
+                all_sessions = self.get_all_sessions()
+                users_present = [s['wallet_address'] for s in all_sessions]
+
+                # Build activity content for encryption
+                activity_content = {
+                    'type': activity_type,
+                    'data': data or {},
+                    'metadata': metadata or {},
+                    'user': wallet_address
+                }
+
+                # Encrypt activity
+                encryption_service = get_activity_encryption()
+                encrypted_activity = encryption_service.encrypt_activity(
+                    activity_content=activity_content,
+                    users_present=users_present,
+                    activity_type=activity_type
+                )
+
+                # Send to backend
+                buffer_client = get_activity_buffer()
+                camera_pda = get_camera_pda_for_session()
+
+                buffer_client.buffer_activity(
+                    session_id=session.session_id,
+                    camera_id=camera_pda,
+                    user_pubkey=wallet_address,
+                    encrypted_activity=encrypted_activity
+                )
+
+                logger.info(f"[SESSION] Sent activity type {activity_type} to backend for {wallet_address[:8]}...")
+
+            except Exception as e:
+                # Don't fail the whole operation if backend send fails
+                logger.warning(f"[SESSION] Failed to send activity to backend: {e}")
+
         return True
 
     def _cleanup_expired_sessions(self) -> int:

@@ -17,7 +17,7 @@ import {
 } from '../camera-interface';
 import { DeviceSignedResponse } from '../camera-types';
 import { hasValidDeviceSignature, logDeviceSignature } from '../device-signature-utils';
-import { createSignedRequest, SignedRequestParams } from '../request-signer';
+import { createSignedRequest } from '../request-signer';
 
 export class JetsonCamera implements ICamera {
   public readonly cameraId: string;
@@ -356,6 +356,9 @@ export class JetsonCamera implements ICamera {
           isOnline = data.online;
         }
 
+        // Extract active session count from response (Phase 3 Privacy Architecture)
+        const activeSessionCount = data.data?.activeSessionCount ?? data.activeSessionCount ?? 0;
+
         return {
           success: true,
           data: {
@@ -363,7 +366,8 @@ export class JetsonCamera implements ICamera {
             isStreaming: streamingStatus,
             isRecording: data.recording || data.data?.recording || false,
             lastSeen: Date.now(),
-            owner: this.currentSession?.walletAddress
+            owner: this.currentSession?.walletAddress,
+            activeSessionCount: activeSessionCount
           }
         };
       } else {

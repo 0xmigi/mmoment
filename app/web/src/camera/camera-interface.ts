@@ -23,6 +23,7 @@ export interface CameraStatus {
   lastSeen: number;
   owner?: string;
   error?: string;
+  activeSessionCount?: number;
 }
 
 export interface CameraStreamInfo {

@@ -371,6 +371,19 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         // Clear old session events before starting new session
         timelineService.clearForNewSession();
 
+        // Emit check-in event to timeline
+        timelineService.emitEvent({
+          type: 'check_in',
+          user: {
+            address: primaryWallet.address,
+            displayName: primaryProfile?.displayName,
+            username: primaryProfile?.username,
+            pfpUrl: primaryProfile?.pfpUrl
+          },
+          timestamp: Date.now(),
+          cameraId: camera.id
+        });
+
         setIsCheckedIn(true);
 
         // Refresh active users count

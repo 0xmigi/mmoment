@@ -1915,8 +1915,9 @@ def register_routes(app):
             session_id = session.session_id
             check_in_time = int(session.created_at)
 
-            # Add checkout activity to buffer
-            session.add_activity(
+            # Add checkout activity to buffer AND send to backend for real-time display
+            session_service.add_activity_to_session(
+                wallet_address=wallet_address,
                 activity_type=1,  # CHECK_OUT
                 data={"duration_seconds": int(time.time() - session.created_at)},
                 metadata={"camera_pda": get_camera_pda()}

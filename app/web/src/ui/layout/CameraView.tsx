@@ -9,6 +9,7 @@ import { IRLAppsButton } from "../../camera/IRLAppsButton";
 import { CompetitionScoreboard } from "../../camera/CompetitionScoreboard";
 import { CompetitionControls } from "../../camera/CompetitionControls";
 import { cameraStatus } from "../../camera/camera-status";
+import { CameraRegistry } from "../../camera/camera-registry";
 import { unifiedCameraService } from "../../camera/unified-camera-service";
 import { useCameraStatus } from "../../camera/useCameraStatus";
 import { unifiedCameraPolling, CameraStatusData } from "../../camera/unified-camera-polling";
@@ -460,7 +461,6 @@ export function CameraView() {
   // Set wallet on CameraRegistry for request signing (ed25519 authentication)
   useEffect(() => {
     if (primaryWallet) {
-      const { CameraRegistry } = require("../../camera/camera-registry");
       CameraRegistry.getInstance().setWallet(primaryWallet);
       console.log("[CameraView] Wallet set for request signing");
     }
