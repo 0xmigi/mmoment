@@ -2295,12 +2295,22 @@ app.post("/api/session/activity", async (req, res) => {
     }
 
     // Broadcast to camera room
-    console.log(`📤 Broadcasting encrypted activity as timeline event to camera ${cameraId}`);
+    const room = io.sockets.adapter.rooms.get(cameraId);
+    const socketsInRoom = room ? room.size : 0;
+    console.log(`📤 Broadcasting to camera ${cameraId} (${socketsInRoom} sockets in room)`);
+    console.log(`📤 Event type: ${eventType}, user: ${userPubkey.slice(0, 8)}...`);
+
     io.to(cameraId).emit("timelineEvent", timelineEvent);
 
     res.json({
       success: true,
-      message: 'Activity buffered successfully'
+      message: 'Activity buffered successfully',
+      debug: {
+        cameraId,
+        socketsInRoom,
+        eventType,
+        eventId: timelineEvent.id
+      }
     });
   } catch (error) {
     console.error('Failed to buffer session activity:', error);
