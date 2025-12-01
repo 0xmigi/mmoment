@@ -206,7 +206,7 @@ class DeviceSigner:
         try:
             import base58
             from nacl.signing import VerifyKey
-            from nacl.exceptions import BadSignature
+            from nacl.exceptions import BadSignatureError
 
             # Decode wallet address (Solana pubkey is ed25519 public key)
             pubkey_bytes = base58.b58decode(wallet_address)
@@ -223,7 +223,7 @@ class DeviceSigner:
             logger.info(f"✅ Wallet signature verified for {wallet_address[:8]}...")
             return True
 
-        except BadSignature:
+        except BadSignatureError:
             logger.warning(f"❌ Invalid signature from wallet {wallet_address[:8]}...")
             return False
         except Exception as e:

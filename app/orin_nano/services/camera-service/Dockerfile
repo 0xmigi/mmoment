@@ -16,6 +16,14 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive TZ=America/New_York apt-get
     ffmpeg \
     network-manager \
     socat \
+    pkg-config \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libswresample-dev \
+    libzbar0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create required directories
