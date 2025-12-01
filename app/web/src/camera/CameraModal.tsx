@@ -406,6 +406,10 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         if (errorMsg.includes('already checked in')) {
           errorMsg = 'You are already checked in to this camera.';
           setIsCheckedIn(true);
+          // IMPORTANT: Notify parent even when already checked in
+          if (onCheckStatusChange) {
+            onCheckStatusChange(true);
+          }
           return;
         } else if (errorMsg.includes('Signature verification failed')) {
           errorMsg = 'Signature verification failed. Please try again.';

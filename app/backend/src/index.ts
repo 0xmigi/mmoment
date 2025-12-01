@@ -2807,9 +2807,15 @@ io.on("connection", (socket) => {
     }
     cameraRooms.get(cameraId)?.add(socket.id);
 
-    // Don't automatically send recent events - they include old sessions
-    // Live timeline should only show real-time events from current session
-    // Historical events belong in Activities view (fetched from database)
+    // Send recent events for this camera
+    // Frontend will filter to current session (events after most recent check_in)
+    const cameraEvents = timelineEvents
+      .filter((event) => event.cameraId === cameraId)
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 50);
+
+    console.log(`[Timeline] Sending ${cameraEvents.length} recent events to socket ${socket.id} for camera ${cameraId}`);
+    socket.emit("recentEvents", cameraEvents);
   });
 
   // Handle leaving a camera room

@@ -260,7 +260,7 @@ export function CameraView() {
 
   // Update the states for TransactionModal
   const [showTransactionModal, setShowTransactionModal] = useState(false);
-  const [transactionData, setTransactionData] = useState<{
+  const [transactionData, _setTransactionData] = useState<{
     type: "photo" | "video" | "stream" | "initialize";
     cameraAccount: string;
   } | null>(null);
@@ -396,6 +396,20 @@ export function CameraView() {
       // Set camera account state
       setCameraAccount(decodedCameraId);
 
+      // CRITICAL: Check session status immediately on page load
+      // This ensures isCheckedIn is correct before user clicks any buttons
+      if (primaryWallet?.address && unifiedCameraService.hasCamera(decodedCameraId)) {
+        console.log("[CameraView] Checking session status on page load...");
+        unifiedCameraService.getSessionStatus(decodedCameraId, primaryWallet.address)
+          .then((result) => {
+            if (result.success && result.data) {
+              console.log(`[CameraView] Initial session check: ${result.data.isCheckedIn ? 'CHECKED IN' : 'NOT CHECKED IN'}`);
+              setIsCheckedIn(result.data.isCheckedIn);
+            }
+          })
+          .catch((err) => console.error("[CameraView] Initial session check failed:", err));
+      }
+
       // Attempt to fetch camera data if possible (but don't show errors if it fails)
       if (fetchCameraById) {
         fetchCameraById(decodedCameraId)
@@ -416,7 +430,7 @@ export function CameraView() {
     } catch (error) {
       console.error("[CameraView] Error processing camera ID:", error);
     }
-  }, [cameraId, fetchCameraById, setSelectedCamera]);
+  }, [cameraId, fetchCameraById, setSelectedCamera, primaryWallet?.address]);
 
   // Clear camera account when navigating to the default /app route
   useEffect(() => {
@@ -1045,7 +1059,8 @@ export function CameraView() {
       return;
     }
 
-    const isCheckedIn = await checkUserSession();
+    // PHASE 3: Use local state for check-in status (don't re-query Jetson on every action)
+    // The periodic checkUserSession() keeps this state in sync
     if (!isCheckedIn) {
       return promptForCheckIn("photo");
     }
@@ -1132,7 +1147,7 @@ export function CameraView() {
       return;
     }
 
-    const isCheckedIn = await checkUserSession();
+    // PHASE 3: Use local state for check-in status (don't re-query Jetson on every action)
     if (!isCheckedIn) {
       return promptForCheckIn("video");
     }
@@ -1268,8 +1283,7 @@ export function CameraView() {
       return;
     }
 
-    // Check if user is checked in first
-    const isCheckedIn = await checkUserSession();
+    // PHASE 3: Use local state for check-in status (don't re-query Jetson on every action)
     if (!isCheckedIn) {
       return promptForCheckIn("stream");
     }
@@ -1748,7 +1762,11 @@ export function CameraView() {
       {/* Mobile Camera Modal */}
       <CameraModal
         isOpen={isMobileCameraModalOpen}
-        onClose={() => setIsMobileCameraModalOpen(false)}
+        onClose={() => {
+          setIsMobileCameraModalOpen(false);
+          // Immediately check session status when modal closes to ensure sync
+          checkUserSession();
+        }}
         onCheckStatusChange={(newStatus: boolean) => {
           console.log("Mobile modal status change:", newStatus);
           setIsCheckedIn(newStatus);
