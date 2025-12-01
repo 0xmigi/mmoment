@@ -2249,15 +2249,53 @@ app.post("/api/session/activity", async (req, res) => {
     };
     const eventType = activityTypeToEventType[activityType] || 'photo_captured';
 
-    // CHECK_IN (0) and CHECK_OUT (1) are simple notifications - no encryption required
-    // Per Phase 3 architecture: activities are cached plaintext during session, encrypted at checkout
-    const isSimpleNotification = activityType === 0 || activityType === 1;
+    // CHECK_IN (0) and CHECK_OUT (1) - now saved to database for historical timeline
+    // These may come with or without encryption from Jetson
+    const isCheckInOut = activityType === 0 || activityType === 1;
 
-    if (isSimpleNotification) {
-      // Handle simple notification (check_in/check_out)
-      // Just broadcast to WebSocket - these don't need to be stored encrypted
-      console.log(`📢 Simple notification: ${eventType} for ${userPubkey.slice(0, 8)}... on camera ${cameraId.slice(0, 8)}...`);
+    if (isCheckInOut) {
+      console.log(`📢 ${eventType} for ${userPubkey.slice(0, 8)}... on camera ${cameraId.slice(0, 8)}...`);
 
+      // Save to database for historical timeline queries
+      // Use encrypted content if provided (from Jetson), otherwise create minimal plaintext
+      let encryptedContentBuffer: Buffer;
+      let nonceBuffer: Buffer;
+      let accessGrantsBuffer: Buffer;
+
+      if (encryptedContent && nonce && accessGrants) {
+        // Jetson sent encrypted data - use it
+        encryptedContentBuffer = Buffer.from(encryptedContent, 'base64');
+        nonceBuffer = Buffer.from(nonce, 'base64');
+        accessGrantsBuffer = Buffer.from(JSON.stringify(accessGrants), 'utf-8');
+      } else {
+        // Fallback: create minimal plaintext content for database storage
+        const plaintextContent = JSON.stringify({
+          type: eventType,
+          user: userPubkey,
+          timestamp: normalizedTimestamp,
+          tx_signature: transactionSignature
+        });
+        encryptedContentBuffer = Buffer.from(plaintextContent, 'utf-8');
+        nonceBuffer = Buffer.alloc(12); // Empty nonce for plaintext
+        accessGrantsBuffer = Buffer.from('[]', 'utf-8'); // Empty access grants
+      }
+
+      const activity: SessionActivityBuffer = {
+        sessionId,
+        cameraId,
+        userPubkey,
+        timestamp: normalizedTimestamp,
+        activityType,
+        encryptedContent: encryptedContentBuffer,
+        nonce: nonceBuffer,
+        accessGrants: accessGrantsBuffer,
+        createdAt: new Date()
+      };
+
+      await saveSessionActivity(activity);
+      console.log(`✅ Saved ${eventType} to database for session ${sessionId.slice(0, 8)}...`);
+
+      // Create timeline event for real-time display
       const timelineEvent: Record<string, any> = {
         id: `activity-${sessionId}-${normalizedTimestamp}`,
         type: eventType,
@@ -2275,6 +2313,23 @@ app.post("/api/session/activity", async (req, res) => {
         timelineEvent.transactionId = transactionSignature;
       }
 
+      // Add to in-memory cache for subsequent joinCamera calls
+      timelineEvents.push({
+        id: timelineEvent.id,
+        type: eventType,
+        user: {
+          address: userPubkey,
+          username: username || undefined,
+          displayName: displayName || undefined
+        },
+        timestamp: normalizedTimestamp,
+        cameraId: cameraId
+      });
+      // Keep only last 500 events in memory
+      if (timelineEvents.length > 500) {
+        timelineEvents.shift();
+      }
+
       // Broadcast to camera room
       const room = io.sockets.adapter.rooms.get(cameraId);
       const socketsInRoom = room ? room.size : 0;
@@ -2284,12 +2339,13 @@ app.post("/api/session/activity", async (req, res) => {
 
       return res.json({
         success: true,
-        message: 'Timeline event broadcast',
+        message: `${eventType} saved and broadcast`,
         debug: {
           cameraId,
           socketsInRoom,
           eventType,
-          eventId: timelineEvent.id
+          eventId: timelineEvent.id,
+          savedToDb: true
         }
       });
     }
@@ -2789,7 +2845,7 @@ io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
 
   // Handle joining a camera room
-  socket.on("joinCamera", (cameraId: string) => {
+  socket.on("joinCamera", async (cameraId: string) => {
     console.log(`Socket ${socket.id} joining camera ${cameraId}`);
 
     // Leave any existing camera rooms
@@ -2807,15 +2863,74 @@ io.on("connection", (socket) => {
     }
     cameraRooms.get(cameraId)?.add(socket.id);
 
-    // Send recent events for this camera
+    // Query database for persisted events (survives server restarts)
     // Frontend will filter to current session (events after most recent check_in)
-    const cameraEvents = timelineEvents
-      .filter((event) => event.cameraId === cameraId)
-      .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, 50);
+    try {
+      const dbActivities = await getCameraActivities(cameraId, 100);
 
-    console.log(`[Timeline] Sending ${cameraEvents.length} recent events to socket ${socket.id} for camera ${cameraId}`);
-    socket.emit("recentEvents", cameraEvents);
+      // Map activity_type to event type string
+      const activityTypeToEventType: Record<number, string> = {
+        0: 'check_in',
+        1: 'check_out',
+        2: 'photo_captured',
+        3: 'video_recorded',
+        4: 'stream_started',
+        5: 'face_enrolled',
+        50: 'cv_activity'
+      };
+
+      // Convert database activities to timeline event format
+      const dbEvents = dbActivities.map(activity => ({
+        id: `activity-${activity.sessionId}-${activity.timestamp}`,
+        type: activityTypeToEventType[activity.activityType] || 'unknown',
+        user: {
+          address: activity.userPubkey
+        },
+        timestamp: activity.timestamp,
+        cameraId: activity.cameraId
+      }));
+
+      // Get in-memory events for this camera (for very recent events not yet persisted)
+      const memoryEvents = timelineEvents
+        .filter((event) => event.cameraId === cameraId);
+
+      // Merge and deduplicate by ID (prefer memory events as they may have more user info)
+      const eventIds = new Set<string>();
+      const allEvents: TimelineEvent[] = [];
+
+      // Add memory events first (fresher, may have display names)
+      for (const event of memoryEvents) {
+        if (!eventIds.has(event.id)) {
+          eventIds.add(event.id);
+          allEvents.push(event);
+        }
+      }
+
+      // Add database events that aren't already in memory
+      for (const event of dbEvents) {
+        if (!eventIds.has(event.id)) {
+          eventIds.add(event.id);
+          allEvents.push(event as TimelineEvent);
+        }
+      }
+
+      // Sort by timestamp (newest first) and limit
+      const cameraEvents = allEvents
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 100);
+
+      console.log(`[Timeline] Sending ${cameraEvents.length} events (${dbEvents.length} from DB, ${memoryEvents.length} from memory) to socket ${socket.id} for camera ${cameraId}`);
+      socket.emit("recentEvents", cameraEvents);
+    } catch (error) {
+      console.error(`[Timeline] Error fetching camera events from DB:`, error);
+      // Fallback to in-memory only
+      const cameraEvents = timelineEvents
+        .filter((event) => event.cameraId === cameraId)
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 50);
+      console.log(`[Timeline] Fallback: Sending ${cameraEvents.length} in-memory events to socket ${socket.id}`);
+      socket.emit("recentEvents", cameraEvents);
+    }
   });
 
   // Handle leaving a camera room
