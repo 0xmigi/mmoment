@@ -20,31 +20,18 @@ interface CompetitionScoreboardProps {
 export function CompetitionScoreboard({ cameraId, walletAddress }: CompetitionScoreboardProps) {
   const [competitionState, setCompetitionState] = useState<CompetitionState | null>(null);
 
-  console.log('[Scoreboard] Component render - cameraId:', cameraId, 'competitionState:', competitionState);
-
   useEffect(() => {
-    console.log('[Scoreboard] useEffect mounted for cameraId:', cameraId);
-    // Check immediately on mount
     const checkAppStatus = async () => {
       try {
-        console.log('[Scoreboard] Checking app status...');
         const result = await unifiedCameraService.getAppStatus(cameraId);
-        console.log('[Scoreboard] App status result:', result);
 
         if (result.success && result.data?.active_app) {
-          console.log('[Scoreboard] Active app detected:', result.data.active_app);
-
-          // Check if backend has competition state with competitors
           if (result.data.state?.competitors?.length) {
-            console.log('[Scoreboard] Setting competition state from backend:', result.data.state);
             setCompetitionState(result.data.state);
           } else {
-            // No competitors in backend state - use sessionStorage
             const competitorsJson = sessionStorage.getItem('competition_competitors');
-            console.log('[Scoreboard] No competitors in backend, checking sessionStorage:', competitorsJson);
             if (competitorsJson) {
               const competitors = JSON.parse(competitorsJson);
-              console.log('[Scoreboard] Creating placeholder state for competitors:', competitors);
               setCompetitionState({
                 active: result.data.state?.active || false,
                 competitors: competitors.map((c: any) => ({
@@ -56,30 +43,21 @@ export function CompetitionScoreboard({ cameraId, walletAddress }: CompetitionSc
             }
           }
         } else {
-          console.log('[Scoreboard] No active app, clearing state');
           setCompetitionState(null);
         }
       } catch (error) {
-        console.error('[Scoreboard] Error checking app status:', error);
+        console.error('[Scoreboard] Error:', error);
       }
     };
 
-    // Check immediately
     checkAppStatus();
-
-    // Poll every 500ms
-    const pollInterval = setInterval(checkAppStatus, 500);
-
+    const pollInterval = setInterval(checkAppStatus, 2000);
     return () => clearInterval(pollInterval);
   }, [cameraId]);
 
-  // Don't show if no competition state
   if (!competitionState?.competitors?.length) {
-    console.log('[Scoreboard] Returning null - no competitors. competitionState:', competitionState);
     return null;
   }
-
-  console.log('[Scoreboard] Rendering scoreboard with competitors:', competitionState.competitors);
 
   // Get primary metric (reps, score, points, etc.)
   const getPrimaryMetric = (stats: Record<string, any>) => {

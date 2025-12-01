@@ -577,6 +577,17 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
         // Notify subscribers
         notifyCheckInStatusChange(true);
 
+        // Set jetson-camera's currentSession locally (required for takePhoto)
+        // We use setSession instead of connect() to avoid a second API call to /api/session/connect
+        // which would fail since a session already exists from /api/checkin
+        await unifiedCameraService.setSession(cameraId, {
+          sessionId: result.data.session_id,
+          walletAddress: walletAddress,
+          cameraPda: cameraId,
+          timestamp: Date.now(),
+          isActive: true
+        });
+
         return true;
       } else {
         const errorMsg = result.error || 'Check-in failed';

@@ -137,6 +137,7 @@ export interface ICamera {
 
   // Session management
   getCurrentSession(): CameraSession | null;
+  setSession?(session: CameraSession): void;
 
   // Recording state
   isCurrentlyRecording(): Promise<boolean> | boolean;

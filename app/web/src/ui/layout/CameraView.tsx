@@ -935,14 +935,30 @@ export function CameraView() {
       // Note: Pre-capture transactions removed - activities are now buffered on Jetson
       // and committed at checkout via the encrypted activity buffer system
 
+      // Ensure camera has a local session set (required for takePhoto)
+      // We use setSession instead of connect() to avoid calling /api/session/connect
+      // which conflicts with Phase 3's /api/checkin
       const isConnected = await unifiedCameraService.isConnected(
         currentCameraId
       );
       if (!isConnected && primaryWallet?.address) {
-        await unifiedCameraService.connect(
-          currentCameraId,
-          primaryWallet.address
-        );
+        // Try to restore session from localStorage
+        const sessionKey = `mmoment_session_${primaryWallet.address}_${currentCameraId}`;
+        const storedSession = localStorage.getItem(sessionKey);
+        if (storedSession) {
+          try {
+            const sessionData = JSON.parse(storedSession);
+            await unifiedCameraService.setSession(currentCameraId, {
+              sessionId: sessionData.sessionId,
+              walletAddress: primaryWallet.address,
+              cameraPda: currentCameraId,
+              timestamp: sessionData.timestamp || Date.now(),
+              isActive: true
+            });
+          } catch (e) {
+            console.error('[CameraView] Failed to restore session from localStorage:', e);
+          }
+        }
       }
 
       const response = await unifiedCameraService.takePhoto(currentCameraId);
@@ -1028,14 +1044,30 @@ export function CameraView() {
       setIsRecording(true);
       updateToast("info", "Starting video recording...");
 
+      // Ensure camera has a local session set (required for video recording)
+      // We use setSession instead of connect() to avoid calling /api/session/connect
+      // which conflicts with Phase 3's /api/checkin
       const isConnected = await unifiedCameraService.isConnected(
         currentCameraId
       );
       if (!isConnected && primaryWallet?.address) {
-        await unifiedCameraService.connect(
-          currentCameraId,
-          primaryWallet.address
-        );
+        // Try to restore session from localStorage
+        const sessionKey = `mmoment_session_${primaryWallet.address}_${currentCameraId}`;
+        const storedSession = localStorage.getItem(sessionKey);
+        if (storedSession) {
+          try {
+            const sessionData = JSON.parse(storedSession);
+            await unifiedCameraService.setSession(currentCameraId, {
+              sessionId: sessionData.sessionId,
+              walletAddress: primaryWallet.address,
+              cameraPda: currentCameraId,
+              timestamp: sessionData.timestamp || Date.now(),
+              isActive: true
+            });
+          } catch (e) {
+            console.error('[CameraView] Failed to restore session from localStorage:', e);
+          }
+        }
       }
 
       const recordResponse = await unifiedCameraService.startVideoRecording(
@@ -1205,15 +1237,30 @@ export function CameraView() {
         // Note: Pre-capture transactions removed - activities are now buffered on Jetson
         // and committed at checkout via the encrypted activity buffer system
 
-        // Connect to camera if not already connected
+        // Ensure camera has a local session set (required for streaming)
+        // We use setSession instead of connect() to avoid calling /api/session/connect
+        // which conflicts with Phase 3's /api/checkin
         const isConnected = await unifiedCameraService.isConnected(
           currentCameraId
         );
         if (!isConnected && primaryWallet?.address) {
-          await unifiedCameraService.connect(
-            currentCameraId,
-            primaryWallet.address
-          );
+          // Try to restore session from localStorage
+          const sessionKey = `mmoment_session_${primaryWallet.address}_${currentCameraId}`;
+          const storedSession = localStorage.getItem(sessionKey);
+          if (storedSession) {
+            try {
+              const sessionData = JSON.parse(storedSession);
+              await unifiedCameraService.setSession(currentCameraId, {
+                sessionId: sessionData.sessionId,
+                walletAddress: primaryWallet.address,
+                cameraPda: currentCameraId,
+                timestamp: sessionData.timestamp || Date.now(),
+                isActive: true
+              });
+            } catch (e) {
+              console.error('[CameraView] Failed to restore session from localStorage:', e);
+            }
+          }
         }
 
         const response = await unifiedCameraService.startStream(

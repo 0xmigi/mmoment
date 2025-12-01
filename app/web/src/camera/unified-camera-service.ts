@@ -198,6 +198,33 @@ export class UnifiedCameraService {
   }
 
   /**
+   * Set session locally without making an API call.
+   * Used when session was created via /api/checkin (Phase 3) to set the
+   * camera's currentSession without calling /api/session/connect.
+   */
+  public async setSession(cameraId: string, session: CameraSession): Promise<boolean> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        this.log(`Cannot set session - camera not found: ${cameraId}`);
+        return false;
+      }
+
+      if (camera.setSession) {
+        camera.setSession(session);
+        this.log(`Session set for ${cameraId}:`, session.sessionId);
+        return true;
+      } else {
+        this.log(`Camera ${cameraId} does not support setSession`);
+        return false;
+      }
+    } catch (error) {
+      this.log(`Error setting session for ${cameraId}:`, error);
+      return false;
+    }
+  }
+
+  /**
    * Get camera status
    */
   public async getStatus(cameraId: string): Promise<CameraActionResponse<CameraStatus>> {

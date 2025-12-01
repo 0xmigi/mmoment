@@ -1206,6 +1206,16 @@ export class JetsonCamera implements ICamera {
     return this.currentSession;
   }
 
+  /**
+   * Set the current session locally without making an API call.
+   * Used when session was created via /api/checkin (Phase 3) to avoid
+   * calling /api/session/connect which would create a duplicate session.
+   */
+  setSession(session: CameraSession): void {
+    this.currentSession = session;
+    this.log('Session set locally (no API call):', session);
+  }
+
   getGestureControlsStatus(): boolean {
     const stored = localStorage.getItem('jetson_gesture_controls_enabled');
     return stored === 'true';

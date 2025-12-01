@@ -126,12 +126,10 @@ def require_session(f):
             logger.warning(f"🔍 Missing wallet address for {f.__name__}")
             return jsonify({"success": False, "error": "wallet_address required"}), 403
 
-        # Check if wallet is checked in first
-        blockchain_sync = get_blockchain_session_sync()
-        if not blockchain_sync.is_wallet_checked_in(wallet_address):
-            logger.warning(
-                f"❌ Wallet {wallet_address[:8]}... not checked in"
-            )
+        # Check if wallet is checked in via session_service (Phase 3 source of truth)
+        session_service = get_services().get("session")
+        if not session_service or not session_service.get_session_by_wallet(wallet_address):
+            logger.warning(f"❌ Wallet {wallet_address[:8]}... not checked in")
             return jsonify(
                 {"success": False, "error": "Invalid session - please check in first"}
             ), 403
@@ -994,17 +992,12 @@ def register_routes(app):
             f"[ENROLL-CONFIRM] Confirming face enrollment for wallet: {wallet_address}, face_id: {face_id}"
         )
 
-        # Check if wallet is checked in on-chain (the ONLY session authority that matters)
-        blockchain_sync = get_blockchain_session_sync()
-        if not blockchain_sync.is_wallet_checked_in(wallet_address):
-            logger.warning(
-                f"[ENROLL-CONFIRM] Wallet {wallet_address} is not checked in on-chain"
-            )
+        # Check if wallet is checked in via session_service (Phase 3 source of truth)
+        session_service = get_services().get("session")
+        if not session_service or not session_service.get_session_by_wallet(wallet_address):
+            logger.warning(f"[ENROLL-CONFIRM] Wallet {wallet_address} is not checked in")
             return jsonify(
-                {
-                    "success": False,
-                    "error": "Wallet must be checked in on-chain to confirm face enrollment",
-                }
+                {"success": False, "error": "Wallet must be checked in to confirm face enrollment"}
             ), 403
 
         try:
@@ -1142,19 +1135,15 @@ def register_routes(app):
                     }
                 ), 400
 
-            # CRITICAL: Require on-chain check-in for ANY recognition token creation
+            # CRITICAL: Require check-in for ANY recognition token creation
             # User must be physically present at the camera (checked in) to enroll
-            blockchain_sync = get_blockchain_session_sync()
-            if not blockchain_sync.is_wallet_checked_in(wallet_address):
+            session_service = get_services().get("session")
+            if not session_service or not session_service.get_session_by_wallet(wallet_address):
                 logger.warning(
                     f"[EXTRACT-EMBEDDING] ❌ Wallet {wallet_address} not checked in - recognition token creation denied"
                 )
                 return jsonify(
-                    {
-                        "success": False,
-                        "error": "You must be checked in at this camera to create a recognition token",
-                        "checked_in": False,
-                    }
+                    {"success": False, "error": "You must be checked in at this camera to create a recognition token", "checked_in": False}
                 ), 403
 
             # Decode base64 image
