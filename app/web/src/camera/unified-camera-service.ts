@@ -912,6 +912,75 @@ export class UnifiedCameraService {
   }
 
   /**
+   * Check if a user is currently checked in at a camera
+   *
+   * PHASE 3 PRIVACY ARCHITECTURE:
+   * Queries the Jetson directly (source of truth) to check session status.
+   * This is consistent with how activeSessionCount already works.
+   *
+   * @param cameraId - Camera PDA
+   * @param walletAddress - User's wallet address to check
+   * @returns { isCheckedIn: boolean, activeSessionCount: number }
+   */
+  public async getSessionStatus(cameraId: string, walletAddress: string): Promise<CameraActionResponse<{
+    isCheckedIn: boolean;
+    activeSessionCount: number;
+  }>> {
+    try {
+      this.log(`[SESSION-STATUS] Checking session for ${walletAddress.slice(0, 8)}... at camera ${cameraId.slice(0, 8)}...`);
+
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        this.log(`[SESSION-STATUS] Camera not found: ${cameraId}`);
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`,
+          data: { isCheckedIn: false, activeSessionCount: 0 }
+        };
+      }
+
+      const apiUrl = (camera as any).apiUrl;
+      const url = `${apiUrl}/api/session/status/${walletAddress}`;
+      this.log(`[SESSION-STATUS] Querying: ${url}`);
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        credentials: 'omit'
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.log(`[SESSION-STATUS] Error: ${errorText}`);
+        return {
+          success: false,
+          error: `HTTP ${response.status}: ${errorText}`,
+          data: { isCheckedIn: false, activeSessionCount: 0 }
+        };
+      }
+
+      const result = await response.json();
+      this.log(`[SESSION-STATUS] Result: isCheckedIn=${result.isCheckedIn}, activeCount=${result.activeSessionCount}`);
+
+      return {
+        success: true,
+        data: {
+          isCheckedIn: result.isCheckedIn,
+          activeSessionCount: result.activeSessionCount
+        }
+      };
+    } catch (error) {
+      this.log(`[SESSION-STATUS] Error:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to check session status',
+        data: { isCheckedIn: false, activeSessionCount: 0 }
+      };
+    }
+  }
+
+  /**
    * Get user profile from camera
    */
   public async getUserProfile(cameraId: string, walletAddress: string): Promise<CameraActionResponse<{

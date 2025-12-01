@@ -938,6 +938,40 @@ def register_routes(app):
         """Standardized session disconnect endpoint"""
         return disconnect()
 
+    @app.route("/api/session/status/<wallet_address>")
+    @sign_response
+    def api_session_status(wallet_address):
+        """
+        Check if a specific wallet is currently checked in.
+
+        Phase 3 Privacy Architecture:
+        - Frontend queries this to know if user can take photos/videos
+        - Returns isCheckedIn: true/false
+        - Also returns activeSessionCount for consistency
+        """
+        try:
+            if not wallet_address:
+                return jsonify({"success": False, "error": "wallet_address is required"}), 400
+
+            blockchain_sync = get_blockchain_session_sync()
+            is_checked_in = blockchain_sync.is_wallet_checked_in(wallet_address)
+
+            # Also get total count for consistency with /api/status
+            session_service = get_services().get("session")
+            active_count = session_service.get_active_session_count() if session_service else 0
+
+            logger.info(f"[SESSION-STATUS] Wallet {wallet_address[:8]}... checked_in={is_checked_in}")
+
+            return jsonify({
+                "success": True,
+                "wallet_address": wallet_address,
+                "isCheckedIn": is_checked_in,
+                "activeSessionCount": active_count
+            })
+        except Exception as e:
+            logger.error(f"Error checking session status: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+
     # Computer Vision (Jetson-specific)
     @app.route("/api/face/enroll/confirm", methods=["POST"])
     def api_face_enroll_confirm():

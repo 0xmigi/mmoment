@@ -784,86 +784,68 @@ export function CameraView() {
     };
   }, [sendSimpleTransaction]);
 
-  // Replace the promptForCheckIn function with one that shows the modal
+  // PHASE 3: Prompt user to check in via CameraModal (not TransactionModal)
+  // Camera actions after check-in are free and direct to the Jetson
   const promptForCheckIn = (actionType: "photo" | "video" | "stream") => {
     if (!cameraAccount) {
       updateToast("error", "No camera connected");
       return false;
     }
 
-    // Set transaction data and show modal
-    setTransactionData({
-      type: actionType,
-      cameraAccount: cameraAccount,
-    });
-    setShowTransactionModal(true);
+    // Show toast and open the CameraModal for check-in
+    updateToast("info", "Please check in to use camera controls");
+    setIsMobileCameraModalOpen(true);
 
     // Track this as an "attempt"
     console.log(
-      `User attempted to use camera for ${actionType} without checking in first`
+      `[Phase3] User attempted ${actionType} without checking in - prompting check-in via CameraModal`
     );
 
     return false;
   };
 
-  // Update the checkUserSession function with similar throttling
+  // PHASE 3: Check session status from Jetson (source of truth)
+  // This is consistent with how activeSessionCount is already fetched from Jetson
   const checkUserSession = async (): Promise<boolean> => {
-    if (!primaryWallet?.address || !cameraAccount || !program || !connection) {
-      console.error("Missing required components for check-in status");
+    if (!primaryWallet?.address || !cameraAccount) {
+      console.log("[CameraView] Missing wallet or camera for session check");
       return false;
     }
 
-    try {
-      const userPublicKey = new PublicKey(primaryWallet.address);
-      const cameraPublicKey = new PublicKey(cameraAccount);
+    // Only check Jetson cameras - other cameras still use blockchain
+    if (!unifiedCameraService.hasCamera(cameraAccount)) {
+      console.log("[CameraView] Camera not in registry, cannot check session");
+      return isCheckedIn;
+    }
 
-      // Find the session PDA
-      const [sessionPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("session"),
-          userPublicKey.toBuffer(),
-          cameraPublicKey.toBuffer(),
-        ],
-        CAMERA_ACTIVATION_PROGRAM_ID
+    try {
+      const result = await unifiedCameraService.getSessionStatus(
+        cameraAccount,
+        primaryWallet.address
       );
 
-      try {
-        // Try to fetch the session account
-        const sessionAccount = await (program.account as any).userSession.fetch(
-          sessionPda
-        );
-        if (sessionAccount) {
-          if (!isCheckedIn) {
-            console.log("[CameraView] Setting checked-in status to TRUE");
-            setIsCheckedIn(true);
-            // Refresh timeline if status changed
-            if (timelineRef.current?.refreshTimeline) {
-              timelineRef.current?.refreshTimeline();
-            }
-          }
-          return true;
-        }
-      } catch (_) {
-        console.log(
-          "[CameraView] Session account not found, user is not checked in"
-        );
-        if (isCheckedIn) {
-          console.log("[CameraView] Setting checked-in status to FALSE");
-          setIsCheckedIn(false);
+      if (result.success && result.data) {
+        const newStatus = result.data.isCheckedIn;
+
+        if (newStatus !== isCheckedIn) {
+          console.log(`[CameraView] Session status changed: ${isCheckedIn} -> ${newStatus}`);
+          setIsCheckedIn(newStatus);
           // Refresh timeline if status changed
           if (timelineRef.current?.refreshTimeline) {
             timelineRef.current?.refreshTimeline();
           }
         }
-        return false;
+
+        return newStatus;
+      } else {
+        console.log("[CameraView] Failed to get session status from Jetson:", result.error);
+        // On error, don't change state to prevent UI flashing
+        return isCheckedIn;
       }
     } catch (err) {
       console.error("[CameraView] Error checking session status:", err);
-      // Don't update state on error to prevent UI flashing
-      return isCheckedIn; // Return current state on error
+      return isCheckedIn;
     }
-
-    return isCheckedIn;
   };
 
   // Update the periodic check-in status check to use a longer interval
@@ -890,7 +872,7 @@ export function CameraView() {
       console.log("[CameraView] Cleaning up check-in status monitor");
       clearInterval(intervalId);
     };
-  }, [primaryWallet, cameraAccount, program, connection]);
+  }, [primaryWallet, cameraAccount]);  // Removed program, connection - now using Jetson directly
 
   // Sync gesture controls state with localStorage
   useEffect(() => {

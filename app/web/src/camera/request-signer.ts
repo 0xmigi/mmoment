@@ -92,6 +92,18 @@ export async function getSignMessageFunction(
       console.log('[RequestSigner] Using signer.signMessage');
       return async (message: Uint8Array) => {
         const sig = await signer.signMessage(message);
+        console.log('[RequestSigner] Raw signature result:', sig);
+        console.log('[RequestSigner] Signature type:', typeof sig);
+        console.log('[RequestSigner] Is Uint8Array:', sig instanceof Uint8Array);
+        if (sig && typeof sig === 'object') {
+          console.log('[RequestSigner] Signature keys:', Object.keys(sig));
+          // Handle case where signature might be wrapped in an object
+          if ('signature' in sig) {
+            console.log('[RequestSigner] Found signature property, using it');
+            const innerSig = (sig as any).signature;
+            return innerSig instanceof Uint8Array ? innerSig : new Uint8Array(innerSig);
+          }
+        }
         return sig instanceof Uint8Array ? sig : new Uint8Array(sig);
       };
     }
@@ -100,6 +112,13 @@ export async function getSignMessageFunction(
       console.log('[RequestSigner] Using primaryWallet.signMessage');
       return async (message: Uint8Array) => {
         const sig = await primaryWallet.signMessage(message);
+        console.log('[RequestSigner] Raw signature result:', sig);
+        console.log('[RequestSigner] Signature type:', typeof sig);
+        if (sig && typeof sig === 'object' && 'signature' in sig) {
+          console.log('[RequestSigner] Found signature property, using it');
+          const innerSig = (sig as any).signature;
+          return innerSig instanceof Uint8Array ? innerSig : new Uint8Array(innerSig);
+        }
         return sig instanceof Uint8Array ? sig : new Uint8Array(sig);
       };
     }
