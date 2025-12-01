@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 
-import { IDL } from "../../anchor/idl";
 import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from "../../anchor/setup";
 import { TransactionModal } from "../../auth/components/TransactionModal";
 import { CameraModal } from "../../camera/CameraModal";
@@ -26,15 +25,14 @@ import {
 } from "../../timeline/timeline-types";
 import { ToastContainer } from "../feedback/ToastContainer";
 import { CameraControls } from "./MobileControls";
-import { Program, AnchorProvider } from "@coral-xyz/anchor";
 import {
   useDynamicContext,
   useEmbeddedWallet,
 } from "@dynamic-labs/sdk-react-core";
 import { useConnection } from "@solana/wallet-adapter-react";
 import {
-  PublicKey,
   Connection,
+  PublicKey,
   Transaction,
   TransactionInstruction,
 } from "@solana/web3.js";
@@ -50,7 +48,7 @@ import {
 import { useRef, useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 
-// Update the CameraIdDisplay component to add a forced refresh when the modal is closed
+// CameraIdDisplay component - uses unified check-in state from CameraProvider
 const CameraIdDisplay = ({
   cameraId,
   selectedCamera,
@@ -69,9 +67,9 @@ const CameraIdDisplay = ({
   const cameraStatus = useCameraStatus(
     selectedCamera?.publicKey || cameraAccount || cameraId || ""
   );
-  const { primaryWallet } = useDynamicContext();
-  const { connection } = useConnection();
-  const [isCheckedIn, setIsCheckedIn] = useState(false);
+
+  // Use unified check-in state from CameraProvider (Phase 3 Privacy Architecture)
+  const { isCheckedIn, refreshCheckInStatus } = useCamera();
 
   // Get the direct ID from localStorage if available (most reliable source)
   const directId = localStorage.getItem("directCameraId");
@@ -80,78 +78,22 @@ const CameraIdDisplay = ({
   const displayId =
     selectedCamera?.publicKey || cameraAccount || directId || cameraId;
 
-  // Simple blockchain check
-  const checkBlockchainStatus = async () => {
-    if (!displayId || !primaryWallet?.address || !connection) return;
-
-    try {
-      console.log(
-        `[BLOCKCHAIN CHECK] Checking status for ${displayId.slice(0, 8)}...`
-      );
-
-      const provider = new AnchorProvider(
-        connection,
-        {
-          publicKey: new PublicKey(primaryWallet.address),
-          signTransaction: async (tx: Transaction) => tx,
-          signAllTransactions: async (txs: Transaction[]) => txs,
-        } as any,
-        { commitment: "confirmed" }
-      );
-
-      const program = new Program(
-        IDL as any,
-        CAMERA_ACTIVATION_PROGRAM_ID,
-        provider
-      );
-
-      const [sessionPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("session"),
-          new PublicKey(primaryWallet.address).toBuffer(),
-          new PublicKey(displayId).toBuffer(),
-        ],
-        CAMERA_ACTIVATION_PROGRAM_ID
-      );
-
-      try {
-        const session = await (program.account as any).userSession.fetch(sessionPda);
-        console.log(`[BLOCKCHAIN CHECK] ✅ SESSION FOUND:`, session);
-        setIsCheckedIn(true);
-      } catch (err) {
-        console.log(`[BLOCKCHAIN CHECK] ❌ NO SESSION FOUND`);
-        setIsCheckedIn(false);
-      }
-    } catch (err) {
-      console.error("[BLOCKCHAIN CHECK] ERROR:", err);
-    }
-  };
-
-  // Check blockchain status immediately when component loads or camera changes
-  useEffect(() => {
-    if (displayId && primaryWallet?.address && connection) {
-      console.log(
-        `[CAMERA ID DISPLAY] Component loaded/changed - checking blockchain status`
-      );
-      checkBlockchainStatus();
-    }
-  }, [displayId, primaryWallet?.address, connection]);
-
-  // Add a function to handle status change from modal
+  // Handle status change from modal - refresh from context
   const handleCheckStatusChange = (newStatus: boolean) => {
-    console.log("Status change from modal:", newStatus);
-    setIsCheckedIn(newStatus);
+    console.log("[CameraIdDisplay] Status change from modal:", newStatus);
+    // Refresh check-in status from context (which queries Jetson)
+    refreshCheckInStatus();
     // If timelineRef exists, refresh it
     if (timelineRef?.current?.refreshTimeline) {
       timelineRef.current?.refreshTimeline();
     }
   };
 
-  // Add a function to handle modal close with a forced refresh
+  // Handle modal close - refresh status
   const handleModalClose = () => {
     setIsModalOpen(false);
-    // Check blockchain status when modal closes
-    checkBlockchainStatus();
+    // Refresh check-in status from Jetson when modal closes
+    refreshCheckInStatus();
   };
 
   // Handle case where ID might not be valid
@@ -220,7 +162,8 @@ export function CameraView() {
   const { primaryWallet, user } = useDynamicContext();
   const { cameraId } = useParams<{ cameraId: string }>();
   useEmbeddedWallet();
-  const { selectedCamera, setSelectedCamera, fetchCameraById } = useCamera();
+  // Use unified check-in state from CameraProvider (Phase 3 Privacy Architecture)
+  const { selectedCamera, setSelectedCamera, fetchCameraById, isCheckedIn, refreshCheckInStatus } = useCamera();
   const { program } = useProgram();
   const { connection } = useConnection();
   const timelineRef = useRef<{
@@ -238,7 +181,7 @@ export function CameraView() {
   const [currentToast, setCurrentToast] = useState<ToastMessage | null>(null);
   const [loading] = useState(false);
   const [, setIsMobileView] = useState(window.innerWidth <= 768);
-  const [isCheckedIn, setIsCheckedIn] = useState(false);
+  // Removed local isCheckedIn state - now using unified state from CameraProvider
 
   // Add state to store video recording transaction signature
   const [_recordingTransactionSignature] = useState<string | null>(null);
@@ -396,19 +339,8 @@ export function CameraView() {
       // Set camera account state
       setCameraAccount(decodedCameraId);
 
-      // CRITICAL: Check session status immediately on page load
-      // This ensures isCheckedIn is correct before user clicks any buttons
-      if (primaryWallet?.address && unifiedCameraService.hasCamera(decodedCameraId)) {
-        console.log("[CameraView] Checking session status on page load...");
-        unifiedCameraService.getSessionStatus(decodedCameraId, primaryWallet.address)
-          .then((result) => {
-            if (result.success && result.data) {
-              console.log(`[CameraView] Initial session check: ${result.data.isCheckedIn ? 'CHECKED IN' : 'NOT CHECKED IN'}`);
-              setIsCheckedIn(result.data.isCheckedIn);
-            }
-          })
-          .catch((err) => console.error("[CameraView] Initial session check failed:", err));
-      }
+      // NOTE: Session status is now automatically checked by CameraProvider
+      // when selectedCamera changes. No need for manual initial check here.
 
       // Attempt to fetch camera data if possible (but don't show errors if it fails)
       if (fetchCameraById) {
@@ -641,9 +573,8 @@ export function CameraView() {
           return undefined;
         }
 
-        // First, verify user is checked in
-        const isCheckedInNow = await checkUserSession();
-        if (!isCheckedInNow) {
+        // First, verify user is checked in (using unified state from CameraProvider)
+        if (!isCheckedIn) {
           updateToast(
             "error",
             "You need to check in before performing camera actions"
@@ -818,75 +749,9 @@ export function CameraView() {
     return false;
   };
 
-  // PHASE 3: Check session status from Jetson (source of truth)
-  // This is consistent with how activeSessionCount is already fetched from Jetson
-  const checkUserSession = async (): Promise<boolean> => {
-    if (!primaryWallet?.address || !cameraAccount) {
-      console.log("[CameraView] Missing wallet or camera for session check");
-      return false;
-    }
-
-    // Only check Jetson cameras - other cameras still use blockchain
-    if (!unifiedCameraService.hasCamera(cameraAccount)) {
-      console.log("[CameraView] Camera not in registry, cannot check session");
-      return isCheckedIn;
-    }
-
-    try {
-      const result = await unifiedCameraService.getSessionStatus(
-        cameraAccount,
-        primaryWallet.address
-      );
-
-      if (result.success && result.data) {
-        const newStatus = result.data.isCheckedIn;
-
-        if (newStatus !== isCheckedIn) {
-          console.log(`[CameraView] Session status changed: ${isCheckedIn} -> ${newStatus}`);
-          setIsCheckedIn(newStatus);
-          // Refresh timeline if status changed
-          if (timelineRef.current?.refreshTimeline) {
-            timelineRef.current?.refreshTimeline();
-          }
-        }
-
-        return newStatus;
-      } else {
-        console.log("[CameraView] Failed to get session status from Jetson:", result.error);
-        // On error, don't change state to prevent UI flashing
-        return isCheckedIn;
-      }
-    } catch (err) {
-      console.error("[CameraView] Error checking session status:", err);
-      return isCheckedIn;
-    }
-  };
-
-  // Update the periodic check-in status check to use a longer interval
-  useEffect(() => {
-    if (!primaryWallet?.address || !cameraAccount) return;
-
-    console.log("[CameraView] Setting up check-in status monitoring");
-
-    // Check status immediately
-    checkUserSession();
-
-    // Set up periodic check every 10 seconds (instead of 3)
-    const intervalId = setInterval(() => {
-      checkUserSession().then((isCheckedIn) => {
-        console.log(
-          "[CameraView] Periodic check result:",
-          isCheckedIn ? "CHECKED IN" : "NOT CHECKED IN"
-        );
-      });
-    }, 10000);
-
-    // Clean up on unmount
-    return () => {
-      console.log("[CameraView] Cleaning up check-in status monitor");
-      clearInterval(intervalId);
-    };
-  }, [primaryWallet, cameraAccount]);  // Removed program, connection - now using Jetson directly
+  // NOTE: Check-in status is now managed by CameraProvider (Phase 3 Privacy Architecture)
+  // The provider auto-refreshes status when camera/wallet changes and provides unified state
+  // See: CameraProvider.refreshCheckInStatus() for manual refresh
 
   // Sync gesture controls state with localStorage
   useEffect(() => {
@@ -1059,8 +924,7 @@ export function CameraView() {
       return;
     }
 
-    // PHASE 3: Use local state for check-in status (don't re-query Jetson on every action)
-    // The periodic checkUserSession() keeps this state in sync
+    // PHASE 3: Use unified state from CameraProvider (auto-refreshed on camera/wallet changes)
     if (!isCheckedIn) {
       return promptForCheckIn("photo");
     }
@@ -1465,8 +1329,8 @@ export function CameraView() {
             onSuccess={({ transactionId }) => {
               setShowTransactionModal(false);
 
-              // After successful check-in and action, refresh check-in status
-              checkUserSession().then(() => {
+              // After successful check-in and action, refresh check-in status from context
+              refreshCheckInStatus().then(() => {
                 // Create a timeline event with the transaction ID
                 if (transactionData) {
                   const eventType = getEventType(transactionData.type);
@@ -1764,12 +1628,13 @@ export function CameraView() {
         isOpen={isMobileCameraModalOpen}
         onClose={() => {
           setIsMobileCameraModalOpen(false);
-          // Immediately check session status when modal closes to ensure sync
-          checkUserSession();
+          // Refresh check-in status from context (queries Jetson)
+          refreshCheckInStatus();
         }}
         onCheckStatusChange={(newStatus: boolean) => {
           console.log("Mobile modal status change:", newStatus);
-          setIsCheckedIn(newStatus);
+          // Refresh from context instead of local state
+          refreshCheckInStatus();
           // Refresh timeline if needed
           if (timelineRef.current?.refreshTimeline) {
             timelineRef.current?.refreshTimeline();

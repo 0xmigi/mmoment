@@ -953,14 +953,18 @@ def register_routes(app):
             if not wallet_address:
                 return jsonify({"success": False, "error": "wallet_address is required"}), 400
 
-            blockchain_sync = get_blockchain_session_sync()
-            is_checked_in = blockchain_sync.is_wallet_checked_in(wallet_address)
-
-            # Also get total count for consistency with /api/status
+            # Phase 3 Privacy Architecture: Check session_service (off-chain source of truth)
+            # NOT blockchain_sync (which checks on-chain state - outdated)
             session_service = get_services().get("session")
+
+            # Check if wallet has an active session in the off-chain session service
+            session = session_service.get_session_by_wallet(wallet_address) if session_service else None
+            is_checked_in = session is not None
+
+            # Get total active count for consistency with /api/status
             active_count = session_service.get_active_session_count() if session_service else 0
 
-            logger.info(f"[SESSION-STATUS] Wallet {wallet_address[:8]}... checked_in={is_checked_in}")
+            logger.info(f"[SESSION-STATUS] Wallet {wallet_address[:8]}... checked_in={is_checked_in} (session_service)")
 
             return jsonify({
                 "success": True,

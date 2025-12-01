@@ -3,10 +3,8 @@ import { useState, useEffect } from 'react';
 import { Dialog } from '@headlessui/react';
 import { X, ExternalLink, Camera, User } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { timelineService } from '../timeline/timeline-service';
 import { unifiedCameraService } from './unified-camera-service';
-import { createSignedRequest } from './request-signer';
-import { useSocialProfile } from '../auth/social/useSocialProfile';
+import { useCamera } from './CameraProvider';
 import { CONFIG } from '../core/config';
 
 interface CameraModalProps {
@@ -32,9 +30,8 @@ interface CameraModalProps {
 
 export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: CameraModalProps) {
   const { primaryWallet } = useDynamicContext();
-  const { primaryProfile } = useSocialProfile();
-  const [isCheckedIn, setIsCheckedIn] = useState(false);
-  const [loading, setLoading] = useState(false);
+  // Use unified check-in state from CameraProvider (Phase 3 Privacy Architecture)
+  const { isCheckedIn, isCheckingIn, checkInError, checkIn, checkOut, refreshCheckInStatus } = useCamera();
   const [error, setError] = useState<string | null>(null);
 
   // Configuration states for Jetson camera features
@@ -52,7 +49,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
   // Check if this is a Jetson camera (has advanced features)
   const isJetsonCamera = camera.id === CONFIG.JETSON_CAMERA_PDA || camera.model === 'jetson' || camera.model === 'jetson_orin_nano';
 
-  // Add more frequent status updates to the parent component
+  // Notify parent component when check-in status changes (backwards compatibility)
   useEffect(() => {
     if (onCheckStatusChange) {
       console.log("[CameraModal] Notifying parent of check-in status:", isCheckedIn);
@@ -60,15 +57,15 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   }, [isCheckedIn, onCheckStatusChange]);
 
-  // Check session status and active users only when modal opens (no polling)
+  // Refresh check-in status and active users when modal opens
   useEffect(() => {
     if (!isOpen || !camera.id) return;
 
-    console.log("[CameraModal] Checking session status and active users on open");
+    console.log("[CameraModal] Modal opened - refreshing check-in status and active users");
 
-    // Only check session status if wallet is connected
+    // Refresh check-in status from context (queries Jetson)
     if (primaryWallet?.address) {
-      checkSessionStatus();
+      refreshCheckInStatus();
     }
 
     // Always fetch active users (doesn't need wallet)
@@ -78,13 +75,13 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     const intervalId = setInterval(() => {
       console.log("[CameraModal] Periodic active users check");
       fetchActiveUsersForCamera();
-    }, 15000); // Check every 15 seconds instead of 3
+    }, 15000);
 
     return () => {
       console.log("[CameraModal] Cleaning up active users check");
       clearInterval(intervalId);
     };
-  }, [isOpen, camera.id]);
+  }, [isOpen, camera.id, primaryWallet?.address, refreshCheckInStatus]);
 
   // Clear errors and load configuration when modal opens
   useEffect(() => {
@@ -136,40 +133,8 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
   }, [isJetsonCamera, camera.id]);
 
 
-  // NEW PRIVACY ARCHITECTURE: Sessions are now managed off-chain by Jetson
-  // Check session status via localStorage (set when user checks in/out)
-  const checkSessionStatus = async () => {
-    if (!camera.id || !primaryWallet?.address) return;
-
-    try {
-      // Check local session state (persisted across page refreshes)
-      const sessionKey = `mmoment_session_${primaryWallet.address}_${camera.id}`;
-      const storedSession = localStorage.getItem(sessionKey);
-
-      if (storedSession) {
-        const session = JSON.parse(storedSession);
-        // Check if session is still valid (within last 24 hours)
-        const sessionAge = Date.now() - session.timestamp;
-        const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-
-        if (sessionAge < maxAge) {
-          console.log("[CameraModal] Found valid local session, setting checked-in: true");
-          setIsCheckedIn(true);
-          return;
-        } else {
-          // Session expired, clear it
-          console.log("[CameraModal] Local session expired, clearing");
-          localStorage.removeItem(sessionKey);
-        }
-      }
-
-      console.log("[CameraModal] No local session found, setting checked-in: false");
-      setIsCheckedIn(false);
-    } catch (err) {
-      console.error('[CameraModal] Error checking session status:', err);
-      setIsCheckedIn(false);
-    }
-  };
+  // NOTE: Session status checking is now handled by CameraProvider.refreshCheckInStatus()
+  // which queries Jetson (the source of truth) and updates localStorage as needed
 
   // NEW PRIVACY ARCHITECTURE: Sessions are managed off-chain by Jetson
   // Active users count comes from Jetson's session management
@@ -329,170 +294,37 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   };
 
-  // NEW PRIVACY ARCHITECTURE: Check-in is now fully off-chain via Jetson
-  // No more on-chain UserSession PDA - sessions are managed by Jetson
-  // PHASE 3: Requires Ed25519 signature for cryptographic handshake
+  // Check-in handler using unified context (Phase 3 Privacy Architecture)
   const handleCheckIn = async () => {
-    if (!camera.id || !primaryWallet?.address) {
-      setError('No camera or wallet available');
-      return;
-    }
-
-    setLoading(true);
     setError(null);
 
-    try {
-      console.log('🚀 [CameraModal] Starting off-chain check-in via Jetson...');
-      console.log('🔍 [CameraModal] primaryProfile:', primaryProfile);
+    console.log('[CameraModal] Starting check-in via CameraProvider context...');
+    const success = await checkIn();
 
-      // PHASE 3: Create signed request for cryptographic handshake
-      console.log('🔐 [CameraModal] Creating signed request...');
-      const signedParams = await createSignedRequest(primaryWallet);
-      if (!signedParams) {
-        setError('Failed to sign check-in request. Please ensure your wallet supports message signing.');
-        setLoading(false);
-        return;
-      }
-      console.log('✅ [CameraModal] Request signed successfully');
-
-      // Call Jetson check-in endpoint with Ed25519 signature
-      const checkinResult = await unifiedCameraService.checkin(camera.id, {
-        ...signedParams,  // wallet_address, request_signature, request_timestamp, request_nonce
-        display_name: primaryProfile?.displayName,
-        username: primaryProfile?.username
-      });
-
-      if (checkinResult.success) {
-        console.log('✅ [CameraModal] Off-chain check-in successful!', checkinResult.data);
-        console.log(`   Display name: ${checkinResult.data?.display_name}`);
-        console.log(`   Session ID: ${checkinResult.data?.session_id}`);
-
-        // Store session locally for persistence across page refreshes
-        const sessionKey = `mmoment_session_${primaryWallet.address}_${camera.id}`;
-        localStorage.setItem(sessionKey, JSON.stringify({
-          sessionId: checkinResult.data?.session_id,
-          timestamp: Date.now(),
-          cameraId: camera.id,
-          walletAddress: primaryWallet.address
-        }));
-
-        // Clear old session events before starting new session
-        timelineService.clearForNewSession();
-
-        // NOTE: We no longer emit check_in event locally
-        // Backend broadcasts via WebSocket after Jetson notifies it (Phase 3 architecture)
-
-        setIsCheckedIn(true);
-
-        // Refresh active users count
-        await fetchActiveUsersForCamera();
-
-        // Notify parent component
-        if (onCheckStatusChange) {
-          onCheckStatusChange(true);
-        }
-      } else {
-        console.error('❌ [CameraModal] Off-chain check-in failed:', checkinResult.error);
-        setError(checkinResult.error || 'Failed to check in to camera');
-      }
-
-    } catch (error) {
-      console.error('Check-in error:', error);
-
-      if (error instanceof Error) {
-        let errorMsg = error.message;
-
-        // Check for common error messages and provide more user-friendly versions
-        if (errorMsg.includes('already checked in')) {
-          errorMsg = 'You are already checked in to this camera.';
-          setIsCheckedIn(true);
-          // IMPORTANT: Notify parent even when already checked in
-          if (onCheckStatusChange) {
-            onCheckStatusChange(true);
-          }
-          return;
-        } else if (errorMsg.includes('Signature verification failed')) {
-          errorMsg = 'Signature verification failed. Please try again.';
-        } else if (errorMsg.length > 150) {
-          errorMsg = 'An error occurred during check-in. Please check the console for details.';
-        }
-
-        setError(errorMsg);
-      } else {
-        setError('Unknown error during check-in');
-      }
-    } finally {
-      setLoading(false);
+    if (success) {
+      console.log('[CameraModal] Check-in successful');
+      // Refresh active users count
+      await fetchActiveUsersForCamera();
+    } else {
+      // Show error from context
+      setError(checkInError || 'Failed to check in to camera');
     }
   };
 
-  // NEW PRIVACY ARCHITECTURE: Check-out is now off-chain via Jetson
-  // Jetson will handle:
-  // 1. Writing encrypted activities to CameraTimeline (no user info)
-  // 2. Sending access keys to backend for UserSessionChain storage
+  // Check-out handler using unified context (Phase 3 Privacy Architecture)
   const handleCheckOut = async () => {
-    if (!camera.id || !primaryWallet?.address) {
-      setError('No camera or wallet available');
-      return;
-    }
-
-    setLoading(true);
     setError(null);
 
-    try {
-      console.log('🚀 [CameraModal] Starting off-chain check-out via Jetson...');
+    console.log('[CameraModal] Starting check-out via CameraProvider context...');
+    const success = await checkOut();
 
-      // Call Jetson checkout endpoint
-      // Jetson will handle timeline writes and access key delivery to backend
-      const checkoutResult = await unifiedCameraService.checkout(camera.id, {
-        wallet_address: primaryWallet.address,
-        transaction_signature: '' // No transaction in new architecture
-      });
-
-      if (checkoutResult.success) {
-        console.log('✅ [CameraModal] Off-chain check-out successful!', checkoutResult.data);
-
-        // Clear local session state
-        const sessionKey = `mmoment_session_${primaryWallet.address}_${camera.id}`;
-        localStorage.removeItem(sessionKey);
-
-        // Remove user profile from camera
-        try {
-          const removeResult = await unifiedCameraService.removeUserProfile(camera.id, primaryWallet.address);
-          if (removeResult.success) {
-            console.log('[CameraModal] User profile removed successfully from camera');
-          }
-        } catch (err) {
-          console.warn('[CameraModal] Failed to remove user profile:', err);
-        }
-
-        setIsCheckedIn(false);
-
-        // End the timeline session
-        timelineService.endSession();
-
-        // Refresh active users count
-        await fetchActiveUsersForCamera();
-
-        // Notify parent component
-        if (onCheckStatusChange) {
-          onCheckStatusChange(false);
-        }
-      } else {
-        console.error('❌ [CameraModal] Off-chain check-out failed:', checkoutResult.error);
-        setError(checkoutResult.error || 'Failed to check out from camera');
-      }
-
-    } catch (error) {
-      console.error('Check-out error:', error);
-
-      if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError('Unknown error during check-out');
-      }
-    } finally {
-      setLoading(false);
+    if (success) {
+      console.log('[CameraModal] Check-out successful');
+      // Refresh active users count
+      await fetchActiveUsersForCamera();
+    } else {
+      // Show error from context
+      setError(checkInError || 'Failed to check out from camera');
     }
   };
 
@@ -693,18 +525,18 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                 {isCheckedIn ? (
                   <button
                     onClick={handleCheckOut}
-                    disabled={loading}
+                    disabled={isCheckingIn}
                     className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
                   >
-                    {loading ? 'Processing...' : 'Check Out'}
+                    {isCheckingIn ? 'Processing...' : 'Check Out'}
                   </button>
                 ) : (
                   <button
                     onClick={handleCheckIn}
-                    disabled={loading}
+                    disabled={isCheckingIn}
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
                   >
-                    {loading ? 'Processing...' : 'Check In'}
+                    {isCheckingIn ? 'Processing...' : 'Check In'}
                   </button>
                 )}
               </>
