@@ -2219,14 +2219,86 @@ app.delete("/api/profile/:walletAddress", async (req, res) => {
 // Receive encrypted activity from Jetson (called during active session)
 app.post("/api/session/activity", async (req, res) => {
   try {
-    // transactionSignature is optional - included for check_in/check_out to show Solscan link
-    const { sessionId, cameraId, userPubkey, timestamp, activityType, encryptedContent, nonce, accessGrants, transactionSignature } = req.body;
+    // Extract all possible fields - some are optional depending on activity type
+    const {
+      sessionId, cameraId, userPubkey, timestamp, activityType,
+      encryptedContent, nonce, accessGrants,
+      transactionSignature, displayName, username
+    } = req.body;
 
-    // Validate required fields
-    if (!sessionId || !cameraId || !userPubkey || timestamp === undefined || activityType === undefined || !encryptedContent || !nonce || !accessGrants) {
+    // Validate required fields (common to all activities)
+    if (!sessionId || !cameraId || !userPubkey || timestamp === undefined || activityType === undefined) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: sessionId, cameraId, userPubkey, timestamp, activityType, encryptedContent, nonce, accessGrants'
+        error: 'Missing required fields: sessionId, cameraId, userPubkey, timestamp, activityType'
+      });
+    }
+
+    // Normalize timestamp: detect seconds vs milliseconds
+    const normalizedTimestamp = timestamp < 10000000000 ? timestamp * 1000 : timestamp;
+
+    // Map activity type to timeline event type
+    const activityTypeToEventType: Record<number, string> = {
+      0: 'check_in',
+      1: 'check_out',
+      2: 'photo_captured',
+      3: 'video_recorded',
+      4: 'stream_started',
+      5: 'face_enrolled',
+      50: 'cv_activity'
+    };
+    const eventType = activityTypeToEventType[activityType] || 'photo_captured';
+
+    // CHECK_IN (0) and CHECK_OUT (1) are simple notifications - no encryption required
+    // Per Phase 3 architecture: activities are cached plaintext during session, encrypted at checkout
+    const isSimpleNotification = activityType === 0 || activityType === 1;
+
+    if (isSimpleNotification) {
+      // Handle simple notification (check_in/check_out)
+      // Just broadcast to WebSocket - these don't need to be stored encrypted
+      console.log(`📢 Simple notification: ${eventType} for ${userPubkey.slice(0, 8)}... on camera ${cameraId.slice(0, 8)}...`);
+
+      const timelineEvent: Record<string, any> = {
+        id: `activity-${sessionId}-${normalizedTimestamp}`,
+        type: eventType,
+        user: {
+          address: userPubkey,
+          displayName: displayName || undefined,
+          username: username || userPubkey.slice(0, 8) + '...'
+        },
+        timestamp: normalizedTimestamp,
+        cameraId: cameraId
+      };
+
+      // Include transaction signature for Solscan link if provided
+      if (transactionSignature) {
+        timelineEvent.transactionId = transactionSignature;
+      }
+
+      // Broadcast to camera room
+      const room = io.sockets.adapter.rooms.get(cameraId);
+      const socketsInRoom = room ? room.size : 0;
+      console.log(`📤 Broadcasting ${eventType} to camera ${cameraId.slice(0, 8)}... (${socketsInRoom} sockets in room)`);
+
+      io.to(cameraId).emit("timelineEvent", timelineEvent);
+
+      return res.json({
+        success: true,
+        message: 'Timeline event broadcast',
+        debug: {
+          cameraId,
+          socketsInRoom,
+          eventType,
+          eventId: timelineEvent.id
+        }
+      });
+    }
+
+    // For all other activities (photos, videos, streams, etc.), encryption is REQUIRED
+    if (!encryptedContent || !nonce || !accessGrants) {
+      return res.status(400).json({
+        success: false,
+        error: `encryptedContent, nonce, accessGrants required for activity type ${activityType} (${eventType})`
       });
     }
 
@@ -2234,10 +2306,6 @@ app.post("/api/session/activity", async (req, res) => {
     const encryptedContentBuffer = Buffer.from(encryptedContent, 'base64');
     const nonceBuffer = Buffer.from(nonce, 'base64');
     const accessGrantsBuffer = Buffer.from(JSON.stringify(accessGrants), 'utf-8');
-
-    // Normalize timestamp: detect seconds vs milliseconds
-    // Timestamps in seconds are < 10000000000 (year 2286 in seconds, but year 1970 + 4 months in ms)
-    const normalizedTimestamp = timestamp < 10000000000 ? timestamp * 1000 : timestamp;
 
     // Save to database
     const activity: SessionActivityBuffer = {
@@ -2256,27 +2324,14 @@ app.post("/api/session/activity", async (req, res) => {
 
     console.log(`✅ Buffered encrypted activity for session ${sessionId.slice(0, 8)}... (type: ${activityType})`);
 
-    // Also emit a Socket.IO timeline event so frontend sees it in real-time
-    // Map activity type to timeline event type
-    const activityTypeToEventType: Record<number, string> = {
-      0: 'check_in',
-      1: 'check_out',
-      2: 'photo_captured',
-      3: 'video_recorded',
-      4: 'stream_started',
-      5: 'face_enrolled',
-      50: 'cv_activity'
-    };
-
-    const eventType = activityTypeToEventType[activityType] || 'photo_captured';
-
     // Create timeline event for real-time display
     const timelineEvent: Record<string, any> = {
       id: `activity-${sessionId}-${normalizedTimestamp}`,
       type: eventType,
       user: {
         address: userPubkey,
-        username: userPubkey.slice(0, 8) + '...'
+        displayName: displayName || undefined,
+        username: username || userPubkey.slice(0, 8) + '...'
       },
       timestamp: normalizedTimestamp,
       cameraId: cameraId,
@@ -2297,7 +2352,7 @@ app.post("/api/session/activity", async (req, res) => {
     // Broadcast to camera room
     const room = io.sockets.adapter.rooms.get(cameraId);
     const socketsInRoom = room ? room.size : 0;
-    console.log(`📤 Broadcasting to camera ${cameraId} (${socketsInRoom} sockets in room)`);
+    console.log(`📤 Broadcasting to camera ${cameraId.slice(0, 8)}... (${socketsInRoom} sockets in room)`);
     console.log(`📤 Event type: ${eventType}, user: ${userPubkey.slice(0, 8)}...`);
 
     io.to(cameraId).emit("timelineEvent", timelineEvent);

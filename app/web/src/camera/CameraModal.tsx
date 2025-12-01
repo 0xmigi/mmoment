@@ -5,6 +5,7 @@ import { X, ExternalLink, Camera, User } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { timelineService } from '../timeline/timeline-service';
 import { unifiedCameraService } from './unified-camera-service';
+import { createSignedRequest } from './request-signer';
 import { useSocialProfile } from '../auth/social/useSocialProfile';
 import { CONFIG } from '../core/config';
 
@@ -330,6 +331,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
 
   // NEW PRIVACY ARCHITECTURE: Check-in is now fully off-chain via Jetson
   // No more on-chain UserSession PDA - sessions are managed by Jetson
+  // PHASE 3: Requires Ed25519 signature for cryptographic handshake
   const handleCheckIn = async () => {
     if (!camera.id || !primaryWallet?.address) {
       setError('No camera or wallet available');
@@ -343,15 +345,21 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       console.log('🚀 [CameraModal] Starting off-chain check-in via Jetson...');
       console.log('🔍 [CameraModal] primaryProfile:', primaryProfile);
 
-      // Generate a unique session ID for this check-in
-      const sessionId = `${primaryWallet.address}_${camera.id}_${Date.now()}`;
+      // PHASE 3: Create signed request for cryptographic handshake
+      console.log('🔐 [CameraModal] Creating signed request...');
+      const signedParams = await createSignedRequest(primaryWallet);
+      if (!signedParams) {
+        setError('Failed to sign check-in request. Please ensure your wallet supports message signing.');
+        setLoading(false);
+        return;
+      }
+      console.log('✅ [CameraModal] Request signed successfully');
 
-      // Call Jetson check-in endpoint (no blockchain transaction needed!)
+      // Call Jetson check-in endpoint with Ed25519 signature
       const checkinResult = await unifiedCameraService.checkin(camera.id, {
-        wallet_address: primaryWallet.address,
+        ...signedParams,  // wallet_address, request_signature, request_timestamp, request_nonce
         display_name: primaryProfile?.displayName,
         username: primaryProfile?.username
-        // Note: No session_pda or transaction_signature - this is now off-chain
       });
 
       if (checkinResult.success) {
@@ -362,7 +370,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         // Store session locally for persistence across page refreshes
         const sessionKey = `mmoment_session_${primaryWallet.address}_${camera.id}`;
         localStorage.setItem(sessionKey, JSON.stringify({
-          sessionId: checkinResult.data?.session_id || sessionId,
+          sessionId: checkinResult.data?.session_id,
           timestamp: Date.now(),
           cameraId: camera.id,
           walletAddress: primaryWallet.address
@@ -371,18 +379,8 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         // Clear old session events before starting new session
         timelineService.clearForNewSession();
 
-        // Emit check-in event to timeline
-        timelineService.emitEvent({
-          type: 'check_in',
-          user: {
-            address: primaryWallet.address,
-            displayName: primaryProfile?.displayName,
-            username: primaryProfile?.username,
-            pfpUrl: primaryProfile?.pfpUrl
-          },
-          timestamp: Date.now(),
-          cameraId: camera.id
-        });
+        // NOTE: We no longer emit check_in event locally
+        // Backend broadcasts via WebSocket after Jetson notifies it (Phase 3 architecture)
 
         setIsCheckedIn(true);
 
@@ -409,6 +407,8 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
           errorMsg = 'You are already checked in to this camera.';
           setIsCheckedIn(true);
           return;
+        } else if (errorMsg.includes('Signature verification failed')) {
+          errorMsg = 'Signature verification failed. Please try again.';
         } else if (errorMsg.length > 150) {
           errorMsg = 'An error occurred during check-in. Please check the console for details.';
         }

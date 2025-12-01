@@ -772,19 +772,27 @@ export class UnifiedCameraService {
   }
 
   /**
-   * Unified check-in - handles everything in one atomic operation
-   * Eliminates race conditions by triggering immediate blockchain sync
+   * Check-in to camera with Ed25519 cryptographic handshake
+   *
+   * PHASE 3 PRIVACY ARCHITECTURE:
+   * Check-in requires a cryptographic signature to prove wallet ownership.
+   * This prevents impersonation and ensures the camera knows FOR CERTAIN who is checked in.
    *
    * @param cameraId - Camera PDA
-   * @param profile - Check-in profile with wallet, display name, etc.
-   * @param profile.session_pda - CRITICAL: Solana session PDA for activity buffering
+   * @param profile.wallet_address - User's wallet address (base58)
+   * @param profile.request_signature - Ed25519 signature (base58 encoded)
+   * @param profile.request_timestamp - Unix timestamp in ms when signed
+   * @param profile.request_nonce - Random UUID for replay protection
+   * @param profile.display_name - Optional display name for timeline
+   * @param profile.username - Optional username for timeline
    */
   public async checkin(cameraId: string, profile: {
     wallet_address: string;
-    session_pda?: string;  // Solana session PDA - CRITICAL for activity buffering
+    request_signature: string;    // Required: Ed25519 signature (base58)
+    request_timestamp: number;    // Required: Unix ms timestamp
+    request_nonce: string;        // Required: UUID for replay protection
     display_name?: string;
     username?: string;
-    transaction_signature?: string;
   }): Promise<CameraActionResponse<{
     wallet_address: string;
     display_name: string;

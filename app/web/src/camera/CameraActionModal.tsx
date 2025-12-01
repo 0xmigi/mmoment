@@ -5,6 +5,7 @@ import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
 import { unifiedCameraService } from './unified-camera-service';
+import { createSignedRequest } from './request-signer';
 import { useSocialProfile } from '../auth/social/useSocialProfile';
 
 interface CameraActionModalProps {
@@ -84,6 +85,7 @@ export const CameraActionModal = ({
   };
 
   // NEW PRIVACY ARCHITECTURE: Check-in is now off-chain via Jetson
+  // PHASE 3: Requires Ed25519 signature for cryptographic handshake
   const handleCheckIn = async () => {
     if (!cameraId || !primaryWallet?.address) {
       setError('No camera or wallet available');
@@ -97,9 +99,18 @@ export const CameraActionModal = ({
     try {
       console.log('[CameraActionModal] Starting off-chain check-in via Jetson...');
 
-      // Call Jetson check-in endpoint (no blockchain transaction!)
+      // PHASE 3: Create signed request for cryptographic handshake
+      const signedParams = await createSignedRequest(primaryWallet);
+      if (!signedParams) {
+        setError('Failed to sign check-in request');
+        setLoading(false);
+        setCheckInStatus('error');
+        return;
+      }
+
+      // Call Jetson check-in endpoint with Ed25519 signature
       const checkinResult = await unifiedCameraService.checkin(cameraId, {
-        wallet_address: primaryWallet.address,
+        ...signedParams,
         display_name: primaryProfile?.displayName,
         username: primaryProfile?.username
       });
