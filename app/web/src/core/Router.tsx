@@ -135,6 +135,24 @@ function Router() {
             </MainLayout>
           }
         />
+        {/* General routes for Gallery and Activities (user-centric, not camera-specific) */}
+        <Route
+          path="/app/gallery"
+          element={
+            <MainLayout activeTab="gallery" onTabChange={setActiveTab}>
+              <GalleryView />
+            </MainLayout>
+          }
+        />
+        <Route
+          path="/app/activities"
+          element={
+            <MainLayout activeTab="activities" onTabChange={setActiveTab}>
+              <ActivitiesView />
+            </MainLayout>
+          }
+        />
+        {/* Legacy camera-specific routes (kept for backward compatibility) */}
         <Route
           path="/app/gallery/:cameraId"
           element={

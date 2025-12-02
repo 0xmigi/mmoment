@@ -10,12 +10,14 @@ interface MediaGalleryProps {
   mode?: "recent" | "archive";
   maxRecentItems?: number;
   cameraId?: string;
+  hideTitle?: boolean;
 }
 
 export default function MediaGallery({
   mode = "recent",
   maxRecentItems = 5,
   cameraId,
+  hideTitle = false,
 }: MediaGalleryProps) {
   const { primaryWallet } = useDynamicContext();
   const [media, setMedia] = useState<(IPFSMedia | PipeGalleryItem)[]>([]);
@@ -252,9 +254,11 @@ export default function MediaGallery({
 
   return (
     <div className="max-w-3xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl text-left font-bold text-gray-800">{title}</h2>
-      </div>
+      {!hideTitle && (
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl text-left font-bold text-gray-800">{title}</h2>
+        </div>
+      )}
 
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">

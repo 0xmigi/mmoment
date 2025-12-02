@@ -10,6 +10,14 @@ import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { CONFIG } from '../core/config';
 import { ACTIVITY_TYPE } from '../utils/activity-crypto';
 
+// Session participant from backend
+export interface SessionParticipant {
+  address: string;
+  displayName?: string;
+  username?: string;
+  pfpUrl?: string;
+}
+
 // Session summary from backend
 export interface SessionSummary {
   sessionId: string;
@@ -18,6 +26,7 @@ export interface SessionSummary {
   endTime: number;
   activityCount: number;
   activityTypes: number[];
+  participants?: SessionParticipant[];  // Optional for backward compatibility
 }
 
 interface UseUserSessionsReturn {

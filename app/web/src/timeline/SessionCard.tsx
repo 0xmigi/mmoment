@@ -7,13 +7,12 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronUp, Camera, Video, Radio, Clock, MapPin } from 'lucide-react';
+import { ChevronDown, ChevronUp, Clock, MapPin } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { SessionSummary, formatSessionDuration } from '../hooks/useUserSessions';
+import { SessionSummary, SessionParticipant, formatSessionDuration } from '../hooks/useUserSessions';
 import { Timeline } from './Timeline';
 import { TimelineEvent } from './timeline-types';
 import { CONFIG } from '../core/config';
-import { ACTIVITY_TYPE } from '../utils/activity-crypto';
 
 interface SessionCardProps {
   session: SessionSummary;
@@ -34,6 +33,63 @@ interface SessionTimelineEventFromAPI {
     nonce: string;
     accessGrants: string;
   };
+}
+
+/**
+ * ParticipantStack - Shows overlapping participant profile pictures
+ * Excludes the current user (implied they were there)
+ */
+interface ParticipantStackProps {
+  participants: SessionParticipant[];
+  currentUserAddress: string;
+  maxShow?: number;
+}
+
+function ParticipantStack({ participants, currentUserAddress, maxShow = 3 }: ParticipantStackProps) {
+  // Filter out current user
+  const otherParticipants = participants.filter(p => p.address !== currentUserAddress);
+
+  if (otherParticipants.length === 0) {
+    // Solo session - return empty space
+    return <div className="w-8 h-8" />;
+  }
+
+  const displayParticipants = otherParticipants.slice(0, maxShow);
+  const overflowCount = otherParticipants.length - maxShow;
+
+  return (
+    <div className="flex items-center -space-x-2">
+      {displayParticipants.map((participant, index) => (
+        <div
+          key={participant.address}
+          className="w-8 h-8 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center overflow-hidden"
+          style={{ zIndex: maxShow - index }}
+          title={participant.displayName || participant.username || participant.address.slice(0, 8)}
+        >
+          {participant.pfpUrl ? (
+            <img
+              src={participant.pfpUrl}
+              alt={participant.displayName || participant.username || 'User'}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <span className="text-xs font-medium text-gray-600">
+              {(participant.displayName || participant.username || participant.address).charAt(0).toUpperCase()}
+            </span>
+          )}
+        </div>
+      ))}
+      {overflowCount > 0 && (
+        <div
+          className="w-8 h-8 rounded-full bg-gray-300 border-2 border-white flex items-center justify-center"
+          style={{ zIndex: 0 }}
+          title={`+${overflowCount} more`}
+        >
+          <span className="text-xs font-medium text-gray-700">+{overflowCount}</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -128,12 +184,6 @@ export function SessionCard({ session, defaultExpanded = false }: SessionCardPro
     }
   }, [isExpanded, timelineEvents.length, isLoading, error, fetchTimeline]);
 
-  // Count unique activity types
-  const uniqueTypes = new Set(session.activityTypes);
-  const hasPhotos = uniqueTypes.has(ACTIVITY_TYPE.PHOTO);
-  const hasVideos = uniqueTypes.has(ACTIVITY_TYPE.VIDEO);
-  const hasStreams = uniqueTypes.has(ACTIVITY_TYPE.STREAM);
-
   // Format camera ID for display
   const shortCameraId = session.cameraId.slice(0, 8) + '...' + session.cameraId.slice(-4);
 
@@ -145,24 +195,12 @@ export function SessionCard({ session, defaultExpanded = false }: SessionCardPro
         className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
       >
         <div className="flex items-center gap-3">
-          {/* Activity type icons */}
-          <div className="flex items-center gap-1">
-            {hasPhotos && (
-              <div className="w-8 h-8 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center">
-                <Camera className="w-4 h-4" />
-              </div>
-            )}
-            {hasVideos && (
-              <div className="w-8 h-8 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center">
-                <Video className="w-4 h-4" />
-              </div>
-            )}
-            {hasStreams && (
-              <div className="w-8 h-8 bg-red-100 text-red-600 rounded-full flex items-center justify-center">
-                <Radio className="w-4 h-4" />
-              </div>
-            )}
-          </div>
+          {/* Participant profile pictures */}
+          <ParticipantStack
+            participants={session.participants || []}
+            currentUserAddress={primaryWallet?.address || ''}
+            maxShow={3}
+          />
 
           {/* Session info */}
           <div className="text-left">

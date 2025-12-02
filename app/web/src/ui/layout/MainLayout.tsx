@@ -35,17 +35,27 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
     });
   }, [location.pathname, activeTab, cameraId]);
   
-  // Handle tab navigation with camera ID
+  // Handle tab navigation
+  // Camera tab preserves cameraId in URL, Gallery/Activities use general routes
   const handleTabChange = (tab: 'camera' | 'gallery' | 'activities' | 'account') => {
     onTabChange(tab);
-    
+
     // Extract camera ID from current path if available
     const matchPath = location.pathname.match(/\/app\/(camera|gallery|activities)\/([^\/]+)/);
     const currentCameraId = cameraId || (matchPath ? matchPath[2] : localStorage.getItem('directCameraId'));
-    
-    if (currentCameraId) {
-      console.log(`Navigating to ${tab} with camera ID: ${currentCameraId}`);
-      navigate(`/app/${tab}/${currentCameraId}`);
+
+    if (tab === 'camera' && currentCameraId) {
+      // Camera tab: preserve cameraId in URL
+      console.log(`Navigating to camera with ID: ${currentCameraId}`);
+      navigate(`/app/camera/${currentCameraId}`);
+    } else if (tab === 'gallery') {
+      // Gallery: always use general route (filters available in view)
+      console.log('Navigating to general gallery view');
+      navigate('/app/gallery');
+    } else if (tab === 'activities') {
+      // Activities: always use general route (filters available in view)
+      console.log('Navigating to general activities view');
+      navigate('/app/activities');
     } else {
       navigate('/app');
     }

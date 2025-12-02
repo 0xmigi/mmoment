@@ -763,6 +763,13 @@ export async function getSessionBufferStats(): Promise<{
 }
 
 // Session summary interface for listing
+export interface SessionParticipant {
+  address: string;
+  displayName?: string;
+  username?: string;
+  pfpUrl?: string;
+}
+
 export interface SessionSummary {
   sessionId: string;
   cameraId: string;
@@ -770,6 +777,7 @@ export interface SessionSummary {
   endTime: number;
   activityCount: number;
   activityTypes: number[];  // Unique activity types in this session
+  participants: SessionParticipant[];  // All users who were at the camera during this session
 }
 
 // Activity type constants (must match Solana ActivityType enum in state.rs)
@@ -873,6 +881,36 @@ export async function getUserSessions(walletAddress: string, limit: number = 50)
               );
             });
 
+            // Step 4: Get all unique participants (users) at this camera during the session
+            const participantAddresses = await new Promise<string[]>((res, rej) => {
+              dbInstance.all(
+                `SELECT DISTINCT user_pubkey
+                 FROM session_activity_buffers
+                 WHERE camera_id = ?
+                   AND timestamp >= ?
+                   AND timestamp <= ?`,
+                [checkIn.camera_id, checkIn.timestamp, checkOut.timestamp],
+                (err, rows: any[]) => {
+                  if (err) rej(err);
+                  else res(rows.map(r => r.user_pubkey));
+                }
+              );
+            });
+
+            // Step 5: Fetch profiles for participants (batch)
+            const profilesMap = await getUserProfiles(participantAddresses);
+
+            // Step 6: Build participant list with profile enrichment
+            const participants: SessionParticipant[] = participantAddresses.map(address => {
+              const profile = profilesMap.get(address);
+              return {
+                address,
+                displayName: profile?.displayName,
+                username: profile?.username,
+                pfpUrl: profile?.profileImage,
+              };
+            });
+
             // Create session with session_id from check-in as sessionId
             sessions.push({
               sessionId, // Use the already-derived sessionId
@@ -882,7 +920,8 @@ export async function getUserSessions(walletAddress: string, limit: number = 50)
               activityCount: activityStats.activity_count || 0,
               activityTypes: activityStats.activity_types
                 ? activityStats.activity_types.split(',').map(Number).filter((n: number) => !isNaN(n))
-                : []
+                : [],
+              participants
             });
 
             console.log(`[getUserSessions] Session: ${sessionId.slice(0, 8)}... at camera ${checkIn.camera_id.slice(0, 8)}... (${activityStats.activity_count} activities)`);
