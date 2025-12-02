@@ -1980,14 +1980,48 @@ def register_routes(app):
 
             session_id = session.session_id
             check_in_time = int(session.created_at)
+            camera_pda = get_camera_pda()
 
-            # Add checkout activity to buffer AND send to backend for real-time display
+            # Get user profile info from session for timeline display
+            user_profile = session.user_profile or {}
+            display_name = user_profile.get('display_name') or user_profile.get('displayName') or wallet_address[:8]
+            username = user_profile.get('username')
+
+            # Add checkout activity to LOCAL buffer only (send_to_backend=False)
+            # We send to backend DIRECTLY below for guaranteed sync delivery
             session_service.add_activity_to_session(
                 wallet_address=wallet_address,
                 activity_type=1,  # CHECK_OUT
                 data={"duration_seconds": int(time.time() - session.created_at)},
-                metadata={"camera_pda": get_camera_pda()}
+                metadata={"camera_pda": camera_pda},
+                send_to_backend=False  # We send directly below
             )
+
+            # Tell backend about check-out DIRECTLY (sync POST - no async queue!)
+            # This ensures timeline event is saved BEFORE we return the response
+            backend_url = os.environ.get('BACKEND_URL', 'https://mmoment-production.up.railway.app')
+            try:
+                import requests as req
+                activity_response = req.post(
+                    f"{backend_url}/api/session/activity",
+                    json={
+                        "sessionId": session_id,
+                        "cameraId": camera_pda,
+                        "userPubkey": wallet_address,
+                        "activityType": 1,  # CHECK_OUT
+                        "timestamp": int(time.time() * 1000),
+                        "displayName": display_name,
+                        "username": username
+                    },
+                    timeout=5
+                )
+                if activity_response.status_code == 200:
+                    result = activity_response.json()
+                    logger.info(f"[CHECKOUT] ✅ Timeline notified! Sockets in room: {result.get('debug', {}).get('socketsInRoom', '?')}")
+                else:
+                    logger.warning(f"[CHECKOUT] Timeline notification failed: HTTP {activity_response.status_code}")
+            except Exception as e:
+                logger.warning(f"[CHECKOUT] Timeline notification failed (non-blocking): {e}")
 
             # Get all activities from session
             activities = session.get_activities()

@@ -326,6 +326,17 @@ export const findRecognitionTokenPDA = (user: PublicKey) => {
 export const findFaceDataPDA = findRecognitionTokenPDA;
 
 /**
+ * Helper to find a user session chain PDA
+ * This stores encrypted access keys for the user's historical sessions
+ */
+export const findUserSessionChainPDA = (user: PublicKey) => {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("user-session-chain"), user.toBuffer()],
+    CAMERA_NETWORK_PROGRAM_ID
+  );
+};
+
+/**
  * Alias for useCameraActivationProgram for backward compatibility
  */
 export function useProgram() {

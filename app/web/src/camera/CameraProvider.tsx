@@ -12,6 +12,7 @@ import { unifiedCameraService } from './unified-camera-service';
 import { createSignedRequest } from './request-signer';
 import { timelineService } from '../timeline/timeline-service';
 import { useSocialProfile } from '../auth/social/useSocialProfile';
+import { checkUserHasSessionChain, createUserSessionChain } from '../hooks/useUserSessionChain';
 
 // Define types for specific structures
 interface CameraAccountData {
@@ -170,6 +171,8 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
   const { primaryWallet } = useDynamicContext();
   const { primaryProfile } = useSocialProfile();
   const { program, loading: programLoading } = useProgram();
+  // Get connection for session chain creation
+  const connectionFromProgram = program?.provider?.connection;
   const [isInitialized, setIsInitialized] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -528,6 +531,7 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
   }, [selectedCamera?.publicKey, primaryWallet?.address, getSessionKey, notifyCheckInStatusChange]);
 
   // Check in to the currently selected camera
+  // This also ensures user has a session chain (creates one if needed)
   const checkIn = useCallback(async (): Promise<boolean> => {
     const cameraId = selectedCamera?.publicKey;
     const walletAddress = primaryWallet?.address;
@@ -543,13 +547,41 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
     setCheckInError(null);
 
     try {
-      // Create signed request using Ed25519
+      // Step 1: Check if user has a session chain (needed for storing access keys at checkout)
+      if (program && connectionFromProgram && isSolanaWallet(primaryWallet)) {
+        const userPubkey = new PublicKey(walletAddress);
+        const sessionChainStatus = await checkUserHasSessionChain(userPubkey, program);
+
+        if (!sessionChainStatus.exists) {
+          console.log('[CameraProvider] User has no session chain, creating one...');
+
+          // Create session chain - this will prompt for wallet signature
+          const signature = await createUserSessionChain(
+            userPubkey,
+            primaryWallet,
+            program,
+            connectionFromProgram
+          );
+
+          if (!signature) {
+            // User may have cancelled the signature or it failed
+            // Don't block check-in, but log it - backend will queue keys
+            console.warn('[CameraProvider] Session chain creation failed or was cancelled. Proceeding with check-in anyway.');
+          } else {
+            console.log('[CameraProvider] Session chain created successfully');
+          }
+        } else {
+          console.log('[CameraProvider] User already has session chain');
+        }
+      }
+
+      // Step 2: Create signed request using Ed25519
       const signedParams = await createSignedRequest(primaryWallet);
       if (!signedParams) {
         throw new Error('Failed to sign check-in request. Please try again.');
       }
 
-      // Call Jetson check-in endpoint
+      // Step 3: Call Jetson check-in endpoint
       const result = await unifiedCameraService.checkin(cameraId, {
         ...signedParams,
         display_name: primaryProfile?.displayName,
@@ -603,7 +635,7 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsCheckingIn(false);
     }
-  }, [selectedCamera?.publicKey, primaryWallet, primaryProfile, getSessionKey, notifyCheckInStatusChange]);
+  }, [selectedCamera?.publicKey, primaryWallet, primaryProfile, getSessionKey, notifyCheckInStatusChange, program, connectionFromProgram]);
 
   // Check out from the currently selected camera
   const checkOut = useCallback(async (): Promise<boolean> => {

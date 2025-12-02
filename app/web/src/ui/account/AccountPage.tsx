@@ -22,6 +22,7 @@ import {
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFacialEmbeddingStatus } from "../../hooks/useFacialEmbeddingStatus";
+import { useUserSessionChain } from "../../hooks/useUserSessionChain";
 
 // Define interfaces
 interface SocialCredential {
@@ -54,6 +55,9 @@ export function AccountPage() {
 
   // Get facial embedding status from blockchain
   const facialEmbeddingStatus = useFacialEmbeddingStatus();
+
+  // Get session keychain status from blockchain
+  const sessionChainStatus = useUserSessionChain();
 
   // Fetch SOL balance
   useEffect(() => {
@@ -201,9 +205,25 @@ export function AccountPage() {
       isWallet: true,
       icon: <Globe className="w-3 h-3 mr-1" />,
     },
+    {
+      id: "sessionKeychain",
+      label: "Session Keychain",
+      value: sessionChainStatus.hasSessionChain
+        ? `${sessionChainStatus.sessionCount} key${sessionChainStatus.sessionCount !== 1 ? 's' : ''} stored`
+        : "Not set up",
+      connected: sessionChainStatus.hasSessionChain,
+      isPublic: false,
+      isSessionKeychain: true,
+      status: sessionChainStatus,
+      icon: sessionChainStatus.isLoading
+        ? <Loader2 className="w-3 h-3 mr-1 animate-spin text-blue-500" />
+        : sessionChainStatus.hasSessionChain
+        ? <CheckCircle className="w-3 h-3 mr-1 text-green-500" />
+        : <AlertCircle className="w-3 h-3 mr-1 text-orange-500" />,
+    },
   ].filter(
     (item) =>
-      item.connected || ["farcaster", "email", "twitter", "recognition"].includes(item.id)
+      item.connected || ["farcaster", "email", "twitter", "recognition", "sessionKeychain"].includes(item.id)
   );
 
   return (
@@ -306,6 +326,10 @@ export function AccountPage() {
                               <span className={identity.status.hasEmbedding ? 'text-green-600' : 'text-orange-600'}>
                                 {identity.value}
                               </span>
+                            ) : identity.isSessionKeychain ? (
+                              <span className={identity.status.hasSessionChain ? 'text-green-600' : 'text-orange-600'}>
+                                {identity.value}
+                              </span>
                             ) : (
                               <>
                                 {identity.id === "twitter" && "@"}
@@ -314,6 +338,8 @@ export function AccountPage() {
                                 {!identity.isPublic && identity.value && <span className="ml-2 text-gray-400">• Private</span>}
                               </>
                             )
+                          ) : identity.isSessionKeychain ? (
+                            <span className="text-gray-400">Created on first check-in</span>
                           ) : (
                             <span className="text-gray-400">Not connected</span>
                           )}
@@ -334,7 +360,6 @@ export function AccountPage() {
 
         {/* Pipe Storage Section */}
         <PipeStorageSection />
-
 
         {/* Wallet Backup Section - responsive padding */}
         {isEmbeddedWallet && (
