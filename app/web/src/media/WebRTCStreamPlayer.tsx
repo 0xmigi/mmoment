@@ -61,6 +61,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const socketRef = useRef<Socket | null>(null);
+  const cameraSocketIdRef = useRef<string | null>(null); // Store camera's socket ID for ICE candidates
   const [connectionState, setConnectionState] = useState<
     "connecting" | "connected" | "failed" | "disconnected"
   >("disconnected");
@@ -85,6 +86,9 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
       peerConnectionRef.current = null;
     }
 
+    // Clear camera socket ID (will be set again on next offer)
+    cameraSocketIdRef.current = null;
+
     // NOTE: Keep socket connection alive for recovery
     // Socket.IO signaling should persist through WebRTC failures
 
@@ -107,6 +111,9 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
+
+    // Clear camera socket ID
+    cameraSocketIdRef.current = null;
 
     // Disconnect socket on component unmount
     if (socketRef.current) {
@@ -206,7 +213,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
     const peerConnection = new RTCPeerConnection(config);
 
     peerConnection.onicecandidate = (event) => {
-      if (event.candidate && socketRef.current && currentCameraId) {
+      if (event.candidate && socketRef.current && currentCameraId && cameraSocketIdRef.current) {
         console.log("[WebRTC] 🧊 BROWSER SENDING ICE candidate:", {
           type: event.candidate.type,
           protocol: event.candidate.protocol,
@@ -215,15 +222,18 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
           priority: event.candidate.priority,
           foundation: event.candidate.foundation,
           component: event.candidate.component,
-          candidate_string: event.candidate.candidate
+          candidate_string: event.candidate.candidate,
+          targetSocketId: cameraSocketIdRef.current
         });
         socketRef.current.emit("webrtc-ice-candidate", {
           candidate: event.candidate,
-          targetId: "camera",
+          targetId: cameraSocketIdRef.current, // Use actual camera socket ID, not "camera"
           cameraId: currentCameraId,
         });
       } else if (event.candidate === null) {
         console.log("[WebRTC] 🧊 BROWSER ICE gathering completed");
+      } else if (event.candidate && !cameraSocketIdRef.current) {
+        console.warn("[WebRTC] ⚠️ ICE candidate generated but camera socket ID not yet known - candidate will be lost");
       }
     };
 
@@ -666,6 +676,10 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         }) => {
           console.log("[WebRTC] Received offer from camera:", data.offer);
           console.log("[WebRTC] Offer SDP:", data.offer.sdp);
+          console.log("[WebRTC] Camera socket ID:", data.senderId);
+
+          // Store camera's socket ID for ICE candidate routing
+          cameraSocketIdRef.current = data.senderId;
 
           try {
             console.log('[WebRTC] About to create peer connection...');
