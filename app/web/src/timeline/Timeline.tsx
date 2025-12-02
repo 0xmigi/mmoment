@@ -19,6 +19,8 @@ interface TimelineProps {
   initialEvents?: TimelineEvent[];
   /** Whether to show the profile stack at the bottom (default: true for camera variant) */
   showProfileStack?: boolean;
+  /** Show absolute timestamps (e.g. "12:34 PM") instead of relative (e.g. "5 minutes ago") */
+  showAbsoluteTime?: boolean;
 }
 
 // Get the display count based on screen width
@@ -74,7 +76,13 @@ const getEventText = (type: TimelineEventType): string => {
   }
 };
 
-export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full', cameraId, mobileOverlay = false, initialEvents, showProfileStack }, ref) => {
+// Format absolute timestamp (e.g. "12:34 PM")
+const formatAbsoluteTime = (timestamp: number): string => {
+  const date = new Date(timestamp);
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full', cameraId, mobileOverlay = false, initialEvents, showProfileStack, showAbsoluteTime = false }, ref) => {
   const [events, setEvents] = useState<TimelineEvent[]>(initialEvents || []);
   const [selectedUser, setSelectedUser] = useState<TimelineUser | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -463,9 +471,11 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                         {getEventText(event.type)}
                       </p>
                       <p className={`${mobileOverlay ? 'text-[10px]' : 'text-xs'} ${mobileOverlay ? 'text-gray-300' : 'text-gray-500'}`}>
-                        {event.timestamp > Date.now() - 60000 
-                          ? 'less than a minute ago'
-                          : `${Math.floor((Date.now() - event.timestamp) / 60000)} minutes ago`
+                        {showAbsoluteTime
+                          ? formatAbsoluteTime(event.timestamp)
+                          : event.timestamp > Date.now() - 60000
+                            ? 'less than a minute ago'
+                            : `${Math.floor((Date.now() - event.timestamp) / 60000)} minutes ago`
                         }
                       </p>
                     </div>

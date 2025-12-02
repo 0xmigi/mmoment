@@ -220,17 +220,12 @@ export function SessionCard({ session, defaultExpanded = false }: SessionCardPro
           </div>
         </div>
 
-        {/* Activity count & expand icon */}
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-500">
-            {session.activityCount} {session.activityCount === 1 ? 'activity' : 'activities'}
-          </span>
-          {isExpanded ? (
-            <ChevronUp className="w-5 h-5 text-gray-400" />
-          ) : (
-            <ChevronDown className="w-5 h-5 text-gray-400" />
-          )}
-        </div>
+        {/* Expand icon */}
+        {isExpanded ? (
+          <ChevronUp className="w-5 h-5 text-gray-400" />
+        ) : (
+          <ChevronDown className="w-5 h-5 text-gray-400" />
+        )}
       </button>
 
       {/* Expanded content - shows full Timeline */}
@@ -260,6 +255,7 @@ export function SessionCard({ session, defaultExpanded = false }: SessionCardPro
               initialEvents={timelineEvents}
               variant="full"
               showProfileStack={false}
+              showAbsoluteTime={true}
             />
           )}
         </div>

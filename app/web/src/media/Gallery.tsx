@@ -11,6 +11,7 @@ interface MediaGalleryProps {
   maxRecentItems?: number;
   cameraId?: string;
   hideTitle?: boolean;
+  mediaType?: "all" | "photos" | "videos";
 }
 
 export default function MediaGallery({
@@ -18,6 +19,7 @@ export default function MediaGallery({
   maxRecentItems = 5,
   cameraId,
   hideTitle = false,
+  mediaType = "all",
 }: MediaGalleryProps) {
   const { primaryWallet } = useDynamicContext();
   const [media, setMedia] = useState<(IPFSMedia | PipeGalleryItem)[]>([]);
@@ -249,8 +251,16 @@ export default function MediaGallery({
     );
   }
 
+  // Filter media by type
+  const filteredMedia = media.filter(item => {
+    if (mediaType === "all") return true;
+    if (mediaType === "photos") return item.type === "image";
+    if (mediaType === "videos") return item.type === "video";
+    return true;
+  });
+
   const title =
-    mode === "recent" ? `Your recents` : `Gallery (${media.length})`;
+    mode === "recent" ? `Your recents` : `Gallery (${filteredMedia.length})`;
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -268,18 +278,20 @@ export default function MediaGallery({
 
       {loading ? (
         <div className="text-left py-4">Loading your media...</div>
-      ) : media.length === 0 ? (
+      ) : filteredMedia.length === 0 ? (
         <div className="text-left py-4 text-gray-500">
           {mode === "recent"
             ? "No media in current session"
-            : "No archived media found"}
+            : mediaType === "all"
+              ? "No archived media found"
+              : `No ${mediaType} found`}
         </div>
       ) : (
         <div
           className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3"
           data-testid="media-gallery"
         >
-          {media.map((item) => (
+          {filteredMedia.map((item) => (
             <div
               key={item.id}
               className="relative group cursor-pointer aspect-square"

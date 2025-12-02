@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { RefreshCw, Calendar, Filter, Camera, Video, Radio } from 'lucide-react';
+import { Calendar, Filter, Camera, Video, Radio } from 'lucide-react';
 import { useUserSessions } from '../../hooks/useUserSessions';
 import { SessionCard } from '../../timeline/SessionCard';
 import { useCamera } from '../../camera/CameraProvider';
@@ -56,8 +56,7 @@ export function ActivitiesView() {
         <h2 className="text-xl font-semibold mb-4">Activities</h2>
 
         {/* Filters - clean single row */}
-        <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-2 overflow-x-auto pb-2">
+        <div className="flex items-center gap-2 overflow-x-auto mb-6 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           <Filter className="w-4 h-4 text-gray-400 flex-shrink-0" />
 
           {/* Camera filter */}
@@ -91,7 +90,7 @@ export function ActivitiesView() {
             onClick={() => setActivityTypeFilter(activityTypeFilter === ACTIVITY_TYPE.PHOTO ? null : ACTIVITY_TYPE.PHOTO)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1
               ${activityTypeFilter === ACTIVITY_TYPE.PHOTO
-                ? 'bg-blue-600 text-white'
+                ? 'bg-gray-700 text-white'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
           >
@@ -103,7 +102,7 @@ export function ActivitiesView() {
             onClick={() => setActivityTypeFilter(activityTypeFilter === ACTIVITY_TYPE.VIDEO ? null : ACTIVITY_TYPE.VIDEO)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1
               ${activityTypeFilter === ACTIVITY_TYPE.VIDEO
-                ? 'bg-purple-600 text-white'
+                ? 'bg-gray-700 text-white'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
           >
@@ -115,7 +114,7 @@ export function ActivitiesView() {
             onClick={() => setActivityTypeFilter(activityTypeFilter === ACTIVITY_TYPE.STREAM ? null : ACTIVITY_TYPE.STREAM)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1
               ${activityTypeFilter === ACTIVITY_TYPE.STREAM
-                ? 'bg-red-600 text-white'
+                ? 'bg-gray-700 text-white'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
           >
@@ -124,17 +123,7 @@ export function ActivitiesView() {
           </button>
         </div>
 
-        {/* Refresh button */}
-        <button
-          onClick={() => fetchSessions()}
-          disabled={isLoading}
-          className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 flex-shrink-0"
-        >
-          <RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
-        </button>
-      </div>
-
-      {/* Content */}
+        {/* Content */}
       {!primaryWallet?.address ? (
         <div className="bg-gray-50 rounded-xl p-8 text-center">
           <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-4" />
