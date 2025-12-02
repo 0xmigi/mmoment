@@ -28,10 +28,18 @@ export function ActivitiesView() {
     }
   }, [primaryWallet?.address, fetchSessions]);
 
+  // Debug: Log sessions and route camera ID
+  console.log(`[ActivitiesView] routeCameraId: ${routeCameraId || 'none'}`);
+  console.log(`[ActivitiesView] Total sessions fetched: ${sessions.length}`);
+  if (sessions.length > 0) {
+    console.log(`[ActivitiesView] Session cameraIds:`, sessions.map(s => s.cameraId));
+  }
+
   // Filter sessions based on selected filter
   const filteredSessions = sessions.filter(session => {
-    // If viewing from a specific camera route, show only that camera
-    if (routeCameraId && session.cameraId !== routeCameraId) {
+    // If viewing from a specific camera route AND filter is 'this_camera', show only that camera
+    // Otherwise show all sessions
+    if (activeFilter === 'this_camera' && routeCameraId && session.cameraId !== routeCameraId) {
       return false;
     }
 
@@ -42,10 +50,14 @@ export function ActivitiesView() {
     return true;
   });
 
+  console.log(`[ActivitiesView] Filtered sessions: ${filteredSessions.length}`);
+
   // Dynamic filters based on context
   const filters: Array<{ id: FilterType; label: string }> = [
     { id: 'all', label: 'All Sessions' },
     { id: 'with_media', label: 'With Media' },
+    // Add "This Camera" filter when viewing from a camera route
+    ...(routeCameraId ? [{ id: 'this_camera' as FilterType, label: 'This Camera' }] : []),
   ];
 
   return (
