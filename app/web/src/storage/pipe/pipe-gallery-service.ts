@@ -244,18 +244,20 @@ class PipeGalleryService {
   }
 
   /**
-   * Check if Pipe storage is enabled
+   * Check if Pipe storage is enabled (defaults to true)
    */
   isPipeStorageEnabled(): boolean {
-    return localStorage.getItem("mmoment_storage_type") === "pipe";
+    // Default to true - only disabled if explicitly set to 'pinata'
+    return localStorage.getItem("mmoment_storage_type") !== "pinata";
   }
 
   /**
-   * Get the storage type preference
+   * Get the storage type preference (defaults to 'pipe')
    */
   getStorageType(): "pipe" | "pinata" {
     const stored = localStorage.getItem("mmoment_storage_type");
-    return stored === "pipe" ? "pipe" : "pinata";
+    // Default to 'pipe' - only use pinata if explicitly set
+    return stored === "pinata" ? "pinata" : "pipe";
   }
 }
 

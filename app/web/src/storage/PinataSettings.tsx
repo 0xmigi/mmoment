@@ -10,7 +10,8 @@ export function PinataSettings() {
   const [apiKey, setApiKey] = useState('');
   const [apiSecret, setApiSecret] = useState('');
   const [isSaved, setIsSaved] = useState(false);
-  const [usePipeStorage, setUsePipeStorage] = useState(false);
+  // Default to Pipe storage enabled (true)
+  const [usePipeStorage, setUsePipeStorage] = useState(true);
 
   // Load credentials on mount
   useEffect(() => {
@@ -19,9 +20,9 @@ export function PinataSettings() {
     setApiKey(creds.PINATA_API_KEY || '');
     setApiSecret(creds.PINATA_API_SECRET || '');
 
-    // Load storage preference
+    // Load storage preference - default to pipe (only pinata if explicitly set)
     const storageType = localStorage.getItem('mmoment_storage_type');
-    setUsePipeStorage(storageType === 'pipe');
+    setUsePipeStorage(storageType !== 'pinata');
   }, []);
 
   // Handle form submission

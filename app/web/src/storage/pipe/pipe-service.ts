@@ -44,8 +44,12 @@ export class PipeService implements PipeStorageProvider {
   readonly name = "Pipe Network";
 
   private credentials: PipeCredentials | null = null;
-  private baseUrl = "https://us-west-00-firestarter.pipenetwork.com";
+  // Use us-west-01 for consistency with backend (mainnet endpoint)
+  private baseUrl = "https://us-west-01-firestarter.pipenetwork.com";
   private initPromise: Promise<void>;
+  // Upload retry configuration
+  private readonly maxRetries = 3;
+  private readonly retryDelayMs = 1000;
 
   constructor() {
     this.initPromise = this.initializeCredentials();
@@ -139,34 +143,65 @@ export class PipeService implements PipeStorageProvider {
       throw new Error("Pipe credentials not available");
     }
 
-    const formData = new FormData();
-
     // Generate MMOMENT filename
     const timestamp = metadata?.timestamp || new Date().toISOString();
     const cameraId = metadata?.cameraId || "web";
     const extension = type === "video" ? "mp4" : "jpg";
     const filename = `mmoment_${type}_${cameraId}_${timestamp}.${extension}`;
 
-    formData.append("file", blob, filename);
+    // Retry logic for resilient uploads
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      try {
+        const formData = new FormData();
+        formData.append("file", blob, filename);
 
-    const uploadUrl = new URL(`${this.baseUrl}/priorityUpload`);
-    uploadUrl.searchParams.append("user_id", this.credentials.userId);
-    uploadUrl.searchParams.append("user_app_key", this.credentials.userAppKey);
+        const uploadUrl = new URL(`${this.baseUrl}/priorityUpload`);
+        uploadUrl.searchParams.append("user_id", this.credentials.userId);
+        uploadUrl.searchParams.append("user_app_key", this.credentials.userAppKey);
 
-    const response = await fetch(uploadUrl.toString(), {
-      method: "POST",
-      body: formData,
-    });
+        // Add timeout via AbortController (2 min for videos, 30s for images)
+        const controller = new AbortController();
+        const timeoutMs = type === "video" ? 120000 : 30000;
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Pipe upload failed: ${error}`);
+        const response = await fetch(uploadUrl.toString(), {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(`Pipe upload failed (${response.status}): ${error}`);
+        }
+
+        const result = await response.text(); // Pipe returns filename as string
+        console.log(`✅ Uploaded to Pipe: ${result} (attempt ${attempt})`);
+
+        return result;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+
+        // Don't retry on abort (timeout)
+        if (lastError.name === "AbortError") {
+          throw new Error(`Upload timed out after ${type === "video" ? "2 minutes" : "30 seconds"}`);
+        }
+
+        console.warn(`⚠️ Upload attempt ${attempt}/${this.maxRetries} failed:`, lastError.message);
+
+        if (attempt < this.maxRetries) {
+          // Exponential backoff
+          const delay = this.retryDelayMs * Math.pow(2, attempt - 1);
+          console.log(`   Retrying in ${delay}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
     }
 
-    const result = await response.text(); // Pipe returns filename as string
-    console.log(`✅ Uploaded to Pipe: ${result}`);
-
-    return result;
+    throw lastError || new Error("Upload failed after all retries");
   }
 
   async getMediaForWallet(walletAddress: string): Promise<PipeMedia[]> {

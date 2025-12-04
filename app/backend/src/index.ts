@@ -725,7 +725,7 @@ app.get("/api/pipe/files/:walletAddress", async (req, res) => {
   }
 });
 
-// Download endpoint using Firestarter SDK for proper authentication
+// Download endpoint - uses shared Pipe account (JWT auth) since all files are stored there
 app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
   const { walletAddress, fileId } = req.params;
 
@@ -735,99 +735,94 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
       .json({ error: "Wallet address and file ID are required" });
   }
 
+  const fileName = decodeURIComponent(fileId);
+  console.log(
+    `📥 Downloading ${fileName.slice(0, 30)}... for wallet: ${walletAddress.slice(0, 8)}...`,
+  );
+
+  // Determine content type from file extension
+  let contentType = "application/octet-stream";
+  const fileNameLower = fileName.toLowerCase();
+  if (fileNameLower.includes(".mp4") || fileNameLower.includes(".mov")) {
+    contentType = "video/mp4";
+  } else if (fileNameLower.includes(".jpg") || fileNameLower.includes(".jpeg")) {
+    contentType = "image/jpeg";
+  } else if (fileNameLower.includes(".png")) {
+    contentType = "image/png";
+  } else if (fileNameLower.includes(".webp")) {
+    contentType = "image/webp";
+  }
+
+  // Primary method: Use shared account JWT (where all Jetson uploads go)
   try {
-    const fileName = decodeURIComponent(fileId);
-    console.log(
-      `📥 Downloading ${fileName.slice(0, 30)}... for wallet: ${walletAddress.slice(0, 8)}...`,
-    );
+    console.log("📥 Downloading from shared Pipe account (JWT)...");
+    const { access_token } = await getPipeJWTToken();
+    const baseUrl = process.env.PIPE_BASE_URL || 'https://us-west-01-firestarter.pipenetwork.com';
 
-    // Get the Pipe account for this wallet (uses user_app_key auth, not JWT)
-    const account = await getPipeAccountForWallet(walletAddress);
+    const downloadUrl = new URL(`${baseUrl}/download-stream`);
+    downloadUrl.searchParams.append("file_name", fileName);
 
-    // Determine content type from file extension
-    let contentType = "application/octet-stream";
-    const fileNameLower = fileName.toLowerCase();
-    if (fileNameLower.includes(".mp4") || fileNameLower.includes(".mov")) {
-      contentType = "video/mp4";
-    } else if (fileNameLower.includes(".jpg") || fileNameLower.includes(".jpeg")) {
-      contentType = "image/jpeg";
-    } else if (fileNameLower.includes(".png")) {
-      contentType = "image/png";
-    } else if (fileNameLower.includes(".webp")) {
-      contentType = "image/webp";
-    }
+    const pipeResponse = await axios.get(downloadUrl.toString(), {
+      headers: {
+        "Authorization": `Bearer ${access_token}`,
+      },
+      responseType: "arraybuffer",
+      timeout: 60000, // 1 minute timeout
+    });
 
-    // Use SDK's downloadFile method which handles auth properly
-    console.log(`📥 Using SDK downloadFile for: ${fileName.slice(0, 30)}...`);
-    const fileData = await pipeClient.downloadFile(account, fileName);
+    const responseData = Buffer.from(pipeResponse.data);
 
-    // Convert Uint8Array to Buffer
-    const buffer = Buffer.from(fileData);
-
-    console.log(`✅ Downloaded ${buffer.length} bytes via SDK`);
-
-    // Set response headers
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Content-Length", buffer.length);
-    res.setHeader("Cache-Control", "public, max-age=31536000");
-
-    return res.send(buffer);
-
-  } catch (error) {
-    console.error("❌ Download failed:", error);
-
-    // Try fallback with JWT auth for legacy files
-    try {
-      console.log("🔄 Trying fallback download with JWT auth...");
-      const { access_token } = await getPipeJWTToken();
-      const baseUrl = process.env.PIPE_BASE_URL || 'https://us-west-01-firestarter.pipenetwork.com';
-      const fileName = decodeURIComponent(fileId);
-
-      const downloadUrl = new URL(`${baseUrl}/download-stream`);
-      downloadUrl.searchParams.append("file_name", fileName);
-
-      const pipeResponse = await axios.get(downloadUrl.toString(), {
-        headers: {
-          "Authorization": `Bearer ${access_token}`,
-        },
-        responseType: "arraybuffer",
-        timeout: 60000, // 1 minute timeout
-      });
-
-      const responseData = Buffer.from(pipeResponse.data);
-
-      // Parse multipart response if needed
-      const firstLineEnd = responseData.indexOf('\n'.charCodeAt(0));
-      if (firstLineEnd !== -1) {
-        const boundary = responseData.slice(0, firstLineEnd).toString('utf8').trim();
-        if (boundary.startsWith('--')) {
-          // Find file content in multipart
-          const separator = Buffer.from('\r\n\r\n', 'utf8');
-          const headerEnd = responseData.indexOf(separator);
-          if (headerEnd !== -1) {
-            let fileContent = responseData.slice(headerEnd + 4);
-            // Find end boundary
-            const endBoundary = fileContent.indexOf(Buffer.from(boundary, 'utf8'));
-            if (endBoundary !== -1) {
-              fileContent = fileContent.slice(0, endBoundary - 2); // Remove \r\n before boundary
-            }
-            console.log(`✅ Fallback extracted ${fileContent.length} bytes`);
-            res.setHeader("Content-Length", fileContent.length);
-            return res.send(fileContent);
+    // Parse multipart response if needed
+    const firstLineEnd = responseData.indexOf('\n'.charCodeAt(0));
+    if (firstLineEnd !== -1) {
+      const boundary = responseData.slice(0, firstLineEnd).toString('utf8').trim();
+      if (boundary.startsWith('--')) {
+        // Find file content in multipart
+        const separator = Buffer.from('\r\n\r\n', 'utf8');
+        const headerEnd = responseData.indexOf(separator);
+        if (headerEnd !== -1) {
+          let fileContent = responseData.slice(headerEnd + 4);
+          // Find end boundary
+          const endBoundary = fileContent.indexOf(Buffer.from(boundary, 'utf8'));
+          if (endBoundary !== -1) {
+            fileContent = fileContent.slice(0, endBoundary - 2); // Remove \r\n before boundary
           }
+          console.log(`✅ Downloaded ${fileContent.length} bytes from shared account`);
+          res.setHeader("Content-Type", contentType);
+          res.setHeader("Content-Length", fileContent.length);
+          res.setHeader("Cache-Control", "public, max-age=31536000");
+          return res.send(fileContent);
         }
       }
+    }
 
-      // Send raw if not multipart
-      console.log(`✅ Fallback download ${responseData.length} bytes (raw)`);
-      res.setHeader("Content-Length", responseData.length);
-      return res.send(responseData);
+    // Non-multipart response - send directly
+    console.log(`✅ Downloaded ${responseData.length} bytes from shared account`);
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Length", responseData.length);
+    res.setHeader("Cache-Control", "public, max-age=31536000");
+    return res.send(responseData);
 
-    } catch (fallbackError) {
-      console.error("❌ Fallback download also failed:", fallbackError);
+  } catch (error) {
+    console.error("❌ Shared account download failed:", error);
+
+    // Fallback: Try per-user account via SDK (for future per-user uploads)
+    try {
+      console.log("🔄 Trying fallback download from per-user account (SDK)...");
+      const account = await getPipeAccountForWallet(walletAddress);
+      const fileData = await pipeClient.downloadFile(account, fileName);
+      const buffer = Buffer.from(fileData);
+
+      console.log(`✅ Downloaded ${buffer.length} bytes via SDK (per-user account)`);
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Length", buffer.length);
+      res.setHeader("Cache-Control", "public, max-age=31536000");
+      return res.send(buffer);
+    } catch (sdkError) {
+      console.error("❌ SDK fallback also failed:", sdkError);
       if (!res.headersSent) {
         res.status(500).json({
-          error: error instanceof Error ? error.message : "Download failed",
+          error: "Download failed from both shared and per-user accounts",
         });
       }
     }

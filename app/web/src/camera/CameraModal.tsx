@@ -1,11 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useState, useEffect } from 'react';
 import { Dialog } from '@headlessui/react';
-import { X, ExternalLink, Camera, User } from 'lucide-react';
+import { X, ExternalLink, Camera, User, KeyRound, Loader2 } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
+import { isSolanaWallet } from '@dynamic-labs/solana';
 import { unifiedCameraService } from './unified-camera-service';
 import { useCamera } from './CameraProvider';
 import { CONFIG } from '../core/config';
+import { useUserSessionChain, fetchAuthorityPublicKey } from '../hooks/useUserSessionChain';
+import { useProgram, findUserSessionChainPDA } from '../anchor/setup';
+import { useConnection } from '@solana/wallet-adapter-react';
+import { PublicKey, SystemProgram } from '@solana/web3.js';
 
 interface CameraModalProps {
   isOpen: boolean;
@@ -33,6 +38,13 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
   // Use unified check-in state from CameraProvider (Phase 3 Privacy Architecture)
   const { isCheckedIn, isCheckingIn, checkInError, checkIn, checkOut, refreshCheckInStatus } = useCamera();
   const [error, setError] = useState<string | null>(null);
+
+  // Session keychain state (required for privacy architecture)
+  const { hasSessionChain, isLoading: sessionChainLoading, refetch: refetchSessionChain } = useUserSessionChain();
+  const { program } = useProgram();
+  const { connection } = useConnection();
+  const [isCreatingSessionChain, setIsCreatingSessionChain] = useState(false);
+  const [sessionChainError, setSessionChainError] = useState<string | null>(null);
 
   // Configuration states for Jetson camera features
   const [faceVisualization, setFaceVisualization] = useState(false);
@@ -328,6 +340,94 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   };
 
+  // Handler for creating session keychain (one-time setup before first check-in)
+  const handleCreateSessionChain = async () => {
+    if (!primaryWallet?.address) {
+      setSessionChainError('Wallet not connected');
+      return;
+    }
+
+    if (!isSolanaWallet(primaryWallet)) {
+      setSessionChainError('Not a Solana wallet');
+      return;
+    }
+
+    if (!program || !connection) {
+      setSessionChainError('Please wait for wallet to fully load and try again');
+      return;
+    }
+
+    setIsCreatingSessionChain(true);
+    setSessionChainError(null);
+
+    try {
+      const userPublicKey = new PublicKey(primaryWallet.address);
+      const [sessionChainPda] = findUserSessionChainPDA(userPublicKey);
+
+      // Fetch authority public key from backend
+      console.log('[CameraModal] Fetching authority for session chain...');
+      const authority = await fetchAuthorityPublicKey();
+      if (!authority) {
+        throw new Error('Could not connect to backend. Please try again.');
+      }
+
+      console.log('[CameraModal] Creating session chain...');
+      console.log('[CameraModal] User:', userPublicKey.toString());
+      console.log('[CameraModal] Authority:', authority.toString());
+
+      // Build the transaction
+      const tx = await program.methods
+        .createUserSessionChain()
+        .accounts({
+          user: userPublicKey,
+          authority: authority,
+          userSessionChain: sessionChainPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .transaction();
+
+      // Get blockhash
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = userPublicKey;
+
+      // Sign with Dynamic wallet
+      console.log('[CameraModal] Requesting signature...');
+      const signer = await (primaryWallet as any).getSigner();
+      const signedTx = await signer.signTransaction(tx);
+
+      // Send and confirm
+      console.log('[CameraModal] Sending transaction...');
+      const signature = await connection.sendRawTransaction(signedTx.serialize());
+      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
+
+      console.log('[CameraModal] Session keychain created successfully!');
+
+      // Refresh the session chain status
+      await refetchSessionChain();
+
+    } catch (error: any) {
+      console.error('[CameraModal] Session chain creation error:', error);
+
+      let errorMessage = 'Failed to create session keychain';
+      if (error.message?.includes('User rejected')) {
+        errorMessage = 'Transaction cancelled. Please try again.';
+      } else if (error.message?.includes('insufficient funds')) {
+        errorMessage = 'Insufficient SOL for transaction (~0.003 SOL needed)';
+      } else if (error.message?.includes('already in use')) {
+        errorMessage = 'Session keychain already exists!';
+        // Refresh to update UI
+        await refetchSessionChain();
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      setSessionChainError(errorMessage);
+    } finally {
+      setIsCreatingSessionChain(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -521,8 +621,9 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                   </div>
                 )}
 
-                {/* Check In/Out Button */}
+                {/* Check In/Out Button or Session Keychain Setup */}
                 {isCheckedIn ? (
+                  // User is checked in - show check out button
                   <button
                     onClick={handleCheckOut}
                     disabled={isCheckingIn}
@@ -530,7 +631,57 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                   >
                     {isCheckingIn ? 'Processing...' : 'Check Out'}
                   </button>
+                ) : !hasSessionChain && !sessionChainLoading ? (
+                  // User needs to create session keychain first (one-time setup)
+                  <div className="space-y-3">
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <KeyRound className="w-5 h-5 text-amber-600" />
+                        <h3 className="font-medium text-amber-900">One-Time Setup Required</h3>
+                      </div>
+                      <p className="text-sm text-amber-800 mb-1">
+                        Create your Session Keychain to ensure your camera history is permanently stored on-chain.
+                      </p>
+                      <p className="text-xs text-amber-700">
+                        This is a one-time action (~0.003 SOL) that enables decentralized access to your session history.
+                      </p>
+                    </div>
+
+                    {sessionChainError && (
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                        <p className="text-sm text-red-700">{sessionChainError}</p>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={handleCreateSessionChain}
+                      disabled={isCreatingSessionChain}
+                      className="w-full flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-700 text-white px-4 py-3 rounded-lg transition-colors font-medium disabled:opacity-50"
+                    >
+                      {isCreatingSessionChain ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Creating Keychain...
+                        </>
+                      ) : (
+                        <>
+                          <KeyRound className="w-4 h-4" />
+                          Create Session Keychain
+                        </>
+                      )}
+                    </button>
+                  </div>
+                ) : sessionChainLoading ? (
+                  // Loading session chain status
+                  <button
+                    disabled
+                    className="w-full flex items-center justify-center gap-2 bg-gray-300 text-gray-600 px-4 py-2 rounded-lg"
+                  >
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Loading...
+                  </button>
                 ) : (
+                  // User has session keychain - show normal check in button
                   <button
                     onClick={handleCheckIn}
                     disabled={isCheckingIn}

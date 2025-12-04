@@ -30,7 +30,8 @@ export default function MediaGallery({
     IPFSMedia | PipeGalleryItem | null
   >(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
-  const [storageType, setStorageType] = useState<"pinata" | "pipe">("pinata");
+  // Default to 'pipe' storage
+  const [storageType, setStorageType] = useState<"pinata" | "pipe">("pipe");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Add click handler for media items
@@ -304,7 +305,7 @@ export default function MediaGallery({
                     src={item.url}
                     className="w-full h-full object-cover"
                     onError={(e) => {
-                      console.error("IPFS video playback error:", {
+                      console.error("Video playback error:", {
                         mediaId: item.id,
                         url: item.url,
                         mimeType: item.mimeType,
