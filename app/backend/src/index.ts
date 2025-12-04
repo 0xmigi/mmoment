@@ -725,7 +725,7 @@ app.get("/api/pipe/files/:walletAddress", async (req, res) => {
   }
 });
 
-// Streaming download endpoint for large videos (no buffering)
+// Download endpoint using Firestarter SDK for proper authentication
 app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
   const { walletAddress, fileId } = req.params;
 
@@ -736,106 +736,100 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
   }
 
   try {
+    const fileName = decodeURIComponent(fileId);
     console.log(
-      `📥 Streaming download ${fileId} for wallet: ${walletAddress.slice(0, 8)}...`,
+      `📥 Downloading ${fileName.slice(0, 30)}... for wallet: ${walletAddress.slice(0, 8)}...`,
     );
 
-    // Get JWT token (legacy Pipe account uses JWT Bearer auth, not user_app_key)
-    const { access_token } = await getPipeJWTToken();
-    const baseUrl = process.env.PIPE_BASE_URL || 'https://us-west-01-firestarter.pipenetwork.com';
+    // Get the Pipe account for this wallet (uses user_app_key auth, not JWT)
+    const account = await getPipeAccountForWallet(walletAddress);
 
     // Determine content type from file extension
     let contentType = "application/octet-stream";
-    const fileName = decodeURIComponent(fileId).toLowerCase();
-    if (fileName.includes(".mp4") || fileName.includes(".mov")) {
+    const fileNameLower = fileName.toLowerCase();
+    if (fileNameLower.includes(".mp4") || fileNameLower.includes(".mov")) {
       contentType = "video/mp4";
-    } else if (fileName.includes(".jpg") || fileName.includes(".jpeg")) {
+    } else if (fileNameLower.includes(".jpg") || fileNameLower.includes(".jpeg")) {
       contentType = "image/jpeg";
-    } else if (fileName.includes(".png")) {
+    } else if (fileNameLower.includes(".png")) {
       contentType = "image/png";
+    } else if (fileNameLower.includes(".webp")) {
+      contentType = "image/webp";
     }
 
-    // Set headers for streaming
+    // Use SDK's downloadFile method which handles auth properly
+    console.log(`📥 Using SDK downloadFile for: ${fileName.slice(0, 30)}...`);
+    const fileData = await pipeClient.downloadFile(account, fileName);
+
+    // Convert Uint8Array to Buffer
+    const buffer = Buffer.from(fileData);
+
+    console.log(`✅ Downloaded ${buffer.length} bytes via SDK`);
+
+    // Set response headers
     res.setHeader("Content-Type", contentType);
-    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Content-Length", buffer.length);
     res.setHeader("Cache-Control", "public, max-age=31536000");
 
-    // Pipe priority-upload uses content-addressing: download by hash (fileId), not placeholder fileName
-    const downloadUrl = new URL(`${baseUrl}/download-stream`);
-    downloadUrl.searchParams.append("file_name", fileId);
-
-    console.log(`📥 Downloading from Pipe using fileId: ${fileId.slice(0, 20)}...`);
-
-    const pipeResponse = await axios.get(downloadUrl.toString(), {
-      headers: {
-        "Authorization": `Bearer ${access_token}`,
-      },
-      responseType: "arraybuffer",  // Get full response to parse multipart
-      timeout: 300000,
-    });
-
-    // Pipe returns multipart form-data, need to extract actual file content
-    const responseData = Buffer.from(pipeResponse.data);
-
-    // Extract boundary from first line (format: --{boundary})
-    const firstLineEnd = responseData.indexOf('\n'.charCodeAt(0));
-    if (firstLineEnd !== -1) {
-      const boundary = responseData.slice(0, firstLineEnd).toString('utf8').trim();
-
-      if (boundary.startsWith('--')) {
-        // Split by boundary (use Buffer for binary safety)
-        const boundaryBuffer = Buffer.from(boundary, 'utf8');
-        const parts: Buffer[] = [];
-        let start = 0;
-        let pos = 0;
-
-        while ((pos = responseData.indexOf(boundaryBuffer, start)) !== -1) {
-          if (start < pos) {
-            parts.push(responseData.slice(start, pos));
-          }
-          start = pos + boundaryBuffer.length;
-        }
-        if (start < responseData.length) {
-          parts.push(responseData.slice(start));
-        }
-
-        // Find the part with file content
-        for (const part of parts) {
-          const partText = part.toString('utf8', 0, Math.min(200, part.length)); // Check headers only
-          if (partText.includes('Content-Disposition') && partText.includes('filename')) {
-            // Find CRLF CRLF that separates headers from content
-            const separator = Buffer.from('\r\n\r\n', 'utf8');
-            const headerEnd = part.indexOf(separator);
-            if (headerEnd !== -1) {
-              // Extract binary content after headers, trim trailing CRLF
-              let fileContent = part.slice(headerEnd + 4); // Skip \r\n\r\n
-              // Remove trailing \r\n
-              if (fileContent.length >= 2 &&
-                  fileContent[fileContent.length - 2] === 13 &&
-                  fileContent[fileContent.length - 1] === 10) {
-                fileContent = fileContent.slice(0, -2);
-              }
-
-              console.log(`✅ Extracted ${fileContent.length} bytes from multipart response`);
-              res.setHeader("Content-Length", fileContent.length);
-              return res.send(fileContent);
-            }
-          }
-        }
-      }
-    }
-
-    // Fallback: if parsing failed, send as-is
-    console.warn('⚠️  Failed to parse multipart response, sending raw data');
-    res.setHeader("Content-Length", responseData.length);
-    res.send(responseData);
+    return res.send(buffer);
 
   } catch (error) {
     console.error("❌ Download failed:", error);
-    if (!res.headersSent) {
-      res.status(500).json({
-        error: error instanceof Error ? error.message : "Download failed",
+
+    // Try fallback with JWT auth for legacy files
+    try {
+      console.log("🔄 Trying fallback download with JWT auth...");
+      const { access_token } = await getPipeJWTToken();
+      const baseUrl = process.env.PIPE_BASE_URL || 'https://us-west-01-firestarter.pipenetwork.com';
+      const fileName = decodeURIComponent(fileId);
+
+      const downloadUrl = new URL(`${baseUrl}/download-stream`);
+      downloadUrl.searchParams.append("file_name", fileName);
+
+      const pipeResponse = await axios.get(downloadUrl.toString(), {
+        headers: {
+          "Authorization": `Bearer ${access_token}`,
+        },
+        responseType: "arraybuffer",
+        timeout: 60000, // 1 minute timeout
       });
+
+      const responseData = Buffer.from(pipeResponse.data);
+
+      // Parse multipart response if needed
+      const firstLineEnd = responseData.indexOf('\n'.charCodeAt(0));
+      if (firstLineEnd !== -1) {
+        const boundary = responseData.slice(0, firstLineEnd).toString('utf8').trim();
+        if (boundary.startsWith('--')) {
+          // Find file content in multipart
+          const separator = Buffer.from('\r\n\r\n', 'utf8');
+          const headerEnd = responseData.indexOf(separator);
+          if (headerEnd !== -1) {
+            let fileContent = responseData.slice(headerEnd + 4);
+            // Find end boundary
+            const endBoundary = fileContent.indexOf(Buffer.from(boundary, 'utf8'));
+            if (endBoundary !== -1) {
+              fileContent = fileContent.slice(0, endBoundary - 2); // Remove \r\n before boundary
+            }
+            console.log(`✅ Fallback extracted ${fileContent.length} bytes`);
+            res.setHeader("Content-Length", fileContent.length);
+            return res.send(fileContent);
+          }
+        }
+      }
+
+      // Send raw if not multipart
+      console.log(`✅ Fallback download ${responseData.length} bytes (raw)`);
+      res.setHeader("Content-Length", responseData.length);
+      return res.send(responseData);
+
+    } catch (fallbackError) {
+      console.error("❌ Fallback download also failed:", fallbackError);
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: error instanceof Error ? error.message : "Download failed",
+        });
+      }
     }
   }
 });
