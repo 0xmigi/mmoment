@@ -777,17 +777,18 @@ app.get("/api/pipe/download/:walletAddress/:fileId", async (req, res) => {
     if (firstLineEnd !== -1) {
       const boundary = responseData.slice(0, firstLineEnd).toString('utf8').trim();
       if (boundary.startsWith('--')) {
-        // Find file content in multipart
+        // Find file content in multipart (after headers)
         const separator = Buffer.from('\r\n\r\n', 'utf8');
         const headerEnd = responseData.indexOf(separator);
         if (headerEnd !== -1) {
           let fileContent = responseData.slice(headerEnd + 4);
-          // Find end boundary
-          const endBoundary = fileContent.indexOf(Buffer.from(boundary, 'utf8'));
+          // Find end boundary - must be preceded by \r\n to avoid false matches in binary data
+          const endBoundaryPattern = Buffer.from('\r\n' + boundary, 'utf8');
+          const endBoundary = fileContent.indexOf(endBoundaryPattern);
           if (endBoundary !== -1) {
-            fileContent = fileContent.slice(0, endBoundary - 2); // Remove \r\n before boundary
+            fileContent = fileContent.slice(0, endBoundary);
           }
-          console.log(`✅ Downloaded ${fileContent.length} bytes from shared account`);
+          console.log(`✅ Downloaded ${fileContent.length} bytes from shared account (multipart)`);
           res.setHeader("Content-Type", contentType);
           res.setHeader("Content-Length", fileContent.length);
           res.setHeader("Cache-Control", "public, max-age=31536000");
