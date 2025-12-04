@@ -92,7 +92,7 @@ export function CompetitionScoreboard({ cameraId, walletAddress }: CompetitionSc
         <div className="flex flex-col items-center gap-1">
           <span className="text-xs font-medium text-gray-900">
             {competitor.display_name}
-            {isCurrentUser && <span className="ml-1 text-blue-600">(you)</span>}
+            {isCurrentUser && <span className="ml-1 text-primary">(you)</span>}
           </span>
           <div className="flex items-baseline gap-1">
             <span className="text-3xl font-bold text-gray-900 tabular-nums">
@@ -125,7 +125,7 @@ export function CompetitionScoreboard({ cameraId, walletAddress }: CompetitionSc
           <div className="flex flex-col items-start flex-1">
             <span className="text-xs font-medium text-gray-900 truncate max-w-full">
               {competitor1.display_name}
-              {isUser1 && <span className="ml-1 text-blue-600">(you)</span>}
+              {isUser1 && <span className="ml-1 text-primary">(you)</span>}
             </span>
             <span className="text-2xl font-bold text-gray-900 tabular-nums">
               {score1}
@@ -150,7 +150,7 @@ export function CompetitionScoreboard({ cameraId, walletAddress }: CompetitionSc
           <div className="flex flex-col items-end flex-1">
             <span className="text-xs font-medium text-gray-900 truncate max-w-full">
               {competitor2.display_name}
-              {isUser2 && <span className="ml-1 text-blue-600">(you)</span>}
+              {isUser2 && <span className="ml-1 text-primary">(you)</span>}
             </span>
             <span className="text-2xl font-bold text-gray-900 tabular-nums">
               {score2}
@@ -177,7 +177,7 @@ export function CompetitionScoreboard({ cameraId, walletAddress }: CompetitionSc
               </span>
               <span className="text-xs font-medium text-gray-900">
                 {competitor.display_name}
-                {isCurrentUser && <span className="ml-1 text-blue-600">(you)</span>}
+                {isCurrentUser && <span className="ml-1 text-primary">(you)</span>}
               </span>
               <span className="text-lg font-bold text-gray-900 tabular-nums">
                 {getPrimaryMetric(stats)}

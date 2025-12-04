@@ -90,7 +90,7 @@ export function FacialEmbeddingManager({
   if (isChecking) {
     return (
       <div className="flex items-center justify-center p-8">
-        <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
         <span className="ml-3 text-gray-600">Checking facial embedding...</span>
       </div>
     );
@@ -163,14 +163,14 @@ export function FacialEmbeddingManager({
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="bg-primary-light border border-primary-light rounded-lg p-4">
             <div className="flex items-center space-x-3 mb-3">
-              <User className="h-6 w-6 text-blue-600" />
-              <h3 className="text-base font-semibold text-blue-800">
+              <User className="h-6 w-6 text-primary" />
+              <h3 className="text-base font-semibold text-primary">
                 Create Facial Embedding
               </h3>
             </div>
-            <p className="text-sm text-blue-700">
+            <p className="text-sm text-primary">
               Create a secure facial embedding to use CV apps on mmoment cameras. This only needs to be done once.
             </p>
           </div>
@@ -178,7 +178,7 @@ export function FacialEmbeddingManager({
           <button
             onClick={() => setShowEnrollment(true)}
             disabled={!primaryWallet || !selectedCamera}
-            className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center space-x-2 font-medium"
+            className="w-full bg-primary text-white px-4 py-3 rounded-lg hover:bg-primary-hover disabled:opacity-50 flex items-center justify-center space-x-2 font-medium"
           >
             <Smartphone className="h-5 w-5" />
             <span>Create Facial Embedding</span>

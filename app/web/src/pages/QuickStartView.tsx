@@ -190,7 +190,7 @@ export default function QuickStartView() {
           <p className="text-gray-700 mb-6">{error}</p>
           <button
             onClick={() => navigate('/app')}
-            className="w-full bg-blue-600 text-white rounded-lg py-3 font-bold"
+            className="w-full bg-primary text-white rounded-lg py-3 font-bold"
           >
             Go to App
           </button>
@@ -255,7 +255,7 @@ export default function QuickStartView() {
             
             <button
               onClick={handleQuickStart}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium transition-colors"
+              className="w-full bg-primary hover:bg-primary-hover text-white py-3 rounded-lg font-medium transition-colors"
             >
               Access Camera
             </button>

@@ -122,14 +122,14 @@ const CameraIdDisplay = ({
       ) : (
         <div
           onClick={() => setIsModalOpen(true)}
-          className="text-sm text-gray-600 hover:text-blue-600 transition-colors cursor-pointer flex items-center"
+          className="text-sm text-gray-600 hover:text-primary transition-colors cursor-pointer flex items-center"
         >
           <span>id: {formatId(displayId)}</span>
           <span id="check-in-status-icon">
             {isCheckedIn ? (
               <CheckCircle className="w-3.5 h-3.5 ml-1.5 text-green-500" />
             ) : (
-              <Link2 className="w-3.5 h-3.5 ml-1.5 text-blue-500" />
+              <Link2 className="w-3.5 h-3.5 ml-1.5 text-primary" />
             )}
           </span>
         </div>
@@ -1489,7 +1489,7 @@ export function CameraView() {
                     {isCheckedIn ? (
                       <CheckCircle className="w-3 h-3 text-green-400" />
                     ) : (
-                      <Link2 className="w-3 h-3 text-blue-400" />
+                      <Link2 className="w-3 h-3 text-primary" />
                     )}
                   </div>
                 </div>
@@ -1522,7 +1522,7 @@ export function CameraView() {
                     <button
                       onClick={handleDirectStream}
                       disabled={loading}
-                      className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-black transition-colors rounded-xl"
+                      className="w-16 h-full flex items-center justify-center hover:text-primary text-black transition-colors rounded-xl"
                       aria-label={
                         currentCameraStatus.isStreaming
                           ? "Stop Stream"
@@ -1550,7 +1550,7 @@ export function CameraView() {
                     <button
                       onClick={handleDirectPhoto}
                       disabled={loading}
-                      className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-gray-800 transition-colors rounded-xl"
+                      className="w-16 h-full flex items-center justify-center hover:text-primary text-gray-800 transition-colors rounded-xl"
                     >
                       {loading ? (
                         <Loader className="w-5 h-5 animate-spin" />
@@ -1567,7 +1567,7 @@ export function CameraView() {
                     <button
                       onClick={handleDirectVideo}
                       disabled={loading}
-                      className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-gray-800 transition-colors rounded-xl"
+                      className="w-16 h-full flex items-center justify-center hover:text-primary text-gray-800 transition-colors rounded-xl"
                     >
                       {loading ? (
                         <Loader className="w-5 h-5 animate-spin" />

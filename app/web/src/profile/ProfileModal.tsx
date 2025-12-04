@@ -122,7 +122,7 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-medium text-gray-700">Farcaster</span>
                       {(farcasterCred === primarySocialCred || (hasBackendProfile && backendProvider === 'farcaster')) && (
-                        <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">source</span>
+                        <span className="text-[10px] text-primary bg-primary-light px-1.5 py-0.5 rounded">source</span>
                       )}
                     </div>
                     <div className="text-xs text-gray-500">
@@ -136,7 +136,7 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
                         window.open(`https://farcaster.xyz/${username.replace('@', '')}`, '_blank');
                       }
                     }}
-                    className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
+                    className="text-xs text-primary hover:text-primary-hover transition-colors flex items-center gap-1"
                   >
                     View <ExternalLink className="w-3 h-3" />
                   </button>
@@ -150,7 +150,7 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-medium text-gray-700">X / Twitter</span>
                       {(primarySocialCred === twitterCred || (hasBackendProfile && backendProvider === 'twitter')) && (
-                        <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">source</span>
+                        <span className="text-[10px] text-primary bg-primary-light px-1.5 py-0.5 rounded">source</span>
                       )}
                     </div>
                     <div className="text-xs text-gray-500">
@@ -164,7 +164,7 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
                         window.open(`https://twitter.com/${username.replace('@', '')}`, '_blank');
                       }
                     }}
-                    className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
+                    className="text-xs text-primary hover:text-primary-hover transition-colors flex items-center gap-1"
                   >
                     View <ExternalLink className="w-3 h-3" />
                   </button>
@@ -194,7 +194,7 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
                         {action.transactionId && (
                           <button
                             onClick={handleExplorerClick}
-                            className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
+                            className="text-xs text-primary hover:text-primary-hover transition-colors flex items-center gap-1"
                           >
                             View Tx <ExternalLink className="w-3 h-3" />
                           </button>

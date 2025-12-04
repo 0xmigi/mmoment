@@ -172,7 +172,7 @@ export function PushupConfigModal({
 
               {isLoading ? (
                 <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
                 </div>
               ) : recognizedUsers.length === 0 ? (
                 <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
@@ -188,14 +188,14 @@ export function PushupConfigModal({
                       onClick={() => toggleCompetitor(user.wallet_address)}
                       className={`w-full flex items-center justify-between p-3 rounded-lg border-2 transition-all ${
                         selectedCompetitors.has(user.wallet_address)
-                          ? 'border-blue-500 bg-blue-50'
+                          ? 'border-primary bg-primary-light'
                           : 'border-gray-200 bg-gray-50 hover:border-gray-300'
                       }`}
                     >
                       <div className="flex items-center space-x-3">
                         <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
                           selectedCompetitors.has(user.wallet_address)
-                            ? 'border-blue-500 bg-blue-500'
+                            ? 'border-primary bg-primary'
                             : 'border-gray-300'
                         }`}>
                           {selectedCompetitors.has(user.wallet_address) && (
@@ -206,7 +206,7 @@ export function PushupConfigModal({
                           <div className="text-sm font-medium text-gray-900">
                             {user.display_name}
                             {user.isCurrentUser && (
-                              <span className="ml-2 text-xs text-blue-600">(You)</span>
+                              <span className="ml-2 text-xs text-primary">(You)</span>
                             )}
                           </div>
                           <div className="text-xs text-gray-500">
@@ -228,7 +228,7 @@ export function PushupConfigModal({
               <select
                 value={duration}
                 onChange={(e) => setDuration(Number(e.target.value))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
               >
                 <option value={60}>1 minute</option>
                 <option value={180}>3 minutes</option>
@@ -265,7 +265,7 @@ export function PushupConfigModal({
             <button
               onClick={handleLoadApp}
               disabled={isLoading || selectedCompetitors.size === 0}
-              className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+              className="w-full bg-primary text-white py-3 px-4 rounded-lg hover:bg-primary-hover transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
             >
               {isLoading ? (
                 <>

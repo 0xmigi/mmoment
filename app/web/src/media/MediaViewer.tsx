@@ -278,7 +278,7 @@ export default function MediaViewer({
                   className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
                   title="Download"
                 >
-                  <Download className="w-4 h-4 text-blue-500" />
+                  <Download className="w-4 h-4 text-primary" />
                 </button>
                 {media.provider === "pipe" && (
                   <button
@@ -324,7 +324,7 @@ export default function MediaViewer({
                   {socialProvider && (
                     <div className="text-sm text-gray-500">
                       {username && `@${username.replace("@", "")}`}{" "}
-                      <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded ml-1">
+                      <span className="text-xs text-primary bg-primary-light px-1.5 py-0.5 rounded ml-1">
                         {socialProvider}
                       </span>
                     </div>
@@ -384,7 +384,7 @@ export default function MediaViewer({
                       href={`https://solscan.io/tx/${transactionId}?cluster=devnet`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-sm text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
+                      className="text-sm text-primary hover:text-primary-hover transition-colors flex items-center gap-1"
                     >
                       View on Solscan <ArrowUpRight className="w-3.5 h-3.5" />
                     </a>

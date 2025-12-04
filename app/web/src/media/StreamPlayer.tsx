@@ -248,7 +248,7 @@ const StreamPlayer = memo(() => {
             <p className="text-gray-400">Failed to load stream</p>
             {isMobile && error && (
               <button
-                className="mt-2 px-3 py-1 text-xs bg-blue-500 text-white rounded"
+                className="mt-2 px-3 py-1 text-xs bg-primary text-white rounded"
                 onClick={() => {
                   setIsLoading(true);
                   setError(null);
@@ -326,7 +326,7 @@ const StreamPlayer = memo(() => {
           <div className="absolute top-2 right-2">
             <button
               onClick={() => setUseWebRTC(true)}
-              className="bg-blue-500 bg-opacity-80 hover:bg-opacity-100 text-white text-xs px-2 py-1 rounded transition-all"
+              className="bg-primary bg-opacity-80 hover:bg-opacity-100 text-white text-xs px-2 py-1 rounded transition-all"
             >
               Try WebRTC
             </button>

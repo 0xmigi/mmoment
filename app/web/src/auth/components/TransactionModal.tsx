@@ -301,7 +301,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   {checkInSuccess ? (
                     <button
                       disabled={true}
-                      className="flex-1 bg-blue-400 text-white py-2 px-3 rounded-lg text-sm font-medium transition-colors"
+                      className="flex-1 bg-primary-muted text-white py-2 px-3 rounded-lg text-sm font-medium transition-colors"
                     >
                       Processing...
                     </button>
@@ -310,7 +310,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                       <button
                         onClick={handleCheckIn}
                         disabled={isCheckingIn}
-                        className="flex-1 bg-blue-600 text-white py-2 px-3 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="flex-1 bg-primary text-white py-2 px-3 rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {isCheckingIn ? 'Checking in...' : 'Check In & Continue'}
                       </button>
@@ -355,7 +355,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
                 {/* Status Messages */}
                 {status && (
-                  <div className="bg-blue-50 text-blue-700 px-2 py-1.5 rounded-lg text-xs flex items-center">
+                  <div className="bg-primary-light text-primary px-2 py-1.5 rounded-lg text-xs flex items-center">
                     <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-current mr-2" />
                     {status}
                   </div>
@@ -372,7 +372,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   <button
                     onClick={handleConfirmTransaction}
                     disabled={loading}
-                    className="flex-1 bg-blue-600 text-white py-2 px-3 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 bg-primary text-white py-2 px-3 rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {loading ? 'Processing...' : 'Confirm'}
                   </button>

@@ -34,7 +34,7 @@ export const QuickActions = () => {
         {hasUnsavedChanges && (
           <button
             onClick={saveSettings}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors"
           >
             Save Changes
           </button>
@@ -51,8 +51,8 @@ export const QuickActions = () => {
             checked={quickActions.PHOTO.enabled}
             onChange={(enabled) => handleToggle('PHOTO', enabled)}
             className={`${
-              quickActions.PHOTO.enabled ? 'bg-blue-600' : 'bg-gray-200'
-            } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2`}
+              quickActions.PHOTO.enabled ? 'bg-primary' : 'bg-gray-200'
+            } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
           >
             <span
               className={`${
@@ -71,8 +71,8 @@ export const QuickActions = () => {
             checked={quickActions.VIDEO.enabled}
             onChange={(enabled) => handleToggle('VIDEO', enabled)}
             className={`${
-              quickActions.VIDEO.enabled ? 'bg-blue-600' : 'bg-gray-200'
-            } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2`}
+              quickActions.VIDEO.enabled ? 'bg-primary' : 'bg-gray-200'
+            } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
           >
             <span
               className={`${
@@ -91,8 +91,8 @@ export const QuickActions = () => {
             checked={quickActions.CUSTOM.enabled}
             onChange={(enabled) => handleToggle('CUSTOM', enabled)}
             className={`${
-              quickActions.CUSTOM.enabled ? 'bg-blue-600' : 'bg-gray-200'
-            } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2`}
+              quickActions.CUSTOM.enabled ? 'bg-primary' : 'bg-gray-200'
+            } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
           >
             <span
               className={`${

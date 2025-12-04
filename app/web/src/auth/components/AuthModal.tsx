@@ -125,7 +125,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                     value={otp}
                     onChange={(e) => setOtp(e.target.value)}
                     disabled={isLoading}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-primary focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="Enter verification code"
                     required
                   />
@@ -136,7 +136,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-primary text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isLoading ? 'Verifying...' : 'Verify'}
                 </button>
@@ -151,14 +151,14 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     disabled={isLoading}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-primary focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="name@example.com"
                     required
                   />
                   <button
                     type="submit"
                     disabled={isLoading}
-                    className="w-full mt-2 bg-blue-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full mt-2 bg-primary text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isLoading ? 'Please wait...' : 'Continue with Email'}
                   </button>

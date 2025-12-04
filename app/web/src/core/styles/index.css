@@ -63,6 +63,7 @@ body {
 
 /* Grid Pattern Background */
 .grid-pattern {
+  background-color: #f9fafb; /* gray-50 */
   background-size: 20px 20px;
   background-image: linear-gradient(
       to right,
@@ -87,6 +88,26 @@ body {
     rgba(255, 255, 255, 0) 100%
   );
   pointer-events: none;
+  z-index: 1;
+}
+
+/* Fade to black at bottom */
+.grid-pattern::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 200px;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.3) 40%,
+    rgba(0, 0, 0, 0.7) 70%,
+    rgb(0, 0, 0) 100%
+  );
+  pointer-events: none;
+  z-index: 1;
 }
 
 /* iOS Safari specific and Safe Area Support */

@@ -52,8 +52,8 @@ export const Settings = () => {
                 checked={quickActions.photo}
                 onChange={() => handleQuickActionToggle('photo')}
                 className={`${
-                  quickActions.photo ? 'bg-blue-600' : 'bg-gray-200'
-                } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2`}
+                  quickActions.photo ? 'bg-primary' : 'bg-gray-200'
+                } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
               >
                 <span
                   className={`${
@@ -73,8 +73,8 @@ export const Settings = () => {
                 checked={quickActions.video}
                 onChange={() => handleQuickActionToggle('video')}
                 className={`${
-                  quickActions.video ? 'bg-blue-600' : 'bg-gray-200'
-                } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2`}
+                  quickActions.video ? 'bg-primary' : 'bg-gray-200'
+                } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
               >
                 <span
                   className={`${
@@ -94,8 +94,8 @@ export const Settings = () => {
                 checked={quickActions.stream}
                 onChange={() => handleQuickActionToggle('stream')}
                 className={`${
-                  quickActions.stream ? 'bg-blue-600' : 'bg-gray-200'
-                } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2`}
+                  quickActions.stream ? 'bg-primary' : 'bg-gray-200'
+                } relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2`}
               >
                 <span
                   className={`${

@@ -1,7 +1,7 @@
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { MainLayout, CameraView, GalleryView, ActivitiesView } from '../ui';
-import { LandingPage, ProductPage, QuickStartView } from '../pages';
+import { LandingPage, ProductPage, QuickStartView, AboutPage, LoginPage } from '../pages';
 import { Settings } from '../ui/settings/Settings';
 import { AccountPage } from '../ui/account/AccountPage';
 import { SolDevNetDebug } from '../ui/debug/SolDevNetDebug';
@@ -97,6 +97,8 @@ function Router() {
   return (
       <Routes>
         <Route path="/" element={<LandingPage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/about" element={<AboutPage />} />
         <Route path="/product" element={<ProductPage />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/soldevnetdebug" element={<SolDevNetDebug />} />

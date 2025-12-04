@@ -18,7 +18,7 @@ export function CameraControls({ onTakePicture, onRecordVideo, isLoading }: Came
           onClick={onTakePicture}
           disabled={isLoading}
           className={`p-2 rounded-lg ${
-            isLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#999999] hover:bg-[#d1dfff]'
+            isLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-500 hover:bg-gray-400'
           } transition-colors`}
           aria-label="Take Picture"
         >
@@ -29,7 +29,7 @@ export function CameraControls({ onTakePicture, onRecordVideo, isLoading }: Came
           onClick={onRecordVideo}
           disabled={isLoading}
           className={`p-2 rounded-lg ${
-            isLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#999999] hover:bg-[#d1dfff]'
+            isLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-500 hover:bg-gray-400'
           } transition-colors`}
           aria-label="Record Video"
         >

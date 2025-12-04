@@ -368,7 +368,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                   <div className="space-y-2">
                     <button
                       onClick={handleDevCameraClick}
-                      className="text-xs bg-yellow-100 hover:bg-yellow-200 text-yellow-800 px-3 py-1.5 rounded flex items-center justify-center w-full transition-colors"
+                      className="text-xs bg-primary-light hover:bg-primary-muted text-primary px-3 py-1.5 rounded flex items-center justify-center w-full transition-colors"
                     >
                       Connect to Pi5 <ExternalLink className="h-3 w-3 ml-1" />
                     </button>
@@ -377,7 +377,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                         const baseUrl = window.location.origin;
                         window.location.href = `${baseUrl}/app/camera/${CONFIG.JETSON_CAMERA_PDA}`;
                       }}
-                      className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 px-3 py-1.5 rounded flex items-center justify-center w-full transition-colors"
+                      className="text-xs bg-primary-light hover:bg-primary-muted text-primary px-3 py-1.5 rounded flex items-center justify-center w-full transition-colors"
                     >
                       Connect to Orin Nano <ExternalLink className="h-3 w-3 ml-1" />
                     </button>
@@ -389,8 +389,8 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
               <>
                 {/* Camera PDA */}
                 <div className="flex items-center mb-4">
-                  <div className="w-10 h-10 rounded-full bg-blue-50 flex-shrink-0 flex items-center justify-center overflow-hidden">
-                    <Camera className="w-5 h-5 text-blue-500" />
+                  <div className="w-10 h-10 rounded-full bg-primary-light flex-shrink-0 flex items-center justify-center overflow-hidden">
+                    <Camera className="w-5 h-5 text-primary" />
                   </div>
                   <div className="ml-3 flex-1">
                     <div className="text-sm text-gray-700">Camera</div>
@@ -398,7 +398,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                   </div>
                   <button
                     onClick={handleCameraExplorerClick}
-                    className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center"
+                    className="text-xs text-primary hover:text-primary-hover transition-colors flex items-center"
                   >
                     View <ExternalLink className="w-3 h-3 ml-1" />
                   </button>
@@ -420,7 +420,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                   </div>
                   <button
                     onClick={handleOwnerExplorerClick}
-                    className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center"
+                    className="text-xs text-primary hover:text-primary-hover transition-colors flex items-center"
                   >
                     View <ExternalLink className="w-3 h-3 ml-1" />
                   </button>
@@ -473,9 +473,9 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                         <button
                           onClick={handleFaceVisualizationToggle}
                           disabled={configLoading}
-                          className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                          className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${
                             faceVisualization
-                              ? 'bg-blue-600 hover:bg-blue-700'
+                              ? 'bg-primary hover:bg-primary-hover'
                               : 'bg-gray-200 hover:bg-gray-300'
                           } ${configLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
@@ -496,9 +496,9 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                         <button
                           onClick={handlePoseVisualizationToggle}
                           disabled={configLoading}
-                          className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                          className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${
                             poseVisualization
-                              ? 'bg-blue-600 hover:bg-blue-700'
+                              ? 'bg-primary hover:bg-primary-hover'
                               : 'bg-gray-200 hover:bg-gray-300'
                           } ${configLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
@@ -534,7 +534,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                   <button
                     onClick={handleCheckIn}
                     disabled={isCheckingIn}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+                    className="w-full bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg transition-colors"
                   >
                     {isCheckingIn ? 'Processing...' : 'Check In'}
                   </button>

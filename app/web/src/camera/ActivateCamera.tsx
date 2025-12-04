@@ -92,7 +92,7 @@ export const ActivateCamera = forwardRef<{ handleTakePicture: () => Promise<void
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
         disabled={loading || !primaryWallet?.address}
-        className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-gray-800 transition-colors rounded-xl"
+        className="w-16 h-full flex items-center justify-center hover:text-primary text-gray-800 transition-colors rounded-xl"
       >
         {loading ? (
           <Loader className="w-5 h-5 animate-spin" />

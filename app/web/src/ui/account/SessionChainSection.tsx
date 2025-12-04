@@ -26,7 +26,7 @@ export function SessionChainSection() {
           <span className="font-medium text-sm">Session Keychain</span>
         </div>
         {isLoading ? (
-          <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+          <Loader2 className="w-4 h-4 animate-spin text-primary" />
         ) : hasSessionChain ? (
           <CheckCircle className="w-4 h-4 text-green-500" />
         ) : (
@@ -46,7 +46,7 @@ export function SessionChainSection() {
               href={`https://explorer.solana.com/address/${sessionChainPda}?cluster=devnet`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+              className="flex items-center gap-1 text-xs text-primary hover:text-primary-hover"
             >
               <ExternalLink className="w-3 h-3" />
               View on Explorer

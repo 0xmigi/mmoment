@@ -103,7 +103,7 @@ export const CameraActionModal = ({
     // Show loading state from context
     if (isCheckingIn) {
       return (
-        <div className="bg-blue-50 text-blue-700 p-2 rounded-lg text-sm flex items-center">
+        <div className="bg-primary-light text-primary p-2 rounded-lg text-sm flex items-center">
           <Loader className="w-4 h-4 mr-2 animate-spin" />
           Processing your request... This may take a few moments.
         </div>
@@ -162,10 +162,10 @@ export const CameraActionModal = ({
           </div>
 
           <div className="p-4 space-y-4">
-            <div className="flex items-center space-x-3 p-2 bg-blue-50 rounded-lg">
-              <Camera className="w-5 h-5 text-blue-600" />
+            <div className="flex items-center space-x-3 p-2 bg-primary-light rounded-lg">
+              <Camera className="w-5 h-5 text-primary" />
               <div>
-                <p className="text-sm text-blue-900">
+                <p className="text-sm text-primary">
                   {isCheckedIn
                     ? "You are currently checked in to this camera"
                     : "You need to check in to this camera to perform actions"}
@@ -198,17 +198,17 @@ export const CameraActionModal = ({
                     id="use-face-recognition"
                     checked={useFaceRecognition}
                     onChange={(e) => setUseFaceRecognition(e.target.checked)}
-                    className="rounded text-blue-600 focus:ring-blue-500"
+                    className="rounded text-primary focus:ring-primary"
                     disabled={isCheckingIn}
                   />
                   <span className="text-sm flex items-center">
-                    <UserRound className="w-4 h-4 mr-1.5 text-blue-600" />
+                    <UserRound className="w-4 h-4 mr-1.5 text-primary" />
                     Use Face Recognition
                   </span>
                 </label>
                 <button
                   onClick={() => setShowAdvancedInfo(!showAdvancedInfo)}
-                  className="text-gray-500 hover:text-blue-600 transition-colors"
+                  className="text-gray-500 hover:text-primary transition-colors"
                 >
                   <Info className="w-4 h-4" />
                 </button>
@@ -244,7 +244,7 @@ export const CameraActionModal = ({
                   onClick={handleCheckIn}
                   disabled={isCheckingIn}
                   className={`w-full py-2.5 rounded-lg font-medium ${
-                    isCheckingIn ? 'bg-blue-300 text-blue-800 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'
+                    isCheckingIn ? 'bg-primary-muted text-primary cursor-not-allowed' : 'bg-primary text-white hover:bg-primary-hover'
                   }`}
                 >
                   {isCheckingIn ? (

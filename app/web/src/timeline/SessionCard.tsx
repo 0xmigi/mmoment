@@ -241,7 +241,7 @@ export function SessionCard({ session, defaultExpanded = false }: SessionCardPro
               {error}
               <button
                 onClick={fetchTimeline}
-                className="block mx-auto mt-2 text-blue-500 hover:text-blue-600"
+                className="block mx-auto mt-2 text-primary hover:text-primary-hover"
               >
                 Retry
               </button>

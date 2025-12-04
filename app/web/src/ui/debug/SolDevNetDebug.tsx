@@ -1578,7 +1578,7 @@ export function SolDevNetDebug() {
     return (
       <button
         onClick={navigateToCamera}
-        className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm mr-2"
+        className="bg-primary hover:bg-primary text-white px-3 py-1 rounded text-sm mr-2"
       >
         View Camera
       </button>
@@ -1695,7 +1695,7 @@ export function SolDevNetDebug() {
             <div 
               key={camera.publicKey} 
               className={`bg-white rounded-lg shadow-sm border p-4 ${
-                camera.userCheckedIn ? 'border-blue-400' : 
+                camera.userCheckedIn ? 'border-primary-muted' : 
                 isActive ? 'border-green-200' : 'border-gray-200'
               }`}
             >
@@ -1707,7 +1707,7 @@ export function SolDevNetDebug() {
                       <span className="ml-2 bg-yellow-100 text-yellow-800 text-xs px-2 py-0.5 rounded">Old Format</span>
                     )}
                     {camera.userCheckedIn && (
-                      <span className="ml-2 bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded">
+                      <span className="ml-2 bg-primary-light text-primary text-xs px-2 py-0.5 rounded">
                         You're Checked In
                       </span>
                     )}
@@ -1764,7 +1764,7 @@ export function SolDevNetDebug() {
 
                   <p className="text-sm text-gray-600">
                     Owner: <span className="font-mono text-xs">{camera.owner.substring(0, 8)}...</span>
-                    {isOwner && <span className="ml-1 text-blue-600 text-xs">(you)</span>}
+                    {isOwner && <span className="ml-1 text-primary text-xs">(you)</span>}
                   </p>
 
                   {camera.registrationDate && (
@@ -1788,7 +1788,7 @@ export function SolDevNetDebug() {
                               [camera.publicKey]: !prev[camera.publicKey]
                             }));
                           }}
-                          className="mr-2 h-4 w-4 text-blue-600"
+                          className="mr-2 h-4 w-4 text-primary"
                         />
                         <label htmlFor={`face-recognition-${camera.publicKey}`} className="text-sm text-gray-700">
                           Use Face Recognition
@@ -1863,14 +1863,14 @@ export function SolDevNetDebug() {
       {/* Connection Information */}
       <div className="mb-8">
         <h2 className="text-xl font-bold mb-2">Connection Information</h2>
-        <div className="bg-blue-50 p-4 rounded mb-4">
+        <div className="bg-primary-light p-4 rounded mb-4">
           <p>This dashboard helps you manage camera devices on Solana. Use it to register new cameras and generate NFC URLs.</p>
         </div>
 
         {statusMessage && (
           <div className={`p-4 rounded mb-4 ${statusType === 'success' ? 'bg-green-100 text-green-800' :
               statusType === 'error' ? 'bg-red-100 text-red-800' :
-                'bg-blue-100 text-blue-800'
+                'bg-primary-light text-primary'
             }`}>
             {statusMessage}
           </div>
@@ -1938,23 +1938,23 @@ export function SolDevNetDebug() {
             </div>
             
             {/* Analytics Summary */}
-            <div className="bg-blue-50 p-3 rounded mb-4">
-              <h3 className="font-semibold text-blue-800 mb-2 flex items-center">
+            <div className="bg-primary-light p-3 rounded mb-4">
+              <h3 className="font-semibold text-primary mb-2 flex items-center">
                 Live Analytics
                 {loadingAnalytics && (
-                  <div className="ml-2 w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                  <div className="ml-2 w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
                 )}
               </h3>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <span className="text-blue-600 font-medium">Total Active Users:</span>{' '}
-                  <span className="font-bold text-blue-800">
+                  <span className="text-primary font-medium">Total Active Users:</span>{' '}
+                  <span className="font-bold text-primary">
                     {Object.values(activeUsersPerCamera).reduce((sum, count) => sum + count, 0)}
                   </span>
                 </div>
                 <div>
-                  <span className="text-blue-600 font-medium">Cameras with Users:</span>{' '}
-                  <span className="font-bold text-blue-800">
+                  <span className="text-primary font-medium">Cameras with Users:</span>{' '}
+                  <span className="font-bold text-primary">
                     {Object.values(activeUsersPerCamera).filter(count => count > 0).length} / {registeredCameras.length}
                   </span>
                 </div>
@@ -1977,7 +1977,7 @@ export function SolDevNetDebug() {
                   await fetchRegisteredCameras();
                   await fetchActiveUsersPerCamera();
                 }}
-                className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                className="bg-primary text-white px-4 py-2 rounded hover:bg-primary"
                 disabled={loading || loadingAnalytics || !initialized}
               >
                 {(loadingCameras || loadingAnalytics) ? 'Loading...' : 'Refresh cameras & analytics'}
@@ -2000,7 +2000,7 @@ export function SolDevNetDebug() {
         {/* Camera Management */}
         <div className="bg-white p-4 rounded-lg shadow">
           <h2 className="font-semibold mb-4">Camera Management</h2>
-          <div className="bg-blue-50 p-3 mb-4 rounded-md text-sm">
+          <div className="bg-primary-light p-3 mb-4 rounded-md text-sm">
             <p className="font-semibold">How to register a new camera:</p>
             <ol className="list-decimal pl-5 mt-1 space-y-1">
               <li>Enter a unique camera name</li>
@@ -2033,7 +2033,7 @@ export function SolDevNetDebug() {
             <button
               onClick={registerCamera}
               disabled={loading || !primaryWallet?.address || !initialized}
-              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+              className="w-full bg-primary text-white py-2 px-4 rounded-md hover:bg-primary-hover disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
               {loading ? 'Processing...' : 'Register Camera'}
             </button>
@@ -2043,7 +2043,7 @@ export function SolDevNetDebug() {
         {/* --- Face Enrollment Section --- */}
         <div className="bg-white p-4 rounded-lg shadow">
           <h2 className="font-semibold mb-4">Face Enrollment</h2>
-          <div className="bg-blue-50 p-3 mb-4 rounded-md text-sm">
+          <div className="bg-primary-light p-3 mb-4 rounded-md text-sm">
             <p className="font-semibold">Enroll your face for recognition:</p>
             <ol className="list-decimal pl-5 mt-1 space-y-1">
               <li>Ensure your Jetson is running and accessible.</li>
@@ -2064,7 +2064,7 @@ export function SolDevNetDebug() {
 
           {/* Enrollment Status/Error Display */}
           {enrollmentStatus && (
-            <div className={`p-2 rounded mb-2 text-sm ${enrollmentError ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
+            <div className={`p-2 rounded mb-2 text-sm ${enrollmentError ? 'bg-red-100 text-red-700' : 'bg-primary-light text-primary'}`}>
               {enrollmentStatus}
             </div>
           )}
@@ -2107,7 +2107,7 @@ export function SolDevNetDebug() {
         {/* NFC URL Generator */}
         <div className="bg-white p-4 rounded-lg shadow">
           <h2 className="font-semibold mb-4">NFC URL Generator</h2>
-          <div className="bg-blue-50 p-3 mb-4 rounded-md text-sm">
+          <div className="bg-primary-light p-3 mb-4 rounded-md text-sm">
             <p className="font-semibold">Generate a URL to connect to a camera:</p>
             <ol className="list-decimal pl-5 mt-1 space-y-1">
               <li>Select a camera from the list below</li>
@@ -2182,7 +2182,7 @@ export function SolDevNetDebug() {
                 }
               }}
               disabled={registeredCameras.length === 0}
-              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+              className="w-full bg-primary text-white py-2 px-4 rounded-md hover:bg-primary-hover disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
               Generate NFC URL
             </button>

@@ -63,7 +63,7 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
     <>
       <button
         onClick={handleIRLAppsClick}
-        className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-1.5 py-0.5 rounded shadow-lg transition-colors text-xs"
+        className="flex items-center space-x-2 bg-primary hover:bg-primary-hover text-white px-1.5 py-0.5 rounded shadow-lg transition-colors text-xs"
         title={facialEmbeddingStatus.hasEmbedding ? "Access Apps" : "Create Recognition Token for Apps"}
       >
         <Zap className="w-3.5 h-3.5" />
@@ -118,7 +118,7 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
                       disabled={!isAccessible}
                       className={`p-2 rounded-full transition-colors ${
                         isAccessible
-                          ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                          ? 'bg-primary hover:bg-primary-hover text-white'
                           : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                       }`}
                       title={isAccessible ? 'Start app' : needsToken ? 'Locked - need token' : 'Not available'}
@@ -157,7 +157,7 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
                       setShowAppsModal(false);
                       setShowEnrollment(true);
                     }}
-                    className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                    className="w-full bg-primary text-white py-3 px-4 rounded-lg hover:bg-primary-hover transition-colors text-sm font-medium"
                   >
                     Create Recognition Token
                   </button>

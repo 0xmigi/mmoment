@@ -422,7 +422,7 @@ export function QrRegistrationWizard({
               <button
                 onClick={handleWifiSubmit}
                 disabled={loading || !wifiCredentials.ssid.trim() || !wifiCredentials.password.trim()}
-                className="w-full bg-blue-600 text-white py-3 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-300"
+                className="w-full bg-primary text-white py-3 px-4 rounded-md hover:bg-primary-hover disabled:bg-gray-300"
               >
                 {loading ? 'Generating QR Code...' : 'Generate Setup QR Code'}
               </button>
@@ -442,7 +442,7 @@ export function QrRegistrationWizard({
 
             {/* Scanning indicator */}
             <div className="flex items-center justify-center gap-2 mb-4">
-              <div className="animate-pulse flex items-center gap-2 text-blue-600">
+              <div className="animate-pulse flex items-center gap-2 text-primary">
                 <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -477,8 +477,8 @@ export function QrRegistrationWizard({
         return (
           <div className="text-center py-8">
             <div className="animate-pulse">
-              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <div className="w-16 h-16 bg-primary-light rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
                 </svg>
               </div>
@@ -562,14 +562,14 @@ export function QrRegistrationWizard({
       {/* Progress indicator */}
       <div className="mb-6">
         <div className="flex items-center justify-between text-sm text-gray-500 mb-2">
-          <span className={currentStep === 'wifi' ? 'text-blue-600 font-medium' : ''}>1. WiFi</span>
-          <span className={currentStep === 'qr' || currentStep === 'scanning' ? 'text-blue-600 font-medium' : ''}>2. Scan</span>
-          <span className={currentStep === 'register' ? 'text-blue-600 font-medium' : ''}>3. Register</span>
+          <span className={currentStep === 'wifi' ? 'text-primary font-medium' : ''}>1. WiFi</span>
+          <span className={currentStep === 'qr' || currentStep === 'scanning' ? 'text-primary font-medium' : ''}>2. Scan</span>
+          <span className={currentStep === 'register' ? 'text-primary font-medium' : ''}>3. Register</span>
           <span className={currentStep === 'complete' ? 'text-green-600 font-medium' : ''}>4. Done</span>
         </div>
         <div className="w-full bg-gray-200 rounded-full h-2">
           <div
-            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+            className="bg-primary h-2 rounded-full transition-all duration-300"
             style={{
               width: `${
                 currentStep === 'wifi' ? '25%' :
@@ -588,8 +588,8 @@ export function QrRegistrationWizard({
 
       {/* Progress message */}
       {progressMessage && (
-        <div className="mt-4 p-3 bg-blue-50 rounded-md">
-          <p className="text-sm text-blue-800">{progressMessage}</p>
+        <div className="mt-4 p-3 bg-primary-light rounded-md">
+          <p className="text-sm text-primary">{progressMessage}</p>
         </div>
       )}
 

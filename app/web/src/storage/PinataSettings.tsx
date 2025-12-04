@@ -53,7 +53,7 @@ export function PinataSettings() {
       <div className="fixed bottom-4 right-4 z-50">
         <button
           onClick={() => setIsOpen(true)}
-          className="bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2 shadow-lg"
+          className="bg-primary hover:bg-primary text-white rounded-full p-2 shadow-lg"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z"></path>
@@ -126,7 +126,7 @@ export function PinataSettings() {
               type="text"
               value={jwt}
               onChange={(e) => setJwt(e.target.value)}
-              className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full p-2 border rounded focus:ring-2 focus:ring-primary focus:border-primary"
               placeholder="eyJhbGciOiJIUzI1NiIsInR5..."
             />
           </div>
@@ -139,7 +139,7 @@ export function PinataSettings() {
               type="text"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full p-2 border rounded focus:ring-2 focus:ring-primary focus:border-primary"
               placeholder="ba5bee0fc39a35e442b6..."
             />
           </div>
@@ -152,7 +152,7 @@ export function PinataSettings() {
               type="text"
               value={apiSecret}
               onChange={(e) => setApiSecret(e.target.value)}
-              className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full p-2 border rounded focus:ring-2 focus:ring-primary focus:border-primary"
               placeholder="your_api_secret_here..."
             />
           </div>
@@ -160,7 +160,7 @@ export function PinataSettings() {
           <div className="flex items-center justify-between">
             <button
               type="submit"
-              className="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+              className="bg-primary hover:bg-primary text-white font-medium py-2 px-4 rounded focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50"
             >
               Save Credentials
             </button>

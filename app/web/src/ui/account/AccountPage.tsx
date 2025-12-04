@@ -187,7 +187,7 @@ export function AccountPage() {
       isRecognition: true,
       status: facialEmbeddingStatus,
       icon: facialEmbeddingStatus.isLoading
-        ? <Loader2 className="w-3 h-3 mr-1 animate-spin text-blue-500" />
+        ? <Loader2 className="w-3 h-3 mr-1 animate-spin text-primary" />
         : facialEmbeddingStatus.hasEmbedding
         ? <CheckCircle className="w-3 h-3 mr-1 text-green-500" />
         : <AlertCircle className="w-3 h-3 mr-1 text-orange-500" />,
@@ -216,7 +216,7 @@ export function AccountPage() {
       isSessionKeychain: true,
       status: sessionChainStatus,
       icon: sessionChainStatus.isLoading
-        ? <Loader2 className="w-3 h-3 mr-1 animate-spin text-blue-500" />
+        ? <Loader2 className="w-3 h-3 mr-1 animate-spin text-primary" />
         : sessionChainStatus.hasSessionChain
         ? <CheckCircle className="w-3 h-3 mr-1 text-green-500" />
         : <AlertCircle className="w-3 h-3 mr-1 text-orange-500" />,
@@ -241,7 +241,7 @@ export function AccountPage() {
                 ? "bg-green-50 text-green-700"
                 : statusMessage.type === "error"
                 ? "bg-red-50 text-red-700"
-                : "bg-blue-50 text-blue-700"
+                : "bg-primary-light text-primary"
             }`}
           >
             <p>{statusMessage.message}</p>
@@ -368,7 +368,7 @@ export function AccountPage() {
               <div className="font-medium mb-3">Wallet Backup</div>
               <button
                 onClick={() => setShowBackupOptions(!showBackupOptions)}
-                className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors"
               >
                 <KeyRound className="w-4 h-4" />
                 Back up Wallet

@@ -60,7 +60,7 @@ function NotificationDisplay() {
           className={`p-4 rounded-lg shadow-lg flex justify-between items-start ${
             notification.type === 'success' ? 'bg-green-100 text-green-800' : 
             notification.type === 'error' ? 'bg-red-100 text-red-800' : 
-            'bg-blue-100 text-blue-800'
+            'bg-primary-light text-primary'
           }`}
         >
           <p>{notification.message}</p>

@@ -210,7 +210,7 @@ export function PipeStorageSection() {
               ? "bg-green-50 text-green-700 border border-green-200"
               : statusMessage.type === "error"
               ? "bg-red-50 text-red-700 border border-red-200"
-              : "bg-blue-50 text-blue-700 border border-blue-200"
+              : "bg-primary-light text-primary border border-primary-light"
           }`}
         >
           <div className="flex items-center gap-2">
@@ -237,7 +237,7 @@ export function PipeStorageSection() {
             </div>
             <div className="w-full bg-gray-200 rounded-full h-2">
               <div
-                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                className="bg-primary h-2 rounded-full transition-all duration-300"
                 style={{ width: `${Math.min(storageUsedPercent, 100)}%` }}
               />
             </div>
@@ -256,7 +256,7 @@ export function PipeStorageSection() {
             </div>
             <div className="bg-white rounded-lg p-3 border">
               <div className="flex items-center gap-2 mb-1">
-                <HardDrive className="w-4 h-4 text-blue-600" />
+                <HardDrive className="w-4 h-4 text-primary" />
                 <span className="text-sm font-medium">PIPE</span>
               </div>
               <div className="text-lg font-semibold">
@@ -303,7 +303,7 @@ export function PipeStorageSection() {
                     disabled={purchasing}
                     className={`w-full p-3 rounded-lg border text-left transition-all ${
                       option.recommended
-                        ? "border-blue-200 bg-blue-50 hover:bg-blue-100"
+                        ? "border-primary-light bg-primary-light hover:bg-primary-muted"
                         : "border-gray-200 bg-white hover:bg-gray-50"
                     } ${purchasing ? "opacity-50 cursor-not-allowed" : ""}`}
                   >
@@ -312,7 +312,7 @@ export function PipeStorageSection() {
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{option.label}</span>
                           {option.recommended && (
-                            <span className="px-2 py-0.5 bg-blue-600 text-white text-xs rounded-full">
+                            <span className="px-2 py-0.5 bg-primary text-white text-xs rounded-full">
                               Recommended
                             </span>
                           )}
@@ -337,8 +337,8 @@ export function PipeStorageSection() {
           )}
 
           {/* Info Text */}
-          <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-            <p className="text-xs text-blue-700">
+          <div className="mt-4 p-3 bg-primary-light rounded-lg border border-primary-light">
+            <p className="text-xs text-primary">
               💡 Your photos are stored in your own Pipe account with
               client-side encryption. Only you can access them.
             </p>

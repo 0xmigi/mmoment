@@ -354,7 +354,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       case 'auto_check_out':
         return <User className={`${iconClass} ${isOverlay ? '' : 'text-orange-500'}`} />;
       case 'face_enrolled':
-        return <User className={`${iconClass} ${isOverlay ? '' : 'text-blue-500'}`} />;
+        return <User className={`${iconClass} ${isOverlay ? '' : 'text-primary'}`} />;
       case 'cv_activity':
         return <Signal className={`${iconClass} ${isOverlay ? '' : 'text-purple-500'}`} />;
       default:
@@ -431,7 +431,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                           e.stopPropagation();
                           handleProfileClick(event);
                         }}
-                        className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
+                        className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary-muted transition-all"
                       >
                         {event.user.pfpUrl ? (
                           <img 
@@ -461,7 +461,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                             handleProfileClick(event);
                           }}
                           className={`font-medium cursor-pointer transition-colors ${
-                            mobileOverlay ? 'hover:text-gray-300' : 'hover:text-blue-600'
+                            mobileOverlay ? 'hover:text-gray-300' : 'hover:text-primary'
                           }`}
                         >
                           {event.user.displayName || event.user.username || 

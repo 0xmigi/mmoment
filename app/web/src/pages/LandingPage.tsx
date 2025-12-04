@@ -1,42 +1,9 @@
 import { useNavigate } from 'react-router-dom';
 import Logo from '../ui/common/Logo';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { useState, useEffect } from 'react';
-import { AuthModal } from '../auth';
-
-function GetStartedButton() {
-    const { primaryWallet } = useDynamicContext();
-    const [showAuthModal, setShowAuthModal] = useState(false);
-    const navigate = useNavigate();
-
-    const handleClick = () => {
-        if (primaryWallet?.address) {
-            navigate('/app');
-        } else {
-            setShowAuthModal(true);
-        }
-    };
-
-    return (
-        <>
-            <button
-                onClick={handleClick}
-                className="px-6 py-2 bg-gray-100 text-black rounded-lg hover:bg-gray-200 transition-colors"
-            >
-                {primaryWallet?.address ? 'Open App' : 'Get Started'}
-            </button>
-            <AuthModal 
-                isOpen={showAuthModal} 
-                onClose={() => {
-                    setShowAuthModal(false);
-                    if (primaryWallet?.address) {
-                        navigate('/app');
-                    }
-                }} 
-            />
-        </>
-    );
-}
+import { useEffect } from 'react';
+import Navbar from '../ui/layout/Navbar';
+import Footer from '../ui/layout/Footer';
 
 export default function LandingPage() {
     const { primaryWallet } = useDynamicContext();
@@ -51,11 +18,7 @@ export default function LandingPage() {
     return (
         <div className="bg-white min-h-screen overflow-auto">
             {/* Navigation */}
-            <div className="fixed top-0 right-0 p-4 z-50">
-                <div className="flex items-center gap-4">
-                    <GetStartedButton />
-                </div>
-            </div>
+            <Navbar />
 
             {/* Main Content */}
             <main>
@@ -91,7 +54,7 @@ export default function LandingPage() {
                                         <span>Live content hubs</span>
                                     </div>
                                     <div className="flex items-center justify-center lg:justify-start gap-2 text-sm sm:text-base text-gray-600">
-                                        <div className="w-2 h-2 bg-pink-300 rounded-full" />
+                                        <div className="w-2 h-2 bg-accent rounded-full" />
                                         <span>Secured by Solana</span>
                                     </div>
                                 </div>
@@ -100,24 +63,29 @@ export default function LandingPage() {
                     </div>
                 </section>
 
-                {/* Grid Pattern Section */}
-                <section className="bg-gray-50 py-16 sm:py-24 relative mt-0 grid-pattern">
-                    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-                        <h3 className="text-2xl sm:text-4xl font-bold text-center mb-3">Learn more?</h3>
-                        <p className="text-sm sm:text-base text-gray-600 text-center mb-8 sm:mb-12 max-w-2xl mx-auto">
-                            Read the blog post that inspired our project
-                        </p>
-                        <div className="flex justify-center">
-                            <button
-                                onClick={() => window.open('https://paragraph.xyz/@0xmigi.eth/more-physical-and-more-social', "_blank")}
-                                className="px-6 sm:px-8 py-2.5 sm:py-3 bg-black text-white text-sm sm:text-base rounded-lg hover:bg-gray-800 transition-colors"
-                            >
-                                link to post →
-                            </button>
+                {/* Grid Pattern Section - fades to black via CSS */}
+                <section className="relative mt-0 grid-pattern pb-24">
+                    <div className="relative z-10 py-16 sm:py-24">
+                        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+                            <h3 className="text-2xl sm:text-4xl font-bold text-center mb-3">Learn more?</h3>
+                            <p className="text-sm sm:text-base text-gray-600 text-center mb-8 sm:mb-12 max-w-2xl mx-auto">
+                                Read the blog post that inspired our project
+                            </p>
+                            <div className="flex justify-center">
+                                <button
+                                    onClick={() => window.open('https://paragraph.xyz/@0xmigi.eth/more-physical-and-more-social', "_blank")}
+                                    className="px-6 sm:px-8 py-2.5 sm:py-3 bg-gray-100 text-gray-700 border-2 border-accent text-sm sm:text-base rounded-lg hover:bg-gray-200 transition-colors"
+                                >
+                                    Read the post →
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </section>
             </main>
+
+            {/* Footer - no top padding since it merges with section above */}
+            <Footer />
         </div>
     );
 }
