@@ -41,6 +41,29 @@ export interface TimelineUser {
   provider?: string;
 }
 
+/** CV activity result for a single participant */
+export interface CVActivityResult {
+  wallet_address: string;
+  display_name?: string;
+  rank: number;
+  stats: {
+    reps?: number;
+    [key: string]: unknown;
+  };
+}
+
+/** CV activity metadata (competition results, etc.) */
+export interface CVActivityMetadata {
+  app_name: string;
+  duration_seconds?: number;
+  participant_count: number;
+  results: CVActivityResult[];
+  user_stats: {
+    reps?: number;
+    [key: string]: unknown;
+  };
+}
+
 export interface TimelineEvent {
   id: string;
   type: TimelineEventType;
@@ -49,6 +72,8 @@ export interface TimelineEvent {
   transactionId?: string;
   mediaUrl?: string;
   cameraId?: string;
+  /** CV activity metadata (only present for cv_activity events) */
+  cvActivity?: CVActivityMetadata;
 }
   
 export interface TimelineState {

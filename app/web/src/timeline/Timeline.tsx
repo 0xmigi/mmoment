@@ -5,7 +5,7 @@ import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { ProfileModal } from '../profile/ProfileModal';
 import MediaViewer from '../media/MediaViewer';
 import { timelineService } from './timeline-service';
-import { TimelineEvent, TimelineEventType, TimelineUser } from './timeline-types';
+import { TimelineEvent, TimelineEventType, TimelineUser, CVActivityMetadata } from './timeline-types';
 import { IPFSMedia } from '../storage/ipfs/ipfs-service';
 import { CONFIG } from '../core/config';
 
@@ -46,8 +46,35 @@ const getMobileTimelineCount = () => {
   return Math.round(minItems + (maxItems - minItems) * curvedRatio);
 };
 
+// Format CV activity text based on metadata
+const formatCVActivityText = (cvActivity?: CVActivityMetadata): string => {
+  if (!cvActivity) {
+    return 'completed a CV activity';
+  }
+
+  const { app_name, user_stats, results, participant_count } = cvActivity;
+  const reps = user_stats?.reps ?? 0;
+
+  // Format app name nicely (pushup -> push-ups)
+  const appDisplayName = app_name === 'pushup' ? 'push-ups' :
+                         app_name === 'pullup' ? 'pull-ups' :
+                         app_name === 'squat' ? 'squats' : app_name;
+
+  // Single participant - just show their count
+  if (participant_count === 1) {
+    return `completed ${reps} ${appDisplayName}`;
+  }
+
+  // Multiple participants - show rank and count
+  const userResult = results?.find(r => r.stats?.reps === reps);
+  const rank = userResult?.rank ?? 1;
+  const rankSuffix = rank === 1 ? 'st' : rank === 2 ? 'nd' : rank === 3 ? 'rd' : 'th';
+
+  return `finished ${rank}${rankSuffix} with ${reps} ${appDisplayName}`;
+};
+
 // Add this function before the Timeline component
-const getEventText = (type: TimelineEventType): string => {
+const getEventText = (type: TimelineEventType, cvActivity?: CVActivityMetadata): string => {
   switch (type) {
     case 'photo_captured':
       return 'took a photo';
@@ -68,7 +95,7 @@ const getEventText = (type: TimelineEventType): string => {
     case 'face_enrolled':
       return 'enrolled their face';
     case 'cv_activity':
-      return 'completed a CV activity';
+      return formatCVActivityText(cvActivity);
     case 'other':
       return 'performed an action';
     default:
@@ -468,7 +495,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                            `${event.user.address.slice(0, 6)}...${event.user.address.slice(-4)}`}
                         </span>
                         {' '}
-                        {getEventText(event.type)}
+                        {getEventText(event.type, event.cvActivity)}
                       </p>
                       <p className={`${mobileOverlay ? 'text-[10px]' : 'text-xs'} ${mobileOverlay ? 'text-gray-300' : 'text-gray-500'}`}>
                         {showAbsoluteTime

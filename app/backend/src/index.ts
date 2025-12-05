@@ -2213,7 +2213,8 @@ app.post("/api/session/activity", async (req, res) => {
     const {
       sessionId, cameraId, userPubkey, timestamp, activityType,
       encryptedContent, nonce, accessGrants,
-      transactionSignature, displayName, username
+      transactionSignature, displayName, username,
+      cvActivityMeta  // Optional: CV activity metadata for timeline display
     } = req.body;
 
     // Validate required fields (common to all activities)
@@ -2393,6 +2394,12 @@ app.post("/api/session/activity", async (req, res) => {
     if (transactionSignature) {
       timelineEvent.transactionId = transactionSignature;
       console.log(`   📝 Including transaction signature: ${transactionSignature.slice(0, 8)}...`);
+    }
+
+    // Include CV activity metadata for timeline display
+    if (cvActivityMeta && activityType === 50) {
+      timelineEvent.cvActivity = cvActivityMeta;
+      console.log(`   🏋️ Including CV activity meta: ${cvActivityMeta.app_name}, ${cvActivityMeta.participant_count} participants`);
     }
 
     // Broadcast to camera room

@@ -160,6 +160,7 @@ class TimelineActivityService:
         activity_content: Dict[str, Any],
         activity_type: int,
         transaction_signature: Optional[str] = None,
+        cv_activity_meta: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
         Internal method to encrypt and buffer an activity.
@@ -169,6 +170,7 @@ class TimelineActivityService:
             activity_content: Activity data to encrypt
             activity_type: Activity type enum
             transaction_signature: Optional Solana tx signature for Solscan link
+            cv_activity_meta: Optional CV activity metadata for timeline display
 
         Returns:
             True if buffered successfully
@@ -205,6 +207,7 @@ class TimelineActivityService:
                 user_pubkey=wallet_address,
                 encrypted_activity=encrypted,
                 transaction_signature=transaction_signature,
+                cv_activity_meta=cv_activity_meta,
             )
 
             logger.info(
@@ -506,6 +509,95 @@ class TimelineActivityService:
             )
 
         return success
+
+    def buffer_cv_activity(
+        self,
+        app_name: str,
+        competitors: List[Dict[str, Any]],
+        duration_seconds: Optional[float] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Buffer a CV app activity (competition result, exercise completion, etc.)
+
+        Called when a CV app session completes.
+
+        Args:
+            app_name: Name of the CV app (e.g., 'pushup', 'pullup', 'squat')
+            competitors: List of competitor results with stats
+                [{'wallet_address': str, 'display_name': str, 'stats': {...}}, ...]
+            duration_seconds: Duration of the activity/competition
+            metadata: Optional additional metadata
+
+        Returns:
+            True if buffered successfully
+        """
+        metadata = metadata or {}
+
+        # Sort competitors by reps (descending) to determine rankings
+        sorted_competitors = sorted(
+            competitors,
+            key=lambda c: c.get("stats", {}).get("reps", 0),
+            reverse=True,
+        )
+
+        # Build results for each participant
+        results = []
+        for rank, comp in enumerate(sorted_competitors, 1):
+            results.append({
+                "wallet_address": comp.get("wallet_address"),
+                "display_name": comp.get("display_name"),
+                "rank": rank,
+                "stats": comp.get("stats", {}),
+            })
+
+        # Create activity for each participant
+        success_count = 0
+        for comp in competitors:
+            wallet_address = comp.get("wallet_address")
+            if not wallet_address:
+                continue
+
+            user_stats = comp.get("stats", {})
+
+            activity_content = {
+                "type": "cv_activity",
+                "app_name": app_name,
+                "camera_id": self._camera_id,
+                "user": wallet_address,
+                "timestamp": metadata.get("timestamp", int(time.time() * 1000)),
+                "duration_seconds": duration_seconds,
+                "results": results,  # All participants' results
+                "user_stats": user_stats,  # This user's stats
+                "participant_count": len(competitors),
+            }
+
+            # CV activity metadata for timeline display (unencrypted summary)
+            cv_activity_meta = {
+                "app_name": app_name,
+                "duration_seconds": duration_seconds,
+                "participant_count": len(competitors),
+                "results": results,
+                "user_stats": user_stats,
+            }
+
+            success = self._buffer_activity(
+                wallet_address,
+                activity_content,
+                ACTIVITY_TYPE_CV_APP,
+                cv_activity_meta=cv_activity_meta,
+            )
+
+            if success:
+                success_count += 1
+
+        if success_count > 0:
+            self._buffered_cv_activities = getattr(self, "_buffered_cv_activities", 0) + 1
+            logger.info(
+                f"🏋️ CV activity '{app_name}' buffered for {success_count}/{len(competitors)} participants"
+            )
+
+        return success_count > 0
 
     def get_status(self) -> Dict[str, Any]:
         """Get service status and statistics."""

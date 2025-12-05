@@ -2878,7 +2878,7 @@ def register_routes(app):
 
     @app.route("/api/apps/competition/end", methods=["POST"])
     def api_apps_competition_end():
-        """End the current competition"""
+        """End the current competition and buffer results to timeline"""
         services = get_services()
         if "app_manager" not in services:
             return jsonify(
@@ -2895,7 +2895,38 @@ def register_routes(app):
             ), 400
 
         try:
-            result = app_manager.active_app.end_competition()
+            # Get competition info before ending
+            active_app = app_manager.active_app
+            app_name = getattr(active_app, "name", active_app.__class__.__name__.lower().replace("app", ""))
+            start_time = getattr(active_app, "start_time", None)
+
+            # End the competition
+            result = active_app.end_competition()
+
+            # Buffer CV activity to timeline for each participant
+            competitors = result.get("competitors", [])
+            if competitors:
+                try:
+                    import time
+                    from services.timeline_activity_service import (
+                        get_timeline_activity_service,
+                    )
+
+                    # Calculate duration
+                    duration_seconds = None
+                    if start_time:
+                        duration_seconds = time.time() - start_time
+
+                    timeline_service = get_timeline_activity_service()
+                    timeline_service.buffer_cv_activity(
+                        app_name=app_name,
+                        competitors=competitors,
+                        duration_seconds=duration_seconds,
+                    )
+                    logger.info(f"CV activity buffered for {len(competitors)} competitors")
+                except Exception as timeline_err:
+                    logger.warning(f"Failed to buffer CV activity to timeline: {timeline_err}")
+
             return jsonify({"success": True, "result": result})
         except Exception as e:
             logger.error(f"Failed to end competition: {e}", exc_info=True)

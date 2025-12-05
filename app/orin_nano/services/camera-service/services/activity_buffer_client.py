@@ -134,7 +134,8 @@ class ActivityBufferClient:
         camera_id: str,
         user_pubkey: str,
         encrypted_activity: Dict[str, Any],
-        transaction_signature: Optional[str] = None
+        transaction_signature: Optional[str] = None,
+        cv_activity_meta: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
         Queue an encrypted activity for buffering.
@@ -153,6 +154,11 @@ class ActivityBufferClient:
                 - activityType: activity type enum
                 - timestamp: millisecond timestamp
             transaction_signature: Optional Solana transaction signature for Solscan link
+            cv_activity_meta: Optional CV activity metadata for timeline display
+                - app_name: Name of the CV app (pushup, pullup, etc.)
+                - results: Competition results with rankings
+                - user_stats: This user's stats
+                - participant_count: Number of participants
 
         Returns:
             True if queued successfully
@@ -173,6 +179,10 @@ class ActivityBufferClient:
             # Include transaction signature if provided (for check_in/check_out Solscan links)
             if transaction_signature:
                 activity['transactionSignature'] = transaction_signature
+
+            # Include CV activity metadata for timeline display (unencrypted summary)
+            if cv_activity_meta:
+                activity['cvActivityMeta'] = cv_activity_meta
 
             # Queue for async sending
             self._queue.put(activity)
