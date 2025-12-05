@@ -216,7 +216,7 @@ async function processAccessKeyForUser(userPubkey: string): Promise<boolean> {
       );
 
       if (dbUpdated) {
-        console.log(`   �� Updated timeline event with transaction ID in database`);
+        console.log(`   ✅ Updated timeline event with transaction ID in database`);
       } else {
         console.log(`   ⚠️ No matching check_out event found in database (may have been cleared)`);
       }
