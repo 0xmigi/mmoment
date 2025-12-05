@@ -12,6 +12,7 @@ import {
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { isSolanaWallet } from "@dynamic-labs/solana";
 import { useConnection } from "@solana/wallet-adapter-react";
+import { CONFIG } from "../../core/config";
 import {
   HardDrive,
   Coins,
@@ -60,8 +61,7 @@ export function PipeStorageSection() {
       console.log("📊 Fetching main Pipe account status...");
 
       // Fetch status from backend for the main system account
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
-      const response = await fetch(`${backendUrl}/api/pipe/account/status`);
+      const response = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/account/status`);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch Pipe status: ${response.status}`);

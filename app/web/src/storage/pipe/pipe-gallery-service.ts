@@ -1,3 +1,5 @@
+import { CONFIG } from '../../core/config';
+
 export interface PipeFile {
   id: string;
   name: string;
@@ -34,9 +36,8 @@ class PipeGalleryService {
   private socket: any = null;
 
   constructor() {
-    // Use the same backend URL that's running on the local network
-    this.backendUrl =
-      import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
+    // Use CONFIG.BACKEND_URL which properly falls back to Railway URL in production
+    this.backendUrl = CONFIG.BACKEND_URL;
 
     // Initialize WebSocket connection for real-time gallery updates
     this.initializeWebSocket();
