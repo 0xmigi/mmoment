@@ -197,6 +197,28 @@ async function processAccessKeyForUser(userPubkey: string): Promise<boolean> {
     console.log(`   ✅ Stored ${keys.length} access key(s) for user ${userPubkey.slice(0, 8)}...`);
     console.log(`      Tx: ${signature.slice(0, 8)}...`);
 
+    // Update the check-out timeline event with the transaction ID
+    // Use the most recent key's timestamp to find the matching event
+    const mostRecentKey = keys.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
+    try {
+      // Call the local PATCH endpoint to update the timeline event
+      const updateResponse = await fetch('http://localhost:3001/api/session/activity/transaction', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userPubkey,
+          timestamp: mostRecentKey.timestamp,
+          transactionId: signature,
+          eventType: 'check_out'
+        })
+      });
+      if (updateResponse.ok) {
+        console.log(`   📝 Updated timeline event with transaction ID`);
+      }
+    } catch (updateError) {
+      console.log(`   ⚠️ Could not update timeline event (non-critical):`, updateError);
+    }
+
     // Clear processed keys
     pendingKeys.delete(userPubkey);
 

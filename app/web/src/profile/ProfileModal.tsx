@@ -1,5 +1,6 @@
 import { Dialog } from '@headlessui/react';
-import { X, ExternalLink } from 'lucide-react';
+import { X, ExternalLink, Trophy, Users, Clock, Gift } from 'lucide-react';
+import { CVActivityMetadata } from '../timeline/timeline-types';
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -25,6 +26,13 @@ interface ProfileModalProps {
     timestamp: number;
     transactionId?: string;
     mediaUrl?: string;
+    cvActivity?: CVActivityMetadata;
+    /** Future: Prize/bounty earned for completing this action */
+    prize?: {
+      amount: number;
+      currency: string;
+      from?: string; // Who issued the prize
+    };
   };
 }
 
@@ -66,6 +74,37 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
       hour12: true
     }).format(date);
   };
+
+  // Format app name nicely (pushup -> Push-ups)
+  const formatAppName = (appName: string): string => {
+    const mapping: Record<string, string> = {
+      'pushup': 'Push-ups',
+      'pullup': 'Pull-ups',
+      'squat': 'Squats',
+      'situp': 'Sit-ups',
+      'jumping_jack': 'Jumping Jacks',
+    };
+    return mapping[appName] || appName.charAt(0).toUpperCase() + appName.slice(1).replace(/_/g, ' ');
+  };
+
+  // Get rank suffix (1st, 2nd, 3rd, etc.)
+  const getRankSuffix = (rank: number): string => {
+    if (rank === 1) return 'st';
+    if (rank === 2) return 'nd';
+    if (rank === 3) return 'rd';
+    return 'th';
+  };
+
+  // Get rank color for styling
+  const getRankColor = (rank: number): string => {
+    if (rank === 1) return 'text-yellow-600 bg-yellow-50';
+    if (rank === 2) return 'text-gray-500 bg-gray-100';
+    if (rank === 3) return 'text-amber-700 bg-amber-50';
+    return 'text-gray-600 bg-gray-50';
+  };
+
+  // Check if this is a CV activity
+  const isCVActivity = action?.type === 'cv_activity' && action?.cvActivity;
 
 
   return (
@@ -178,29 +217,84 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
                 <div className="text-xs font-medium text-gray-500">Action</div>
                 <div className="bg-gray-50 px-2 py-2 rounded-lg">
                   <div className="space-y-2">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900 capitalize">
-                        {action.type.replace(/_/g, ' ')}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {formatDate(action.timestamp)}
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between pt-1 border-t border-gray-200/75">
-                      <div className="text-[10px] font-mono text-gray-500">
-                        {action.transactionId ? `${action.transactionId.slice(0, 8)}...${action.transactionId.slice(-8)}` : 'Processing...'}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {action.transactionId && (
-                          <button
-                            onClick={handleExplorerClick}
-                            className="text-xs text-primary hover:text-primary-hover transition-colors flex items-center gap-1"
-                          >
-                            View Tx <ExternalLink className="w-3 h-3" />
-                          </button>
+                    {/* CV Activity - Rich Display */}
+                    {isCVActivity && action.cvActivity ? (
+                      <>
+                        {/* Main activity summary */}
+                        <div className="flex items-start gap-2">
+                          <div className="flex-1">
+                            <div className="text-sm font-medium text-gray-900">
+                              Completed {action.cvActivity.user_stats?.reps ?? 0} {formatAppName(action.cvActivity.app_name)}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {formatDate(action.timestamp)}
+                            </div>
+                          </div>
+                          {/* Rank badge for competitions */}
+                          {action.cvActivity.participant_count > 1 && (
+                            <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getRankColor(action.cvActivity.results?.find(r => r.stats?.reps === action.cvActivity?.user_stats?.reps)?.rank ?? 1)}`}>
+                              <Trophy className="w-3 h-3" />
+                              {(() => {
+                                const rank = action.cvActivity.results?.find(r => r.stats?.reps === action.cvActivity?.user_stats?.reps)?.rank ?? 1;
+                                return `${rank}${getRankSuffix(rank)}`;
+                              })()}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Competition details */}
+                        {action.cvActivity.participant_count > 1 && (
+                          <div className="flex items-center gap-3 text-xs text-gray-500 pt-1">
+                            <div className="flex items-center gap-1">
+                              <Users className="w-3 h-3" />
+                              <span>{action.cvActivity.participant_count} participants</span>
+                            </div>
+                            {action.cvActivity.duration_seconds && (
+                              <div className="flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                <span>{Math.round(action.cvActivity.duration_seconds)}s</span>
+                              </div>
+                            )}
+                          </div>
                         )}
+
+                        {/* Prize/Bounty (future) */}
+                        {action.prize && (
+                          <div className="flex items-center gap-2 pt-1 text-xs">
+                            <Gift className="w-3 h-3 text-green-600" />
+                            <span className="text-green-700 font-medium">
+                              Earned {action.prize.amount} {action.prize.currency}
+                              {action.prize.from && <span className="text-gray-500"> from {action.prize.from}</span>}
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      /* Standard action display for non-CV activities */
+                      <div>
+                        <div className="text-sm font-medium text-gray-900 capitalize">
+                          {action.type.replace(/_/g, ' ')}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {formatDate(action.timestamp)}
+                        </div>
                       </div>
-                    </div>
+                    )}
+
+                    {/* Transaction link - only show for on-chain actions (check-outs, financialized actions) */}
+                    {(action.type === 'check_out' || action.type === 'auto_check_out' || action.prize) && action.transactionId && (
+                      <div className="flex items-center justify-between pt-1 border-t border-gray-200/75">
+                        <div className="text-[10px] font-mono text-gray-500">
+                          {action.transactionId.slice(0, 8)}...{action.transactionId.slice(-8)}
+                        </div>
+                        <button
+                          onClick={handleExplorerClick}
+                          className="text-xs text-primary hover:text-primary-hover transition-colors flex items-center gap-1"
+                        >
+                          View Tx <ExternalLink className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

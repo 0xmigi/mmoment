@@ -47,6 +47,7 @@ export interface SessionActivityBuffer {
   nonce: Buffer;             // 12-byte nonce
   accessGrants: Buffer;      // JSON array of encrypted keys, serialized
   createdAt: Date;
+  metadata?: string;         // JSON string for activity-specific data (e.g., CV activity results)
 }
 
 // Initialize database with tables
@@ -113,9 +114,18 @@ export async function initializeDatabase(dbPath: string = './mmoment.db'): Promi
             encrypted_content BLOB NOT NULL,
             nonce BLOB NOT NULL,
             access_grants BLOB NOT NULL,
-            created_at INTEGER NOT NULL
+            created_at INTEGER NOT NULL,
+            metadata TEXT
           )
         `);
+
+        // Migration: Add metadata column if it doesn't exist (for existing databases)
+        try {
+          await runQuery(`ALTER TABLE session_activity_buffers ADD COLUMN metadata TEXT`);
+          console.log('📦 Added metadata column to session_activity_buffers');
+        } catch {
+          // Column already exists, ignore
+        }
 
         // Create indexes for session_activity_buffers
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_session_buffers_session ON session_activity_buffers(session_id)`);
@@ -604,8 +614,8 @@ export async function saveSessionActivity(activity: SessionActivityBuffer): Prom
 
     const stmt = db.prepare(`
       INSERT INTO session_activity_buffers
-      (session_id, camera_id, user_pubkey, timestamp, activity_type, encrypted_content, nonce, access_grants, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (session_id, camera_id, user_pubkey, timestamp, activity_type, encrypted_content, nonce, access_grants, created_at, metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -618,6 +628,7 @@ export async function saveSessionActivity(activity: SessionActivityBuffer): Prom
       activity.nonce,
       activity.accessGrants,
       activity.createdAt.getTime(),
+      activity.metadata || null,
       (err: Error | null) => {
         if (err) {
           reject(err);
@@ -986,6 +997,19 @@ export interface SessionTimelineEvent {
     nonce: string;  // base64
     accessGrants: string;  // JSON string
   };
+  // Activity-specific metadata (e.g., CV activity results)
+  cvActivity?: {
+    app_name: string;
+    duration_seconds?: number;
+    participant_count: number;
+    results: Array<{
+      wallet_address: string;
+      display_name?: string;
+      rank: number;
+      stats: { reps?: number; [key: string]: unknown };
+    }>;
+    user_stats: { reps?: number; [key: string]: unknown };
+  };
 }
 
 // Get all events at a camera during a session's time window
@@ -1028,20 +1052,34 @@ export async function getSessionTimelineEvents(
         };
 
         // Convert all activities to timeline events
-        const events: SessionTimelineEvent[] = rows.map((row: any) => ({
-          id: `activity-${row.session_id}-${row.timestamp}`,
-          type: activityTypeToEventType[row.activity_type] || 'unknown',
-          userAddress: row.user_pubkey,
-          timestamp: row.timestamp,
-          cameraId: row.camera_id,
-          encrypted: {
-            sessionId: row.session_id,
-            activityType: row.activity_type,
-            encryptedContent: row.encrypted_content.toString('base64'),
-            nonce: row.nonce.toString('base64'),
-            accessGrants: row.access_grants.toString('utf-8')
+        const events: SessionTimelineEvent[] = rows.map((row: any) => {
+          // Parse metadata if present (contains cvActivity for CV activities)
+          let parsedMetadata: { cvActivity?: SessionTimelineEvent['cvActivity'] } = {};
+          if (row.metadata) {
+            try {
+              parsedMetadata = JSON.parse(row.metadata);
+            } catch {
+              // Ignore parse errors
+            }
           }
-        }));
+
+          return {
+            id: `activity-${row.session_id}-${row.timestamp}`,
+            type: activityTypeToEventType[row.activity_type] || 'unknown',
+            userAddress: row.user_pubkey,
+            timestamp: row.timestamp,
+            cameraId: row.camera_id,
+            encrypted: {
+              sessionId: row.session_id,
+              activityType: row.activity_type,
+              encryptedContent: row.encrypted_content.toString('base64'),
+              nonce: row.nonce.toString('base64'),
+              accessGrants: row.access_grants.toString('utf-8')
+            },
+            // Include CV activity metadata if present
+            ...(parsedMetadata.cvActivity && { cvActivity: parsedMetadata.cvActivity })
+          };
+        });
 
         resolve(events);
       }

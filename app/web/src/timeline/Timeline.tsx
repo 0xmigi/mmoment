@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState, forwardRef, useRef, useCallback, useMemo } from 'react';
-import { Camera, Video, Power, User, Radio, Signal } from 'lucide-react';
+import { Camera, Video, Power, User, Radio, Activity } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { ProfileModal } from '../profile/ProfileModal';
 import MediaViewer from '../media/MediaViewer';
@@ -383,7 +383,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       case 'face_enrolled':
         return <User className={`${iconClass} ${isOverlay ? '' : 'text-primary'}`} />;
       case 'cv_activity':
-        return <Signal className={`${iconClass} ${isOverlay ? '' : 'text-purple-500'}`} />;
+        return <Activity className={`${iconClass} ${isOverlay ? '' : 'text-purple-500'}`} />;
       default:
         return <User className={iconClass} />;
     }
@@ -608,7 +608,8 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
             type: selectedEvent.type,
             timestamp: selectedEvent.timestamp,
             transactionId: selectedEvent.transactionId,
-            mediaUrl: selectedEvent.mediaUrl
+            mediaUrl: selectedEvent.mediaUrl,
+            cvActivity: selectedEvent.cvActivity
           }}
         />
       )}

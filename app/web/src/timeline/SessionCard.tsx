@@ -33,6 +33,19 @@ interface SessionTimelineEventFromAPI {
     nonce: string;
     accessGrants: string;
   };
+  // CV activity metadata (for pushups, squats, etc.)
+  cvActivity?: {
+    app_name: string;
+    duration_seconds?: number;
+    participant_count: number;
+    results: Array<{
+      wallet_address: string;
+      display_name?: string;
+      rank: number;
+      stats: { reps?: number; [key: string]: unknown };
+    }>;
+    user_stats: { reps?: number; [key: string]: unknown };
+  };
 }
 
 /**
@@ -124,6 +137,8 @@ function apiEventToTimelineEvent(event: SessionTimelineEventFromAPI): TimelineEv
     },
     timestamp: event.timestamp,
     cameraId: event.cameraId,
+    // Include CV activity metadata if present
+    ...(event.cvActivity && { cvActivity: event.cvActivity }),
   };
 }
 

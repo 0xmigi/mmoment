@@ -206,6 +206,18 @@ class TimelineService {
         this.events.forEach(event => this.notifyListeners(event));
       });
 
+      // Handle timeline event updates (e.g., transaction ID added after cron job writes to chain)
+      this.socket.on('timelineEventUpdate', (update: { id: string; transactionId?: string }) => {
+        console.log('[Timeline] Received event update:', update);
+        const existingEvent = this.events.find(e => e.id === update.id);
+        if (existingEvent && update.transactionId) {
+          existingEvent.transactionId = update.transactionId;
+          console.log(`[Timeline] Updated event ${update.id} with transaction ID: ${update.transactionId.slice(0, 8)}...`);
+          // Notify listeners of the updated event
+          this.notifyListeners(existingEvent);
+        }
+      });
+
       this.socket.on('disconnect', () => {
         this.isConnected = false;
         console.log('Disconnected from timeline service');

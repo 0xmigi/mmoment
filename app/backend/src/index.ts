@@ -1517,6 +1517,7 @@ interface TimelineEvent {
   };
   timestamp: number;
   cameraId?: string;
+  transactionId?: string;
 }
 
 // In-memory cache of timeline events
@@ -2354,7 +2355,7 @@ app.post("/api/session/activity", async (req, res) => {
     const nonceBuffer = Buffer.from(nonce, 'base64');
     const accessGrantsBuffer = Buffer.from(JSON.stringify(accessGrants), 'utf-8');
 
-    // Save to database
+    // Save to database (include metadata for CV activities)
     const activity: SessionActivityBuffer = {
       sessionId,
       cameraId,
@@ -2364,7 +2365,8 @@ app.post("/api/session/activity", async (req, res) => {
       encryptedContent: encryptedContentBuffer,
       nonce: nonceBuffer,
       accessGrants: accessGrantsBuffer,
-      createdAt: new Date()
+      createdAt: new Date(),
+      metadata: cvActivityMeta ? JSON.stringify({ cvActivity: cvActivityMeta }) : undefined
     };
 
     await saveSessionActivity(activity);
@@ -2425,6 +2427,62 @@ app.post("/api/session/activity", async (req, res) => {
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to buffer activity'
+    });
+  }
+});
+
+// Update a timeline event with a transaction ID (called by cron job after UserSessionChain write)
+app.patch("/api/session/activity/transaction", async (req, res) => {
+  try {
+    const { userPubkey, timestamp, transactionId, eventType } = req.body;
+
+    if (!userPubkey || !timestamp || !transactionId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: userPubkey, timestamp, transactionId'
+      });
+    }
+
+    console.log(`📝 Updating timeline event with transaction ID:`);
+    console.log(`   User: ${userPubkey.slice(0, 8)}...`);
+    console.log(`   Timestamp: ${timestamp}`);
+    console.log(`   Transaction: ${transactionId.slice(0, 8)}...`);
+    console.log(`   Event type: ${eventType || 'check_out'}`);
+
+    // Find the timeline event and get its cameraId
+    const matchingEvent = timelineEvents.find(e =>
+      e.user?.address === userPubkey &&
+      Math.abs(e.timestamp - timestamp) < 60000 && // Within 1 minute
+      (eventType ? e.type === eventType : e.type === 'check_out' || e.type === 'auto_check_out')
+    );
+
+    if (matchingEvent) {
+      // Update in-memory event
+      matchingEvent.transactionId = transactionId;
+      console.log(`   ✅ Updated in-memory event: ${matchingEvent.id}`);
+
+      // Broadcast update to camera room
+      if (matchingEvent.cameraId) {
+        io.to(matchingEvent.cameraId).emit("timelineEventUpdate", {
+          id: matchingEvent.id,
+          transactionId: transactionId
+        });
+        console.log(`   📤 Broadcasted update to camera room: ${matchingEvent.cameraId.slice(0, 8)}...`);
+      }
+    } else {
+      console.log(`   ⚠️ No matching event found in memory (may have been cleared)`);
+    }
+
+    res.json({
+      success: true,
+      message: 'Transaction ID update processed',
+      eventFound: !!matchingEvent
+    });
+  } catch (error) {
+    console.error('Failed to update timeline event transaction:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to update transaction'
     });
   }
 });
@@ -2877,15 +2935,29 @@ io.on("connection", (socket) => {
       };
 
       // Convert database activities to timeline event format
-      const dbEvents = dbActivities.map(activity => ({
-        id: `activity-${activity.sessionId}-${activity.timestamp}`,
-        type: activityTypeToEventType[activity.activityType] || 'unknown',
-        user: {
-          address: activity.userPubkey
-        },
-        timestamp: activity.timestamp,
-        cameraId: activity.cameraId
-      }));
+      const dbEvents = dbActivities.map(activity => {
+        // Parse metadata if present (contains cvActivity for CV activities)
+        let parsedMetadata: { cvActivity?: any } = {};
+        if (activity.metadata) {
+          try {
+            parsedMetadata = JSON.parse(activity.metadata);
+          } catch {
+            // Ignore parse errors
+          }
+        }
+
+        return {
+          id: `activity-${activity.sessionId}-${activity.timestamp}`,
+          type: activityTypeToEventType[activity.activityType] || 'unknown',
+          user: {
+            address: activity.userPubkey
+          },
+          timestamp: activity.timestamp,
+          cameraId: activity.cameraId,
+          // Include CV activity metadata if present
+          ...(parsedMetadata.cvActivity && { cvActivity: parsedMetadata.cvActivity })
+        };
+      });
 
       // Get in-memory events for this camera (for very recent events not yet persisted)
       const memoryEvents = timelineEvents
