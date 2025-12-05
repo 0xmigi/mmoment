@@ -684,9 +684,12 @@ export async function getSessionActivities(sessionId: string): Promise<SessionAc
 }
 
 // Update transaction ID for a session activity (called after UserSessionChain write)
+// NOTE: We find the most recent check_out for the user that doesn't have a transaction_id yet.
+// This is more reliable than timestamp matching because the access key timestamp (check-in time)
+// differs from the check_out event timestamp (checkout time).
 export async function updateActivityTransactionId(
   userPubkey: string,
-  timestamp: number,
+  _timestamp: number,  // Unused - kept for API compatibility
   activityType: number,
   transactionId: string
 ): Promise<boolean> {
@@ -696,17 +699,20 @@ export async function updateActivityTransactionId(
       return;
     }
 
-    // Allow 60 second tolerance for timestamp matching
-    const timestampMin = timestamp - 60000;
-    const timestampMax = timestamp + 60000;
-
+    // Find the most recent activity of this type for this user that doesn't have a transaction_id
+    // This handles the timestamp mismatch between access key (check-in time) and checkout event (checkout time)
     db.run(
       `UPDATE session_activity_buffers
        SET transaction_id = ?
-       WHERE user_pubkey = ?
-         AND timestamp BETWEEN ? AND ?
-         AND activity_type = ?`,
-      [transactionId, userPubkey, timestampMin, timestampMax, activityType],
+       WHERE id = (
+         SELECT id FROM session_activity_buffers
+         WHERE user_pubkey = ?
+           AND activity_type = ?
+           AND transaction_id IS NULL
+         ORDER BY timestamp DESC
+         LIMIT 1
+       )`,
+      [transactionId, userPubkey, activityType],
       function(err) {
         if (err) {
           reject(err);
