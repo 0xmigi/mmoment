@@ -2443,16 +2443,19 @@ app.patch("/api/session/activity/transaction", async (req, res) => {
       });
     }
 
+    // Normalize timestamp: access key timestamps are in seconds, timeline events use milliseconds
+    const normalizedTimestamp = timestamp < 10000000000 ? timestamp * 1000 : timestamp;
+
     console.log(`📝 Updating timeline event with transaction ID:`);
     console.log(`   User: ${userPubkey.slice(0, 8)}...`);
-    console.log(`   Timestamp: ${timestamp}`);
+    console.log(`   Timestamp: ${timestamp} -> ${normalizedTimestamp} (normalized)`);
     console.log(`   Transaction: ${transactionId.slice(0, 8)}...`);
     console.log(`   Event type: ${eventType || 'check_out'}`);
 
     // Find the timeline event and get its cameraId
     const matchingEvent = timelineEvents.find(e =>
       e.user?.address === userPubkey &&
-      Math.abs(e.timestamp - timestamp) < 60000 && // Within 1 minute
+      Math.abs(e.timestamp - normalizedTimestamp) < 60000 && // Within 1 minute
       (eventType ? e.type === eventType : e.type === 'check_out' || e.type === 'auto_check_out')
     );
 
