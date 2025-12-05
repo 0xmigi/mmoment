@@ -5,6 +5,7 @@ import { Connection, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet, BN } from '@coral-xyz/anchor';
 import { IDL } from './idl';
 import { Server } from 'socket.io';
+import { updateActivityTransactionId } from './database';
 
 const PROGRAM_ID = new PublicKey('E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL');
 const RETRY_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes for retrying pending keys
@@ -201,19 +202,30 @@ async function processAccessKeyForUser(userPubkey: string): Promise<boolean> {
     // Use the most recent key's timestamp to find the matching event
     const mostRecentKey = keys.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
     try {
-      // Call the local PATCH endpoint to update the timeline event
-      const updateResponse = await fetch('http://localhost:3001/api/session/activity/transaction', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userPubkey,
-          timestamp: mostRecentKey.timestamp,
-          transactionId: signature,
-          eventType: 'check_out'
-        })
-      });
-      if (updateResponse.ok) {
-        console.log(`   📝 Updated timeline event with transaction ID`);
+      // Normalize timestamp: access key timestamps are in seconds, database uses milliseconds
+      const normalizedTimestamp = mostRecentKey.timestamp < 10000000000
+        ? mostRecentKey.timestamp * 1000
+        : mostRecentKey.timestamp;
+
+      // Directly update the database (more reliable than HTTP call on Railway)
+      const dbUpdated = await updateActivityTransactionId(
+        userPubkey,
+        normalizedTimestamp,
+        1, // activity_type 1 = check_out
+        signature
+      );
+
+      if (dbUpdated) {
+        console.log(`   �� Updated timeline event with transaction ID in database`);
+      } else {
+        console.log(`   ⚠️ No matching check_out event found in database (may have been cleared)`);
+      }
+
+      // Also emit socket event if io is available (for real-time updates)
+      if (io) {
+        // We don't have the cameraId here, so we can't emit to the right room
+        // The database update is the important part for historical timeline
+        console.log(`   📡 Socket.IO available for real-time updates`);
       }
     } catch (updateError) {
       console.log(`   ⚠️ Could not update timeline event (non-critical):`, updateError);
