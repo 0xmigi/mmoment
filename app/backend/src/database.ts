@@ -48,6 +48,7 @@ export interface SessionActivityBuffer {
   accessGrants: Buffer;      // JSON array of encrypted keys, serialized
   createdAt: Date;
   metadata?: string;         // JSON string for activity-specific data (e.g., CV activity results)
+  transactionId?: string;    // Solana transaction ID for on-chain writes
 }
 
 // Initialize database with tables
@@ -123,6 +124,14 @@ export async function initializeDatabase(dbPath: string = './mmoment.db'): Promi
         try {
           await runQuery(`ALTER TABLE session_activity_buffers ADD COLUMN metadata TEXT`);
           console.log('📦 Added metadata column to session_activity_buffers');
+        } catch {
+          // Column already exists, ignore
+        }
+
+        // Migration: Add transaction_id column if it doesn't exist
+        try {
+          await runQuery(`ALTER TABLE session_activity_buffers ADD COLUMN transaction_id TEXT`);
+          console.log('📦 Added transaction_id column to session_activity_buffers');
         } catch {
           // Column already exists, ignore
         }
@@ -674,6 +683,41 @@ export async function getSessionActivities(sessionId: string): Promise<SessionAc
   });
 }
 
+// Update transaction ID for a session activity (called after UserSessionChain write)
+export async function updateActivityTransactionId(
+  userPubkey: string,
+  timestamp: number,
+  activityType: number,
+  transactionId: string
+): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    // Allow 60 second tolerance for timestamp matching
+    const timestampMin = timestamp - 60000;
+    const timestampMax = timestamp + 60000;
+
+    db.run(
+      `UPDATE session_activity_buffers
+       SET transaction_id = ?
+       WHERE user_pubkey = ?
+         AND timestamp BETWEEN ? AND ?
+         AND activity_type = ?`,
+      [transactionId, userPubkey, timestampMin, timestampMax, activityType],
+      function(err) {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(this.changes > 0);
+        }
+      }
+    );
+  });
+}
+
 // Clear buffered activities after successful checkout (called after blockchain commit)
 export async function clearSessionActivities(sessionId: string): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -989,6 +1033,7 @@ export interface SessionTimelineEvent {
   userAddress: string;
   timestamp: number;
   cameraId: string;
+  transactionId?: string;  // Solana transaction ID for on-chain writes
   // For encrypted activities (all activities have this now)
   encrypted?: {
     sessionId: string;
@@ -1069,6 +1114,8 @@ export async function getSessionTimelineEvents(
             userAddress: row.user_pubkey,
             timestamp: row.timestamp,
             cameraId: row.camera_id,
+            // Include transaction ID if present (from UserSessionChain write)
+            ...(row.transaction_id && { transactionId: row.transaction_id }),
             encrypted: {
               sessionId: row.session_id,
               activityType: row.activity_type,

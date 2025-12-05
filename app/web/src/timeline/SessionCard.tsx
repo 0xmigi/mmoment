@@ -26,6 +26,7 @@ interface SessionTimelineEventFromAPI {
   userAddress: string;
   timestamp: number;
   cameraId: string;
+  transactionId?: string;  // Solana transaction ID for on-chain writes
   encrypted?: {
     sessionId: string;
     activityType: number;
@@ -137,6 +138,8 @@ function apiEventToTimelineEvent(event: SessionTimelineEventFromAPI): TimelineEv
     },
     timestamp: event.timestamp,
     cameraId: event.cameraId,
+    // Include transaction ID if present (for on-chain actions like check-outs)
+    ...(event.transactionId && { transactionId: event.transactionId }),
     // Include CV activity metadata if present
     ...(event.cvActivity && { cvActivity: event.cvActivity }),
   };

@@ -66,6 +66,7 @@ import {
   getCameraActivities,
   getUserActivities,
   getSessionTimelineEvents,
+  updateActivityTransactionId,
   SessionActivityBuffer,
   SessionSummary,
   SessionTimelineEvent
@@ -2459,8 +2460,30 @@ app.patch("/api/session/activity/transaction", async (req, res) => {
       (eventType ? e.type === eventType : e.type === 'check_out' || e.type === 'auto_check_out')
     );
 
+    // Determine activity type for database update
+    const activityTypeMap: Record<string, number> = {
+      'check_in': 0,
+      'check_out': 1,
+      'auto_check_out': 1,
+      'photo_captured': 2,
+      'video_recorded': 3,
+      'stream_started': 4,
+      'cv_activity': 50
+    };
+    const targetEventType = eventType || 'check_out';
+    const activityType = activityTypeMap[targetEventType] ?? 1;
+
+    // Persist to database (this is the permanent record)
+    const dbUpdated = await updateActivityTransactionId(
+      userPubkey,
+      normalizedTimestamp,
+      activityType,
+      transactionId
+    );
+    console.log(`   💾 Database update: ${dbUpdated ? 'success' : 'no matching record'}`);
+
+    // Update in-memory event (for real-time updates)
     if (matchingEvent) {
-      // Update in-memory event
       matchingEvent.transactionId = transactionId;
       console.log(`   ✅ Updated in-memory event: ${matchingEvent.id}`);
 
@@ -2479,7 +2502,8 @@ app.patch("/api/session/activity/transaction", async (req, res) => {
     res.json({
       success: true,
       message: 'Transaction ID update processed',
-      eventFound: !!matchingEvent
+      eventFound: !!matchingEvent,
+      dbUpdated
     });
   } catch (error) {
     console.error('Failed to update timeline event transaction:', error);
