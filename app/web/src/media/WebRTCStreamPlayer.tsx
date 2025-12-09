@@ -9,6 +9,16 @@ interface WebRTCStreamPlayerProps {
   onError?: (error: string) => void;
 }
 
+// WHEP fallback configuration
+const WHEP_CONFIG = {
+  // MediaMTX server URL - the camera publishes here via WHIP
+  MEDIAMTX_URL: "http://129.80.99.75:8889",
+  STREAM_NAME: "jetson-camera",
+  get WHEP_URL() {
+    return `${this.MEDIAMTX_URL}/${this.STREAM_NAME}/whep`;
+  }
+};
+
 // Cellular connection detection helper
 const detectCellularConnection = (): boolean => {
   // Method 1: Check Network Information API (if available)
@@ -68,6 +78,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
   const [error, setError] = useState<string | null>(null);
   const [pendingStream, setPendingStream] = useState<MediaStream | null>(null);
   const connectionAttemptsRef = useRef<number>(0);
+  const whepAttemptedRef = useRef<boolean>(false);
   const { selectedCamera } = useCamera();
   const { cameraId } = useParams<{ cameraId: string }>();
 
@@ -142,6 +153,98 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
     [cleanup, onError]
   );
 
+  // WHEP fallback connection - connects directly to MediaMTX server
+  const connectViaWhep = useCallback(async () => {
+    console.log("[WHEP] 🔄 Falling back to WHEP via MediaMTX...");
+    console.log("[WHEP] URL:", WHEP_CONFIG.WHEP_URL);
+
+    setConnectionState("connecting");
+    setError(null);
+    whepAttemptedRef.current = true;
+
+    try {
+      // Create peer connection with minimal config (no TURN needed - MediaMTX has public IP)
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+
+      peerConnectionRef.current = pc;
+
+      // Handle incoming video track
+      pc.ontrack = (event) => {
+        console.log("[WHEP] 📺 Received video track from MediaMTX");
+        const stream = event.streams[0];
+        if (stream && videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch((e) => console.warn("[WHEP] Play failed:", e));
+          setConnectionState("connected");
+          setError(null);
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        console.log("[WHEP] Connection state:", pc.connectionState);
+        if (pc.connectionState === "connected") {
+          console.log("[WHEP] ✅ Connected to MediaMTX stream!");
+          setConnectionState("connected");
+        } else if (pc.connectionState === "failed") {
+          console.error("[WHEP] ❌ WHEP connection failed");
+          setError("WHEP connection to MediaMTX failed");
+          setConnectionState("failed");
+        }
+      };
+
+      // Add transceiver for receiving video
+      pc.addTransceiver("video", { direction: "recvonly" });
+
+      // Create offer
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      // Wait for ICE gathering to complete
+      await new Promise<void>((resolve) => {
+        if (pc.iceGatheringState === "complete") {
+          resolve();
+        } else {
+          pc.onicegatheringstatechange = () => {
+            if (pc.iceGatheringState === "complete") {
+              resolve();
+            }
+          };
+          // Timeout after 3 seconds
+          setTimeout(resolve, 3000);
+        }
+      });
+
+      console.log("[WHEP] 📤 Sending offer to MediaMTX...");
+
+      // Send offer to MediaMTX WHEP endpoint
+      const response = await fetch(WHEP_CONFIG.WHEP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: pc.localDescription?.sdp,
+      });
+
+      if (response.status !== 201) {
+        throw new Error(`WHEP handshake failed: ${response.status}`);
+      }
+
+      const answerSdp = await response.text();
+      console.log("[WHEP] 📥 Received answer from MediaMTX");
+
+      await pc.setRemoteDescription({
+        type: "answer",
+        sdp: answerSdp,
+      });
+
+      console.log("[WHEP] ✅ WHEP handshake complete!");
+
+    } catch (error) {
+      console.error("[WHEP] ❌ WHEP connection failed:", error);
+      setError(`WHEP fallback failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+      setConnectionState("failed");
+    }
+  }, []);
 
   const createPeerConnection = useCallback(async () => {
     // Generate time-based TURN credentials
@@ -304,9 +407,14 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
               initializeWebRTC();
             }
           }, 2000);
+        } else if (!whepAttemptedRef.current) {
+          // P2P and relay both failed - try WHEP fallback
+          console.log("[WebRTC] ❌ Relay-only connection also failed - trying WHEP fallback...");
+          cleanup();
+          connectViaWhep();
         } else {
-          console.log("[WebRTC] ❌ Relay-only connection also failed");
-          handleError("Connection failed - both direct and relay modes failed");
+          console.log("[WebRTC] ❌ All connection methods failed (P2P, relay, WHEP)");
+          handleError("Connection failed - all methods exhausted");
         }
       } else if (state === "disconnected") {
         console.warn("[WebRTC] ⚠️ Connection disconnected");

@@ -674,6 +674,35 @@ def register_routes(app):
             logger.error(f"Error getting WebRTC stream status: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
 
+    @app.route("/api/stream/whip/status", methods=["GET"])
+    def api_whip_status():
+        """Get WHIP publisher status and remote stream URL"""
+        try:
+            whip_service = get_services().get("whip")
+
+            if not whip_service:
+                return jsonify({
+                    "success": True,
+                    "available": False,
+                    "message": "WHIP publisher not enabled"
+                })
+
+            status = whip_service.get_status()
+
+            return jsonify({
+                "success": True,
+                "available": True,
+                "running": status["running"],
+                "connected": status["connected"],
+                "stream_name": status["stream_name"],
+                "whep_url": status["whep_url"],
+                "mediamtx_url": status["mediamtx_url"],
+                "reconnect_attempts": status["reconnect_attempts"]
+            })
+        except Exception as e:
+            logger.error(f"Error getting WHIP status: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+
     # Camera Actions
     @app.route("/api/capture", methods=["POST"])
     @require_session

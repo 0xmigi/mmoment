@@ -61,6 +61,7 @@ def init_services():
     from services.session_service import get_session_service
     from services.livepeer_stream_service import LivepeerStreamService
     from services.webrtc_service import get_webrtc_service
+    from services.whip_publisher import get_whip_publisher
     
     # GPU Face service for YOLOv8 + InsightFace face detection and recognition
     gpu_face_service = None
@@ -169,6 +170,25 @@ def init_services():
     # Give WebRTC service time to initialize async components
     time.sleep(2)
 
+    # Initialize WHIP Publisher for remote streaming via MediaMTX
+    whip_publisher = None
+    whip_enabled = os.environ.get('WHIP_ENABLED', 'true').lower() == 'true'
+    if whip_enabled:
+        logger.info("📡 Initializing WHIP publisher for remote streaming...")
+        try:
+            whip_publisher = get_whip_publisher()
+            whip_publisher.set_buffer_service(buffer_service)
+            whip_start_result = whip_publisher.start()
+            if whip_start_result:
+                logger.info(f"✅ WHIP publisher started - stream available at: {whip_publisher.whep_url}")
+            else:
+                logger.warning("⚠️ WHIP publisher failed to start - remote streaming unavailable")
+        except Exception as e:
+            logger.error(f"❌ WHIP publisher initialization failed: {e}")
+            whip_publisher = None
+    else:
+        logger.info("📡 WHIP publisher disabled via WHIP_ENABLED=false")
+
     # Initialize Blockchain Session Sync
     from services.blockchain_session_sync import get_blockchain_session_sync, reset_blockchain_session_sync
     reset_blockchain_session_sync()  # Ensure fresh instance with current environment variables
@@ -206,7 +226,8 @@ def init_services():
         'capture': capture_service,
         'session': session_service,
         'livepeer': livepeer_service,
-        'webrtc': webrtc_service
+        'webrtc': webrtc_service,
+        'whip': whip_publisher
     }
     
     # Add GPU Face service if available
@@ -313,6 +334,8 @@ def main():
     finally:
         # Shut down services
         logger.info("Stopping services...")
+        if 'whip' in services and services['whip']:
+            services['whip'].stop()
         if 'webrtc' in services:
             services['webrtc'].stop()
         if 'livepeer' in services:
