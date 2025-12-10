@@ -91,6 +91,16 @@ def get_blockchain_session_sync():
     return get_blockchain_session_sync()
 
 
+def get_checked_in_users() -> list:
+    """Get list of currently checked-in wallet addresses for access grants."""
+    try:
+        blockchain_sync = get_blockchain_session_sync()
+        return list(blockchain_sync.checked_in_wallets)
+    except Exception as e:
+        logger.warning(f"Failed to get checked-in users: {e}")
+        return []
+
+
 # Session validation decorator - With CRYPTOGRAPHIC SIGNATURE VERIFICATION
 def require_session(f):
     """
@@ -701,13 +711,14 @@ def register_routes(app):
                 f"Expected filename {filename} but got {latest_video.get('filename')}"
             )
 
-        # Upload video to Pipe using device-signed direct upload
+        # Upload video to storage using device-signed direct upload
         import threading
 
         from services.capture_event_signer import sign_capture
-        from services.direct_pipe_upload import get_direct_pipe_upload_service
+        from services.storage_provider import get_upload_service, is_walrus_enabled
 
-        pipe_upload_info = {"initiated": False, "storage_provider": "pipe"}
+        storage_provider = "walrus" if is_walrus_enabled() else "pipe"
+        storage_upload_info = {"initiated": False, "storage_provider": storage_provider}
 
         try:
             # Get video file path
@@ -716,8 +727,8 @@ def register_routes(app):
                 # Get camera PDA for signing
                 camera_pda = get_camera_pda()
 
-                # Calculate file hash and sign capture event with device key
-                upload_service = get_direct_pipe_upload_service()
+                # Get upload service (Walrus or Pipe based on STORAGE_PROVIDER env var)
+                upload_service = get_upload_service()
                 file_hash = upload_service.calculate_file_hash(video_path)
 
                 if not file_hash:
@@ -745,25 +756,44 @@ def register_routes(app):
                     f"📝 Video capture event signed: {device_signature[:16]}..."
                 )
 
-                # Upload to Pipe in background thread
-                def run_pipe_upload():
+                # Get checked-in users for Walrus encryption
+                checked_in_users = get_checked_in_users() if is_walrus_enabled() else []
+
+                # Upload to storage in background thread
+                def run_storage_upload():
                     try:
-                        upload_result = upload_service.upload_video(
-                            wallet_address=wallet_address,
-                            video_path=video_path,
-                            camera_id=camera_pda,
-                            device_signature=device_signature,
-                            duration=duration_limit,
-                            timestamp=latest_video.get("timestamp"),
-                        )
+                        if is_walrus_enabled():
+                            # Walrus upload with encryption
+                            upload_result = upload_service.upload_video(
+                                wallet_address=wallet_address,
+                                video_path=video_path,
+                                camera_id=camera_pda,
+                                device_signature=device_signature,
+                                checked_in_users=checked_in_users,
+                                duration=duration_limit,
+                                timestamp=latest_video.get("timestamp"),
+                                user_sui_address=None,
+                                private=False,
+                            )
+                        else:
+                            # Pipe upload (existing behavior)
+                            upload_result = upload_service.upload_video(
+                                wallet_address=wallet_address,
+                                video_path=video_path,
+                                camera_id=camera_pda,
+                                device_signature=device_signature,
+                                duration=duration_limit,
+                                timestamp=latest_video.get("timestamp"),
+                            )
+
                         if upload_result["success"]:
-                            logger.info(
-                                f"✅ Video uploaded to Pipe: {upload_result.get('file_name')}"
-                            )
-                            logger.info(f"   File ID: {upload_result.get('file_id')}")
-                            logger.info(
-                                f"   Device Signature: {device_signature[:16]}..."
-                            )
+                            if is_walrus_enabled():
+                                logger.info(f"✅ Video uploaded to Walrus: {upload_result.get('blob_id')}")
+                                logger.info(f"   Download URL: {upload_result.get('download_url')}")
+                            else:
+                                logger.info(f"✅ Video uploaded to Pipe: {upload_result.get('file_name')}")
+                                logger.info(f"   File ID: {upload_result.get('file_id')}")
+                            logger.info(f"   Device Signature: {device_signature[:16]}...")
 
                             # Buffer video activity to timeline (privacy-preserving)
                             try:
@@ -774,14 +804,17 @@ def register_routes(app):
                                 timeline_service = get_timeline_activity_service()
                                 timeline_service.buffer_video_activity(
                                     wallet_address=wallet_address,
-                                    pipe_file_name=upload_result.get("file_name"),
-                                    pipe_file_id=upload_result.get("file_id"),
+                                    pipe_file_name=upload_result.get("file_name") or upload_result.get("blob_id"),
+                                    pipe_file_id=upload_result.get("file_id") or upload_result.get("blob_id"),
                                     duration_seconds=duration_limit,
                                     metadata={
                                         "timestamp": latest_video.get("timestamp"),
                                         "device_signature": device_signature,
                                         "filename": latest_video.get("filename"),
                                         "size": latest_video.get("size"),
+                                        "storage_provider": storage_provider,
+                                        "blob_id": upload_result.get("blob_id"),
+                                        "download_url": upload_result.get("download_url"),
                                     },
                                 )
                                 logger.info(f"📤 Video activity buffered to timeline")
@@ -791,42 +824,42 @@ def register_routes(app):
                                 )
                         else:
                             logger.error(
-                                f"❌ Pipe video upload failed: {upload_result.get('error')}"
+                                f"❌ {storage_provider} video upload failed: {upload_result.get('error')}"
                             )
                     except Exception as e:
-                        logger.error(f"❌ Pipe upload thread error: {e}", exc_info=True)
+                        logger.error(f"❌ {storage_provider} upload thread error: {e}", exc_info=True)
 
                 # Start upload in background thread
-                upload_thread = threading.Thread(target=run_pipe_upload, daemon=True)
+                upload_thread = threading.Thread(target=run_storage_upload, daemon=True)
                 upload_thread.start()
 
-                pipe_upload_info = {
+                storage_upload_info = {
                     "initiated": True,
                     "target_wallet": wallet_address,
                     "upload_status": "uploading",
-                    "storage_provider": "pipe",
+                    "storage_provider": storage_provider,
                     "device_signature": device_signature,
-                    "upload_type": "direct_jetson_device_signed",
+                    "upload_type": "walrus_encrypted" if is_walrus_enabled() else "direct_jetson_device_signed",
                 }
 
                 logger.info(
-                    f"🎥 Video recorded for {wallet_address[:8]}... -> uploading directly to Pipe"
+                    f"🎥 Video recorded for {wallet_address[:8]}... -> uploading to {storage_provider}"
                 )
 
             else:
                 logger.error(f"Video file not found at {video_path}")
-                pipe_upload_info["error"] = "Video file not found"
+                storage_upload_info["error"] = "Video file not found"
 
         except Exception as e:
             logger.error(
-                f"Failed to initiate Pipe video upload for {wallet_address[:8]}...: {e}",
+                f"Failed to initiate {storage_provider} video upload for {wallet_address[:8]}...: {e}",
                 exc_info=True,
             )
-            pipe_upload_info = {
+            storage_upload_info = {
                 "initiated": False,
                 "error": str(e),
                 "upload_status": "failed",
-                "storage_provider": "pipe",
+                "storage_provider": storage_provider,
             }
 
         return jsonify(
@@ -840,7 +873,8 @@ def register_routes(app):
                 "url": latest_video.get("url"),
                 "size": latest_video.get("size"),
                 "timestamp": latest_video.get("timestamp"),
-                "pipe_upload": pipe_upload_info,
+                "storage_upload": storage_upload_info,
+                "pipe_upload": storage_upload_info,  # Backward compatibility
             }
         )
 
@@ -3151,19 +3185,19 @@ def register_routes(app):
         # Add base64 data to response
         photo_info["image_data"] = f"data:image/jpeg;base64,{base64_image}"
 
-        # Upload to Pipe using device-signed direct upload
+        # Upload to storage using device-signed direct upload
         import threading
 
         from services.capture_event_signer import sign_capture
-        from services.direct_pipe_upload import get_direct_pipe_upload_service
+        from services.storage_provider import get_upload_service, is_walrus_enabled
 
         try:
             # Get camera PDA for signing
             camera_pda = get_camera_pda()
             photo_path = photo_info["path"]
 
-            # Calculate file hash and sign capture event with device key
-            upload_service = get_direct_pipe_upload_service()
+            # Get upload service (Walrus or Pipe based on STORAGE_PROVIDER env var)
+            upload_service = get_upload_service()
             file_hash = upload_service.calculate_file_hash(photo_path)
 
             if not file_hash:
@@ -3188,35 +3222,62 @@ def register_routes(app):
 
             logger.info(f"📝 Photo capture event signed: {device_signature[:16]}...")
 
-            # Upload to Pipe synchronously (wait for completion before returning)
-            logger.info(f"📤 Uploading photo to Pipe...")
-            upload_result = upload_service.upload_photo(
-                wallet_address=wallet_address,
-                photo_path=photo_path,
-                camera_id=camera_pda,
-                device_signature=device_signature,
-                timestamp=photo_info.get("timestamp"),
-            )
+            # Upload to storage (Walrus or Pipe based on STORAGE_PROVIDER)
+            storage_provider = "walrus" if is_walrus_enabled() else "pipe"
+            logger.info(f"📤 Uploading photo to {storage_provider}...")
+
+            if is_walrus_enabled():
+                # Walrus upload with encryption and access grants
+                checked_in_users = get_checked_in_users()
+                upload_result = upload_service.upload_photo(
+                    wallet_address=wallet_address,
+                    photo_path=photo_path,
+                    camera_id=camera_pda,
+                    device_signature=device_signature,
+                    checked_in_users=checked_in_users,
+                    timestamp=photo_info.get("timestamp"),
+                    user_sui_address=None,  # TODO: Get from backend if available
+                    private=False,  # Shared with all checked-in users by default
+                )
+            else:
+                # Pipe upload (existing behavior)
+                upload_result = upload_service.upload_photo(
+                    wallet_address=wallet_address,
+                    photo_path=photo_path,
+                    camera_id=camera_pda,
+                    device_signature=device_signature,
+                    timestamp=photo_info.get("timestamp"),
+                )
 
             if upload_result["success"]:
-                logger.info(
-                    f"✅ Photo uploaded to Pipe: {upload_result.get('file_name')}"
-                )
-                logger.info(f"   File ID: {upload_result.get('file_id')}")
+                if is_walrus_enabled():
+                    logger.info(f"✅ Photo uploaded to Walrus: {upload_result.get('blob_id')}")
+                    logger.info(f"   Download URL: {upload_result.get('download_url')}")
+                else:
+                    logger.info(f"✅ Photo uploaded to Pipe: {upload_result.get('file_name')}")
+                    logger.info(f"   File ID: {upload_result.get('file_id')}")
                 logger.info(f"   Device Signature: {device_signature[:16]}...")
 
                 # Add successful upload info to response
-                photo_info["pipe_upload"] = {
+                photo_info["storage_upload"] = {
                     "initiated": True,
                     "completed": True,
                     "target_wallet": wallet_address,
                     "upload_status": "completed",
-                    "storage_provider": "pipe",
+                    "storage_provider": storage_provider,
                     "device_signature": device_signature,
+                    # Walrus fields
+                    "blob_id": upload_result.get("blob_id"),
+                    "download_url": upload_result.get("download_url"),
+                    "encrypted": upload_result.get("encrypted", False),
+                    "access_grants_count": upload_result.get("access_grants_count", 0),
+                    # Pipe fields (for backward compatibility)
                     "file_name": upload_result.get("file_name"),
                     "file_id": upload_result.get("file_id"),
-                    "upload_type": "direct_jetson_device_signed",
+                    "upload_type": upload_result.get("upload_type", "direct_jetson_device_signed"),
                 }
+                # Keep pipe_upload for backward compatibility
+                photo_info["pipe_upload"] = photo_info["storage_upload"]
 
                 # Buffer photo activity to timeline (privacy-preserving)
                 logger.info(
@@ -3230,14 +3291,17 @@ def register_routes(app):
                     timeline_service = get_timeline_activity_service()
                     timeline_service.buffer_photo_activity(
                         wallet_address=wallet_address,
-                        pipe_file_name=upload_result.get("file_name"),
-                        pipe_file_id=upload_result.get("file_id"),
+                        pipe_file_name=upload_result.get("file_name") or upload_result.get("blob_id"),
+                        pipe_file_id=upload_result.get("file_id") or upload_result.get("blob_id"),
                         metadata={
                             "timestamp": photo_info.get("timestamp"),
                             "device_signature": device_signature,
                             "width": photo_info.get("width"),
                             "height": photo_info.get("height"),
                             "filename": photo_info.get("filename"),
+                            "storage_provider": storage_provider,
+                            "blob_id": upload_result.get("blob_id"),
+                            "download_url": upload_result.get("download_url"),
                         },
                     )
                     logger.info(f"✅ Photo activity buffered to timeline successfully")
@@ -3250,31 +3314,33 @@ def register_routes(app):
                     photo_info["timeline_buffered"] = False
             else:
                 logger.error(
-                    f"❌ Pipe photo upload failed: {upload_result.get('error')}"
+                    f"❌ {storage_provider} photo upload failed: {upload_result.get('error')}"
                 )
-                photo_info["pipe_upload"] = {
+                photo_info["storage_upload"] = {
                     "initiated": True,
                     "completed": False,
                     "upload_status": "failed",
                     "error": upload_result.get("error"),
-                    "storage_provider": "pipe",
+                    "storage_provider": storage_provider,
                 }
+                photo_info["pipe_upload"] = photo_info["storage_upload"]
 
             logger.info(
-                f"📸 Photo captured for {wallet_address[:8]}... -> Pipe upload complete"
+                f"📸 Photo captured for {wallet_address[:8]}... -> {storage_provider} upload complete"
             )
 
         except Exception as e:
             logger.error(
-                f"Failed to initiate Pipe upload for {wallet_address[:8]}...: {e}",
+                f"Failed to initiate storage upload for {wallet_address[:8]}...: {e}",
                 exc_info=True,
             )
-            photo_info["pipe_upload"] = {
+            photo_info["storage_upload"] = {
                 "initiated": False,
                 "error": str(e),
                 "upload_status": "failed",
-                "storage_provider": "pipe",
+                "storage_provider": "walrus" if is_walrus_enabled() else "pipe",
             }
+            photo_info["pipe_upload"] = photo_info["storage_upload"]
 
         return jsonify(photo_info)
 

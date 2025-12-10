@@ -19,10 +19,11 @@ from aiortc.contrib.media import MediaPlayer
 import asyncio
 import queue
 
-# Enable detailed WebRTC/ICE debugging
-logging.getLogger('aiortc').setLevel(logging.DEBUG)
-logging.getLogger('aiortc.rtcicetransport').setLevel(logging.DEBUG)
-logging.getLogger('aioice').setLevel(logging.DEBUG)
+# Reduce WebRTC/ICE logging noise (set to DEBUG for troubleshooting)
+logging.getLogger('aiortc').setLevel(logging.WARNING)
+logging.getLogger('aiortc.rtcicetransport').setLevel(logging.WARNING)
+logging.getLogger('aiortc.rtcrtpsender').setLevel(logging.WARNING)
+logging.getLogger('aioice').setLevel(logging.WARNING)
 
 # SMART RELAY FALLBACK: Keep relay-only patch ready but don't force it by default
 import aioice

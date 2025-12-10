@@ -36,6 +36,31 @@ export interface UserProfile {
   lastUpdated: Date;
 }
 
+// Walrus file mapping interface (for decentralized blob storage)
+export interface WalrusFileMapping {
+  blobId: string;
+  walletAddress: string;
+  downloadUrl: string;
+  cameraId: string;
+  deviceSignature: string;
+  fileType: 'photo' | 'video';
+  timestamp: number;
+  originalSize: number;
+  encryptedSize: number;
+  nonce?: string;
+  suiOwner?: string;
+  accessGrants: string;  // JSON array of {pubkey, encryptedKey}
+  createdAt: Date;
+}
+
+// User Sui wallet interface (for Walrus blob ownership)
+export interface UserSuiWallet {
+  walletAddress: string;  // Solana wallet (primary key)
+  suiAddress: string;     // Generated Sui address (0x...)
+  encryptedSuiKey: string; // Encrypted Sui private key (base64)
+  createdAt: Date;
+}
+
 // Session activity buffer interface (for privacy-preserving bundling)
 export interface SessionActivityBuffer {
   sessionId: string;
@@ -140,6 +165,40 @@ export async function initializeDatabase(dbPath: string = './mmoment.db'): Promi
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_session_buffers_session ON session_activity_buffers(session_id)`);
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_session_buffers_camera ON session_activity_buffers(camera_id, timestamp)`);
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_session_buffers_created ON session_activity_buffers(created_at)`);
+
+        // Create walrus_files table (for decentralized blob storage)
+        await runQuery(`
+          CREATE TABLE IF NOT EXISTS walrus_files (
+            blob_id TEXT PRIMARY KEY,
+            wallet_address TEXT NOT NULL,
+            download_url TEXT NOT NULL,
+            camera_id TEXT NOT NULL,
+            device_signature TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            timestamp INTEGER,
+            original_size INTEGER,
+            encrypted_size INTEGER,
+            nonce TEXT,
+            sui_owner TEXT,
+            access_grants TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+          )
+        `);
+
+        // Create indexes for walrus_files
+        await runQuery(`CREATE INDEX IF NOT EXISTS idx_walrus_wallet ON walrus_files(wallet_address)`);
+        await runQuery(`CREATE INDEX IF NOT EXISTS idx_walrus_camera ON walrus_files(camera_id)`);
+        await runQuery(`CREATE INDEX IF NOT EXISTS idx_walrus_created ON walrus_files(created_at)`);
+
+        // Create user_sui_wallets table (for Walrus blob ownership)
+        await runQuery(`
+          CREATE TABLE IF NOT EXISTS user_sui_wallets (
+            wallet_address TEXT PRIMARY KEY,
+            sui_address TEXT NOT NULL,
+            encrypted_sui_key TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+          )
+        `);
 
         console.log('✅ Database tables initialized');
         resolve();
@@ -1170,6 +1229,230 @@ export async function getUserActivities(walletAddress: string, limit: number = 1
             accessGrants: row.access_grants,
             createdAt: new Date(row.created_at)
           })));
+        }
+      }
+    );
+  });
+}
+
+// ============================================================================
+// WALRUS FILES OPERATIONS (Decentralized Blob Storage)
+// ============================================================================
+
+// Save Walrus file mapping to database
+export async function saveWalrusFile(file: WalrusFileMapping): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO walrus_files
+      (blob_id, wallet_address, download_url, camera_id, device_signature, file_type, timestamp, original_size, encrypted_size, nonce, sui_owner, access_grants, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      file.blobId,
+      file.walletAddress,
+      file.downloadUrl,
+      file.cameraId,
+      file.deviceSignature,
+      file.fileType,
+      file.timestamp,
+      file.originalSize,
+      file.encryptedSize,
+      file.nonce || null,
+      file.suiOwner || null,
+      file.accessGrants,
+      file.createdAt.getTime(),
+      (err: Error | null) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      }
+    );
+
+    stmt.finalize();
+  });
+}
+
+// Get Walrus file by blob ID
+export async function getWalrusFileByBlobId(blobId: string): Promise<WalrusFileMapping | null> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    db.get(
+      'SELECT * FROM walrus_files WHERE blob_id = ?',
+      [blobId],
+      (err: Error | null, row: any) => {
+        if (err) {
+          reject(err);
+        } else if (!row) {
+          resolve(null);
+        } else {
+          resolve({
+            blobId: row.blob_id,
+            walletAddress: row.wallet_address,
+            downloadUrl: row.download_url,
+            cameraId: row.camera_id,
+            deviceSignature: row.device_signature,
+            fileType: row.file_type,
+            timestamp: row.timestamp,
+            originalSize: row.original_size,
+            encryptedSize: row.encrypted_size,
+            nonce: row.nonce || undefined,
+            suiOwner: row.sui_owner || undefined,
+            accessGrants: row.access_grants,
+            createdAt: new Date(row.created_at)
+          });
+        }
+      }
+    );
+  });
+}
+
+// Get all Walrus files for a wallet address
+export async function getWalrusFilesForWallet(walletAddress: string, limit: number = 100): Promise<WalrusFileMapping[]> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    db.all(
+      'SELECT * FROM walrus_files WHERE wallet_address = ? ORDER BY created_at DESC LIMIT ?',
+      [walletAddress, limit],
+      (err: Error | null, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows.map(row => ({
+            blobId: row.blob_id,
+            walletAddress: row.wallet_address,
+            downloadUrl: row.download_url,
+            cameraId: row.camera_id,
+            deviceSignature: row.device_signature,
+            fileType: row.file_type,
+            timestamp: row.timestamp,
+            originalSize: row.original_size,
+            encryptedSize: row.encrypted_size,
+            nonce: row.nonce || undefined,
+            suiOwner: row.sui_owner || undefined,
+            accessGrants: row.access_grants,
+            createdAt: new Date(row.created_at)
+          })));
+        }
+      }
+    );
+  });
+}
+
+// Get all Walrus files where user has access (via access_grants)
+export async function getWalrusFilesWithAccess(walletAddress: string, limit: number = 100): Promise<WalrusFileMapping[]> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    // Query files where user has an access grant (their pubkey is in access_grants JSON)
+    db.all(
+      `SELECT * FROM walrus_files
+       WHERE access_grants LIKE ?
+       ORDER BY created_at DESC
+       LIMIT ?`,
+      [`%"pubkey":"${walletAddress}"%`, limit],
+      (err: Error | null, rows: any[]) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows.map(row => ({
+            blobId: row.blob_id,
+            walletAddress: row.wallet_address,
+            downloadUrl: row.download_url,
+            cameraId: row.camera_id,
+            deviceSignature: row.device_signature,
+            fileType: row.file_type,
+            timestamp: row.timestamp,
+            originalSize: row.original_size,
+            encryptedSize: row.encrypted_size,
+            nonce: row.nonce || undefined,
+            suiOwner: row.sui_owner || undefined,
+            accessGrants: row.access_grants,
+            createdAt: new Date(row.created_at)
+          })));
+        }
+      }
+    );
+  });
+}
+
+// ============================================================================
+// USER SUI WALLETS OPERATIONS (For Walrus Blob Ownership)
+// ============================================================================
+
+// Save or update user Sui wallet
+export async function saveUserSuiWallet(wallet: UserSuiWallet): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    const stmt = db.prepare(`
+      INSERT OR REPLACE INTO user_sui_wallets
+      (wallet_address, sui_address, encrypted_sui_key, created_at)
+      VALUES (?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      wallet.walletAddress,
+      wallet.suiAddress,
+      wallet.encryptedSuiKey,
+      wallet.createdAt.getTime(),
+      (err: Error | null) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      }
+    );
+
+    stmt.finalize();
+  });
+}
+
+// Get user Sui wallet by Solana wallet address
+export async function getUserSuiWallet(walletAddress: string): Promise<UserSuiWallet | null> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    db.get(
+      'SELECT * FROM user_sui_wallets WHERE wallet_address = ?',
+      [walletAddress],
+      (err: Error | null, row: any) => {
+        if (err) {
+          reject(err);
+        } else if (!row) {
+          resolve(null);
+        } else {
+          resolve({
+            walletAddress: row.wallet_address,
+            suiAddress: row.sui_address,
+            encryptedSuiKey: row.encrypted_sui_key,
+            createdAt: new Date(row.created_at)
+          });
         }
       }
     );

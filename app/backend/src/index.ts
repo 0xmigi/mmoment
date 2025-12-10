@@ -69,8 +69,20 @@ import {
   updateActivityTransactionId,
   SessionActivityBuffer,
   SessionSummary,
-  SessionTimelineEvent
+  SessionTimelineEvent,
+  // Walrus storage
+  saveWalrusFile,
+  getWalrusFileByBlobId,
+  getWalrusFilesForWallet,
+  getWalrusFilesWithAccess,
+  WalrusFileMapping
 } from './database';
+
+// Import Sui storage service for Walrus blob ownership
+import {
+  getOrCreateSuiWallet,
+  getSuiAddress
+} from './sui-storage';
 
 // Note: Socket.IO server (io) will be passed to session cleanup cron after it's created below
 
@@ -1948,6 +1960,310 @@ app.post("/api/pipe/clear-accounts", (_req, res) => {
   const clearedCount = pipeAccounts.size;
   pipeAccounts.clear();
   res.json({ message: `Cleared ${clearedCount} Pipe accounts` });
+});
+
+// ============================================================================
+// WALRUS STORAGE API ENDPOINTS
+// Decentralized blob storage with pre-upload encryption
+// ============================================================================
+
+// Jetson endpoint: Notify backend after Walrus upload
+app.post("/api/walrus/upload-complete", async (req, res) => {
+  const {
+    walletAddress,
+    blobId,
+    downloadUrl,
+    cameraId,
+    deviceSignature,
+    fileType,
+    timestamp,
+    originalSize,
+    encryptedSize,
+    nonce,
+    accessGrants,
+    suiOwner
+  } = req.body;
+
+  if (!walletAddress || !blobId || !downloadUrl || !cameraId || !deviceSignature) {
+    return res.status(400).json({
+      error: "walletAddress, blobId, downloadUrl, cameraId, and deviceSignature are required"
+    });
+  }
+
+  try {
+    console.log(`🔷 Walrus upload notification from Jetson:`);
+    console.log(`   Wallet: ${walletAddress.slice(0, 8)}...`);
+    console.log(`   Blob ID: ${blobId.slice(0, 16)}...`);
+    console.log(`   File Type: ${fileType}`);
+    console.log(`   Size: ${originalSize} -> ${encryptedSize} (encrypted)`);
+    console.log(`   Access Grants: ${accessGrants?.length || 0} users`);
+
+    // Parse access grants if provided as string
+    const parsedAccessGrants = typeof accessGrants === 'string'
+      ? JSON.parse(accessGrants)
+      : (accessGrants || []);
+
+    // Save to database
+    await saveWalrusFile({
+      blobId,
+      walletAddress,
+      downloadUrl,
+      cameraId,
+      deviceSignature,
+      fileType: fileType || 'photo',
+      timestamp: timestamp || Date.now(),
+      originalSize: originalSize || 0,
+      encryptedSize: encryptedSize || 0,
+      nonce: nonce || undefined,
+      suiOwner: suiOwner || undefined,
+      accessGrants: JSON.stringify(parsedAccessGrants),
+      createdAt: new Date()
+    });
+
+    console.log(`💾 Saved Walrus file mapping to database`);
+
+    // Notify connected clients via WebSocket
+    io.emit("walrus:upload:complete", {
+      walletAddress,
+      blobId,
+      downloadUrl,
+      cameraId,
+      fileType,
+      timestamp: timestamp || Date.now(),
+      accessGrantsCount: parsedAccessGrants.length,
+      suiOwner
+    });
+
+    res.json({
+      success: true,
+      blobId,
+      downloadUrl,
+      provider: 'walrus'
+    });
+  } catch (error) {
+    console.error("❌ Failed to process Walrus upload notification:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to process upload"
+    });
+  }
+});
+
+// Gallery endpoint: Get user's Walrus media
+app.get("/api/walrus/gallery/:walletAddress", async (req, res) => {
+  const { walletAddress } = req.params;
+  const { includeShared } = req.query;
+
+  if (!walletAddress) {
+    return res.status(400).json({ error: "Wallet address required" });
+  }
+
+  try {
+    console.log(`📸 Fetching Walrus gallery for wallet: ${walletAddress.slice(0, 8)}...`);
+
+    // Get files owned by user
+    const ownedFiles = await getWalrusFilesForWallet(walletAddress);
+    console.log(`   Owned files: ${ownedFiles.length}`);
+
+    // Optionally include files shared with user (via access grants)
+    let sharedFiles: WalrusFileMapping[] = [];
+    if (includeShared === 'true') {
+      sharedFiles = await getWalrusFilesWithAccess(walletAddress);
+      // Filter out already owned files
+      sharedFiles = sharedFiles.filter(f => f.walletAddress !== walletAddress);
+      console.log(`   Shared files: ${sharedFiles.length}`);
+    }
+
+    // Transform to gallery format
+    const mediaItems = [
+      ...ownedFiles.map(file => ({
+        id: file.blobId,
+        blobId: file.blobId,
+        url: file.downloadUrl,
+        type: file.fileType === 'video' ? 'video' : 'image',
+        cameraId: file.cameraId,
+        timestamp: file.timestamp,
+        uploadedAt: file.createdAt.toISOString(),
+        encrypted: true,
+        nonce: file.nonce,
+        suiOwner: file.suiOwner,
+        accessGrants: JSON.parse(file.accessGrants || '[]'),
+        isOwned: true,
+        provider: 'walrus'
+      })),
+      ...sharedFiles.map(file => ({
+        id: file.blobId,
+        blobId: file.blobId,
+        url: file.downloadUrl,
+        type: file.fileType === 'video' ? 'video' : 'image',
+        cameraId: file.cameraId,
+        timestamp: file.timestamp,
+        uploadedAt: file.createdAt.toISOString(),
+        encrypted: true,
+        nonce: file.nonce,
+        ownerWallet: file.walletAddress,
+        accessGrants: JSON.parse(file.accessGrants || '[]'),
+        isOwned: false,
+        provider: 'walrus'
+      }))
+    ];
+
+    // Sort by timestamp descending
+    mediaItems.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    res.json({
+      success: true,
+      walletAddress,
+      provider: 'walrus',
+      items: mediaItems,
+      count: mediaItems.length,
+      ownedCount: ownedFiles.length,
+      sharedCount: sharedFiles.length
+    });
+  } catch (error) {
+    console.error("❌ Failed to fetch Walrus gallery:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to fetch gallery"
+    });
+  }
+});
+
+// Get file metadata by blob ID
+app.get("/api/walrus/file/:blobId", async (req, res) => {
+  const { blobId } = req.params;
+
+  if (!blobId) {
+    return res.status(400).json({ error: "Blob ID required" });
+  }
+
+  try {
+    const file = await getWalrusFileByBlobId(blobId);
+    if (!file) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    res.json({
+      success: true,
+      file: {
+        blobId: file.blobId,
+        downloadUrl: file.downloadUrl,
+        fileType: file.fileType,
+        timestamp: file.timestamp,
+        cameraId: file.cameraId,
+        ownerWallet: file.walletAddress,
+        suiOwner: file.suiOwner,
+        encrypted: true,
+        nonce: file.nonce,
+        originalSize: file.originalSize,
+        encryptedSize: file.encryptedSize,
+        accessGrants: JSON.parse(file.accessGrants || '[]'),
+        createdAt: file.createdAt.toISOString(),
+        provider: 'walrus'
+      }
+    });
+  } catch (error) {
+    console.error("❌ Failed to get Walrus file:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to get file"
+    });
+  }
+});
+
+// Get access key for a specific user and blob
+app.get("/api/walrus/access-key/:blobId/:walletAddress", async (req, res) => {
+  const { blobId, walletAddress } = req.params;
+
+  if (!blobId || !walletAddress) {
+    return res.status(400).json({ error: "Blob ID and wallet address required" });
+  }
+
+  try {
+    const file = await getWalrusFileByBlobId(blobId);
+    if (!file) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    const accessGrants = JSON.parse(file.accessGrants || '[]');
+    const userGrant = accessGrants.find((g: any) => g.pubkey === walletAddress);
+
+    if (!userGrant) {
+      return res.status(403).json({
+        error: "No access grant found for this wallet",
+        hasAccess: false
+      });
+    }
+
+    res.json({
+      success: true,
+      hasAccess: true,
+      encryptedKey: userGrant.encryptedKey,
+      nonce: file.nonce,
+      downloadUrl: file.downloadUrl
+    });
+  } catch (error) {
+    console.error("❌ Failed to get access key:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to get access key"
+    });
+  }
+});
+
+// Get or create Sui wallet for user
+app.post("/api/walrus/sui-wallet/:walletAddress", async (req, res) => {
+  const { walletAddress } = req.params;
+
+  if (!walletAddress) {
+    return res.status(400).json({ error: "Wallet address required" });
+  }
+
+  try {
+    console.log(`🔑 Getting/creating Sui wallet for ${walletAddress.slice(0, 8)}...`);
+    const result = await getOrCreateSuiWallet(walletAddress);
+
+    res.json({
+      success: true,
+      suiAddress: result.suiAddress,
+      isNew: result.isNew,
+      message: result.isNew
+        ? 'New Sui wallet created'
+        : 'Existing Sui wallet retrieved'
+    });
+  } catch (error) {
+    console.error("❌ Failed to get/create Sui wallet:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to get Sui wallet"
+    });
+  }
+});
+
+// Get Sui address for user (read-only, doesn't create)
+app.get("/api/walrus/sui-address/:walletAddress", async (req, res) => {
+  const { walletAddress } = req.params;
+
+  if (!walletAddress) {
+    return res.status(400).json({ error: "Wallet address required" });
+  }
+
+  try {
+    const suiAddress = await getSuiAddress(walletAddress);
+
+    if (!suiAddress) {
+      return res.status(404).json({
+        error: "No Sui wallet found for this address",
+        hasSuiWallet: false
+      });
+    }
+
+    res.json({
+      success: true,
+      hasSuiWallet: true,
+      suiAddress
+    });
+  } catch (error) {
+    console.error("❌ Failed to get Sui address:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to get Sui address"
+    });
+  }
 });
 
 // Database statistics endpoint
