@@ -57,16 +57,11 @@ services:
       - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
       - CLOUDFLARE_ZONE_ID=${CLOUDFLARE_ZONE_ID}
       - CLOUDFLARE_TUNNEL_ID=${CLOUDFLARE_TUNNEL_ID}
-      # Livepeer Configuration (Current Active Account)
-      - LIVEPEER_API_KEY=${LIVEPEER_API_KEY}
-      - LIVEPEER_STREAM_KEY=${LIVEPEER_STREAM_KEY}
-      - LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
-      - LIVEPEER_PLAYBACK_ID=${LIVEPEER_PLAYBACK_ID}
-      # Previous Account (Commented Out)
-      # - LIVEPEER_API_KEY=${LIVEPEER_API_KEY_OLD}
-      # - LIVEPEER_STREAM_KEY=${LIVEPEER_STREAM_KEY_OLD}
+      # Livepeer Configuration REMOVED - using WebRTC/WHIP for all streaming
+      # - LIVEPEER_API_KEY=${LIVEPEER_API_KEY}
+      # - LIVEPEER_STREAM_KEY=${LIVEPEER_STREAM_KEY}
       # - LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
-      # - LIVEPEER_PLAYBACK_ID=${LIVEPEER_PLAYBACK_ID_OLD}
+      # - LIVEPEER_PLAYBACK_ID=${LIVEPEER_PLAYBACK_ID}
     runtime: nvidia
     privileged: true
     cap_add:

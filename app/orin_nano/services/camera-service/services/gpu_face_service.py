@@ -863,7 +863,51 @@ class GPUFaceService:
                         )
         
         return output
-    
+
+    def draw_annotations(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Draw face detection and recognition overlays ALWAYS (ignores visualization toggle).
+        Used for the annotated stream where CV overlays are always shown.
+        """
+        if frame is None:
+            return frame
+
+        output = frame
+
+        with self._results_lock:
+            # Draw recognized faces (green boxes with names)
+            for wallet_address, face_data in self._recognized_faces.items():
+                if 'box' in face_data:
+                    x1, y1, x2, y2 = face_data['box']
+                    face_location = (y1, x2, y2, x1)  # (top, right, bottom, left)
+
+                    identity_info = {
+                        'name': face_data['name'],
+                        'confidence': face_data.get('similarity', 0) * 100,
+                        'wallet_address': wallet_address
+                    }
+
+                    self._draw_face_box(output, face_location, identity_info=identity_info)
+
+            # Draw unrecognized detected faces (red boxes)
+            for face_data in self._detected_faces:
+                if isinstance(face_data, dict) and 'box' in face_data:
+                    # Check if already recognized
+                    is_recognized = False
+                    wallet_address = face_data.get('wallet_address') or face_data.get('identity')
+                    if wallet_address and wallet_address in self._recognized_faces:
+                        is_recognized = True
+                    if not is_recognized and face_data.get('recognized_name'):
+                        if face_data['recognized_name'] in self._recognized_faces:
+                            is_recognized = True
+
+                    if not is_recognized:
+                        x1, y1, x2, y2 = face_data['box']
+                        face_location = (y1, x2, y2, x1)
+                        self._draw_face_box(output, face_location, identity_info=None)
+
+        return output
+
     def _is_same_face_location(self, location1, location2, threshold=50):
         """
         Check if two face locations are roughly the same (within threshold pixels).

@@ -417,8 +417,8 @@ def register_routes(app):
             services = get_services()
             buffer_service = services["buffer"]
             capture_service = services.get("capture")
-            livepeer_service = services.get("livepeer")
             webrtc_service = services.get("webrtc")
+            whip_service = services.get("whip")
 
             # Get buffer/camera status
             buffer_status = buffer_service.get_status()
@@ -428,33 +428,28 @@ def register_routes(app):
             current_filename = None
             if capture_service:
                 is_recording = capture_service.is_recording()
-                # Note: capture service doesn't expose current filename, would need to add that
-
-            # Get Livepeer streaming status
-            is_streaming = False
-            stream_info = {"playbackId": None, "isActive": False, "format": "livepeer"}
-
-            if livepeer_service:
-                livepeer_status = livepeer_service.get_stream_status()
-                is_streaming = livepeer_status.get("status") == "streaming"
-                if is_streaming:
-                    stream_info.update(
-                        {
-                            "playbackId": livepeer_status.get("playback_id"),
-                            "isActive": True,
-                            "format": "livepeer",
-                        }
-                    )
 
             # Get WebRTC status
             webrtc_status = {}
             if webrtc_service:
                 webrtc_status = webrtc_service.get_status()
 
-            # Add WebRTC to stream info if available
-            stream_formats = ["livepeer"]
-            if webrtc_status.get("connected", False):
-                stream_formats.append("webrtc")
+            # Get WHIP status
+            whip_status = {}
+            if whip_service:
+                whip_status = whip_service.get_status()
+
+            # Streaming status based on WebRTC/WHIP (Livepeer removed)
+            is_streaming = webrtc_status.get("connected", False) or whip_status.get("connected", False)
+            stream_info = {
+                "isActive": is_streaming,
+                "format": "webrtc",  # Primary format is now WebRTC
+                "whip_connected": whip_status.get("connected", False),
+                "webrtc_connected": webrtc_status.get("connected", False)
+            }
+
+            # Available stream formats (Livepeer removed)
+            stream_formats = ["webrtc", "whip"]
 
             # Get active session count for Phase 3 privacy architecture
             session_service = services.get("session")
@@ -492,158 +487,75 @@ def register_routes(app):
             logger.error(f"Error getting status: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @app.route("/api/stream/info")
+    @app.route("/api/stream/info", methods=["GET"])
     def api_stream_info():
-        """Stream metadata endpoint (standardized)"""
-        buffer_service = get_services()["buffer"]
-        buffer_status = buffer_service.get_status()
+        """Get information about available video streams (clean and annotated).
 
-        return jsonify(
-            {
-                "success": True,
-                "playbackId": "jetson-camera-stream",
-                "isActive": buffer_status["running"],
-                "streamType": "mjpeg",
-                "resolution": f"{buffer_service._width}x{buffer_service._height}",
-                "fps": buffer_status["fps"],
-                "streamUrl": "/stream",
-            }
-        )
-
-    # Livepeer Streaming Endpoints
-    @app.route("/api/stream/livepeer/start", methods=["POST"])
-    def api_livepeer_start():
-        """Start Livepeer streaming"""
+        Returns URLs and connection info for:
+        - P2P WebRTC streams (clean and annotated) - lower latency, local network
+        - WHEP streams (clean and annotated) - remote viewing via MediaMTX relay
+        """
         try:
-            livepeer_service = get_services()["livepeer"]
-            result = livepeer_service.start_stream()
+            import os
+            webrtc_service = get_services().get("webrtc")
+            whip_clean = get_services().get("whip_clean")
+            whip_annotated = get_services().get("whip_annotated")
 
-            if result.get("status") == "streaming":
-                # Buffer stream start activity to timeline
-                try:
-                    # Get wallet address from request or fall back to first checked-in user
-                    data = request.json or {}
-                    wallet_address = data.get("wallet_address")
+            camera_pda = os.environ.get('CAMERA_PDA', 'unknown')
+            mediamtx_url = os.environ.get('MEDIAMTX_URL', 'http://129.80.99.75:8889')
 
-                    if not wallet_address:
-                        # Fall back to first checked-in user
-                        blockchain_sync = get_blockchain_session_sync()
-                        checked_in = list(blockchain_sync.checked_in_wallets)
-                        if checked_in:
-                            wallet_address = checked_in[0]
-
-                    if wallet_address:
-                        from services.timeline_activity_service import (
-                            get_timeline_activity_service,
-                        )
-
-                        timeline_service = get_timeline_activity_service()
-                        timeline_service.buffer_stream_start_activity(
-                            wallet_address=wallet_address,
-                            stream_id=result.get("stream_key", ""),
-                            playback_id=result.get("playback_id", ""),
-                            metadata={
-                                "resolution": result.get("resolution"),
-                                "fps": result.get("target_fps"),
-                                "optimization": result.get("optimization"),
-                            },
-                        )
-                        result["timeline_buffered"] = True
-                    else:
-                        logger.debug(
-                            "No wallet address for stream start timeline buffering"
-                        )
-                        result["timeline_buffered"] = False
-                except Exception as timeline_err:
-                    logger.warning(
-                        f"Failed to buffer stream start to timeline: {timeline_err}"
-                    )
-                    result["timeline_buffered"] = False
-
-                return jsonify({"success": True, **result})
-            else:
-                return jsonify(
-                    {
-                        "success": False,
-                        "error": result.get("message", "Failed to start stream"),
-                    }
-                ), 500
-        except Exception as e:
-            logger.error(f"Error starting Livepeer stream: {e}")
-            return jsonify({"success": False, "error": str(e)}), 500
-
-    @app.route("/api/stream/livepeer/stop", methods=["POST"])
-    def api_livepeer_stop():
-        """Stop Livepeer streaming"""
-        try:
-            # Get stream status before stopping (for duration calculation)
-            livepeer_service = get_services()["livepeer"]
-            pre_stop_status = livepeer_service.get_stream_status()
-
-            # Calculate duration if stream was active
-            stream_duration = None
-            if pre_stop_status.get("status") == "streaming":
-                uptime = pre_stop_status.get("uptime_seconds", 0)
-                if uptime:
-                    stream_duration = uptime
-
-            result = livepeer_service.stop_stream()
-
-            # Buffer stream end activity to timeline
-            try:
-                # Get wallet address from request or fall back to first checked-in user
-                data = request.json or {}
-                wallet_address = data.get("wallet_address")
-
-                if not wallet_address:
-                    # Fall back to first checked-in user
-                    blockchain_sync = get_blockchain_session_sync()
-                    checked_in = list(blockchain_sync.checked_in_wallets)
-                    if checked_in:
-                        wallet_address = checked_in[0]
-
-                if wallet_address:
-                    from services.timeline_activity_service import (
-                        get_timeline_activity_service,
-                    )
-
-                    timeline_service = get_timeline_activity_service()
-                    timeline_service.buffer_stream_end_activity(
-                        wallet_address=wallet_address,
-                        stream_id=pre_stop_status.get("stream_key", ""),
-                        playback_id=pre_stop_status.get("playback_id", ""),
-                        duration_seconds=stream_duration,
-                        metadata={
-                            "frames_sent": pre_stop_status.get("frames_sent"),
-                            "avg_fps": pre_stop_status.get("current_fps"),
+            # Build stream info response
+            streams = {
+                "camera_pda": camera_pda,
+                "streams": {
+                    "clean": {
+                        "description": "Raw video stream without CV annotations",
+                        "p2p": {
+                            "available": webrtc_service is not None and webrtc_service.running,
+                            "signaling": webrtc_service.backend_url if webrtc_service else None,
+                            "streamType": "clean",
+                            "info": "Connect via Socket.IO with streamType='clean'"
                         },
-                    )
-                    result["timeline_buffered"] = True
-                else:
-                    logger.debug("No wallet address for stream end timeline buffering")
-                    result["timeline_buffered"] = False
-            except Exception as timeline_err:
-                logger.warning(
-                    f"Failed to buffer stream end to timeline: {timeline_err}"
-                )
-                result["timeline_buffered"] = False
+                        "whep": {
+                            "available": whip_clean is not None and whip_clean.connected,
+                            "url": f"{mediamtx_url}/{camera_pda}/" if whip_clean else None,
+                            "running": whip_clean.running if whip_clean else False,
+                            "connected": whip_clean.connected if whip_clean else False
+                        }
+                    },
+                    "annotated": {
+                        "description": "Video stream with CV annotations (face boxes, skeletons, app overlays)",
+                        "p2p": {
+                            "available": webrtc_service is not None and webrtc_service.running,
+                            "signaling": webrtc_service.backend_url if webrtc_service else None,
+                            "streamType": "annotated",
+                            "info": "Connect via Socket.IO with streamType='annotated'"
+                        },
+                        "whep": {
+                            "available": whip_annotated is not None and whip_annotated.connected,
+                            "url": f"{mediamtx_url}/{camera_pda}-annotated/" if whip_annotated else None,
+                            "running": whip_annotated.running if whip_annotated else False,
+                            "connected": whip_annotated.connected if whip_annotated else False
+                        }
+                    }
+                },
+                "recommended": {
+                    "local_network": "p2p",
+                    "remote_viewing": "whep",
+                    "default_stream": "clean"
+                }
+            }
 
-            return jsonify({"success": True, **result})
+            return jsonify({
+                "success": True,
+                **streams
+            })
         except Exception as e:
-            logger.error(f"Error stopping Livepeer stream: {e}")
+            logger.error(f"Error getting stream info: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @app.route("/api/stream/livepeer/status", methods=["GET"])
-    def api_livepeer_status():
-        """Get Livepeer stream status"""
-        try:
-            livepeer_service = get_services()["livepeer"]
-            result = livepeer_service.get_stream_status()
-
-            return jsonify({"success": True, **result})
-        except Exception as e:
-            logger.error(f"Error getting Livepeer stream status: {e}")
-            return jsonify({"success": False, "error": str(e)}), 500
+    # Livepeer Streaming Endpoints REMOVED - using WebRTC/WHIP for all streaming now
+    # Endpoints removed: /api/stream/livepeer/start, /api/stream/livepeer/stop, /api/stream/livepeer/status
 
     @app.route("/api/stream/webrtc/status", methods=["GET"])
     def api_webrtc_status():
@@ -1008,7 +920,8 @@ def register_routes(app):
     def api_face_enroll_confirm():
         """Confirm face enrollment and handle biometric cleanup"""
         wallet_address = request.json.get("wallet_address")
-        signed_transaction = request.json.get("signed_transaction")
+        # Accept both parameter names for compatibility
+        signed_transaction = request.json.get("signed_transaction") or request.json.get("transaction_signature")
         face_id = request.json.get("face_id")
         biometric_session_id = request.json.get("biometric_session_id")
 
@@ -1107,6 +1020,18 @@ def register_routes(app):
             logger.info(
                 f"[ENROLL-CONFIRM] ✅ Face enrollment completed successfully for wallet: {wallet_address}, transaction_id: {transaction_id}"
             )
+
+            # AUTO-RELOAD: Fetch and load the newly minted recognition token for immediate face recognition
+            # This ensures users don't need to check out and back in after creating their token
+            try:
+                from services.blockchain_session_sync import get_blockchain_session_sync
+                blockchain_sync = get_blockchain_session_sync()
+                logger.info(f"[ENROLL-CONFIRM] 🔄 Auto-loading recognition token for {wallet_address[:8]}...")
+                blockchain_sync._fetch_and_decrypt_recognition_token(wallet_address)
+                logger.info(f"[ENROLL-CONFIRM] ✅ Recognition token loaded - face recognition now active!")
+            except Exception as reload_error:
+                logger.warning(f"[ENROLL-CONFIRM] ⚠️ Failed to auto-load recognition token: {reload_error}")
+                # Non-fatal - enrollment succeeded, user can still check out/in to reload
 
             # Return the expected format for frontend
             return jsonify(
@@ -2647,39 +2572,8 @@ def register_routes(app):
 
         return jsonify(health_response)
 
-    # Stream route
-    @app.route("/stream")
-    def stream():
-        """
-        Stream the camera feed as MJPEG
-        This is a special endpoint that continuously streams JPEG frames
-        """
-        buffer_service = get_services()["buffer"]
-
-        def generate():
-            """Generator function for MJPEG streaming"""
-            while True:
-                # Get JPEG frame from buffer (with processing for visualizations)
-                jpeg_data, timestamp = buffer_service.get_jpeg_frame(processed=True)
-
-                if jpeg_data is None:
-                    # If no frame is available, wait and try again
-                    time.sleep(0.03)
-                    continue
-
-                # Yield MJPEG format content
-                yield (
-                    b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg_data + b"\r\n"
-                )
-
-                # Control frame rate of the stream
-                time.sleep(0.03)  # ~30fps
-
-        # Return streaming response
-        return Response(
-            stream_with_context(generate()),
-            mimetype="multipart/x-mixed-replace; boundary=frame",
-        )
+    # MJPEG stream removed - using WebRTC/WHIP for streaming now
+    # See /api/stream/info for available streams
 
     # Visualization routes - all public, no auth required
     @app.route("/toggle_face_detection", methods=["POST"])
@@ -3224,15 +3118,27 @@ def register_routes(app):
         """
         Capture a photo from the camera and upload directly to user's Pipe storage
         Returns the photo data and upload result
+
+        Request body:
+            wallet_address: User's wallet address (required)
+            annotated: If true, capture with CV annotations (face boxes, skeletons). Default: false
+            event_metadata: Optional metadata about the capture trigger (e.g., from CV app)
         """
         wallet_address = request.json.get("wallet_address")
+        annotated = request.json.get("annotated", False)
+        event_metadata = request.json.get("event_metadata")
 
         # Get services
         buffer_service = get_services()["buffer"]
         capture_service = get_services()["capture"]
 
-        # Capture photo
-        photo_info = capture_service.capture_photo(buffer_service, wallet_address)
+        # Capture photo (clean or annotated based on parameter)
+        photo_info = capture_service.capture_photo(
+            buffer_service,
+            wallet_address,
+            annotated=annotated,
+            event_metadata=event_metadata
+        )
 
         if not photo_info["success"]:
             return jsonify(photo_info), 500

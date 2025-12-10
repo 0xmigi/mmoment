@@ -25,14 +25,13 @@ from fractions import Fraction
 logger = logging.getLogger("WHIPPublisher")
 
 
-class CameraVideoTrack(VideoStreamTrack):
+class BaseVideoTrack(VideoStreamTrack):
     """
-    Video track that streams frames from the camera buffer service.
-    Similar to BufferVideoTrack but optimized for WHIP publishing.
+    Base video track class with shared functionality for WHIP publishing.
     """
     kind = "video"
 
-    def __init__(self, buffer_service, fps: int = 30):
+    def __init__(self, buffer_service, fps: int = 30, track_name: str = "base"):
         super().__init__()
         self.buffer_service = buffer_service
         self.fps = fps
@@ -40,6 +39,11 @@ class CameraVideoTrack(VideoStreamTrack):
         self.last_frame_time = 0
         self.frame_count = 0
         self.time_base = Fraction(1, 90000)  # Standard 90kHz RTP clock
+        self.track_name = track_name
+
+    def _get_frame_data(self):
+        """Override in subclass to get the appropriate frame type"""
+        raise NotImplementedError
 
     async def recv(self) -> VideoFrame:
         """Get the next video frame from buffer service"""
@@ -52,8 +56,8 @@ class CameraVideoTrack(VideoStreamTrack):
         self.frame_count += 1
 
         try:
-            # Get frame from buffer service
-            frame_data = self.buffer_service.get_processed_frame()
+            # Get frame from buffer service (method determined by subclass)
+            frame_data = self._get_frame_data()
 
             # Handle tuple return format
             if isinstance(frame_data, tuple) and len(frame_data) > 0:
@@ -63,7 +67,6 @@ class CameraVideoTrack(VideoStreamTrack):
 
             # Validate frame
             if frame is None or (isinstance(frame, np.ndarray) and frame.size == 0):
-                # Generate placeholder frame
                 frame = self._create_placeholder_frame()
 
             # Convert BGR to RGB
@@ -82,12 +85,12 @@ class CameraVideoTrack(VideoStreamTrack):
 
             # Log periodically
             if self.frame_count % 300 == 0:  # Every 10 seconds at 30fps
-                logger.info(f"📡 WHIP: Published {self.frame_count} frames")
+                logger.info(f"📡 WHIP [{self.track_name}]: Published {self.frame_count} frames")
 
             return av_frame
 
         except Exception as e:
-            logger.error(f"Error getting frame: {e}")
+            logger.error(f"Error getting frame [{self.track_name}]: {e}")
             return self._create_error_frame()
 
     def _create_placeholder_frame(self) -> np.ndarray:
@@ -109,6 +112,46 @@ class CameraVideoTrack(VideoStreamTrack):
         return av_frame
 
 
+class CleanVideoTrack(BaseVideoTrack):
+    """
+    Video track that streams CLEAN frames (no CV annotations).
+    Used for the default stream without overlays.
+    """
+    def __init__(self, buffer_service, fps: int = 30):
+        super().__init__(buffer_service, fps, track_name="clean")
+
+    def _get_frame_data(self):
+        """Get clean frame without annotations"""
+        return self.buffer_service.get_clean_frame()
+
+
+class AnnotatedVideoTrack(BaseVideoTrack):
+    """
+    Video track that streams ANNOTATED frames (with CV overlays always on).
+    Used for the annotated stream with face boxes, skeletons, etc.
+    """
+    def __init__(self, buffer_service, fps: int = 30):
+        super().__init__(buffer_service, fps, track_name="annotated")
+
+    def _get_frame_data(self):
+        """Get annotated frame with CV overlays"""
+        return self.buffer_service.get_annotated_frame()
+
+
+# Legacy alias for backwards compatibility
+class CameraVideoTrack(BaseVideoTrack):
+    """
+    Legacy video track - now defaults to annotated frames for backwards compatibility.
+    Use CleanVideoTrack or AnnotatedVideoTrack directly instead.
+    """
+    def __init__(self, buffer_service, fps: int = 30):
+        super().__init__(buffer_service, fps, track_name="legacy")
+
+    def _get_frame_data(self):
+        """Get processed frame (toggle-based, for backwards compatibility)"""
+        return self.buffer_service.get_processed_frame()
+
+
 class WHIPPublisher:
     """
     Publishes camera stream to MediaMTX via WHIP protocol.
@@ -126,7 +169,8 @@ class WHIPPublisher:
         self,
         mediamtx_url: str = None,
         stream_name: str = None,
-        fps: int = 30
+        fps: int = 30,
+        video_track_class: type = None
     ):
         # MediaMTX configuration
         self.mediamtx_url = mediamtx_url or os.environ.get(
@@ -141,6 +185,9 @@ class WHIPPublisher:
         self.fps = fps
         self.buffer_service = None
 
+        # Video track class - default to CleanVideoTrack for clean stream
+        self.video_track_class = video_track_class or CleanVideoTrack
+
         # Connection state
         self.running = False
         self.connected = False
@@ -153,7 +200,8 @@ class WHIPPublisher:
         self.max_reconnect_attempts = 10
         self.reconnect_attempts = 0
 
-        logger.info(f"WHIPPublisher initialized: {self.whip_url}")
+        track_type = "annotated" if video_track_class == AnnotatedVideoTrack else "clean"
+        logger.info(f"WHIPPublisher initialized [{track_type}]: {self.whip_url}")
 
     @property
     def whip_url(self) -> str:
@@ -242,8 +290,8 @@ class WHIPPublisher:
         # Create peer connection
         self.pc = RTCPeerConnection()
 
-        # Add video track
-        video_track = CameraVideoTrack(self.buffer_service, fps=self.fps)
+        # Add video track (using configured track class - CleanVideoTrack or AnnotatedVideoTrack)
+        video_track = self.video_track_class(self.buffer_service, fps=self.fps)
         self.pc.addTrack(video_track)
 
         # Set up connection state monitoring

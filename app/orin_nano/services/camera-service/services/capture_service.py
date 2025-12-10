@@ -74,20 +74,25 @@ class CaptureService:
         
         logger.info("CaptureService initialized with mp4v codec and MOV format for IPFS compatibility")
     
-    def capture_photo(self, buffer_service, user_id: str = None) -> Dict:
+    def capture_photo(self, buffer_service, user_id: str = None, annotated: bool = False, event_metadata: Dict = None) -> Dict:
         """
         Capture a photo from the buffer.
-        
+
         Args:
             buffer_service: The buffer service to get frames from
             user_id: Optional user identifier for the filename
-            
+            annotated: If True, capture frame with CV annotations (face boxes, skeletons, etc.)
+            event_metadata: Optional metadata about the capture event (e.g., app state, trigger type)
+
         Returns:
             Dict with photo information (success, path, etc.)
         """
         try:
-            # Get the latest frame from the buffer
-            frame, timestamp = buffer_service.get_frame()
+            # Get the appropriate frame based on annotation preference
+            if annotated:
+                frame, timestamp = buffer_service.get_annotated_frame()
+            else:
+                frame, timestamp = buffer_service.get_clean_frame()
             
             if frame is None:
                 logger.error("Failed to capture photo: No frame available")
@@ -119,15 +124,22 @@ class CaptureService:
             self._cleanup_photos()
             
             # Return photo info
-            return {
+            result = {
                 "success": True,
                 "path": filepath,
                 "filename": filename,
                 "timestamp": int(timestamp * 1000),
                 "size": filesize,
                 "width": frame.shape[1],
-                "height": frame.shape[0]
+                "height": frame.shape[0],
+                "annotated": annotated
             }
+
+            # Include event metadata if provided (e.g., from CV app capture)
+            if event_metadata:
+                result["event_metadata"] = event_metadata
+
+            return result
             
         except Exception as e:
             logger.error(f"Error capturing photo: {e}")

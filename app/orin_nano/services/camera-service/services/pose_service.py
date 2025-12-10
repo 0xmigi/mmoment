@@ -242,6 +242,41 @@ class PoseService:
 
         return frame
 
+    def draw_annotations(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Draw pose skeletons ALWAYS (ignores visualization toggle).
+        Used for the annotated stream where CV overlays are always shown.
+        """
+        if frame is None:
+            return frame
+
+        with self._results_lock:
+            poses = self._latest_poses.copy()
+
+        if not poses:
+            return frame
+
+        # Draw skeletons directly on frame
+        for pose in poses:
+            keypoints = pose['keypoints']
+
+            # Draw keypoints
+            for i, (x, y, conf) in enumerate(keypoints):
+                if conf > 0.5:
+                    cv2.circle(frame, (int(x), int(y)), 4, (0, 255, 0), -1)
+
+            # Draw skeleton connections
+            for start_idx, end_idx in self.skeleton_connections:
+                start_kpt = keypoints[start_idx]
+                end_kpt = keypoints[end_idx]
+
+                if start_kpt[2] > 0.5 and end_kpt[2] > 0.5:
+                    start_point = (int(start_kpt[0]), int(start_kpt[1]))
+                    end_point = (int(end_kpt[0]), int(end_kpt[1]))
+                    cv2.line(frame, start_point, end_point, (0, 255, 0), 2)
+
+        return frame
+
     def stop(self):
         """Stop pose detection"""
         self.enabled = False

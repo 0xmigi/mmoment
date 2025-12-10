@@ -3088,9 +3088,10 @@ io.on("connection", (socket) => {
 
   socket.on(
     "register-viewer",
-    (data: { cameraId: string; cellularMode?: boolean }) => {
+    (data: { cameraId: string; cellularMode?: boolean; streamType?: 'clean' | 'annotated' }) => {
+      const streamType = data.streamType || 'clean';
       console.log(
-        `Viewer registering for WebRTC camera ${data.cameraId} on socket ${socket.id}, cellular mode: ${data.cellularMode || false}`,
+        `Viewer registering for WebRTC camera ${data.cameraId} on socket ${socket.id}, cellular mode: ${data.cellularMode || false}, stream type: ${streamType}`,
       );
       webrtcPeers.set(socket.id, { cameraId: data.cameraId, type: "viewer" });
       socket.join(`webrtc-${data.cameraId}`);
@@ -3103,13 +3104,14 @@ io.on("connection", (socket) => {
         `Room webrtc-${data.cameraId} has ${roomSockets ? roomSockets.size : 0} sockets`,
       );
 
-      // Notify camera that a viewer wants to connect with cellular mode flag
+      // Notify camera that a viewer wants to connect with cellular mode flag and stream type
       console.log(
-        `Notifying camera in room webrtc-${data.cameraId} that viewer ${socket.id} wants to connect (cellular: ${data.cellularMode || false})`,
+        `Notifying camera in room webrtc-${data.cameraId} that viewer ${socket.id} wants to connect (cellular: ${data.cellularMode || false}, stream: ${streamType})`,
       );
       socket.to(`webrtc-${data.cameraId}`).emit("viewer-wants-connection", {
         viewerId: socket.id,
         cellularMode: data.cellularMode || false,
+        streamType: streamType,  // Pass stream type to camera
       });
     },
   );

@@ -7,15 +7,17 @@ import { io, Socket } from "socket.io-client";
 interface WebRTCStreamPlayerProps {
   fallback?: React.ReactNode;
   onError?: (error: string) => void;
+  streamType?: 'clean' | 'annotated';  // Stream type: clean (default) or annotated (with CV overlays)
 }
 
 // WHEP fallback configuration
 const WHEP_CONFIG = {
   // MediaMTX server URL - the camera publishes here via WHIP
   MEDIAMTX_URL: "http://129.80.99.75:8889",
-  STREAM_NAME: "jetson-camera",
-  get WHEP_URL() {
-    return `${this.MEDIAMTX_URL}/${this.STREAM_NAME}/whep`;
+  // Get WHEP URL for a specific camera and stream type
+  getWhepUrl(cameraId: string, streamType: 'clean' | 'annotated' = 'clean') {
+    const streamName = streamType === 'annotated' ? `${cameraId}-annotated` : cameraId;
+    return `${this.MEDIAMTX_URL}/${streamName}/whep`;
   }
 };
 
@@ -67,7 +69,7 @@ const detectCellularConnection = (): boolean => {
   return false;
 };
 
-const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
+const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError, streamType = 'clean' }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const socketRef = useRef<Socket | null>(null);
@@ -155,8 +157,13 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
 
   // WHEP fallback connection - connects directly to MediaMTX server
   const connectViaWhep = useCallback(async () => {
+    const whepUrl = currentCameraId
+      ? WHEP_CONFIG.getWhepUrl(currentCameraId, streamType)
+      : WHEP_CONFIG.getWhepUrl('jetson-camera', streamType);  // Fallback stream name
+
     console.log("[WHEP] 🔄 Falling back to WHEP via MediaMTX...");
-    console.log("[WHEP] URL:", WHEP_CONFIG.WHEP_URL);
+    console.log("[WHEP] URL:", whepUrl);
+    console.log("[WHEP] Stream type:", streamType);
 
     setConnectionState("connecting");
     setError(null);
@@ -219,7 +226,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
       console.log("[WHEP] 📤 Sending offer to MediaMTX...");
 
       // Send offer to MediaMTX WHEP endpoint
-      const response = await fetch(WHEP_CONFIG.WHEP_URL, {
+      const response = await fetch(whepUrl, {
         method: "POST",
         headers: { "Content-Type": "application/sdp" },
         body: pc.localDescription?.sdp,
@@ -244,7 +251,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
       setError(`WHEP fallback failed: ${error instanceof Error ? error.message : "Unknown error"}`);
       setConnectionState("failed");
     }
-  }, []);
+  }, [currentCameraId, streamType]);
 
   const createPeerConnection = useCallback(async () => {
     // Generate time-based TURN credentials
@@ -750,15 +757,17 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         // Detect if we're on cellular by checking connection type and network info
         const isCellular = detectCellularConnection();
         
-        // Register as viewer with cellular mode flag
+        // Register as viewer with cellular mode flag and stream type
         console.log(
           "[WebRTC] Registering as viewer for camera:",
           currentCameraId,
-          "Cellular mode:", isCellular
+          "Cellular mode:", isCellular,
+          "Stream type:", streamType
         );
-        socket.emit("register-viewer", { 
+        socket.emit("register-viewer", {
           cameraId: currentCameraId,
-          cellularMode: isCellular 
+          cellularMode: isCellular,
+          streamType: streamType  // 'clean' (default) or 'annotated'
         });
       });
 
@@ -900,7 +909,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         }`
       );
     }
-  }, [currentCameraId, createPeerConnection, handleError]);
+  }, [currentCameraId, createPeerConnection, handleError, streamType]);
 
   // Handle pending stream when video element becomes available
   useEffect(() => {

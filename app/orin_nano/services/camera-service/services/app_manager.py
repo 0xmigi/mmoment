@@ -381,6 +381,14 @@ class AppManager:
 
         return frame
 
+    def draw_annotations(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Draw app overlays on frame (same as get_processed_frame for app_manager).
+        App manager doesn't have a visualization toggle, so this is identical.
+        Used for the annotated stream where CV overlays are always shown.
+        """
+        return self.get_processed_frame(frame)
+
 
 # Global instance
 _app_manager = None

@@ -18,6 +18,15 @@ from typing import Optional, Dict, List, Tuple
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BufferService")
 
+# Check for GPU rotation support
+GPU_ROTATION_AVAILABLE = False
+try:
+    import cupy as cp
+    GPU_ROTATION_AVAILABLE = True
+    logger.info("CuPy available - GPU frame rotation enabled")
+except ImportError:
+    logger.info("CuPy not available - using CPU frame rotation")
+
 class BufferService:
     """
     Singleton service that maintains a circular buffer of raw camera frames.
@@ -74,6 +83,31 @@ class BufferService:
         self._health_status = "Not started"
         
         logger.info(f"BufferService initialized with settings: {self._width}x{self._height}@{self._fps}fps")
+
+    def _rotate_frame_gpu(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Rotate frame 90 degrees counter-clockwise using GPU if available.
+        Falls back to CPU rotation if GPU is not available.
+
+        Args:
+            frame: Input frame (1280x720 BGR)
+
+        Returns:
+            Rotated frame (720x1280 BGR)
+        """
+        if GPU_ROTATION_AVAILABLE:
+            try:
+                # Upload to GPU, rotate, download
+                gpu_frame = cp.asarray(frame)
+                # Rotate 90 degrees counter-clockwise: transpose + flip horizontally
+                rotated_gpu = cp.flip(gpu_frame.transpose(1, 0, 2), axis=1)
+                return cp.asnumpy(rotated_gpu)
+            except Exception as e:
+                # Fall back to CPU on GPU error
+                logger.warning(f"GPU rotation failed, using CPU: {e}")
+                return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        else:
+            return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
     def _load_camera_config(self):
         """Load camera configuration from file"""
@@ -289,7 +323,8 @@ class BufferService:
                 # Rotate frame to vertical 16:9 for mobile viewing (720x1280)
                 if ret and frame is not None and frame.size > 0:
                     # Rotate 90 degrees counterclockwise: 1280x720 -> 720x1280
-                    frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                    # Uses GPU acceleration if CuPy is available, otherwise CPU
+                    frame = self._rotate_frame_gpu(frame)
                 
                 # Check if frame capture was successful
                 if not ret or frame is None or frame.size == 0:
@@ -437,6 +472,45 @@ class BufferService:
 
         return frame, timestamp
 
+    def get_clean_frame(self) -> Tuple[Optional[np.ndarray], float]:
+        """
+        Get the latest RAW frame without any CV annotations.
+        Used for clean stream (no overlays).
+        Returns a tuple of (frame, timestamp) or (None, 0) if no frame is available.
+        """
+        with self._buffer_lock:
+            if self._latest_frame is not None:
+                return self._latest_frame.copy(), self._latest_timestamp
+            return None, 0
+
+    def get_annotated_frame(self) -> Tuple[Optional[np.ndarray], float]:
+        """
+        Get the latest frame with CV annotations ALWAYS applied.
+        Used for annotated stream (with face boxes, skeleton, etc).
+        This ignores visualization toggle flags - always draws annotations.
+        Returns a tuple of (annotated_frame, timestamp) or (None, 0) if no frame is available.
+        """
+        with self._buffer_lock:
+            if self._latest_frame is None:
+                return None, 0
+            frame = self._latest_frame.copy()
+            timestamp = self._latest_timestamp
+
+        # Apply all CV annotations regardless of toggle state
+        # Each service's draw_annotations() method always draws (ignores _visualization_enabled)
+        if hasattr(self, '_gpu_face_service') and self._gpu_face_service:
+            frame = self._gpu_face_service.draw_annotations(frame)
+
+        if hasattr(self, '_pose_service') and self._pose_service:
+            frame = self._pose_service.draw_annotations(frame)
+
+        if hasattr(self, '_app_manager') and self._app_manager:
+            frame = self._app_manager.draw_annotations(frame)
+
+        # Note: gesture_service omitted - was causing high CPU usage
+
+        return frame, timestamp
+
     def inject_services(self, gesture_service=None, gpu_face_service=None, pose_service=None, app_manager=None):
         """
         Inject services for frame processing.
@@ -472,23 +546,8 @@ class BufferService:
             recent_frames = list(self._frame_buffer)[-frames_count:]
             return [(frame.copy(), ts) for frame, ts in recent_frames]
 
-    def get_jpeg_frame(self, quality: int = 90, processed: bool = False) -> Tuple[Optional[bytes], float]:
-        """
-        Get the latest frame encoded as JPEG.
-        If processed=True, returns a processed frame with visualizations.
-        Returns a tuple of (jpeg_bytes, timestamp).
-        """
-        if processed and hasattr(self, '_gpu_face_service'):
-            frame, timestamp = self.get_processed_frame()
-        else:
-            frame, timestamp = self.get_frame()
-            
-        if frame is None:
-            return None, 0
-            
-        # Encode the frame to JPEG
-        _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
-        return jpeg.tobytes(), timestamp
+    # get_jpeg_frame() removed - MJPEG streaming no longer used
+    # Use get_clean_frame() or get_annotated_frame() instead
 
     def _health_check(self) -> None:
         """

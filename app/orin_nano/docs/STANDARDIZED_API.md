@@ -11,8 +11,8 @@ All these endpoints are accessible to your frontend application and are the **ON
 - `GET /api/health` - Health check with service status
 - `GET /api/status` - **[MAIN ENDPOINT]** Comprehensive system status including streaming and recording state
 
-### Camera Actions  
-- `POST /api/capture` - Take a photo (requires session)
+### Camera Actions
+- `POST /api/capture` - Take a photo (requires session). Supports `annotated: true` parameter for CV overlay capture.
 - `POST /api/record` - Start/stop video recording (requires session)
 
 ### Media Access
@@ -46,10 +46,28 @@ All these endpoints are accessible to your frontend application and are the **ON
 - `POST /api/face/enroll/prepare-transaction` - Prepare facial  transaction (requires session)
 - `POST /api/face/enroll/confirm` - Confirm facial NFT transaction (requires session)
 
-### Streaming (Jetson-specific - Livepeer)
-- `POST /api/stream/livepeer/start` - Start Livepeer streaming
-- `POST /api/stream/livepeer/stop` - Stop Livepeer streaming
-- `GET /api/stream/livepeer/status` - Get Livepeer streaming status (detailed)
+### Streaming (Jetson-specific - WebRTC)
+
+**Note:** Video streaming uses WebRTC via Socket.IO signaling, NOT REST API endpoints.
+
+- `GET /api/stream/webrtc/status` - Get P2P WebRTC service status
+- `GET /api/stream/whip/status` - Get WHIP publisher status (for WHEP fallback)
+- `GET /api/stream/info` - Get all available stream URLs and connection info
+
+#### WebRTC Architecture
+```
+Frontend ──Socket.IO──> Backend Signaling Server ──Socket.IO──> Jetson Camera
+              │
+              └── Events: register-viewer, webrtc-offer, webrtc-answer, webrtc-ice-candidate
+```
+
+#### Stream Types (Dual Stream)
+- **Clean stream**: Raw video without CV annotations (default)
+- **Annotated stream**: Video with face boxes, skeletons, app overlays
+
+#### Connection Methods
+1. **P2P WebRTC** (lowest latency, local network) - via Socket.IO signaling
+2. **WHEP Fallback** (remote viewing) - direct connection to MediaMTX server
 
 ---
 
@@ -100,6 +118,35 @@ These endpoints are used for communication between Docker containers and service
 }
 ```
 
+### Capture Request
+```json
+{
+  "wallet_address": "string",
+  "annotated": false,
+  "event_metadata": {
+    "app_id": "pushup",
+    "event_type": "pushup_peak",
+    "rep": 5
+  }
+}
+```
+
+**Parameters:**
+- `wallet_address` (required): Wallet address for the capture
+- `annotated` (optional, default: false): If true, capture with CV annotations (face boxes, skeletons, app overlays)
+- `event_metadata` (optional): App-provided context stored with the capture
+
+### Capture Response
+```json
+{
+  "success": true,
+  "path": "/data/images/capture_123.jpg",
+  "timestamp": 1234567890,
+  "annotated": false,
+  "event_metadata": null
+}
+```
+
 ### Status Response (Key Endpoint)
 ```json
 {
@@ -111,9 +158,10 @@ These endpoints are used for communication between Docker containers and service
     "isRecording": false,
     "lastSeen": 1234567890,
     "streamInfo": {
-      "playbackId": "your-playback-id-here",
-      "isActive": true,
-      "format": "livepeer"
+      "p2p_connected": true,
+      "whip_publishing": true,
+      "active_viewers": 2,
+      "format": "webrtc"
     },
     "recordingInfo": {
       "isActive": false,
@@ -144,12 +192,32 @@ These endpoints are used for communication between Docker containers and service
 ```json
 {
   "success": true,
-  "playbackId": "jetson-camera-stream",
-  "isActive": true,
-  "streamType": "mjpeg",
-  "resolution": "1280x720", 
-  "fps": 9.94,
-  "streamUrl": "/stream"
+  "camera_pda": "your-camera-pda",
+  "streams": {
+    "clean": {
+      "description": "Raw video stream without CV annotations",
+      "p2p": {
+        "available": true,
+        "signaling": "Socket.IO via backend"
+      },
+      "whep": {
+        "url": "http://mediamtx-server:8889/{camera_pda}/",
+        "available": true
+      }
+    },
+    "annotated": {
+      "description": "Video stream with CV annotations (face boxes, skeletons, app overlays)",
+      "p2p": {
+        "available": true,
+        "signaling": "Socket.IO via backend"
+      },
+      "whep": {
+        "url": "http://mediamtx-server:8889/{camera_pda}-annotated/",
+        "available": true
+      }
+    }
+  },
+  "default_stream": "clean"
 }
 ```
 
@@ -175,14 +243,28 @@ const session = await fetch('/api/session/connect', {
   body: JSON.stringify({ wallet_address: 'your_wallet' })
 }).then(r => r.json());
 
-// 4. STREAMING CONTROL (Jetson Only)
-const streamStart = await fetch('/api/stream/livepeer/start', {
-  method: 'POST'
-}).then(r => r.json());
+// 4. STREAMING (WebRTC via Socket.IO - NOT REST API)
+// P2P WebRTC streaming uses Socket.IO signaling, not REST endpoints.
+// The frontend connects to the backend signaling server which relays to the camera.
+//
+// Socket.IO Events (sent to backend signaling server):
+//   - 'register-viewer': { viewerId, streamType: 'clean' | 'annotated' }
+//   - 'viewer-wants-connection': { viewerId, streamType, cellularMode }
+//   - 'webrtc-answer': { viewerId, answer }
+//   - 'webrtc-ice-candidate': { viewerId, candidate }
+//
+// Socket.IO Events (received from backend):
+//   - 'webrtc-offer': { viewerId, offer }
+//   - 'webrtc-ice-candidate': { viewerId, candidate }
+//
+// Stream types:
+//   - 'clean': Raw video without CV annotations (default)
+//   - 'annotated': Video with face boxes, skeletons, app overlays
+//
+// For WHEP fallback (remote viewing), use the URLs from /api/stream/info
 
-const streamStop = await fetch('/api/stream/livepeer/stop', {
-  method: 'POST'
-}).then(r => r.json());
+// Get available stream URLs
+const streamInfo = await fetch('/api/stream/info').then(r => r.json());
 
 // 5. COMPUTER VISION (Jetson Only)
 const gesture = await fetch('/api/gesture/current').then(r => r.json());
@@ -265,6 +347,31 @@ await fetch('/api/apps/deactivate', { method: 'POST' });
 // 7. MEDIA ACCESS
 const photos = await fetch('/api/photos').then(r => r.json());
 const videos = await fetch('/api/videos').then(r => r.json());
+
+// 8. PHOTO CAPTURE (with optional CV annotations)
+// Clean capture (default - raw frame without CV overlays)
+const cleanCapture = await fetch('/api/capture', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    wallet_address: 'your_wallet'
+  })
+}).then(r => r.json());
+
+// Annotated capture (with face boxes, skeletons, app overlays)
+const annotatedCapture = await fetch('/api/capture', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    wallet_address: 'your_wallet',
+    annotated: true,
+    event_metadata: {
+      app_id: 'pushup',
+      event_type: 'rep_complete',
+      rep: 10
+    }
+  })
+}).then(r => r.json());
 ```
 
 ### ❌ DO NOT Call These From Frontend

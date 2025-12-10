@@ -59,9 +59,9 @@ def init_services():
     from services.gesture_service import get_gesture_service
     from services.capture_service import get_capture_service
     from services.session_service import get_session_service
-    from services.livepeer_stream_service import LivepeerStreamService
+    # from services.livepeer_stream_service import LivepeerStreamService  # REMOVED: Livepeer no longer used
     from services.webrtc_service import get_webrtc_service
-    from services.whip_publisher import get_whip_publisher
+    from services.whip_publisher import WHIPPublisher, CleanVideoTrack, AnnotatedVideoTrack
     
     # GPU Face service for YOLOv8 + InsightFace face detection and recognition
     gpu_face_service = None
@@ -94,9 +94,9 @@ def init_services():
     capture_service = get_capture_service()
     session_service = get_session_service()
     
-    # Reset and create Livepeer service to ensure it picks up current environment variables
-    LivepeerStreamService.reset_instance()
-    livepeer_service = LivepeerStreamService()
+    # Livepeer service removed - using WebRTC/WHIP for streaming
+    # LivepeerStreamService.reset_instance()
+    # livepeer_service = LivepeerStreamService()
     
     # Get WebRTC service instance
     webrtc_service = get_webrtc_service()
@@ -141,18 +141,16 @@ def init_services():
     except Exception as e:
         logger.error(f"Failed to initialize app manager: {e}")
 
-    # Initialize Livepeer service with buffer service
-    logger.info("Initializing Livepeer service...")
-    livepeer_service.set_buffer_service(buffer_service)
-    
-    # Inject all services into Livepeer service for visual effects
-    temp_services = {
-        'gesture': gesture_service,
-        'face': gpu_face_service
-    }
-    livepeer_service.set_services(temp_services)
-    logger.info("Injected visual services into Livepeer service for overlay support")
-    
+    # Livepeer service initialization removed - using WebRTC/WHIP for streaming
+    # logger.info("Initializing Livepeer service...")
+    # livepeer_service.set_buffer_service(buffer_service)
+    # temp_services = {
+    #     'gesture': gesture_service,
+    #     'face': gpu_face_service
+    # }
+    # livepeer_service.set_services(temp_services)
+    # logger.info("Injected visual services into Livepeer service for overlay support")
+
     # Initialize WebRTC service with buffer service
     logger.info("🚀 Initializing WebRTC service...")
     logger.info(f"🔧 Setting buffer service for WebRTC: {buffer_service}")
@@ -170,24 +168,49 @@ def init_services():
     # Give WebRTC service time to initialize async components
     time.sleep(2)
 
-    # Initialize WHIP Publisher for remote streaming via MediaMTX
-    whip_publisher = None
+    # Initialize DUAL WHIP Publishers for remote streaming via MediaMTX
+    # One for clean stream (no CV annotations), one for annotated stream (with CV overlays)
+    whip_publisher_clean = None
+    whip_publisher_annotated = None
     whip_enabled = os.environ.get('WHIP_ENABLED', 'true').lower() == 'true'
+    camera_pda = os.environ.get('CAMERA_PDA', 'jetson-camera')
+
     if whip_enabled:
-        logger.info("📡 Initializing WHIP publisher for remote streaming...")
+        logger.info("📡 Initializing DUAL WHIP publishers for remote streaming...")
+
+        # Clean stream publisher (default, no CV annotations)
         try:
-            whip_publisher = get_whip_publisher()
-            whip_publisher.set_buffer_service(buffer_service)
-            whip_start_result = whip_publisher.start()
-            if whip_start_result:
-                logger.info(f"✅ WHIP publisher started - stream available at: {whip_publisher.whep_url}")
+            whip_publisher_clean = WHIPPublisher(
+                stream_name=camera_pda,  # Default stream name
+                video_track_class=CleanVideoTrack
+            )
+            whip_publisher_clean.set_buffer_service(buffer_service)
+            if whip_publisher_clean.start():
+                logger.info(f"✅ WHIP [clean] started - stream at: {whip_publisher_clean.whep_url}")
             else:
-                logger.warning("⚠️ WHIP publisher failed to start - remote streaming unavailable")
+                logger.warning("⚠️ WHIP [clean] failed to start")
+                whip_publisher_clean = None
         except Exception as e:
-            logger.error(f"❌ WHIP publisher initialization failed: {e}")
-            whip_publisher = None
+            logger.error(f"❌ WHIP [clean] initialization failed: {e}")
+            whip_publisher_clean = None
+
+        # Annotated stream publisher (with CV overlays)
+        try:
+            whip_publisher_annotated = WHIPPublisher(
+                stream_name=f"{camera_pda}-annotated",  # Annotated stream suffix
+                video_track_class=AnnotatedVideoTrack
+            )
+            whip_publisher_annotated.set_buffer_service(buffer_service)
+            if whip_publisher_annotated.start():
+                logger.info(f"✅ WHIP [annotated] started - stream at: {whip_publisher_annotated.whep_url}")
+            else:
+                logger.warning("⚠️ WHIP [annotated] failed to start")
+                whip_publisher_annotated = None
+        except Exception as e:
+            logger.error(f"❌ WHIP [annotated] initialization failed: {e}")
+            whip_publisher_annotated = None
     else:
-        logger.info("📡 WHIP publisher disabled via WHIP_ENABLED=false")
+        logger.info("📡 WHIP publishers disabled via WHIP_ENABLED=false")
 
     # Initialize Blockchain Session Sync
     from services.blockchain_session_sync import get_blockchain_session_sync, reset_blockchain_session_sync
@@ -225,9 +248,11 @@ def init_services():
         'gesture': gesture_service,
         'capture': capture_service,
         'session': session_service,
-        'livepeer': livepeer_service,
+        # 'livepeer': livepeer_service,  # REMOVED: Livepeer no longer used
         'webrtc': webrtc_service,
-        'whip': whip_publisher
+        'whip': whip_publisher_clean,  # Default WHIP is clean stream
+        'whip_clean': whip_publisher_clean,
+        'whip_annotated': whip_publisher_annotated
     }
     
     # Add GPU Face service if available
@@ -334,12 +359,14 @@ def main():
     finally:
         # Shut down services
         logger.info("Stopping services...")
-        if 'whip' in services and services['whip']:
-            services['whip'].stop()
+        # Stop both WHIP publishers
+        if 'whip_clean' in services and services['whip_clean']:
+            services['whip_clean'].stop()
+        if 'whip_annotated' in services and services['whip_annotated']:
+            services['whip_annotated'].stop()
         if 'webrtc' in services:
             services['webrtc'].stop()
-        if 'livepeer' in services:
-            services['livepeer'].cleanup_stream()
+        # Livepeer cleanup removed - service no longer used
         if 'gesture' in services:
             services['gesture'].stop()
         if 'face' in services:
