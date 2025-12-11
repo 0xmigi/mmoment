@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { Image, Video } from 'lucide-react';
 import MediaViewer from './MediaViewer';
@@ -35,8 +35,8 @@ export default function MediaGallery({
   // Default to 'walrus' storage (new default)
   const [storageType, setStorageType] = useState<"pinata" | "pipe" | "walrus">("walrus");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  // Track decrypted URLs for cleanup
-  const [decryptedUrls, setDecryptedUrls] = useState<Map<string, string>>(new Map());
+  // Track decrypted URLs for cleanup - use ref to avoid re-render loops
+  const decryptedUrlsRef = useRef<Map<string, string>>(new Map());
 
   // Add click handler for media items
   const handleMediaClick = (media: IPFSMedia | PipeGalleryItem | WalrusGalleryItem) => {
@@ -50,10 +50,11 @@ export default function MediaGallery({
 
   // Cleanup decrypted URLs on unmount
   useEffect(() => {
+    const urlsRef = decryptedUrlsRef;
     return () => {
-      decryptedUrls.forEach((url) => revokeDecryptedUrl(url));
+      urlsRef.current.forEach((url) => revokeDecryptedUrl(url));
     };
-  }, [decryptedUrls]);
+  }, []);
 
   // Check storage type preference on mount and when it changes
   useEffect(() => {
@@ -128,17 +129,18 @@ export default function MediaGallery({
           const decryptedFiles = await Promise.all(
             walrusFiles.map(async (file) => {
               if (file.encrypted && !file.decryptedUrl) {
-                // Check if we already have a decrypted URL cached
-                const cachedUrl = decryptedUrls.get(file.blobId);
+                // Check if we already have a decrypted URL cached in ref
+                const cachedUrl = decryptedUrlsRef.current.get(file.blobId);
                 if (cachedUrl) {
-                  return { ...file, decryptedUrl: cachedUrl };
+                  console.log(`[Gallery] Using cached decrypted URL for ${file.blobId.slice(0, 8)}...`);
+                  return { ...file, decryptedUrl: cachedUrl, url: cachedUrl };
                 }
 
                 // Decrypt the file
                 const result = await decryptWalrusBlob(file.blobId, primaryWallet.address);
                 if (result.success && result.objectUrl) {
-                  // Cache the decrypted URL
-                  setDecryptedUrls(prev => new Map(prev).set(file.blobId, result.objectUrl!));
+                  // Cache the decrypted URL in ref (doesn't trigger re-render)
+                  decryptedUrlsRef.current.set(file.blobId, result.objectUrl);
                   return { ...file, decryptedUrl: result.objectUrl, url: result.objectUrl };
                 }
                 console.warn(`Failed to decrypt ${file.blobId}: ${result.error}`);
