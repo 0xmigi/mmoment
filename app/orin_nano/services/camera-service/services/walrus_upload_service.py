@@ -22,14 +22,14 @@ logger = logging.getLogger(__name__)
 
 # Walrus endpoints (mainnet)
 WALRUS_PUBLISHER_URL = os.environ.get(
-    "WALRUS_PUBLISHER_URL", "https://publisher.walrus-mainnet.walrus.space"
+    "WALRUS_PUBLISHER_URL", "https://walrus-mainnet-publisher-1.staketab.org"
 )
 WALRUS_AGGREGATOR_URL = os.environ.get(
     "WALRUS_AGGREGATOR_URL", "https://aggregator.walrus-mainnet.walrus.space"
 )
 
-# Default storage duration (183 epochs = ~1 year max)
-DEFAULT_EPOCHS = 183
+# Default storage duration (5 epochs for testing, increase for production)
+DEFAULT_EPOCHS = 5
 
 
 class WalrusUploadService:

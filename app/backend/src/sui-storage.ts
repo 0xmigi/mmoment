@@ -306,7 +306,7 @@ export async function getSuiX25519PublicKey(walletAddress: string): Promise<{
   // Create key object from the private key and derive public
   const keyObject = crypto.createPrivateKey({
     key: Buffer.concat([
-      Buffer.from('302e020100300506032b6570042204', 'hex'), // PKCS8 prefix for Ed25519
+      Buffer.from('302e020100300506032b657004220420', 'hex'), // PKCS8 prefix for Ed25519 (includes inner OCTET STRING length)
       privateKey
     ]),
     format: 'der',

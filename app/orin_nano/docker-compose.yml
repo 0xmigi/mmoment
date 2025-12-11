@@ -59,7 +59,7 @@ services:
       - CLOUDFLARE_TUNNEL_ID=${CLOUDFLARE_TUNNEL_ID}
       # Walrus Storage Configuration (decentralized blob storage)
       - STORAGE_PROVIDER=walrus
-      - WALRUS_PUBLISHER_URL=https://publisher.walrus-mainnet.walrus.space
+      - WALRUS_PUBLISHER_URL=https://walrus-mainnet-publisher-1.staketab.org
       - WALRUS_AGGREGATOR_URL=https://aggregator.walrus-mainnet.walrus.space
       # Livepeer Configuration REMOVED - using WebRTC/WHIP for all streaming
       # - LIVEPEER_API_KEY=${LIVEPEER_API_KEY}
