@@ -87,6 +87,14 @@ import {
   decryptAesGcm
 } from './sui-storage';
 
+// Import Walrus upload relay service
+import {
+  initializeWalrusUpload,
+  isWalrusRelayEnabled,
+  uploadToWalrus,
+  getBackendSuiAddress
+} from './walrus-upload';
+
 // Note: Socket.IO server (io) will be passed to session cleanup cron after it's created below
 
 // Initialize the Firestarter SDK (new PipeClient API)
@@ -1970,7 +1978,154 @@ app.post("/api/pipe/clear-accounts", (_req, res) => {
 // Decentralized blob storage with pre-upload encryption
 // ============================================================================
 
-// Jetson endpoint: Notify backend after Walrus upload
+// Jetson endpoint: Upload encrypted blob via backend relay (FAST)
+// This uses the upload relay for ~10x faster uploads compared to direct HTTP publisher
+app.post("/api/walrus/upload", async (req, res) => {
+  const startTime = Date.now();
+
+  // Check if relay is enabled
+  if (!isWalrusRelayEnabled()) {
+    return res.status(503).json({
+      error: "Walrus relay not configured",
+      hint: "Set BACKEND_SUI_PRIVATE_KEY to enable fast uploads, or use direct publisher"
+    });
+  }
+
+  try {
+    // Parse multipart form data
+    const contentType = req.headers['content-type'] || '';
+
+    if (!contentType.includes('multipart/form-data') && !contentType.includes('application/octet-stream')) {
+      return res.status(400).json({
+        error: "Expected multipart/form-data or application/octet-stream"
+      });
+    }
+
+    // For application/octet-stream, read body directly
+    // Metadata should be in headers
+    let encryptedData: Buffer;
+    let metadata: {
+      walletAddress: string;
+      cameraId: string;
+      deviceSignature: string;
+      fileType: string;
+      timestamp: number;
+      originalSize: number;
+      nonce: string;
+      accessGrants: string;
+      suiOwner?: string;
+      epochs?: number;
+    };
+
+    if (contentType.includes('application/octet-stream')) {
+      // Read binary body
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(chunk);
+      }
+      encryptedData = Buffer.concat(chunks);
+
+      // Get metadata from headers
+      metadata = {
+        walletAddress: req.headers['x-wallet-address'] as string,
+        cameraId: req.headers['x-camera-id'] as string,
+        deviceSignature: req.headers['x-device-signature'] as string,
+        fileType: req.headers['x-file-type'] as string || 'photo',
+        timestamp: parseInt(req.headers['x-timestamp'] as string) || Date.now(),
+        originalSize: parseInt(req.headers['x-original-size'] as string) || 0,
+        nonce: req.headers['x-nonce'] as string,
+        accessGrants: req.headers['x-access-grants'] as string || '[]',
+        suiOwner: req.headers['x-sui-owner'] as string,
+        epochs: parseInt(req.headers['x-epochs'] as string) || 5,
+      };
+    } else {
+      // For multipart, we'd need additional parsing
+      return res.status(400).json({
+        error: "Use application/octet-stream with metadata in headers"
+      });
+    }
+
+    if (!metadata.walletAddress || !metadata.cameraId || !metadata.deviceSignature) {
+      return res.status(400).json({
+        error: "Missing required headers: x-wallet-address, x-camera-id, x-device-signature"
+      });
+    }
+
+    console.log(`🦭 Walrus relay upload from Jetson:`);
+    console.log(`   Wallet: ${metadata.walletAddress.slice(0, 8)}...`);
+    console.log(`   Camera: ${metadata.cameraId.slice(0, 8)}...`);
+    console.log(`   Size: ${encryptedData.length} bytes (encrypted)`);
+
+    // Upload via relay
+    const uploadResult = await uploadToWalrus(encryptedData, metadata.epochs || 5);
+
+    // Parse access grants
+    const parsedAccessGrants = typeof metadata.accessGrants === 'string'
+      ? JSON.parse(metadata.accessGrants)
+      : (metadata.accessGrants || []);
+
+    // Save to database
+    await saveWalrusFile({
+      blobId: uploadResult.blobId,
+      walletAddress: metadata.walletAddress,
+      downloadUrl: uploadResult.downloadUrl,
+      cameraId: metadata.cameraId,
+      deviceSignature: metadata.deviceSignature,
+      fileType: metadata.fileType || 'photo',
+      timestamp: metadata.timestamp || Date.now(),
+      originalSize: metadata.originalSize || 0,
+      encryptedSize: encryptedData.length,
+      nonce: metadata.nonce || undefined,
+      suiOwner: metadata.suiOwner || undefined,
+      accessGrants: JSON.stringify(parsedAccessGrants),
+      createdAt: new Date()
+    });
+
+    const totalDuration = Date.now() - startTime;
+    console.log(`✅ Walrus relay upload complete in ${totalDuration}ms (upload: ${uploadResult.uploadDurationMs}ms)`);
+
+    // Notify connected clients via WebSocket
+    io.emit("walrus:upload:complete", {
+      walletAddress: metadata.walletAddress,
+      blobId: uploadResult.blobId,
+      downloadUrl: uploadResult.downloadUrl,
+      cameraId: metadata.cameraId,
+      fileType: metadata.fileType,
+      timestamp: metadata.timestamp || Date.now(),
+      accessGrantsCount: parsedAccessGrants.length,
+      suiOwner: metadata.suiOwner,
+      uploadMethod: 'relay'
+    });
+
+    res.json({
+      success: true,
+      blobId: uploadResult.blobId,
+      downloadUrl: uploadResult.downloadUrl,
+      provider: 'walrus',
+      uploadMethod: 'relay',
+      uploadDurationMs: uploadResult.uploadDurationMs,
+      totalDurationMs: totalDuration
+    });
+  } catch (error) {
+    const totalDuration = Date.now() - startTime;
+    console.error(`❌ Walrus relay upload failed after ${totalDuration}ms:`, error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Upload failed",
+      uploadMethod: 'relay'
+    });
+  }
+});
+
+// Check if relay is available
+app.get("/api/walrus/relay-status", async (req, res) => {
+  res.json({
+    relayEnabled: isWalrusRelayEnabled(),
+    backendSuiAddress: getBackendSuiAddress(),
+    relayUrl: process.env.WALRUS_UPLOAD_RELAY || 'https://upload-relay.mainnet.walrus.space'
+  });
+});
+
+// Jetson endpoint: Notify backend after Walrus upload (legacy - for direct publisher uploads)
 app.post("/api/walrus/upload-complete", async (req, res) => {
   const {
     walletAddress,
@@ -3965,6 +4120,13 @@ httpServer.listen(port, "0.0.0.0", async () => {
   } catch (dbError) {
     console.error('❌ Failed to initialize database:', dbError);
     console.warn('⚠️  Server will continue without persistence');
+  }
+
+  // Initialize Walrus Upload Relay
+  console.log('\n🦭 Initializing Walrus upload relay...');
+  const walrusRelayEnabled = initializeWalrusUpload();
+  if (!walrusRelayEnabled) {
+    console.log('   Walrus relay disabled - set BACKEND_SUI_PRIVATE_KEY to enable fast uploads');
   }
 
   // Initialize Gas Sponsorship Service and Session Cleanup Cron after server starts

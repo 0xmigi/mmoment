@@ -54,10 +54,126 @@ class WalrusUploadService:
         self.backend_url = backend_url or os.environ.get(
             "BACKEND_URL", "https://mmoment-production.up.railway.app"
         )
+        # Check if backend relay is available
+        self.relay_enabled = self._check_relay_status()
         logger.info(f"Walrus upload service initialized")
         logger.info(f"  Publisher: {WALRUS_PUBLISHER_URL}")
         logger.info(f"  Aggregator: {WALRUS_AGGREGATOR_URL}")
         logger.info(f"  Backend: {self.backend_url}")
+        logger.info(f"  Relay enabled: {self.relay_enabled}")
+
+    def _check_relay_status(self) -> bool:
+        """
+        Check if backend upload relay is available.
+        """
+        try:
+            response = requests.get(
+                f"{self.backend_url}/api/walrus/relay-status",
+                timeout=5
+            )
+            if response.ok:
+                data = response.json()
+                return data.get("relayEnabled", False)
+            return False
+        except Exception as e:
+            logger.debug(f"Relay status check failed: {e}")
+            return False
+
+    def _upload_via_relay(
+        self,
+        encrypted_data: bytes,
+        wallet_address: str,
+        camera_id: str,
+        device_signature: str,
+        file_type: str,
+        timestamp: int,
+        original_size: int,
+        nonce: str,
+        access_grants: List[Dict],
+        sui_owner: Optional[str] = None,
+        epochs: int = DEFAULT_EPOCHS,
+    ) -> Dict[str, Any]:
+        """
+        Upload encrypted data via backend relay (fast path).
+
+        The backend uses the TypeScript SDK with upload relay for ~10x faster uploads.
+        Backend handles saving to DB and notifying websocket clients.
+
+        Returns:
+            Dict with blobId, downloadUrl, uploadDurationMs
+        """
+        import time
+        start_time = time.time()
+
+        try:
+            headers = {
+                "Content-Type": "application/octet-stream",
+                "X-Wallet-Address": wallet_address,
+                "X-Camera-Id": camera_id,
+                "X-Device-Signature": device_signature,
+                "X-File-Type": file_type,
+                "X-Timestamp": str(timestamp or int(time.time() * 1000)),
+                "X-Original-Size": str(original_size),
+                "X-Nonce": nonce,
+                "X-Access-Grants": json.dumps(access_grants),
+                "X-Epochs": str(epochs),
+            }
+
+            if sui_owner:
+                headers["X-Sui-Owner"] = sui_owner
+
+            logger.info(f"Uploading {len(encrypted_data)} bytes via backend relay...")
+
+            response = requests.post(
+                f"{self.backend_url}/api/walrus/upload",
+                data=encrypted_data,
+                headers=headers,
+                timeout=120  # 2 minutes for relay upload
+            )
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            if response.ok:
+                data = response.json()
+                logger.info(f"Relay upload complete in {duration_ms}ms (backend reported: {data.get('uploadDurationMs', 'N/A')}ms)")
+                return {
+                    "success": True,
+                    "blobId": data["blobId"],
+                    "downloadUrl": data["downloadUrl"],
+                    "uploadMethod": "relay",
+                    "uploadDurationMs": data.get("uploadDurationMs", duration_ms),
+                    "totalDurationMs": data.get("totalDurationMs", duration_ms),
+                }
+            else:
+                error_msg = response.text
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("error", response.text)
+                except:
+                    pass
+                logger.warning(f"Relay upload failed ({response.status_code}): {error_msg}")
+                return {
+                    "success": False,
+                    "error": f"Relay upload failed: {response.status_code} - {error_msg}",
+                    "uploadMethod": "relay",
+                }
+
+        except requests.exceptions.Timeout:
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.warning(f"Relay upload timed out after {duration_ms}ms")
+            return {
+                "success": False,
+                "error": "Relay upload timed out",
+                "uploadMethod": "relay",
+            }
+        except Exception as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.warning(f"Relay upload error after {duration_ms}ms: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "uploadMethod": "relay",
+            }
 
     def calculate_file_hash(self, file_path: str) -> Optional[str]:
         """
@@ -427,35 +543,65 @@ class WalrusUploadService:
             access_grants = self._create_access_grants(content_key, grant_users)
             logger.info(f"Created {len(access_grants)} access grants")
 
-            # 3. Upload to Walrus
-            upload_result = self._upload_to_walrus(
-                encrypted_data=encrypted_data,
-                user_sui_address=user_sui_address,
-            )
-
-            if not upload_result["success"]:
-                return {
-                    'success': False,
-                    'error': upload_result.get('error', 'Upload failed'),
-                    'provider': 'walrus'
-                }
-
-            # 4. Notify backend
             nonce_hex = base64.b64encode(nonce).decode('utf-8')
-            self._notify_backend(
-                wallet_address=wallet_address,
-                blob_id=upload_result["blobId"],
-                download_url=upload_result["downloadUrl"],
-                camera_id=camera_id,
-                device_signature=device_signature,
-                file_type=file_type,
-                timestamp=timestamp,
-                original_size=original_size,
-                encrypted_size=encrypted_size,
-                nonce=nonce_hex,
-                access_grants=access_grants,
-                sui_owner=user_sui_address,
-            )
+            upload_result = None
+            upload_method = "unknown"
+
+            # 3. Try relay first (fast path), then fall back to direct publisher
+            if self.relay_enabled:
+                logger.info("Attempting upload via backend relay (fast path)...")
+                upload_result = self._upload_via_relay(
+                    encrypted_data=encrypted_data,
+                    wallet_address=wallet_address,
+                    camera_id=camera_id,
+                    device_signature=device_signature,
+                    file_type=file_type,
+                    timestamp=timestamp,
+                    original_size=original_size,
+                    nonce=nonce_hex,
+                    access_grants=access_grants,
+                    sui_owner=user_sui_address,
+                )
+
+                if upload_result["success"]:
+                    upload_method = "relay"
+                    # Backend already saved to DB and notified websocket clients
+                    logger.info(f"Relay upload succeeded in {upload_result.get('uploadDurationMs', 'N/A')}ms")
+                else:
+                    logger.warning(f"Relay upload failed: {upload_result.get('error')}, falling back to direct publisher")
+                    upload_result = None  # Reset to try direct publisher
+
+            # Fall back to direct publisher if relay failed or not enabled
+            if upload_result is None:
+                logger.info("Using direct HTTP publisher (slow path)...")
+                upload_result = self._upload_to_walrus(
+                    encrypted_data=encrypted_data,
+                    user_sui_address=user_sui_address,
+                )
+                upload_method = "direct"
+
+                if not upload_result["success"]:
+                    return {
+                        'success': False,
+                        'error': upload_result.get('error', 'Upload failed'),
+                        'provider': 'walrus'
+                    }
+
+                # 4. Notify backend (only needed for direct publisher path)
+                self._notify_backend(
+                    wallet_address=wallet_address,
+                    blob_id=upload_result["blobId"],
+                    download_url=upload_result["downloadUrl"],
+                    camera_id=camera_id,
+                    device_signature=device_signature,
+                    file_type=file_type,
+                    timestamp=timestamp,
+                    original_size=original_size,
+                    encrypted_size=encrypted_size,
+                    nonce=nonce_hex,
+                    access_grants=access_grants,
+                    sui_owner=user_sui_address,
+                )
 
             logger.info(f"Walrus upload complete: {upload_result['blobId']}")
 
@@ -473,6 +619,8 @@ class WalrusUploadService:
                 'access_grants_count': len(access_grants),
                 'sui_owner': user_sui_address,
                 'upload_type': 'walrus_encrypted',
+                'upload_method': upload_method,
+                'upload_duration_ms': upload_result.get("uploadDurationMs"),
             }
 
         except Exception as e:
