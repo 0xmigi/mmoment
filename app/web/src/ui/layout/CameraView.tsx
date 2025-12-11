@@ -15,6 +15,7 @@ import { unifiedCameraPolling, CameraStatusData } from "../../camera/unified-cam
 import { CONFIG } from "../../core/config";
 import { ToastMessage } from "../../core/types/toast";
 import MediaGallery from "../../media/Gallery";
+import { walrusGalleryService } from "../../storage/walrus/walrus-gallery-service";
 import { StreamPlayer } from "../../media/StreamPlayer";
 import { Timeline } from "../../timeline/Timeline";
 import { timelineService } from "../../timeline/timeline-service";
@@ -1021,14 +1022,31 @@ export function CameraView() {
 
       const response = await unifiedCameraService.takePhoto(currentCameraId);
 
-      if (response.success) {
+      if (response.success && response.data) {
         updateToast("success", "Photo captured!");
         cameraStatus.setOnline(false);
+
+        // Add photo to gallery immediately (local-first)
+        // This shows the photo instantly while Walrus upload happens in background
+        const cameraApiUrl = unifiedCameraService.getCameraApiUrl(currentCameraId);
+        if (cameraApiUrl && response.data.filename && primaryWallet?.address) {
+          const localUrl = `${cameraApiUrl}/api/photos/${response.data.filename}`;
+          walrusGalleryService.addPendingPhoto({
+            filename: response.data.filename,
+            localUrl: localUrl,
+            blob: response.data.blob,
+            walletAddress: primaryWallet.address,
+            cameraId: currentCameraId,
+            timestamp: response.data.timestamp || Date.now(),
+            type: 'image',
+          });
+          console.log(`[CameraView] Added pending photo to gallery: ${response.data.filename}`);
+        }
 
         if (timelineRef.current?.refreshEvents) {
           timelineRef.current?.refreshEvents();
         }
-      } else {
+      } else if (!response.success) {
         updateToast(
           "error",
           `Failed to capture photo: ${response.error || "Unknown error"}`

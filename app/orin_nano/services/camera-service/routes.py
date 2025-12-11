@@ -3185,25 +3185,23 @@ def register_routes(app):
         # Add base64 data to response
         photo_info["image_data"] = f"data:image/jpeg;base64,{base64_image}"
 
-        # Upload to storage using device-signed direct upload
-        import threading
-
+        # Sign capture and queue background upload
         from services.capture_event_signer import sign_capture
-        from services.storage_provider import get_upload_service, is_walrus_enabled
+        from services.upload_queue import get_upload_queue
 
         try:
-            # Get camera PDA for signing
             camera_pda = get_camera_pda()
             photo_path = photo_info["path"]
 
-            # Get upload service (Walrus or Pipe based on STORAGE_PROVIDER env var)
-            upload_service = get_upload_service()
+            # Calculate file hash for signing
+            from services.walrus_upload_service import get_walrus_upload_service
+            upload_service = get_walrus_upload_service()
             file_hash = upload_service.calculate_file_hash(photo_path)
 
             if not file_hash:
                 raise Exception("Failed to calculate file hash")
 
-            # Sign capture event (instant, no blockchain wait!)
+            # Sign capture event (instant)
             signed_event = sign_capture(
                 user_wallet=wallet_address,
                 camera_pda=camera_pda,
@@ -3217,132 +3215,101 @@ def register_routes(app):
                     "filename": photo_info["filename"],
                 },
             )
-
             device_signature = signed_event["device_signature"]
+            logger.info(f"📝 Photo signed: {device_signature[:16]}...")
 
-            logger.info(f"📝 Photo capture event signed: {device_signature[:16]}...")
-
-            # Upload to storage (Walrus or Pipe based on STORAGE_PROVIDER)
-            storage_provider = "walrus" if is_walrus_enabled() else "pipe"
-            logger.info(f"📤 Uploading photo to {storage_provider}...")
-
-            if is_walrus_enabled():
-                # Walrus upload with encryption and access grants
-                checked_in_users = get_checked_in_users()
-                upload_result = upload_service.upload_photo(
-                    wallet_address=wallet_address,
-                    photo_path=photo_path,
-                    camera_id=camera_pda,
-                    device_signature=device_signature,
-                    checked_in_users=checked_in_users,
-                    timestamp=photo_info.get("timestamp"),
-                    user_sui_address=None,  # TODO: Get from backend if available
-                    private=False,  # Shared with all checked-in users by default
-                )
-            else:
-                # Pipe upload (existing behavior)
-                upload_result = upload_service.upload_photo(
-                    wallet_address=wallet_address,
-                    photo_path=photo_path,
-                    camera_id=camera_pda,
-                    device_signature=device_signature,
-                    timestamp=photo_info.get("timestamp"),
-                )
-
-            if upload_result["success"]:
-                if is_walrus_enabled():
-                    logger.info(f"✅ Photo uploaded to Walrus: {upload_result.get('blob_id')}")
-                    logger.info(f"   Download URL: {upload_result.get('download_url')}")
-                else:
-                    logger.info(f"✅ Photo uploaded to Pipe: {upload_result.get('file_name')}")
-                    logger.info(f"   File ID: {upload_result.get('file_id')}")
-                logger.info(f"   Device Signature: {device_signature[:16]}...")
-
-                # Add successful upload info to response
-                photo_info["storage_upload"] = {
-                    "initiated": True,
-                    "completed": True,
-                    "target_wallet": wallet_address,
-                    "upload_status": "completed",
-                    "storage_provider": storage_provider,
-                    "device_signature": device_signature,
-                    # Walrus fields
-                    "blob_id": upload_result.get("blob_id"),
-                    "download_url": upload_result.get("download_url"),
-                    "encrypted": upload_result.get("encrypted", False),
-                    "access_grants_count": upload_result.get("access_grants_count", 0),
-                    # Pipe fields (for backward compatibility)
-                    "file_name": upload_result.get("file_name"),
-                    "file_id": upload_result.get("file_id"),
-                    "upload_type": upload_result.get("upload_type", "direct_jetson_device_signed"),
-                }
-                # Keep pipe_upload for backward compatibility
-                photo_info["pipe_upload"] = photo_info["storage_upload"]
-
-                # Buffer photo activity to timeline (privacy-preserving)
-                logger.info(
-                    f"📤 Attempting to buffer photo to timeline for {wallet_address[:8]}..."
-                )
-                try:
-                    from services.timeline_activity_service import (
-                        get_timeline_activity_service,
-                    )
-
-                    timeline_service = get_timeline_activity_service()
-                    timeline_service.buffer_photo_activity(
-                        wallet_address=wallet_address,
-                        pipe_file_name=upload_result.get("file_name") or upload_result.get("blob_id"),
-                        pipe_file_id=upload_result.get("file_id") or upload_result.get("blob_id"),
-                        metadata={
-                            "timestamp": photo_info.get("timestamp"),
-                            "device_signature": device_signature,
-                            "width": photo_info.get("width"),
-                            "height": photo_info.get("height"),
-                            "filename": photo_info.get("filename"),
-                            "storage_provider": storage_provider,
-                            "blob_id": upload_result.get("blob_id"),
-                            "download_url": upload_result.get("download_url"),
-                        },
-                    )
-                    logger.info(f"✅ Photo activity buffered to timeline successfully")
-                    photo_info["timeline_buffered"] = True
-                except Exception as timeline_err:
-                    logger.warning(
-                        f"Failed to buffer photo to timeline: {timeline_err}",
-                        exc_info=True,
-                    )
-                    photo_info["timeline_buffered"] = False
-            else:
-                logger.error(
-                    f"❌ {storage_provider} photo upload failed: {upload_result.get('error')}"
-                )
-                photo_info["storage_upload"] = {
-                    "initiated": True,
-                    "completed": False,
-                    "upload_status": "failed",
-                    "error": upload_result.get("error"),
-                    "storage_provider": storage_provider,
-                }
-                photo_info["pipe_upload"] = photo_info["storage_upload"]
-
-            logger.info(
-                f"📸 Photo captured for {wallet_address[:8]}... -> {storage_provider} upload complete"
+            # Queue background upload (returns immediately)
+            upload_queue = get_upload_queue()
+            job_id = upload_queue.add(
+                file_path=photo_path,
+                file_type="photo",
+                wallet_address=wallet_address,
+                camera_id=camera_pda,
+                device_signature=device_signature,
+                timestamp=photo_info.get("timestamp", 0),
             )
+
+            logger.info(f"📸 Photo captured for {wallet_address[:8]}... -> queued as job #{job_id}")
+
+            photo_info["storage_upload"] = {
+                "initiated": True,
+                "completed": False,
+                "upload_status": "pending",
+                "storage_provider": "walrus",
+                "device_signature": device_signature,
+                "job_id": job_id,
+                "local_url": f"/photos/{photo_info['filename']}",
+            }
+            photo_info["pipe_upload"] = photo_info["storage_upload"]
+
+            # Buffer to timeline
+            try:
+                from services.timeline_activity_service import get_timeline_activity_service
+                timeline_service = get_timeline_activity_service()
+                timeline_service.buffer_photo_activity(
+                    wallet_address=wallet_address,
+                    pipe_file_name=photo_info["filename"],
+                    pipe_file_id=str(job_id),
+                    metadata={
+                        "timestamp": photo_info.get("timestamp"),
+                        "device_signature": device_signature,
+                        "width": photo_info.get("width"),
+                        "height": photo_info.get("height"),
+                        "filename": photo_info.get("filename"),
+                        "storage_provider": "walrus",
+                        "job_id": job_id,
+                    },
+                )
+                photo_info["timeline_buffered"] = True
+            except Exception as timeline_err:
+                logger.warning(f"Failed to buffer to timeline: {timeline_err}")
+                photo_info["timeline_buffered"] = False
 
         except Exception as e:
-            logger.error(
-                f"Failed to initiate storage upload for {wallet_address[:8]}...: {e}",
-                exc_info=True,
-            )
+            logger.error(f"Failed capture for {wallet_address[:8]}...: {e}", exc_info=True)
             photo_info["storage_upload"] = {
                 "initiated": False,
                 "error": str(e),
                 "upload_status": "failed",
-                "storage_provider": "walrus" if is_walrus_enabled() else "pipe",
             }
             photo_info["pipe_upload"] = photo_info["storage_upload"]
 
         return jsonify(photo_info)
+
+    # ===============================
+    # Upload Queue API
+    # ===============================
+
+    @app.route("/api/upload-status/<int:job_id>", methods=["GET"])
+    @require_session
+    def get_upload_job_status(job_id):
+        """Get status of a specific upload job."""
+        from services.upload_queue import get_upload_queue
+        queue = get_upload_queue()
+        job = queue.get_status(job_id)
+        if not job:
+            return jsonify({"success": False, "error": "Job not found"}), 404
+        return jsonify({"success": True, **job})
+
+    @app.route("/api/upload-status", methods=["GET"])
+    @require_session
+    def get_upload_queue_stats():
+        """Get upload queue statistics."""
+        from services.upload_queue import get_upload_queue
+        queue = get_upload_queue()
+        return jsonify({"success": True, **queue.get_stats()})
+
+    @app.route("/api/uploads", methods=["GET"])
+    @require_session
+    def get_user_uploads():
+        """Get upload history for a user."""
+        from services.upload_queue import get_upload_queue
+        wallet_address = request.args.get("wallet_address")
+        if not wallet_address:
+            return jsonify({"success": False, "error": "wallet_address required"}), 400
+        queue = get_upload_queue()
+        uploads = queue.get_user_uploads(wallet_address)
+        return jsonify({"success": True, "uploads": uploads})
 
     @app.route("/start_recording", methods=["POST"])
     @require_session

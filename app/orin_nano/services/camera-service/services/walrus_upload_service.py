@@ -631,6 +631,111 @@ class WalrusUploadService:
                 'provider': 'walrus'
             }
 
+    def upload_encrypted_blob(
+        self,
+        encrypted_data: bytes,
+        wallet_address: str,
+        camera_id: str,
+        device_signature: str,
+        file_type: str,
+        timestamp: int,
+        original_size: int,
+        nonce: str,
+        access_grants: List[Dict],
+        sui_owner: Optional[str] = None,
+        epochs: int = DEFAULT_EPOCHS,
+    ) -> Dict[str, Any]:
+        """
+        Upload pre-encrypted data to Walrus.
+
+        Used by LocalMediaService for background uploads where data is already encrypted.
+        Tries relay first, falls back to direct publisher.
+
+        Args:
+            encrypted_data: Already-encrypted blob data
+            wallet_address: User's wallet address
+            camera_id: Camera ID (PDA)
+            device_signature: Device-signed capture event signature
+            file_type: 'photo' or 'video'
+            timestamp: Capture timestamp (ms)
+            original_size: Original file size before encryption
+            nonce: Base64-encoded encryption nonce
+            access_grants: List of access grant dicts
+            sui_owner: Optional Sui address for ownership
+            epochs: Storage duration
+
+        Returns:
+            Dict with blobId, downloadUrl, success
+        """
+        upload_result = None
+        upload_method = "unknown"
+
+        # Try relay first (fast path)
+        if self.relay_enabled:
+            logger.info("Uploading via backend relay...")
+            upload_result = self._upload_via_relay(
+                encrypted_data=encrypted_data,
+                wallet_address=wallet_address,
+                camera_id=camera_id,
+                device_signature=device_signature,
+                file_type=file_type,
+                timestamp=timestamp,
+                original_size=original_size,
+                nonce=nonce,
+                access_grants=access_grants,
+                sui_owner=sui_owner,
+                epochs=epochs,
+            )
+
+            if upload_result.get("success"):
+                upload_method = "relay"
+                logger.info(f"Relay upload succeeded in {upload_result.get('uploadDurationMs', 'N/A')}ms")
+            else:
+                logger.warning(f"Relay upload failed: {upload_result.get('error')}")
+                upload_result = None
+
+        # Fall back to direct publisher
+        if upload_result is None:
+            logger.info("Using direct HTTP publisher...")
+            upload_result = self._upload_to_walrus(
+                encrypted_data=encrypted_data,
+                user_sui_address=sui_owner,
+                epochs=epochs,
+            )
+            upload_method = "direct"
+
+            if not upload_result.get("success"):
+                return {
+                    "success": False,
+                    "error": upload_result.get("error", "Upload failed"),
+                }
+
+            # Notify backend for direct uploads
+            self._notify_backend(
+                wallet_address=wallet_address,
+                blob_id=upload_result["blobId"],
+                download_url=upload_result["downloadUrl"],
+                camera_id=camera_id,
+                device_signature=device_signature,
+                file_type=file_type,
+                timestamp=timestamp,
+                original_size=original_size,
+                encrypted_size=len(encrypted_data),
+                nonce=nonce,
+                access_grants=access_grants,
+                sui_owner=sui_owner,
+            )
+
+        return {
+            "success": True,
+            "blobId": upload_result.get("blobId"),
+            "blob_id": upload_result.get("blobId"),  # Alias for compatibility
+            "downloadUrl": upload_result.get("downloadUrl"),
+            "download_url": upload_result.get("downloadUrl"),  # Alias
+            "uploadMethod": upload_method,
+            "uploadDurationMs": upload_result.get("uploadDurationMs"),
+        }
+
     def upload_photo(
         self,
         wallet_address: str,

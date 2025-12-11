@@ -37,16 +37,95 @@ export interface WalrusGalleryItem {
     camera?: string;
     location?: string;
   };
+  // Local pending state (for photos not yet uploaded to Walrus)
+  isPending?: boolean;
+  localUrl?: string;       // Local camera URL for pending photos
+  jobId?: number;          // Upload job ID for tracking
 }
 
 class WalrusGalleryService {
   private backendUrl: string;
   private galleryUpdateListeners: Set<() => void> = new Set();
   private socket: any = null;
+  // Pending photos not yet uploaded to Walrus (keyed by jobId or filename)
+  private pendingPhotos: Map<string, WalrusGalleryItem> = new Map();
 
   constructor() {
     this.backendUrl = CONFIG.BACKEND_URL;
     this.initializeWebSocket();
+  }
+
+  /**
+   * Add a pending local photo that hasn't been uploaded to Walrus yet.
+   * This shows the photo immediately in the gallery while upload happens in background.
+   */
+  addPendingPhoto(photo: {
+    filename: string;
+    localUrl: string;       // Full URL to fetch the photo from camera (e.g., https://camera.mmoment.xyz/api/photos/filename.jpg)
+    blob?: Blob;            // Optional blob for immediate display
+    jobId?: number;
+    walletAddress: string;
+    cameraId?: string;
+    timestamp?: number;
+    type?: 'image' | 'video';
+  }): void {
+    const pendingItem: WalrusGalleryItem = {
+      id: `pending-${photo.filename}`,
+      blobId: `pending-${photo.filename}`,
+      name: photo.filename,
+      url: photo.localUrl,
+      type: photo.type || 'image',
+      mimeType: photo.type === 'video' ? 'video/mp4' : 'image/jpeg',
+      timestamp: photo.timestamp || Date.now(),
+      walletAddress: photo.walletAddress,
+      provider: 'walrus',
+      cameraId: photo.cameraId,
+      encrypted: false,  // Local photos are not encrypted
+      isPending: true,
+      localUrl: photo.localUrl,
+      jobId: photo.jobId,
+      // Set decryptedUrl so Gallery can display it immediately
+      decryptedUrl: photo.blob ? URL.createObjectURL(photo.blob) : photo.localUrl,
+    };
+
+    console.log(`📸 [Walrus] Adding pending photo: ${photo.filename}`);
+    this.pendingPhotos.set(photo.filename, pendingItem);
+    this.notifyGalleryUpdate();
+  }
+
+  /**
+   * Remove a pending photo (called when upload completes or fails)
+   */
+  removePendingPhoto(filename: string): void {
+    if (this.pendingPhotos.has(filename)) {
+      const item = this.pendingPhotos.get(filename);
+      // Revoke object URL if we created one
+      if (item?.decryptedUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(item.decryptedUrl);
+      }
+      this.pendingPhotos.delete(filename);
+      console.log(`📸 [Walrus] Removed pending photo: ${filename}`);
+    }
+  }
+
+  /**
+   * Get all pending photos
+   */
+  getPendingPhotos(): WalrusGalleryItem[] {
+    return Array.from(this.pendingPhotos.values());
+  }
+
+  /**
+   * Clear all pending photos (e.g., on logout)
+   */
+  clearPendingPhotos(): void {
+    // Revoke all object URLs
+    this.pendingPhotos.forEach(item => {
+      if (item.decryptedUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(item.decryptedUrl);
+      }
+    });
+    this.pendingPhotos.clear();
   }
 
   /**
@@ -134,7 +213,7 @@ class WalrusGalleryService {
 
       // Transform backend response to gallery items
       // Backend returns: id, blobId, url, type, cameraId, timestamp, encrypted, nonce, accessGrants
-      return allFiles.map((item: any): WalrusGalleryItem => {
+      const walrusFiles = allFiles.map((item: any): WalrusGalleryItem => {
         const isVideo = item.type === 'video' || item.fileType === 'video';
 
         return {
@@ -161,9 +240,23 @@ class WalrusGalleryService {
           },
         };
       });
+
+      // Include pending local photos (not yet uploaded to Walrus)
+      // Filter to only include pending photos for this wallet
+      const pendingForWallet = this.getPendingPhotos().filter(
+        p => p.walletAddress === walletAddress
+      );
+
+      if (pendingForWallet.length > 0) {
+        console.log(`📸 [Walrus] Including ${pendingForWallet.length} pending local photos`);
+      }
+
+      // Merge pending photos with Walrus files, sorted by timestamp (newest first)
+      return [...pendingForWallet, ...walrusFiles].sort((a, b) => b.timestamp - a.timestamp);
     } catch (error) {
       console.error('[Walrus] Error fetching gallery:', error);
-      return [];
+      // Still return pending photos even if Walrus fetch fails
+      return this.getPendingPhotos();
     }
   }
 

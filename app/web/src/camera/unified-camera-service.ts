@@ -6,16 +6,17 @@
  * detects camera types and routes operations to the appropriate implementation.
  */
 
-import { 
-  ICamera, 
-  CameraActionResponse, 
-  CameraMediaResponse, 
-  CameraStreamInfo, 
+import {
+  ICamera,
+  CameraActionResponse,
+  CameraMediaResponse,
+  CameraStreamInfo,
   CameraStatus,
   CameraSession,
   CameraGestureResponse
 } from './camera-interface';
 import { cameraRegistry } from './camera-registry';
+import { CONFIG } from '../core/config';
 
 export class UnifiedCameraService {
   private static instance: UnifiedCameraService | null = null;
@@ -95,6 +96,18 @@ export class UnifiedCameraService {
    */
   public getCameraType(cameraId: string): string | null {
     return cameraRegistry.getCameraType(cameraId);
+  }
+
+  /**
+   * Get camera API URL by ID (for direct API calls)
+   */
+  public getCameraApiUrl(cameraId: string): string | null {
+    if (!cameraId) return null;
+    try {
+      return CONFIG.getCameraApiUrlByPda(cameraId);
+    } catch {
+      return null;
+    }
   }
 
   /**
