@@ -46,9 +46,8 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
   const [isCreatingSessionChain, setIsCreatingSessionChain] = useState(false);
   const [sessionChainError, setSessionChainError] = useState<string | null>(null);
 
-  // Configuration states for Jetson camera features
-  const [faceVisualization, setFaceVisualization] = useState(false);
-  const [poseVisualization, setPoseVisualization] = useState(false);
+  // Configuration state for Jetson camera CV overlay (consolidated from face+pose)
+  const [cvOverlayEnabled, setCvOverlayEnabled] = useState(false);
   const [configLoading, setConfigLoading] = useState(false);
 
   // State for active users analytics
@@ -106,26 +105,35 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
           try {
             console.log('[CameraModal] Loading current computer vision state...');
 
-            // Load visualization states from localStorage (persist across modal opens)
-            const storedFaceViz = localStorage.getItem(`jetson_face_viz_${camera.id}`) === 'true';
-            const storedPoseViz = localStorage.getItem(`jetson_pose_viz_${camera.id}`) === 'true';
+            // Load CV overlay state from localStorage (persist across modal opens)
+            // Check new key first, then migrate from old keys for backwards compatibility
+            let storedCvOverlay = localStorage.getItem(`jetson_cv_overlay_${camera.id}`) === 'true';
 
-            setFaceVisualization(storedFaceViz);
-            setPoseVisualization(storedPoseViz);
+            // Migrate from old separate keys if new key doesn't exist
+            if (!localStorage.getItem(`jetson_cv_overlay_${camera.id}`)) {
+              const oldFaceViz = localStorage.getItem(`jetson_face_viz_${camera.id}`) === 'true';
+              const oldPoseViz = localStorage.getItem(`jetson_pose_viz_${camera.id}`) === 'true';
+              storedCvOverlay = oldFaceViz || oldPoseViz;
+              // Clean up old keys
+              localStorage.removeItem(`jetson_face_viz_${camera.id}`);
+              localStorage.removeItem(`jetson_pose_viz_${camera.id}`);
+              if (storedCvOverlay) {
+                localStorage.setItem(`jetson_cv_overlay_${camera.id}`, 'true');
+              }
+            }
 
-            console.log('[CameraModal] Loaded visualization states - Face:', storedFaceViz, 'Pose:', storedPoseViz);
+            setCvOverlayEnabled(storedCvOverlay);
+            console.log('[CameraModal] Loaded CV overlay state:', storedCvOverlay);
 
             console.log('[CameraModal] Computer vision configuration loaded successfully');
           } catch (error) {
             console.error('Error loading computer vision configuration:', error);
-            // Set defaults on error
-            setFaceVisualization(false);
-            setPoseVisualization(false);
+            // Set default on error
+            setCvOverlayEnabled(false);
           }
         } else {
-          // Reset states for non-Jetson cameras
-          setFaceVisualization(false);
-          setPoseVisualization(false);
+          // Reset state for non-Jetson cameras
+          setCvOverlayEnabled(false);
         }
       }
     };
@@ -230,77 +238,37 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
   };
 
 
-  // Handle face visualization toggle
-  const handleFaceVisualizationToggle = async () => {
+  // Handle CV overlay toggle (consolidated face + pose into one toggle)
+  // This switches between 'clean' and 'annotated' WebRTC streams
+  const handleCvOverlayToggle = async () => {
     setConfigLoading(true);
     try {
-      const newState = !faceVisualization;
-      console.log('[CameraModal] Toggling face visualization to:', newState);
-      
-      const result = await unifiedCameraService.toggleFaceVisualization(camera.id, newState);
-      
-      if (result.success) {
-        setFaceVisualization(newState);
+      const newState = !cvOverlayEnabled;
+      console.log('[CameraModal] Toggling CV overlay to:', newState);
+
+      // Toggle both face and pose visualization on the Jetson
+      // The annotated stream includes all CV overlays when enabled
+      const faceResult = await unifiedCameraService.toggleFaceVisualization(camera.id, newState);
+      const poseResult = await unifiedCameraService.togglePoseVisualization(camera.id, newState);
+
+      if (faceResult.success && poseResult.success) {
+        setCvOverlayEnabled(newState);
         // Persist state to localStorage
-        localStorage.setItem(`jetson_face_viz_${camera.id}`, newState.toString());
-        console.log('[CameraModal] Face visualization toggled successfully to:', newState);
-        
-        // Force refresh the stream to show changes immediately
-        const streamElements = document.querySelectorAll('img[src*="/stream"], video');
-        streamElements.forEach(element => {
-          if (element instanceof HTMLImageElement && element.src.includes('/stream')) {
-            const currentSrc = element.src;
-            element.src = '';
-            setTimeout(() => {
-              element.src = currentSrc + (currentSrc.includes('?') ? '&' : '?') + 't=' + Date.now();
-            }, 100);
-          }
-        });
+        localStorage.setItem(`jetson_cv_overlay_${camera.id}`, newState.toString());
+        console.log('[CameraModal] CV overlay toggled successfully to:', newState);
+
+        // Dispatch custom event to notify StreamPlayer to switch stream type
+        window.dispatchEvent(new CustomEvent('visualizationToggle', {
+          detail: { cameraId: camera.id, type: 'cv_overlay', enabled: newState }
+        }));
       } else {
-        console.error('[CameraModal] Failed to toggle face visualization:', result.error);
-        setError(result.error || 'Failed to toggle face visualization');
+        const errorMsg = faceResult.error || poseResult.error || 'Failed to toggle CV overlay';
+        console.error('[CameraModal] Failed to toggle CV overlay:', errorMsg);
+        setError(errorMsg);
       }
     } catch (error) {
-      console.error('[CameraModal] Error toggling face visualization:', error);
-      setError(error instanceof Error ? error.message : 'Failed to toggle face visualization');
-    } finally {
-      setConfigLoading(false);
-    }
-  };
-
-  // Handle pose visualization toggle
-  const handlePoseVisualizationToggle = async () => {
-    setConfigLoading(true);
-    try {
-      const newState = !poseVisualization;
-      console.log('[CameraModal] Toggling pose visualization to:', newState);
-
-      const result = await unifiedCameraService.togglePoseVisualization(camera.id, newState);
-
-      if (result.success) {
-        setPoseVisualization(newState);
-        // Persist state to localStorage
-        localStorage.setItem(`jetson_pose_viz_${camera.id}`, newState.toString());
-        console.log('[CameraModal] Pose visualization toggled successfully to:', newState);
-
-        // Force refresh the stream to show changes immediately
-        const streamElements = document.querySelectorAll('img[src*="/stream"], video');
-        streamElements.forEach(element => {
-          if (element instanceof HTMLImageElement && element.src.includes('/stream')) {
-            const currentSrc = element.src;
-            element.src = '';
-            setTimeout(() => {
-              element.src = currentSrc + (currentSrc.includes('?') ? '&' : '?') + 't=' + Date.now();
-            }, 100);
-          }
-        });
-      } else {
-        console.error('[CameraModal] Failed to toggle pose visualization:', result.error);
-        setError(result.error || 'Failed to toggle pose visualization');
-      }
-    } catch (error) {
-      console.error('[CameraModal] Error toggling pose visualization:', error);
-      setError(error instanceof Error ? error.message : 'Failed to toggle pose visualization');
+      console.error('[CameraModal] Error toggling CV overlay:', error);
+      setError(error instanceof Error ? error.message : 'Failed to toggle CV overlay');
     } finally {
       setConfigLoading(false);
     }
@@ -563,52 +531,27 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                 {/* Computer Vision Controls - Only for Jetson cameras */}
                 {isJetsonCamera && (
                   <div className="mb-4 pt-4 border-t border-gray-200">
-                    <div className="space-y-2">
-                      {/* Face Visualization Toggle */}
-                      <div className="flex items-center justify-between py-1">
-                        <div className="flex-1">
-                          <div className="text-sm font-medium">User Recognition Overlay</div>
-                          <div className="text-xs text-gray-500">Shows body detection and recognizes enrolled users</div>
-                        </div>
-                        <button
-                          onClick={handleFaceVisualizationToggle}
-                          disabled={configLoading}
-                          className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${
-                            faceVisualization
-                              ? 'bg-primary hover:bg-primary-hover'
-                              : 'bg-gray-200 hover:bg-gray-300'
-                          } ${configLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              faceVisualization ? 'translate-x-5' : 'translate-x-0.5'
-                            }`}
-                          />
-                        </button>
+                    {/* CV Overlay Toggle - consolidated face + pose */}
+                    <div className="flex items-center justify-between py-1">
+                      <div className="flex-1">
+                        <div className="text-sm font-medium">Computer Vision Overlay</div>
+                        <div className="text-xs text-gray-500">Shows user recognition, pose tracking, and activity overlays</div>
                       </div>
-
-                      {/* Pose Visualization Toggle */}
-                      <div className="flex items-center justify-between py-1">
-                        <div className="flex-1">
-                          <div className="text-sm font-medium">Pose Skeleton Overlay</div>
-                          <div className="text-xs text-gray-500">Shows body pose skeleton tracking</div>
-                        </div>
-                        <button
-                          onClick={handlePoseVisualizationToggle}
-                          disabled={configLoading}
-                          className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${
-                            poseVisualization
-                              ? 'bg-primary hover:bg-primary-hover'
-                              : 'bg-gray-200 hover:bg-gray-300'
-                          } ${configLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              poseVisualization ? 'translate-x-5' : 'translate-x-0.5'
-                            }`}
-                          />
-                        </button>
-                      </div>
+                      <button
+                        onClick={handleCvOverlayToggle}
+                        disabled={configLoading}
+                        className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${
+                          cvOverlayEnabled
+                            ? 'bg-primary hover:bg-primary-hover'
+                            : 'bg-gray-200 hover:bg-gray-300'
+                        } ${configLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        <span
+                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                            cvOverlayEnabled ? 'translate-x-5' : 'translate-x-0.5'
+                          }`}
+                        />
+                      </button>
                     </div>
                   </div>
                 )}

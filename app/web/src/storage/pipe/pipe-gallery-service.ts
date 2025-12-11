@@ -245,20 +245,21 @@ class PipeGalleryService {
   }
 
   /**
-   * Check if Pipe storage is enabled (defaults to true)
+   * Check if Pipe storage is enabled (defaults to false - Walrus is now default)
    */
   isPipeStorageEnabled(): boolean {
-    // Default to true - only disabled if explicitly set to 'pinata'
-    return localStorage.getItem("mmoment_storage_type") !== "pinata";
+    return localStorage.getItem("mmoment_storage_type") === "pipe";
   }
 
   /**
-   * Get the storage type preference (defaults to 'pipe')
+   * Get the storage type preference (defaults to 'walrus')
    */
-  getStorageType(): "pipe" | "pinata" {
+  getStorageType(): "pipe" | "pinata" | "walrus" {
     const stored = localStorage.getItem("mmoment_storage_type");
-    // Default to 'pipe' - only use pinata if explicitly set
-    return stored === "pinata" ? "pinata" : "pipe";
+    if (stored === "pipe") return "pipe";
+    if (stored === "pinata") return "pinata";
+    // Default to 'walrus' for new decentralized storage
+    return "walrus";
   }
 }
 

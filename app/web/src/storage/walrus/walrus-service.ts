@@ -1,10 +1,10 @@
 import { IPFSProvider, IPFSMedia } from '../ipfs/ipfs-service';
 import { StorageService, StorageResult, UploadOptions } from '../storage-provider';
 
-// Walrus API constants - Replace with actual endpoints when available
-const WALRUS_PUBLISHER = 'https://publisher.walrus-testnet.walrus.space'; // Real testnet publisher
-const WALRUS_AGGREGATOR = 'https://aggregator.walrus-testnet.walrus.space'; // Real testnet aggregator
-const WALRUS_HTTP_GATEWAY = 'https://publisher.walrus-testnet.walrus.space'; // Use publisher as gateway
+// Walrus API constants - Mainnet endpoints
+const WALRUS_PUBLISHER = 'https://publisher.walrus-mainnet.walrus.space';
+const WALRUS_AGGREGATOR = 'https://aggregator.walrus-mainnet.walrus.space';
+const WALRUS_HTTP_GATEWAY = 'https://aggregator.walrus-mainnet.walrus.space';
 
 export interface WalrusStorageQuota {
   totalBytes: number;

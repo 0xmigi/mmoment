@@ -1,6 +1,7 @@
 import { IPFSMedia } from "../storage/ipfs/ipfs-service";
 import { unifiedIpfsService } from "../storage/ipfs/unified-ipfs-service";
 import { PipeGalleryItem } from "../storage/pipe/pipe-gallery-service";
+import { WalrusGalleryItem } from "../storage/walrus/walrus-gallery-service";
 import { pipeService } from "../storage/pipe/pipe-service";
 import { TimelineEvent } from "../timeline/timeline-types";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
@@ -11,7 +12,7 @@ import { useState, useRef, useEffect } from "react";
 interface MediaViewerProps {
   isOpen: boolean;
   onClose: () => void;
-  media: IPFSMedia | PipeGalleryItem | null;
+  media: IPFSMedia | PipeGalleryItem | WalrusGalleryItem | null;
   event?: TimelineEvent;
   onDelete?: (mediaId: string) => void;
 }
@@ -95,7 +96,7 @@ export default function MediaViewer({
     (media.walletAddress ? `${media.walletAddress.slice(0, 4)}...${media.walletAddress.slice(-4)}` : 'Unknown');
 
   // Use event's transaction ID if available, fallback to media's transaction ID
-  const transactionId = event?.transactionId || media.transactionId;
+  const transactionId = event?.transactionId || (media as IPFSMedia).transactionId;
 
   // Function to handle media download
   const handleDownload = (url: string, filename: string) => {

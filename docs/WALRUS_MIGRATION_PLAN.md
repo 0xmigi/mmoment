@@ -1041,3 +1041,304 @@ async function decryptWalrusBlob(
 | Sui gas | ~30 SUI |
 
 *Costs based on testnet pricing, mainnet may vary*
+
+---
+
+## Sui-Native Encryption (Updated Approach)
+
+### Problem with Original Approach
+
+The original plan encrypted content keys using **Solana wallet addresses** via HKDF. This was problematic because:
+- Content lives on Sui/Walrus
+- Blob ownership is via Sui keypair
+- Encryption should match the ownership chain (Sui-native)
+- Dynamic Labs SDK doesn't expose raw Solana private keys for client-side decryption
+
+### New Architecture: Backend Decryption with Sui Keys
+
+**Key Insight**: Backend already generates and controls Sui keypairs for blob ownership. Use these same keys for encryption.
+
+```
+Jetson Capture Flow:
+1. Jetson fetches user's Sui X25519 public key from backend
+   GET /api/walrus/sui-pubkey/:walletAddress
+2. Jetson generates random AES-256 content key
+3. Jetson encrypts photo/video with AES-256-GCM
+4. Jetson encrypts content key with NaCl sealed box (Sui X25519 pubkey)
+5. Jetson uploads encrypted blob to Walrus
+6. Jetson notifies backend with blobId + encrypted content key in accessGrants
+
+Frontend Display Flow:
+1. Frontend fetches gallery from backend
+2. For encrypted items, frontend calls POST /api/walrus/decrypt/:blobId
+3. Backend decrypts content key using Sui private key (sealed box)
+4. Backend fetches + decrypts blob content (AES-256-GCM)
+5. Backend returns decrypted content to frontend
+6. Frontend displays image/video
+```
+
+### Benefits
+
+1. **No private key exposure** - User's wallet private key never leaves wallet
+2. **No signature prompts** - User doesn't sign messages for decryption
+3. **Simpler frontend** - Just API calls, no client-side crypto
+4. **Centralized access control** - Backend verifies authorization
+5. **Sui-native** - Encryption uses Sui keys that match blob ownership
+
+### New Backend Endpoints
+
+```typescript
+// Get X25519 public key for Jetson encryption
+GET /api/walrus/sui-pubkey/:walletAddress
+Response: {
+  suiAddress: string,
+  x25519PublicKey: string (base64),
+  ed25519PublicKey: string (base64)
+}
+
+// Decrypt blob and return content
+POST /api/walrus/decrypt/:blobId
+Body: { walletAddress: string }
+Response: Binary content (image/video)
+```
+
+### Jetson Changes Required
+
+Update `walrus_upload_service.py` to:
+
+1. Fetch Sui X25519 pubkey from backend instead of using Solana address
+2. Use NaCl sealed box to encrypt content keys
+3. Include encrypted content key in `accessGrants` when notifying backend
+
+```python
+async def _get_sui_pubkey(self, wallet_address: str) -> bytes:
+    """Fetch user's Sui X25519 public key from backend."""
+    response = requests.get(
+        f"{self.backend_url}/api/walrus/sui-pubkey/{wallet_address}"
+    )
+    data = response.json()
+    return base64.b64decode(data["x25519PublicKey"])
+
+def _encrypt_content_key(self, content_key: bytes, sui_pubkey: bytes) -> bytes:
+    """Encrypt content key with NaCl sealed box."""
+    import nacl.public
+    # Create X25519 public key from bytes
+    recipient_pubkey = nacl.public.PublicKey(sui_pubkey)
+    # Seal the content key (creates ephemeral keypair internally)
+    sealed = nacl.public.SealedBox(recipient_pubkey).encrypt(content_key)
+    return sealed
+```
+
+---
+
+## Implementation Status
+
+### Completed ✅
+
+| Component | File | Status |
+|-----------|------|--------|
+| **Backend: Sui X25519 pubkey endpoint** | `src/index.ts` | ✅ Done |
+| **Backend: Decrypt endpoint** | `src/index.ts` | ✅ Done |
+| **Backend: Sealed box decryption** | `src/sui-storage.ts` | ✅ Done |
+| **Backend: AES-GCM decryption** | `src/sui-storage.ts` | ✅ Done |
+| **Frontend: Walrus gallery service** | `walrus-gallery-service.ts` | ✅ Done |
+| **Frontend: Simplified decryption** | `walrus-decryption.ts` | ✅ Done |
+| **Frontend: Gallery.tsx Walrus support** | `Gallery.tsx` | ✅ Done |
+| **Frontend: Walrus as default storage** | `pipe-gallery-service.ts` | ✅ Done |
+| **Frontend: Mainnet URLs** | `walrus-service.ts` | ✅ Done |
+
+### Pending ⏳
+
+| Component | File | Status |
+|-----------|------|--------|
+| **Jetson: Fetch Sui pubkey** | `walrus_upload_service.py` | ⏳ Needs update |
+| **Jetson: NaCl sealed box encryption** | `walrus_upload_service.py` | ⏳ Needs update |
+| **Jetson: Include accessGrants** | `walrus_upload_service.py` | ⏳ Needs update |
+
+### Jetson Update Instructions
+
+When pulling changes to the Jetson, update `walrus_upload_service.py`:
+
+1. **Add NaCl import** (PyNaCl 1.5.0 is already installed):
+   ```python
+   import nacl.public
+   import nacl.utils
+   ```
+
+2. **Add method to fetch Sui pubkey**:
+   ```python
+   def _get_sui_x25519_pubkey(self, wallet_address: str) -> bytes:
+       response = requests.get(
+           f"{self.backend_url}/api/walrus/sui-pubkey/{wallet_address}",
+           timeout=10
+       )
+       response.raise_for_status()
+       data = response.json()
+       return base64.b64decode(data["x25519PublicKey"])
+   ```
+
+3. **Add method to encrypt content key**:
+   ```python
+   def _seal_content_key(self, content_key: bytes, x25519_pubkey: bytes) -> bytes:
+       recipient_pubkey = nacl.public.PublicKey(x25519_pubkey)
+       sealed_box = nacl.public.SealedBox(recipient_pubkey)
+       return sealed_box.encrypt(content_key)
+   ```
+
+4. **Update upload_photo to include accessGrants**:
+   ```python
+   # After encrypting the file
+   sui_pubkey = self._get_sui_x25519_pubkey(wallet_address)
+   encrypted_content_key = self._seal_content_key(content_key, sui_pubkey)
+
+   # Include in backend notification
+   notify_data = {
+       ...
+       "accessGrants": [{
+           "pubkey": wallet_address,
+           "encryptedKey": base64.b64encode(encrypted_content_key).decode()
+       }],
+   }
+   ```
+
+---
+
+## Testing Checklist
+
+1. [ ] Start backend with `yarn dev`
+2. [ ] Start frontend with `yarn dev`
+3. [ ] Update Jetson with Sui-native encryption
+4. [ ] Start Jetson with `STORAGE_PROVIDER=walrus`
+5. [ ] Connect wallet, check-in to camera
+6. [ ] Click "Take Photo"
+7. [ ] Verify in Jetson logs:
+   - Fetched Sui X25519 pubkey
+   - Encrypted content with AES-256-GCM
+   - Sealed content key with NaCl
+   - Uploaded to Walrus successfully
+8. [ ] Verify in backend logs:
+   - Received upload-complete notification
+   - accessGrants contains encrypted key
+9. [ ] Verify in frontend:
+   - Gallery shows new photo
+   - Backend decrypt endpoint called
+   - Photo displays correctly
+
+---
+
+## Final Implementation Summary (December 2025)
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              JETSON (Camera)                                │
+│                                                                             │
+│  1. Capture photo/video                                                     │
+│  2. Generate random AES-256 content key                                     │
+│  3. Encrypt content with AES-256-GCM (nonce prepended)                     │
+│  4. For each checked-in user:                                              │
+│     - GET /api/walrus/sui-pubkey/:wallet → X25519 public key               │
+│     - NaCl sealed box encrypt content key → user's Sui pubkey              │
+│  5. Upload encrypted blob to Walrus                                         │
+│  6. POST /api/walrus/upload-complete with blobId + accessGrants            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              WALRUS NETWORK                                 │
+│                                                                             │
+│  - Encrypted blob stored across 50+ storage nodes                          │
+│  - Content is ENCRYPTED - only authorized users can decrypt                │
+│  - URL: https://aggregator.walrus-mainnet.walrus.space/v1/blobs/{blobId}   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              BACKEND                                        │
+│                                                                             │
+│  Stores:                                                                    │
+│  - walrus_files table: blobId, downloadUrl, accessGrants, nonce, etc.      │
+│  - sui_wallets table: Sui keypairs for each Solana wallet (encrypted)      │
+│                                                                             │
+│  Endpoints:                                                                 │
+│  - GET  /api/walrus/sui-pubkey/:wallet → X25519 pubkey for encryption      │
+│  - POST /api/walrus/upload-complete    → Store file metadata               │
+│  - GET  /api/walrus/gallery/:wallet    → List user's files                 │
+│  - POST /api/walrus/decrypt/:blobId    → Decrypt and return content        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              FRONTEND                                       │
+│                                                                             │
+│  1. Fetch gallery: GET /api/walrus/gallery/:wallet                         │
+│  2. For encrypted items: POST /api/walrus/decrypt/:blobId                  │
+│  3. Backend decrypts and returns raw image/video bytes                     │
+│  4. Display in gallery                                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| **Encryption** | AES-256-GCM + NaCl Sealed Box | Industry standard, PyNaCl/tweetnacl available |
+| **Key Management** | Backend-managed Sui keypairs | No Sui wallet required for users |
+| **Decryption** | Backend (proxy model) | No signature prompts, better UX |
+| **Storage** | Walrus mainnet | Decentralized, Sui-native, cost-effective |
+| **Access Control** | Per-user encrypted content keys | Each user gets their own sealed box |
+
+### Files Modified
+
+| File | Purpose |
+|------|---------|
+| `app/orin_nano/.../walrus_upload_service.py` | Fetches Sui pubkey, NaCl sealed box encryption |
+| `app/backend/src/sui-storage.ts` | Ed25519↔X25519 conversion, sealed box decryption |
+| `app/backend/src/index.ts` | API endpoints for pubkey, upload, gallery, decrypt |
+| `app/web/src/storage/walrus/walrus-decryption.ts` | Frontend calls backend decrypt endpoint |
+| `app/web/src/storage/walrus/walrus-gallery-service.ts` | Fetches gallery from backend |
+| `app/web/src/media/Gallery.tsx` | Displays Walrus media with decryption |
+
+### Trust Model & Transparency
+
+**Current Model**: Backend acts as a "decryption proxy"
+
+- Backend temporarily holds Sui private keys (in SQLite)
+- Backend decrypts content on behalf of authorized users
+- Users don't need to sign messages or manage Sui wallets
+- Trade-off: Backend sees decrypted content briefly
+
+**Why This Is Acceptable**:
+1. Backend is trusted infrastructure (your server)
+2. Content keys are per-file, per-user encrypted
+3. Access grants enforce authorization
+4. No user credential exposure
+5. Better UX (no signature prompts)
+
+**Future Enhancement** (when moving keys on-chain):
+- Encrypted Sui keys stored in UserSessionChain PDA (Solana)
+- Backend fetches encrypted key, decrypts with server-side secret
+- User can export/recover Sui key with Solana signature
+- True user ownership, backend is convenience layer
+
+### Seal Evaluation (Rejected)
+
+We evaluated [Seal](https://seal.mystenlabs.com/) (Mysten Labs' official DSM) but rejected it because:
+
+1. **Requires Sui Wallet**: Users would need to connect a Sui wallet in addition to Solana
+2. **Signature Prompts**: Seal requires `signPersonalMessage` for session keys
+3. **No Python SDK**: Jetson runs Python, Seal is TypeScript-only
+4. **Same Trust Model**: With backend-controlled Sui keys, we'd still trust the backend
+
+Seal would be worth revisiting if:
+- mmoment migrates to Sui-primary wallets
+- Seal releases a Python SDK
+- Users commonly have Sui wallets
+
+### What's Left
+
+- [ ] Move encrypted Sui keys from SQLite to UserSessionChain PDA (on-chain)
+- [ ] Add user-facing "Export Sui Wallet" feature
+- [ ] Add transparency documentation in app
+- [ ] Production testing with real captures

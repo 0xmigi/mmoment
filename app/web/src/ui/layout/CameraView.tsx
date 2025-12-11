@@ -16,7 +16,6 @@ import { CONFIG } from "../../core/config";
 import { ToastMessage } from "../../core/types/toast";
 import MediaGallery from "../../media/Gallery";
 import { StreamPlayer } from "../../media/StreamPlayer";
-import { unifiedIpfsService } from "../../storage/ipfs/unified-ipfs-service";
 import { Timeline } from "../../timeline/Timeline";
 import { timelineService } from "../../timeline/timeline-service";
 import {
@@ -37,8 +36,6 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import {
-  StopCircle,
-  Play,
   Camera,
   Video,
   Loader,
@@ -189,6 +186,9 @@ export function CameraView() {
   // Add state for gesture monitoring
   const [gestureMonitoring, setGestureMonitoring] = useState(false);
   const gestureCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Track if we've auto-started the WebRTC stream for this check-in session
+  const hasAutoStartedStreamRef = useRef<boolean>(false);
 
   // Add state to track gesture controls status changes
   const [gestureControlsEnabled, setGestureControlsEnabled] = useState(false);
@@ -903,6 +903,64 @@ export function CameraView() {
     };
   }, [isCheckedIn, cameraAccount, gestureControlsEnabled]);
 
+  // Auto-start WebRTC streaming when user checks in
+  // WebRTC is now always-on infrastructure for checked-in users, not a "broadcast" feature
+  useEffect(() => {
+    const autoStartStream = async () => {
+      const targetCameraId = cameraAccount || selectedCamera?.publicKey;
+
+      // Conditions for auto-start:
+      // 1. User is checked in
+      // 2. Camera is available (isLive)
+      // 3. Not already streaming
+      // 4. Haven't already auto-started for this check-in session
+      if (
+        isCheckedIn &&
+        targetCameraId &&
+        currentCameraStatus.isLive &&
+        !currentCameraStatus.isStreaming &&
+        !hasAutoStartedStreamRef.current
+      ) {
+        console.log('[CameraView] 🚀 Auto-starting WebRTC stream for checked-in user');
+        hasAutoStartedStreamRef.current = true;
+
+        try {
+          // Ensure camera has a local session set
+          const isConnected = await unifiedCameraService.isConnected(targetCameraId);
+          if (!isConnected && primaryWallet?.address) {
+            const sessionKey = `mmoment_session_${primaryWallet.address}_${targetCameraId}`;
+            const storedSession = localStorage.getItem(sessionKey);
+            if (storedSession) {
+              const { sessionId } = JSON.parse(storedSession);
+              await unifiedCameraService.setSession(targetCameraId, sessionId);
+            }
+          }
+
+          const response = await unifiedCameraService.startStream(targetCameraId);
+          if (response.success) {
+            console.log('[CameraView] ✅ WebRTC stream auto-started successfully');
+            // Force status refresh
+            setTimeout(() => {
+              unifiedCameraPolling.forceCheck(targetCameraId);
+            }, 1000);
+          } else {
+            console.warn('[CameraView] ⚠️ Failed to auto-start stream:', response.error);
+          }
+        } catch (error) {
+          console.error('[CameraView] ❌ Error auto-starting stream:', error);
+        }
+      }
+
+      // Reset the auto-start flag when user checks out
+      if (!isCheckedIn && hasAutoStartedStreamRef.current) {
+        console.log('[CameraView] 🔄 Resetting auto-start flag (user checked out)');
+        hasAutoStartedStreamRef.current = false;
+      }
+    };
+
+    autoStartStream();
+  }, [isCheckedIn, currentCameraStatus.isLive, currentCameraStatus.isStreaming, cameraAccount, selectedCamera?.publicKey, primaryWallet?.address]);
+
   // Update the button handlers to check for check-in status
   const handleDirectPhoto = async () => {
     if (!cameraAccount && !selectedCamera) {
@@ -963,32 +1021,10 @@ export function CameraView() {
 
       const response = await unifiedCameraService.takePhoto(currentCameraId);
 
-      if (response.success && response.data?.blob) {
-        updateToast("info", "Photo captured, uploading to IPFS...");
+      if (response.success) {
+        updateToast("success", "Photo captured!");
+        cameraStatus.setOnline(false);
 
-        try {
-          const results = await unifiedIpfsService.uploadFile(
-            response.data.blob,
-            primaryWallet?.address || "",
-            "image",
-            {
-              cameraId: currentCameraId,
-            }
-          );
-
-          if (results.length > 0) {
-            updateToast("success", "Photo captured and uploaded to IPFS");
-            // Note: Timeline event is handled by Jetson's timeline_activity_service
-            // via buffer_photo_activity() - no frontend emission needed
-            cameraStatus.setOnline(false);
-          } else {
-            updateToast("success", "Photo captured (upload to IPFS failed)");
-          }
-        } catch (uploadError) {
-          updateToast("success", "Photo captured (upload to IPFS failed)");
-        }
-
-        // Refresh timeline to show event buffered by Jetson
         if (timelineRef.current?.refreshEvents) {
           timelineRef.current?.refreshEvents();
         }
@@ -1126,26 +1162,7 @@ export function CameraView() {
               return;
             }
 
-            updateToast("info", "Video processed, uploading to IPFS...");
-
-            try {
-              const ipfsResult = await unifiedIpfsService.uploadFile(
-                videoBlob,
-                primaryWallet.address,
-                "video",
-                {
-                  cameraId: currentCameraId,
-                }
-              );
-
-              if (ipfsResult && ipfsResult.length > 0) {
-                updateToast("success", "Video uploaded to IPFS successfully!");
-              } else {
-                updateToast("error", "Video recorded but IPFS upload failed");
-              }
-            } catch (ipfsError) {
-              updateToast("error", "Video recorded but IPFS upload failed");
-            }
+            updateToast("success", "Video recorded!");
           } else {
             updateToast(
               "error",
@@ -1168,147 +1185,6 @@ export function CameraView() {
         }`
       );
       setIsRecording(false);
-    }
-  };
-
-  const handleDirectStream = async () => {
-    const currentCameraId =
-      cameraAccount || selectedCamera?.publicKey || CONFIG.JETSON_CAMERA_PDA;
-    if (!currentCameraId) {
-      updateToast("error", "No camera selected");
-      return;
-    }
-
-    // PHASE 3: Use local state for check-in status (don't re-query Jetson on every action)
-    if (!isCheckedIn) {
-      return promptForCheckIn("stream");
-    }
-
-    try {
-      // Force fresh status check from unified polling
-      await unifiedCameraPolling.forceCheck(currentCameraId);
-
-      // Use the camera status hook for more reliable state
-      const isCurrentlyStreaming = currentCameraStatus.isStreaming;
-      console.log(
-        `🔄 [STREAM DEBUG] Current streaming state:`,
-        isCurrentlyStreaming
-      );
-
-      if (isCurrentlyStreaming) {
-        // Stop streaming
-        updateToast("info", "Stopping stream...");
-        console.log(`🛑 [STREAM DEBUG] Attempting to stop stream...`);
-
-        // Note: Pre-capture transactions removed - activities are now buffered on Jetson
-        // and committed at checkout via the encrypted activity buffer system
-
-        const response = await unifiedCameraService.stopStream(currentCameraId);
-        console.log(`🛑 [STREAM DEBUG] Stop stream response:`, response);
-
-        if (response.success) {
-          // Clear the "stopping" toast immediately
-          dismissToast();
-
-          // Wait a bit longer for hardware to update, then check status
-          setTimeout(async () => {
-            await unifiedCameraPolling.forceCheck(currentCameraId);
-            // Only show success if we can confirm the stream actually stopped
-            const updatedState =
-              await unifiedCameraService.getComprehensiveState(currentCameraId);
-            if (
-              updatedState.streamInfo.success &&
-              !updatedState.streamInfo.data?.isActive
-            ) {
-              updateToast("success", "Stream stopped");
-            }
-          }, 2000);
-        } else {
-          updateToast(
-            "error",
-            `Failed to stop stream: ${response.error || "Unknown error"}`
-          );
-        }
-      } else {
-        // Start streaming
-        updateToast("info", "Starting stream...");
-        console.log(`▶️ [STREAM DEBUG] Attempting to start stream...`);
-
-        // Note: Pre-capture transactions removed - activities are now buffered on Jetson
-        // and committed at checkout via the encrypted activity buffer system
-
-        // Ensure camera has a local session set (required for streaming)
-        // We use setSession instead of connect() to avoid calling /api/session/connect
-        // which conflicts with Phase 3's /api/checkin
-        const isConnected = await unifiedCameraService.isConnected(
-          currentCameraId
-        );
-        if (!isConnected && primaryWallet?.address) {
-          // Try to restore session from localStorage
-          const sessionKey = `mmoment_session_${primaryWallet.address}_${currentCameraId}`;
-          const storedSession = localStorage.getItem(sessionKey);
-          if (storedSession) {
-            try {
-              const sessionData = JSON.parse(storedSession);
-              await unifiedCameraService.setSession(currentCameraId, {
-                sessionId: sessionData.sessionId,
-                walletAddress: primaryWallet.address,
-                cameraPda: currentCameraId,
-                timestamp: sessionData.timestamp || Date.now(),
-                isActive: true
-              });
-            } catch (e) {
-              console.error('[CameraView] Failed to restore session from localStorage:', e);
-            }
-          }
-        }
-
-        const response = await unifiedCameraService.startStream(
-          currentCameraId
-        );
-        console.log(`▶️ [STREAM DEBUG] Start stream response:`, response);
-
-        if (response.success) {
-          // Clear the "starting" toast immediately
-          dismissToast();
-
-          // Wait a bit longer for hardware to update, then check status
-          setTimeout(async () => {
-            await unifiedCameraPolling.forceCheck(currentCameraId);
-            // Only show success if we can confirm the stream actually started
-            const updatedState =
-              await unifiedCameraService.getComprehensiveState(currentCameraId);
-            if (
-              updatedState.streamInfo.success &&
-              updatedState.streamInfo.data?.isActive
-            ) {
-              updateToast("success", "Stream started");
-            }
-          }, 2000);
-        } else {
-          updateToast(
-            "error",
-            `Failed to start stream: ${response.error || "Unknown error"}`
-          );
-        }
-      }
-
-      // Force additional checks at 2s and 5s intervals to catch delayed state changes
-      setTimeout(() => unifiedCameraPolling.forceCheck(currentCameraId), 2000);
-      setTimeout(() => unifiedCameraPolling.forceCheck(currentCameraId), 5000);
-
-      // Refresh the timeline
-      if (timelineRef.current?.refreshEvents) {
-        timelineRef.current?.refreshEvents();
-      }
-    } catch (error) {
-      console.error("🚨 [STREAM DEBUG] Error handling stream:", error);
-      updateToast(
-        "error",
-        `Error handling stream: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
-      );
     }
   };
 
@@ -1452,12 +1328,9 @@ export function CameraView() {
                       <div className="bg-gray-500 text-white text-xs font-bold px-1.5 py-0.5">
                         OFFLINE
                       </div>
-                    ) : currentCameraStatus.isStreaming ? (
-                      <div className="bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 flex items-center gap-1">
-                        <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
-                        LIVE
-                      </div>
                     ) : (
+                      // WebRTC is now always-on infrastructure for checked-in users
+                      // No longer showing "LIVE" broadcast status - just ONLINE when camera is available
                       <div className="bg-green-500 text-white text-xs font-bold px-1.5 py-0.5">
                         ONLINE
                       </div>
@@ -1518,33 +1391,7 @@ export function CameraView() {
 
                 <div className="hidden sm:flex absolute -right-14 top-0 flex-col h-full z-[45]">
                   {/* Direct buttons for desktop */}
-                  <div className="group h-1/2 relative">
-                    <button
-                      onClick={handleDirectStream}
-                      disabled={loading}
-                      className="w-16 h-full flex items-center justify-center hover:text-primary text-black transition-colors rounded-xl"
-                      aria-label={
-                        currentCameraStatus.isStreaming
-                          ? "Stop Stream"
-                          : "Start Stream"
-                      }
-                    >
-                      {loading ? (
-                        <Loader className="w-5 h-5 animate-spin" />
-                      ) : currentCameraStatus.isStreaming ? (
-                        <StopCircle className="w-5 h-5" />
-                      ) : (
-                        <Play className="w-5 h-5" />
-                      )}
-                    </button>
-                    <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-2 bg-black/75 text-white text-sm rounded opacity-0 group-hover:opacity-100 whitespace-nowrap transition-opacity">
-                      {loading
-                        ? "Processing..."
-                        : currentCameraStatus.isStreaming
-                        ? "Stop Stream"
-                        : "Start Stream"}
-                    </span>
-                  </div>
+                  {/* Stream toggle button removed - WebRTC is now always-on infrastructure for checked-in users */}
 
                   <div className="group h-1/2 relative">
                     <button
@@ -1587,9 +1434,8 @@ export function CameraView() {
             <CameraControls
               onTakePicture={handleDirectPhoto}
               onRecordVideo={handleDirectVideo}
-              onToggleStream={handleDirectStream}
               isLoading={loading}
-              isStreaming={currentCameraStatus.isStreaming}
+              // Stream toggle removed - WebRTC is always-on infrastructure for checked-in users
             />
           </div>
           <div className="max-w-3xl mt-6 md:mt-6 mx-auto flex flex-col justify-top relative">
@@ -1616,15 +1462,9 @@ export function CameraView() {
                     </span>
                     <span className="text-gray-500 font-medium">Offline</span>
                   </div>
-                ) : currentCameraStatus.isStreaming ? (
-                  <div className="flex items-center gap-2">
-                    <span className="relative flex h-3 w-3 -ml-1">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-                    </span>
-                    <span className="text-red-500 font-medium">LIVE</span>
-                  </div>
                 ) : (
+                  // WebRTC is now always-on infrastructure for checked-in users
+                  // No longer showing "LIVE" broadcast status - just Online when camera is available
                   <div className="flex items-center gap-2">
                     <span className="relative flex h-3 w-3 -ml-1">
                       <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>

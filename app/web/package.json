@@ -42,6 +42,8 @@
     "react-router-dom": "^6.27.0",
     "socket.io-client": "^4.8.1",
     "stream-browserify": "^3.0.0",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-sealedbox-js": "^1.2.0",
     "ui": "shadcn/ui",
     "web3.storage": "^4.5.5"
   },

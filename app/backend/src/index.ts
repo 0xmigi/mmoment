@@ -81,7 +81,10 @@ import {
 // Import Sui storage service for Walrus blob ownership
 import {
   getOrCreateSuiWallet,
-  getSuiAddress
+  getSuiAddress,
+  getSuiX25519PublicKey,
+  decryptSealedBox,
+  decryptAesGcm
 } from './sui-storage';
 
 // Note: Socket.IO server (io) will be passed to session cleanup cron after it's created below
@@ -1066,8 +1069,8 @@ app.get("/api/pipe/account/status", async (req, res) => {
         username: process.env.PIPE_USERNAME,
         userId: process.env.PIPE_USER_ID,
         depositAddress: process.env.PIPE_DEPOSIT_ADDRESS,
-        pipeBalance: parseFloat(balanceData.balance || '0'),
-        solBalance: parseFloat(balanceData.sol_balance || '0'),
+        pipeBalance: parseFloat(balanceData.ui_amount || balanceData.balance || '0'),
+        solBalance: parseFloat(balanceData.balance_sol || balanceData.sol_balance || '0'),
         fileCount,
         storageUsedBytes: totalSize,
         storageUsedMB: (totalSize / (1024 * 1024)).toFixed(2)
@@ -2262,6 +2265,134 @@ app.get("/api/walrus/sui-address/:walletAddress", async (req, res) => {
     console.error("❌ Failed to get Sui address:", error);
     res.status(500).json({
       error: error instanceof Error ? error.message : "Failed to get Sui address"
+    });
+  }
+});
+
+// Get Sui X25519 public key for encryption (used by Jetson)
+app.get("/api/walrus/sui-pubkey/:walletAddress", async (req, res) => {
+  const { walletAddress } = req.params;
+
+  if (!walletAddress) {
+    return res.status(400).json({ error: "Wallet address required" });
+  }
+
+  try {
+    // First ensure user has a Sui wallet (create if needed)
+    await getOrCreateSuiWallet(walletAddress);
+
+    // Get the X25519 public key for NaCl sealed box encryption
+    const keyInfo = await getSuiX25519PublicKey(walletAddress);
+
+    if (!keyInfo) {
+      return res.status(404).json({
+        error: "Failed to get Sui public key"
+      });
+    }
+
+    console.log(`🔑 Returning X25519 pubkey for ${walletAddress.slice(0, 8)}...`);
+
+    res.json({
+      success: true,
+      suiAddress: keyInfo.suiAddress,
+      x25519PublicKey: keyInfo.x25519PublicKey.toString('base64'),
+      ed25519PublicKey: keyInfo.ed25519PublicKey.toString('base64')
+    });
+  } catch (error) {
+    console.error("❌ Failed to get Sui public key:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to get Sui public key"
+    });
+  }
+});
+
+// Decrypt a Walrus blob and return the decrypted content
+app.post("/api/walrus/decrypt/:blobId", async (req, res) => {
+  const { blobId } = req.params;
+  const { walletAddress } = req.body;
+
+  if (!blobId) {
+    return res.status(400).json({ error: "Blob ID required" });
+  }
+
+  if (!walletAddress) {
+    return res.status(400).json({ error: "Wallet address required for authorization" });
+  }
+
+  try {
+    console.log(`🔓 Decrypting blob ${blobId.slice(0, 16)}... for ${walletAddress.slice(0, 8)}...`);
+
+    // 1. Get file metadata from database
+    const file = await getWalrusFileByBlobId(blobId);
+    if (!file) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    // 2. Check if file is encrypted
+    if (!file.nonce) {
+      // File is not encrypted, redirect to direct download
+      console.log(`📦 File not encrypted, returning direct URL`);
+      return res.redirect(file.downloadUrl);
+    }
+
+    // 3. Verify user has access (is owner or in access grants)
+    const accessGrants = JSON.parse(file.accessGrants || '[]');
+    const isOwner = file.walletAddress === walletAddress;
+    const userGrant = accessGrants.find((g: any) => g.pubkey === walletAddress);
+
+    if (!isOwner && !userGrant) {
+      console.warn(`⛔ Access denied for ${walletAddress.slice(0, 8)} to blob ${blobId.slice(0, 8)}`);
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    // 4. Get the encrypted content key
+    // For owner, use the first grant or a special owner key
+    // For shared users, use their specific grant
+    const encryptedKeyB64 = userGrant?.encryptedKey || accessGrants[0]?.encryptedKey;
+
+    if (!encryptedKeyB64) {
+      return res.status(400).json({ error: "No encrypted content key found" });
+    }
+
+    // 5. Decrypt the content key using the REQUESTING user's Sui private key (sealed box)
+    // Each user's encrypted key was encrypted to THEIR Sui pubkey, so we use their wallet
+    const encryptedKey = Buffer.from(encryptedKeyB64, 'base64');
+    const contentKey = await decryptSealedBox(encryptedKey, walletAddress);
+
+    if (!contentKey) {
+      return res.status(500).json({ error: "Failed to decrypt content key" });
+    }
+
+    console.log(`🔑 Content key decrypted successfully`);
+
+    // 6. Fetch encrypted blob from Walrus
+    const walrusResponse = await fetch(file.downloadUrl);
+    if (!walrusResponse.ok) {
+      return res.status(502).json({
+        error: `Failed to fetch blob from Walrus: ${walrusResponse.status}`
+      });
+    }
+
+    const encryptedData = Buffer.from(await walrusResponse.arrayBuffer());
+    console.log(`📦 Fetched ${encryptedData.length} bytes from Walrus`);
+
+    // 7. Decrypt content with AES-256-GCM
+    const decryptedContent = decryptAesGcm(encryptedData, contentKey);
+    console.log(`✅ Decrypted ${decryptedContent.length} bytes`);
+
+    // 8. Determine content type
+    const mimeType = file.fileType === 'video' ? 'video/mp4' : 'image/jpeg';
+
+    // 9. Return decrypted content
+    res.set('Content-Type', mimeType);
+    res.set('Content-Length', decryptedContent.length.toString());
+    res.set('Cache-Control', 'private, max-age=3600'); // Cache for 1 hour
+    res.send(decryptedContent);
+
+  } catch (error) {
+    console.error("❌ Failed to decrypt blob:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to decrypt blob"
     });
   }
 });

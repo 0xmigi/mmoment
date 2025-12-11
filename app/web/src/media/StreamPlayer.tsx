@@ -24,6 +24,18 @@ interface StreamInfo {
   streamUrl?: string;
 }
 
+// Helper to determine stream type from localStorage CV overlay state
+const getStreamTypeFromToggles = (cameraId: string | null): 'clean' | 'annotated' => {
+  if (!cameraId) return 'clean';
+  // Use consolidated CV overlay key (with fallback to old keys for backwards compat)
+  const cvOverlay = localStorage.getItem(`jetson_cv_overlay_${cameraId}`) === 'true';
+  if (cvOverlay) return 'annotated';
+  // Fallback: check old keys in case migration hasn't happened yet
+  const faceViz = localStorage.getItem(`jetson_face_viz_${cameraId}`) === 'true';
+  const poseViz = localStorage.getItem(`jetson_pose_viz_${cameraId}`) === 'true';
+  return (faceViz || poseViz) ? 'annotated' : 'clean';
+};
+
 const StreamPlayer = memo(() => {
   const [streamInfo, setStreamInfo] = useState<StreamInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -40,6 +52,59 @@ const StreamPlayer = memo(() => {
   const { program } = useProgram();
   const { selectedCamera } = useCamera();
   const { cameraId } = useParams<{ cameraId: string }>();
+
+  // Get current camera ID for stream type calculation
+  const currentCameraIdForStream =
+    cameraId ||
+    selectedCamera?.publicKey ||
+    localStorage.getItem("directCameraId");
+
+  // Stream type based on visualization toggle states
+  const [streamType, setStreamType] = useState<'clean' | 'annotated'>(() =>
+    getStreamTypeFromToggles(currentCameraIdForStream)
+  );
+
+  // Listen for visualization toggle changes via storage events and custom events
+  useEffect(() => {
+    const updateStreamType = () => {
+      const newStreamType = getStreamTypeFromToggles(currentCameraIdForStream);
+      setStreamType(prev => {
+        if (prev !== newStreamType) {
+          console.log(`[StreamPlayer] 🔄 Stream type changing: ${prev} → ${newStreamType}`);
+          return newStreamType;
+        }
+        return prev;
+      });
+    };
+
+    // Listen for localStorage changes (from other tabs/windows)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key?.startsWith('jetson_cv_overlay_') ||
+          e.key?.startsWith('jetson_face_viz_') ||
+          e.key?.startsWith('jetson_pose_viz_')) {
+        console.log('[StreamPlayer] 📦 Storage event detected:', e.key);
+        updateStreamType();
+      }
+    };
+
+    // Listen for custom visualization toggle events (from same tab)
+    const handleVisualizationChange = () => {
+      console.log('[StreamPlayer] 🎛️ Visualization toggle event detected');
+      updateStreamType();
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('visualizationToggle', handleVisualizationChange);
+
+    // Also check periodically in case events are missed
+    const checkInterval = setInterval(updateStreamType, 2000);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('visualizationToggle', handleVisualizationChange);
+      clearInterval(checkInterval);
+    };
+  }, [currentCameraIdForStream]);
 
   const fetchStreamInfo = useCallback(
     async (forceRefresh = false) => {
@@ -268,6 +333,9 @@ const StreamPlayer = memo(() => {
   if (useWebRTC) {
     return (
       <WebRTCStreamPlayer
+        // Key changes when streamType changes to force reconnection with new stream
+        key={`webrtc-${streamType}`}
+        streamType={streamType}
         onError={(error) => {
           console.log("[StreamPlayer] WebRTC failed:", error);
           // Don't fallback during testing

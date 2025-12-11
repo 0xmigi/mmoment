@@ -5,6 +5,8 @@ import MediaViewer from './MediaViewer';
 import { unifiedIpfsService } from '../storage/ipfs/unified-ipfs-service';
 import { IPFSMedia } from '../storage/ipfs/ipfs-service';
 import { pipeGalleryService, PipeGalleryItem } from '../storage/pipe/pipe-gallery-service';
+import { walrusGalleryService, WalrusGalleryItem } from '../storage/walrus/walrus-gallery-service';
+import { decryptWalrusBlob, revokeDecryptedUrl } from '../storage/walrus/walrus-decryption';
 
 interface MediaGalleryProps {
   mode?: "recent" | "archive";
@@ -22,20 +24,22 @@ export default function MediaGallery({
   mediaType = "all",
 }: MediaGalleryProps) {
   const { primaryWallet } = useDynamicContext();
-  const [media, setMedia] = useState<(IPFSMedia | PipeGalleryItem)[]>([]);
+  const [media, setMedia] = useState<(IPFSMedia | PipeGalleryItem | WalrusGalleryItem)[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [, setDeleting] = useState<string | null>(null);
   const [selectedMedia, setSelectedMedia] = useState<
-    IPFSMedia | PipeGalleryItem | null
+    IPFSMedia | PipeGalleryItem | WalrusGalleryItem | null
   >(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
-  // Default to 'pipe' storage
-  const [storageType, setStorageType] = useState<"pinata" | "pipe">("pipe");
+  // Default to 'walrus' storage (new default)
+  const [storageType, setStorageType] = useState<"pinata" | "pipe" | "walrus">("walrus");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  // Track decrypted URLs for cleanup
+  const [decryptedUrls, setDecryptedUrls] = useState<Map<string, string>>(new Map());
 
   // Add click handler for media items
-  const handleMediaClick = (media: IPFSMedia | PipeGalleryItem) => {
+  const handleMediaClick = (media: IPFSMedia | PipeGalleryItem | WalrusGalleryItem) => {
     console.log(
       "Viewing media with transaction ID:",
       (media as IPFSMedia).transactionId || "none"
@@ -43,6 +47,13 @@ export default function MediaGallery({
     setSelectedMedia(media);
     setIsViewerOpen(true);
   };
+
+  // Cleanup decrypted URLs on unmount
+  useEffect(() => {
+    return () => {
+      decryptedUrls.forEach((url) => revokeDecryptedUrl(url));
+    };
+  }, [decryptedUrls]);
 
   // Check storage type preference on mount and when it changes
   useEffect(() => {
@@ -59,12 +70,20 @@ export default function MediaGallery({
     return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
-  // Subscribe to real-time gallery updates for Pipe storage
+  // Subscribe to real-time gallery updates for Pipe or Walrus storage
   useEffect(() => {
     if (storageType === "pipe") {
       const unsubscribe = pipeGalleryService.onGalleryUpdate(() => {
-        console.log("📡 Gallery update received, refreshing...");
-        // Trigger a re-fetch by incrementing the refresh trigger
+        console.log("📡 Pipe gallery update received, refreshing...");
+        setRefreshTrigger(prev => prev + 1);
+      });
+
+      return () => {
+        unsubscribe();
+      };
+    } else if (storageType === "walrus") {
+      const unsubscribe = walrusGalleryService.onGalleryUpdate(() => {
+        console.log("📡 Walrus gallery update received, refreshing...");
         setRefreshTrigger(prev => prev + 1);
       });
 
@@ -93,9 +112,43 @@ export default function MediaGallery({
       try {
         setError(null);
 
-        let allMedia: (IPFSMedia | PipeGalleryItem)[] = [];
+        let allMedia: (IPFSMedia | PipeGalleryItem | WalrusGalleryItem)[] = [];
 
-        if (storageType === "pipe") {
+        if (storageType === "walrus") {
+          // Get media from Walrus storage
+          console.log(
+            "📦 Fetching media from Walrus storage for:",
+            primaryWallet.address
+          );
+          const walrusFiles = await walrusGalleryService.getUserFiles(
+            primaryWallet.address
+          );
+
+          // Decrypt encrypted files
+          const decryptedFiles = await Promise.all(
+            walrusFiles.map(async (file) => {
+              if (file.encrypted && !file.decryptedUrl) {
+                // Check if we already have a decrypted URL cached
+                const cachedUrl = decryptedUrls.get(file.blobId);
+                if (cachedUrl) {
+                  return { ...file, decryptedUrl: cachedUrl };
+                }
+
+                // Decrypt the file
+                const result = await decryptWalrusBlob(file.blobId, primaryWallet.address);
+                if (result.success && result.objectUrl) {
+                  // Cache the decrypted URL
+                  setDecryptedUrls(prev => new Map(prev).set(file.blobId, result.objectUrl!));
+                  return { ...file, decryptedUrl: result.objectUrl, url: result.objectUrl };
+                }
+                console.warn(`Failed to decrypt ${file.blobId}: ${result.error}`);
+              }
+              return file;
+            })
+          );
+
+          allMedia = decryptedFiles;
+        } else if (storageType === "pipe") {
           // Get media from Pipe storage
           console.log(
             "📦 Fetching media from Pipe storage for:",

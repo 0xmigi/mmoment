@@ -112,36 +112,77 @@ class WalrusUploadService:
         logger.info(f"Encrypted {len(plaintext)} bytes -> {len(encrypted_data)} bytes")
         return encrypted_data, content_key, nonce
 
+    def _get_sui_x25519_pubkey(self, wallet_address: str) -> Optional[bytes]:
+        """
+        Fetch user's Sui X25519 public key from backend.
+
+        The backend manages Sui keypairs for users. We fetch the X25519 public key
+        which is derived from the Sui Ed25519 key, used for sealed box encryption.
+
+        Args:
+            wallet_address: User's Solana wallet address
+
+        Returns:
+            X25519 public key bytes (32 bytes) or None if not found
+        """
+        try:
+            response = requests.get(
+                f"{self.backend_url}/api/walrus/sui-pubkey/{wallet_address}",
+                timeout=10
+            )
+
+            if not response.ok:
+                logger.warning(f"Failed to fetch Sui pubkey for {wallet_address[:8]}...: {response.status_code}")
+                return None
+
+            data = response.json()
+            if not data.get("success"):
+                logger.warning(f"Backend returned error for Sui pubkey: {data.get('error')}")
+                return None
+
+            x25519_pubkey_b64 = data.get("x25519PublicKey")
+            if not x25519_pubkey_b64:
+                logger.warning(f"No x25519PublicKey in response for {wallet_address[:8]}...")
+                return None
+
+            return base64.b64decode(x25519_pubkey_b64)
+
+        except Exception as e:
+            logger.error(f"Error fetching Sui pubkey for {wallet_address[:8]}...: {e}")
+            return None
+
     def _encrypt_key_for_user(self, content_key: bytes, user_pubkey: str) -> bytes:
         """
-        Encrypt the content key for a specific user's wallet pubkey.
+        Encrypt the content key for a specific user using their Sui X25519 public key.
 
-        Uses Ed25519 -> X25519 conversion with sealed box encryption.
-        Same pattern as activity_encryption_service.py.
+        Fetches the user's Sui X25519 public key from backend and uses NaCl sealed box
+        encryption. The backend can then decrypt using the corresponding Sui private key.
 
         Args:
             content_key: The 32-byte AES key to encrypt
-            user_pubkey: User's wallet address (base58 Solana pubkey)
+            user_pubkey: User's Solana wallet address (used to look up Sui key)
 
         Returns:
-            Encrypted key bytes
+            Encrypted key bytes (sealed box format)
         """
         try:
-            from nacl.public import SealedBox
-            from nacl.signing import VerifyKey
-            import base58
+            from nacl.public import SealedBox, PublicKey
 
-            # Decode the Solana pubkey from base58
-            pubkey_bytes = base58.b58decode(user_pubkey)
+            # Fetch Sui X25519 public key from backend
+            x25519_pubkey_bytes = self._get_sui_x25519_pubkey(user_pubkey)
 
-            # Convert Ed25519 verify key to X25519 public key
-            verify_key = VerifyKey(pubkey_bytes)
-            x25519_pubkey = verify_key.to_curve25519_public_key()
+            if x25519_pubkey_bytes is None:
+                logger.warning(f"No Sui pubkey found for {user_pubkey[:8]}..., using fallback")
+                return self._fallback_encrypt_key(content_key, user_pubkey)
+
+            # Create X25519 public key object
+            x25519_pubkey = PublicKey(x25519_pubkey_bytes)
 
             # Use sealed box to encrypt (anonymous sender)
             sealed_box = SealedBox(x25519_pubkey)
             encrypted_key = sealed_box.encrypt(content_key)
 
+            logger.info(f"Encrypted content key with Sui pubkey for {user_pubkey[:8]}...")
             return encrypted_key
 
         except ImportError:
