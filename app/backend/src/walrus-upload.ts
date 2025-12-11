@@ -37,7 +37,8 @@ function createWalrusClient() {
   });
 
   // Extend with walrus and upload relay
-  return suiClient.extend(
+  // @ts-ignore - $extend is dynamically added by the SDK
+  return suiClient.$extend(
     walrus({
       network: SUI_NETWORK,
       aggregatorUrl: WALRUS_AGGREGATOR,

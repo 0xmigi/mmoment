@@ -29,7 +29,7 @@
     "tweetnacl": "^1.0.3",
     "tweetnacl-sealedbox-js": "^1.2.0",
     "@mysten/sui": "^1.18.0",
-    "@mysten/walrus": "^1.0.0"
+    "@mysten/walrus": "^0.7.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
