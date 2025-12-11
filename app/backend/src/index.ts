@@ -2071,7 +2071,7 @@ app.post("/api/walrus/upload", async (req, res) => {
       downloadUrl: uploadResult.downloadUrl,
       cameraId: metadata.cameraId,
       deviceSignature: metadata.deviceSignature,
-      fileType: metadata.fileType || 'photo',
+      fileType: (metadata.fileType === 'video' ? 'video' : 'photo') as 'photo' | 'video',
       timestamp: metadata.timestamp || Date.now(),
       originalSize: metadata.originalSize || 0,
       encryptedSize: encryptedData.length,

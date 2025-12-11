@@ -5,21 +5,21 @@
  * This service receives encrypted blobs from Jetson and uploads them to Walrus.
  */
 
-import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
+import { getFullnodeUrl } from '@mysten/sui/client';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { walrus } from '@mysten/walrus';
+import { WalrusClient } from '@mysten/walrus';
 import { fromBase64 } from '@mysten/sui/utils';
 
 // Walrus configuration
 const WALRUS_UPLOAD_RELAY = process.env.WALRUS_UPLOAD_RELAY || 'https://upload-relay.mainnet.walrus.space';
 const WALRUS_AGGREGATOR = process.env.WALRUS_AGGREGATOR || 'https://aggregator.walrus-mainnet.walrus.space';
-const SUI_NETWORK = (process.env.SUI_NETWORK || 'mainnet') as 'mainnet' | 'testnet' | 'devnet';
+const SUI_NETWORK = (process.env.SUI_NETWORK || 'mainnet') as 'mainnet' | 'testnet';
 
 // Backend's Sui wallet for paying storage costs
 // This should be a funded wallet with SUI and WAL tokens
 const BACKEND_SUI_PRIVATE_KEY = process.env.BACKEND_SUI_PRIVATE_KEY;
 
-let walrusClient: ReturnType<typeof createWalrusClient> | null = null;
+let walrusClient: WalrusClient | null = null;
 let backendKeypair: Ed25519Keypair | null = null;
 
 interface WalrusUploadResult {
@@ -29,27 +29,19 @@ interface WalrusUploadResult {
 }
 
 /**
- * Create a Sui client extended with Walrus capabilities
+ * Create a WalrusClient with upload relay
  */
-function createWalrusClient() {
-  const suiClient = new SuiClient({
-    url: getFullnodeUrl(SUI_NETWORK),
-  });
-
-  // Extend with walrus and upload relay
-  // @ts-ignore - $extend is dynamically added by the SDK
-  return suiClient.$extend(
-    walrus({
-      network: SUI_NETWORK,
-      aggregatorUrl: WALRUS_AGGREGATOR,
-      uploadRelay: {
-        host: WALRUS_UPLOAD_RELAY,
-        sendTip: {
-          max: 10_000_000, // 0.01 SUI max tip
-        },
+function createWalrusClient(): WalrusClient {
+  return new WalrusClient({
+    network: SUI_NETWORK,
+    suiRpcUrl: getFullnodeUrl(SUI_NETWORK),
+    uploadRelay: {
+      host: WALRUS_UPLOAD_RELAY,
+      sendTip: {
+        max: 10_000_000, // 0.01 SUI max tip
       },
-    })
-  );
+    },
+  });
 }
 
 /**
@@ -115,11 +107,12 @@ export async function uploadToWalrus(
     console.log(`🚀 Uploading ${encryptedData.length} bytes to Walrus via relay...`);
 
     // Upload using the SDK with relay
-    const result = await walrusClient.walrus.writeBlob({
+    // Type assertion needed due to @mysten/sui version mismatch between packages
+    const result = await walrusClient.writeBlob({
       blob: new Uint8Array(encryptedData),
       deletable: false,
       epochs,
-      signer: backendKeypair,
+      signer: backendKeypair as any,
     });
 
     const uploadDurationMs = Date.now() - startTime;
