@@ -125,21 +125,23 @@ class WalrusGalleryService {
         return [];
       }
 
-      const ownedFiles = data.files || [];
-      const sharedFiles = data.sharedFiles || [];
-      const allFiles = [...ownedFiles, ...sharedFiles];
+      // Backend returns "items" array with all files (owned + shared)
+      const allFiles = data.items || [];
+      const ownedCount = data.ownedCount || 0;
+      const sharedCount = data.sharedCount || 0;
 
-      console.log(`✅ [Walrus] Found ${ownedFiles.length} owned + ${sharedFiles.length} shared files`);
+      console.log(`✅ [Walrus] Found ${ownedCount} owned + ${sharedCount} shared files`);
 
       // Transform backend response to gallery items
+      // Backend returns: id, blobId, url, type, cameraId, timestamp, encrypted, nonce, accessGrants
       return allFiles.map((item: any): WalrusGalleryItem => {
-        const isVideo = item.fileType === 'video';
+        const isVideo = item.type === 'video' || item.fileType === 'video';
 
         return {
-          id: item.blobId,
-          blobId: item.blobId,
-          name: `${item.blobId.slice(0, 8)}_${item.fileType}`,
-          url: item.downloadUrl,  // Direct Walrus aggregator URL
+          id: item.blobId || item.id,
+          blobId: item.blobId || item.id,
+          name: `${(item.blobId || item.id).slice(0, 8)}_${item.type || 'photo'}`,
+          url: item.url || item.downloadUrl,  // Direct Walrus aggregator URL
           type: isVideo ? 'video' : 'image',
           mimeType: isVideo ? 'video/mp4' : 'image/jpeg',
           timestamp: item.timestamp || Date.now(),
