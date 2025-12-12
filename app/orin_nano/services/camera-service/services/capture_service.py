@@ -374,12 +374,11 @@ class CaptureService:
                 self._recording_active = False
                 self._current_writer = None
                 self._current_recording_path = None
-            
-            # Convert MOV to MP4 for better browser compatibility
+
+            # No conversion needed - recording directly to MP4
             if recording_path_for_conversion and os.path.exists(recording_path_for_conversion):
-                logger.info(f"Starting MP4 conversion for: {recording_path_for_conversion}")
-                self._convert_to_mp4(recording_path_for_conversion)
-            
+                logger.info(f"Recording complete: {recording_path_for_conversion}")
+
             # Run cleanup
             self._cleanup_videos()
     
@@ -393,8 +392,8 @@ class CaptureService:
         """Generate a unique filename for a video"""
         timestamp = int(time.time())
         prefix = f"{user_id}_" if user_id else ""
-        # Use .mov extension for initial recording, will be converted to .mp4
-        return f"{prefix}video_{timestamp}_{uuid.uuid4().hex[:6]}.mov"
+        # Record directly to .mp4 - no conversion needed
+        return f"{prefix}video_{timestamp}_{uuid.uuid4().hex[:6]}.mp4"
     
     def _convert_to_mp4(self, mov_path: str) -> None:
         """

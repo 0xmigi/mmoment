@@ -16,8 +16,8 @@ services:
       - "biometric-security:172.20.0.3"
       - "solana-middleware:172.20.0.2"
     volumes:
-      - ./data/images:/app/photos
-      - /mnt/nvme/mmoment-videos:/app/videos  # Using NVMe SSD for video storage  
+      - /mnt/nvme/mmoment-photos:/app/photos  # NVMe SSD for photo storage
+      - /mnt/nvme/mmoment-videos:/app/videos  # NVMe SSD for video storage
       - ./data/face_embeddings:/app/face_embeddings
       - ./data/faces:/app/faces
       - ./data/recordings:/app/recordings

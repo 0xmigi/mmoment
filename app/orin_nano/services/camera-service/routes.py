@@ -636,22 +636,175 @@ def register_routes(app):
     @app.route("/api/record", methods=["POST"])
     @require_session
     def api_record():
-        """Standardized record endpoint - waits for recording completion"""
+        """
+        Standardized record endpoint - supports start/stop actions for non-blocking operation.
+
+        Request body:
+            action: 'start' | 'stop' | None
+                - 'start': Start recording (non-blocking, returns immediately)
+                - 'stop': Stop recording and queue upload (returns video info + job_id)
+                - None: Legacy blocking behavior (waits for recording completion)
+            wallet_address: User's wallet address (required)
+            duration: Recording duration in seconds (default 30, max 300)
+        """
         import time
 
-        # Start the recording using the same logic as start_recording
+        from services.capture_event_signer import sign_capture
+        from services.storage_provider import is_walrus_enabled
+        from services.upload_queue import get_upload_queue
+        from services.walrus_upload_service import get_walrus_upload_service
+
+        # Get request parameters
         wallet_address = request.json.get("wallet_address")
-        duration = request.json.get("duration", 30)  # Default to 30 seconds
+        duration = request.json.get("duration", 0)  # Default to 0 (indefinite until stopped)
+        action = request.json.get("action")  # 'start', 'stop', or None
 
         # Enforce maximum duration limit to prevent runaway recordings
+        # duration=0 means "record until stopped" (valid for action='start')
         MAX_DURATION = 300  # 5 minutes maximum
-        if duration <= 0 or duration > MAX_DURATION:
-            duration = 30  # Default to 30 seconds for invalid durations
+        if duration < 0 or duration > MAX_DURATION:
+            duration = 0  # Default to indefinite for invalid durations
 
         # Get services
         buffer_service = get_services()["buffer"]
         capture_service = get_services()["capture"]
 
+        # ===== ACTION: START (non-blocking) =====
+        if action == 'start':
+            # Check if already recording
+            if capture_service.is_recording():
+                return jsonify({"success": False, "error": "Already recording"}), 400
+
+            # Start recording (non-blocking)
+            recording_info = capture_service.start_recording(
+                buffer_service, wallet_address, duration
+            )
+
+            if recording_info.get("success"):
+                logger.info(f"🎬 Recording started for {wallet_address[:8]}... (duration: {duration}s)")
+
+            return jsonify(recording_info)
+
+        # ===== ACTION: STOP (with queue-based upload) =====
+        if action == 'stop':
+            # Stop recording
+            result = capture_service.stop_recording()
+
+            if not result.get("success"):
+                return jsonify(result)
+
+            # Get the most recent video file
+            videos = capture_service.get_videos(1)
+            if not videos:
+                return jsonify({
+                    "success": False,
+                    "error": "Recording stopped but no video file was found"
+                }), 500
+
+            latest_video = videos[0]
+            storage_provider = "walrus" if is_walrus_enabled() else "pipe"
+            storage_upload_info = {"initiated": False, "storage_provider": storage_provider}
+
+            try:
+                video_path = latest_video.get("path")
+                if video_path and os.path.exists(video_path):
+                    # Get camera PDA for signing
+                    camera_pda = get_camera_pda()
+
+                    # Calculate file hash for signing
+                    upload_service = get_walrus_upload_service()
+                    file_hash = upload_service.calculate_file_hash(video_path)
+
+                    if not file_hash:
+                        raise Exception("Failed to calculate file hash")
+
+                    # Sign capture event (instant, no blockchain wait!)
+                    signed_event = sign_capture(
+                        user_wallet=wallet_address,
+                        camera_pda=camera_pda,
+                        file_hash=file_hash,
+                        capture_type="video",
+                        file_path=video_path,
+                        metadata={
+                            "timestamp": latest_video.get("timestamp"),
+                            "size": latest_video.get("size"),
+                            "filename": latest_video.get("filename"),
+                        },
+                    )
+                    device_signature = signed_event["device_signature"]
+                    logger.info(f"📝 Video signed: {device_signature[:16]}...")
+
+                    # Queue background upload (returns immediately with job_id)
+                    upload_queue = get_upload_queue()
+                    job_id = upload_queue.add(
+                        file_path=video_path,
+                        file_type="video",
+                        wallet_address=wallet_address,
+                        camera_id=camera_pda,
+                        device_signature=device_signature,
+                        timestamp=latest_video.get("timestamp", 0),
+                    )
+
+                    logger.info(f"🎥 Video recorded for {wallet_address[:8]}... -> queued as job #{job_id}")
+
+                    # Buffer to timeline immediately (don't wait for upload)
+                    try:
+                        from services.timeline_activity_service import get_timeline_activity_service
+                        timeline_service = get_timeline_activity_service()
+                        timeline_service.buffer_video_activity(
+                            wallet_address=wallet_address,
+                            pipe_file_name=latest_video["filename"],
+                            pipe_file_id=str(job_id),
+                            duration_seconds=0,  # Duration unknown at this point
+                            metadata={
+                                "timestamp": latest_video.get("timestamp"),
+                                "device_signature": device_signature,
+                                "filename": latest_video.get("filename"),
+                                "size": latest_video.get("size"),
+                                "storage_provider": storage_provider,
+                                "job_id": job_id,
+                            },
+                        )
+                    except Exception as timeline_err:
+                        logger.warning(f"Failed to buffer video to timeline: {timeline_err}")
+
+                    storage_upload_info = {
+                        "initiated": True,
+                        "completed": False,
+                        "upload_status": "pending",
+                        "storage_provider": storage_provider,
+                        "device_signature": device_signature,
+                        "job_id": job_id,
+                        "local_url": f"/videos/{latest_video['filename']}",
+                    }
+                else:
+                    logger.error(f"Video file not found at {video_path}")
+                    storage_upload_info["error"] = "Video file not found"
+
+            except Exception as e:
+                logger.error(f"Failed to process video for {wallet_address[:8]}...: {e}", exc_info=True)
+                storage_upload_info = {
+                    "initiated": False,
+                    "error": str(e),
+                    "upload_status": "failed",
+                    "storage_provider": storage_provider,
+                }
+
+            return jsonify({
+                "success": True,
+                "recording": False,
+                "completed": True,
+                "video": latest_video,
+                "filename": latest_video.get("filename"),
+                "path": latest_video.get("path"),
+                "url": latest_video.get("url"),
+                "size": latest_video.get("size"),
+                "timestamp": latest_video.get("timestamp"),
+                "storage_upload": storage_upload_info,
+                "pipe_upload": storage_upload_info,  # Backward compatibility
+            })
+
+        # ===== DEFAULT: Legacy blocking behavior (no action parameter) =====
         # Check if already recording
         if capture_service.is_recording():
             return jsonify({"success": False, "error": "Already recording"}), 400
@@ -711,31 +864,20 @@ def register_routes(app):
                 f"Expected filename {filename} but got {latest_video.get('filename')}"
             )
 
-        # Upload video to storage using device-signed direct upload
-        import threading
-
-        from services.capture_event_signer import sign_capture
-        from services.storage_provider import get_upload_service, is_walrus_enabled
-
+        # Queue video upload (same as 'stop' action)
         storage_provider = "walrus" if is_walrus_enabled() else "pipe"
         storage_upload_info = {"initiated": False, "storage_provider": storage_provider}
 
         try:
-            # Get video file path
             video_path = latest_video.get("path")
             if video_path and os.path.exists(video_path):
-                # Get camera PDA for signing
                 camera_pda = get_camera_pda()
-
-                # Get upload service (Walrus or Pipe based on STORAGE_PROVIDER env var)
-                upload_service = get_upload_service()
+                upload_service = get_walrus_upload_service()
                 file_hash = upload_service.calculate_file_hash(video_path)
 
                 if not file_hash:
-                    logger.error("Failed to calculate file hash")
                     raise Exception("Failed to calculate file hash")
 
-                # Sign capture event (instant, no blockchain wait!)
                 signed_event = sign_capture(
                     user_wallet=wallet_address,
                     camera_pda=camera_pda,
@@ -749,102 +891,52 @@ def register_routes(app):
                         "duration_seconds": duration_limit,
                     },
                 )
-
                 device_signature = signed_event["device_signature"]
+                logger.info(f"📝 Video signed: {device_signature[:16]}...")
 
-                logger.info(
-                    f"📝 Video capture event signed: {device_signature[:16]}..."
+                # Queue background upload
+                upload_queue = get_upload_queue()
+                job_id = upload_queue.add(
+                    file_path=video_path,
+                    file_type="video",
+                    wallet_address=wallet_address,
+                    camera_id=camera_pda,
+                    device_signature=device_signature,
+                    timestamp=latest_video.get("timestamp", 0),
                 )
 
-                # Get checked-in users for Walrus encryption
-                checked_in_users = get_checked_in_users() if is_walrus_enabled() else []
+                logger.info(f"🎥 Video recorded for {wallet_address[:8]}... -> queued as job #{job_id}")
 
-                # Upload to storage in background thread
-                def run_storage_upload():
-                    try:
-                        if is_walrus_enabled():
-                            # Walrus upload with encryption
-                            upload_result = upload_service.upload_video(
-                                wallet_address=wallet_address,
-                                video_path=video_path,
-                                camera_id=camera_pda,
-                                device_signature=device_signature,
-                                checked_in_users=checked_in_users,
-                                duration=duration_limit,
-                                timestamp=latest_video.get("timestamp"),
-                                user_sui_address=None,
-                                private=False,
-                            )
-                        else:
-                            # Pipe upload (existing behavior)
-                            upload_result = upload_service.upload_video(
-                                wallet_address=wallet_address,
-                                video_path=video_path,
-                                camera_id=camera_pda,
-                                device_signature=device_signature,
-                                duration=duration_limit,
-                                timestamp=latest_video.get("timestamp"),
-                            )
-
-                        if upload_result["success"]:
-                            if is_walrus_enabled():
-                                logger.info(f"✅ Video uploaded to Walrus: {upload_result.get('blob_id')}")
-                                logger.info(f"   Download URL: {upload_result.get('download_url')}")
-                            else:
-                                logger.info(f"✅ Video uploaded to Pipe: {upload_result.get('file_name')}")
-                                logger.info(f"   File ID: {upload_result.get('file_id')}")
-                            logger.info(f"   Device Signature: {device_signature[:16]}...")
-
-                            # Buffer video activity to timeline (privacy-preserving)
-                            try:
-                                from services.timeline_activity_service import (
-                                    get_timeline_activity_service,
-                                )
-
-                                timeline_service = get_timeline_activity_service()
-                                timeline_service.buffer_video_activity(
-                                    wallet_address=wallet_address,
-                                    pipe_file_name=upload_result.get("file_name") or upload_result.get("blob_id"),
-                                    pipe_file_id=upload_result.get("file_id") or upload_result.get("blob_id"),
-                                    duration_seconds=duration_limit,
-                                    metadata={
-                                        "timestamp": latest_video.get("timestamp"),
-                                        "device_signature": device_signature,
-                                        "filename": latest_video.get("filename"),
-                                        "size": latest_video.get("size"),
-                                        "storage_provider": storage_provider,
-                                        "blob_id": upload_result.get("blob_id"),
-                                        "download_url": upload_result.get("download_url"),
-                                    },
-                                )
-                                logger.info(f"📤 Video activity buffered to timeline")
-                            except Exception as timeline_err:
-                                logger.warning(
-                                    f"Failed to buffer video to timeline: {timeline_err}"
-                                )
-                        else:
-                            logger.error(
-                                f"❌ {storage_provider} video upload failed: {upload_result.get('error')}"
-                            )
-                    except Exception as e:
-                        logger.error(f"❌ {storage_provider} upload thread error: {e}", exc_info=True)
-
-                # Start upload in background thread
-                upload_thread = threading.Thread(target=run_storage_upload, daemon=True)
-                upload_thread.start()
+                # Buffer to timeline
+                try:
+                    from services.timeline_activity_service import get_timeline_activity_service
+                    timeline_service = get_timeline_activity_service()
+                    timeline_service.buffer_video_activity(
+                        wallet_address=wallet_address,
+                        pipe_file_name=latest_video["filename"],
+                        pipe_file_id=str(job_id),
+                        duration_seconds=duration_limit,
+                        metadata={
+                            "timestamp": latest_video.get("timestamp"),
+                            "device_signature": device_signature,
+                            "filename": latest_video.get("filename"),
+                            "size": latest_video.get("size"),
+                            "storage_provider": storage_provider,
+                            "job_id": job_id,
+                        },
+                    )
+                except Exception as timeline_err:
+                    logger.warning(f"Failed to buffer video to timeline: {timeline_err}")
 
                 storage_upload_info = {
                     "initiated": True,
-                    "target_wallet": wallet_address,
-                    "upload_status": "uploading",
+                    "completed": False,
+                    "upload_status": "pending",
                     "storage_provider": storage_provider,
                     "device_signature": device_signature,
-                    "upload_type": "walrus_encrypted" if is_walrus_enabled() else "direct_jetson_device_signed",
+                    "job_id": job_id,
+                    "local_url": f"/videos/{latest_video['filename']}",
                 }
-
-                logger.info(
-                    f"🎥 Video recorded for {wallet_address[:8]}... -> uploading to {storage_provider}"
-                )
 
             else:
                 logger.error(f"Video file not found at {video_path}")
@@ -852,7 +944,7 @@ def register_routes(app):
 
         except Exception as e:
             logger.error(
-                f"Failed to initiate {storage_provider} video upload for {wallet_address[:8]}...: {e}",
+                f"Failed to process video for {wallet_address[:8]}...: {e}",
                 exc_info=True,
             )
             storage_upload_info = {
