@@ -434,11 +434,13 @@ export class JetsonCamera implements ICamera {
               
               return {
                 success: true,
-                data: { 
+                data: {
                   blob: photoBlob,
                   filename: data.filename,
                   timestamp: data.timestamp || Date.now(),
-                  size: photoBlob.size
+                  size: photoBlob.size,
+                  storage_upload: data.storage_upload,
+                  pipe_upload: data.pipe_upload
                 }
               };
             } else {
@@ -622,14 +624,16 @@ export class JetsonCamera implements ICamera {
             
             if (videoResponse.success && videoResponse.data?.blob) {
               this.log('Video file retrieved successfully:', videoResponse.data.blob.size, 'bytes');
-              
+
               return {
                 success: true,
-                data: { 
+                data: {
                   blob: videoResponse.data.blob,
                   filename: data.filename,
                   timestamp: data.timestamp || Date.now(),
-                  size: videoResponse.data.blob.size
+                  size: videoResponse.data.blob.size,
+                  storage_upload: data.storage_upload,
+                  pipe_upload: data.pipe_upload
                 }
               };
             } else {
@@ -881,6 +885,39 @@ export class JetsonCamera implements ICamera {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to get most recent video'
+      };
+    }
+  }
+
+  /**
+   * Get user's upload jobs from the upload queue.
+   * Used to find job_id for videos after natural recording stop.
+   */
+  async getUserUploads(walletAddress: string): Promise<CameraActionResponse<{ uploads: any[] }>> {
+    try {
+      this.log('Getting user uploads for:', walletAddress);
+
+      const response = await this.makeApiCall(`/api/uploads?wallet_address=${encodeURIComponent(walletAddress)}`, 'GET');
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          return {
+            success: true,
+            data: { uploads: data.uploads || [] }
+          };
+        }
+      }
+
+      return {
+        success: false,
+        error: 'Failed to get user uploads'
+      };
+    } catch (error) {
+      this.log('Get user uploads error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get user uploads'
       };
     }
   }

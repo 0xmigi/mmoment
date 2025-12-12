@@ -49,6 +49,19 @@ export interface CameraMediaResponse {
   size?: number;
   width?: number;
   height?: number;
+  // Upload tracking from Jetson's SQLite queue
+  storage_upload?: {
+    job_id?: number;
+    local_url?: string;
+    upload_status?: string;
+    storage_provider?: string;
+    device_signature?: string;
+  };
+  pipe_upload?: {
+    job_id?: number;
+    local_url?: string;
+    upload_status?: string;
+  };
 }
 
 export interface CameraGestureResponse {

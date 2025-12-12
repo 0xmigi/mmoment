@@ -406,9 +406,20 @@ export default function MediaViewer({
                         ? "Pipe Network"
                         : media.provider === "jetson"
                         ? "Jetson Camera"
+                        : media.provider === "walrus"
+                        ? "Walrus"
                         : "IPFS"}
                     </span>
                   </div>
+                  {/* Backed Up Status - shows for Walrus provider */}
+                  {media.provider === "walrus" && "backedUp" in media && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Backed Up</span>
+                      <span className={`font-medium ${media.backedUp ? "text-green-600" : "text-yellow-600"}`}>
+                        {media.backedUp ? "Yes" : "Uploading..."}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500">Media Type</span>
                     <span className="text-gray-700 capitalize">

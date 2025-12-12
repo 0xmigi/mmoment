@@ -1,11 +1,12 @@
 /**
  * Walrus Gallery Service
  *
- * Fetches user's Walrus files from backend and listens for real-time updates.
- * Mirrors the pattern from pipe-gallery-service.ts.
+ * Manages a unified media cache where items track their upload status via job_id.
+ * Uses Jetson's SQLite upload queue as source of truth for upload status.
  */
 
 import { CONFIG } from '../../core/config';
+import { unifiedCameraService } from '../../camera/unified-camera-service';
 
 export interface WalrusAccessGrant {
   pubkey: string;
@@ -13,10 +14,10 @@ export interface WalrusAccessGrant {
 }
 
 export interface WalrusGalleryItem {
-  id: string;              // blobId
-  blobId: string;          // Walrus blob ID
+  id: string;              // Unique identifier (blobId when backed up, job-{jobId} when pending)
+  blobId: string;          // Walrus blob ID (empty when pending)
   name: string;
-  url: string;             // Direct Walrus gateway URL (encrypted content)
+  url: string;             // Current source URL (local when pending, Walrus when backed up)
   type: 'image' | 'video';
   mimeType: string;
   timestamp: number;
@@ -37,18 +38,22 @@ export interface WalrusGalleryItem {
     camera?: string;
     location?: string;
   };
-  // Local pending state (for photos not yet uploaded to Walrus)
-  isPending?: boolean;
-  localUrl?: string;       // Local camera URL for pending photos
-  jobId?: number;          // Upload job ID for tracking
+  // Upload tracking (from Jetson's SQLite queue)
+  backedUp: boolean;       // true = stored in Walrus, false = local only
+  jobId?: number;          // Upload job ID from Jetson
+  localUrl?: string;       // Original local camera URL (preserved for display)
 }
 
 class WalrusGalleryService {
   private backendUrl: string;
   private galleryUpdateListeners: Set<() => void> = new Set();
   private socket: any = null;
-  // Pending photos not yet uploaded to Walrus (keyed by jobId or filename)
-  private pendingPhotos: Map<string, WalrusGalleryItem> = new Map();
+
+  // Unified media cache keyed by jobId (for pending) or blobId (for backed up)
+  private mediaCache: Map<string, WalrusGalleryItem> = new Map();
+
+  // Active polling intervals for pending uploads
+  private pollIntervals: Map<number, NodeJS.Timeout> = new Map();
 
   constructor() {
     this.backendUrl = CONFIG.BACKEND_URL;
@@ -56,22 +61,24 @@ class WalrusGalleryService {
   }
 
   /**
-   * Add a pending local photo that hasn't been uploaded to Walrus yet.
-   * This shows the photo immediately in the gallery while upload happens in background.
+   * Add a local photo from capture response.
+   * Uses jobId from Jetson's upload queue for tracking.
    */
-  addPendingPhoto(photo: {
+  addLocalPhoto(photo: {
     filename: string;
-    localUrl: string;       // Full URL to fetch the photo from camera (e.g., https://camera.mmoment.xyz/api/photos/filename.jpg)
-    blob?: Blob;            // Optional blob for immediate display
-    jobId?: number;
+    localUrl: string;
+    blob?: Blob;
+    jobId: number;
     walletAddress: string;
     cameraId?: string;
     timestamp?: number;
     type?: 'image' | 'video';
   }): void {
-    const pendingItem: WalrusGalleryItem = {
-      id: `pending-${photo.filename}`,
-      blobId: `pending-${photo.filename}`,
+    const cacheKey = `job-${photo.jobId}`;
+
+    const item: WalrusGalleryItem = {
+      id: cacheKey,
+      blobId: '',  // Will be filled when upload completes
       name: photo.filename,
       url: photo.localUrl,
       type: photo.type || 'image',
@@ -80,56 +87,130 @@ class WalrusGalleryService {
       walletAddress: photo.walletAddress,
       provider: 'walrus',
       cameraId: photo.cameraId,
-      encrypted: false,  // Local photos are not encrypted
-      isPending: true,
-      localUrl: photo.localUrl,
+      encrypted: false,  // Local photos not encrypted yet
+      backedUp: false,
       jobId: photo.jobId,
-      // Set decryptedUrl so Gallery can display it immediately
+      localUrl: photo.localUrl,
       decryptedUrl: photo.blob ? URL.createObjectURL(photo.blob) : photo.localUrl,
     };
 
-    console.log(`📸 [Walrus] Adding pending photo: ${photo.filename}`);
-    this.pendingPhotos.set(photo.filename, pendingItem);
+    console.log(`📸 [Walrus] Adding local photo: ${photo.filename} (job #${photo.jobId})`);
+    this.mediaCache.set(cacheKey, item);
     this.notifyGalleryUpdate();
+
+    // Start polling for upload completion
+    this.startPollingJobStatus(photo.jobId, photo.cameraId);
   }
 
   /**
-   * Remove a pending photo (called when upload completes or fails)
+   * Poll Jetson's upload queue to check when job completes
    */
-  removePendingPhoto(filename: string): void {
-    if (this.pendingPhotos.has(filename)) {
-      const item = this.pendingPhotos.get(filename);
-      // Revoke object URL if we created one
-      if (item?.decryptedUrl?.startsWith('blob:')) {
-        URL.revokeObjectURL(item.decryptedUrl);
+  private startPollingJobStatus(jobId: number, cameraId?: string): void {
+    // Don't create duplicate polling
+    if (this.pollIntervals.has(jobId)) return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const cameraApiUrl = cameraId ? unifiedCameraService.getCameraApiUrl(cameraId) : null;
+        if (!cameraApiUrl) {
+          console.warn(`[Walrus] No camera API URL for job #${jobId}`);
+          return;
+        }
+
+        const response = await fetch(`${cameraApiUrl}/api/upload-status/${jobId}`);
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (!data.success) return;
+
+        console.log(`📸 [Walrus] Job #${jobId} status: ${data.status}`);
+
+        if (data.status === 'completed' && data.blob_id) {
+          // Upload complete! Update the item
+          this.markJobAsBackedUp(jobId, {
+            blobId: data.blob_id,
+            downloadUrl: data.download_url,
+          });
+
+          // Stop polling
+          this.stopPollingJobStatus(jobId);
+        } else if (data.status === 'failed') {
+          console.error(`[Walrus] Job #${jobId} failed: ${data.error}`);
+          // Keep local URL, stop polling
+          this.stopPollingJobStatus(jobId);
+        }
+      } catch (error) {
+        console.error(`[Walrus] Error polling job #${jobId}:`, error);
       }
-      this.pendingPhotos.delete(filename);
-      console.log(`📸 [Walrus] Removed pending photo: ${filename}`);
+    }, 3000); // Poll every 3 seconds
+
+    this.pollIntervals.set(jobId, pollInterval);
+    console.log(`📸 [Walrus] Started polling for job #${jobId}`);
+  }
+
+  private stopPollingJobStatus(jobId: number): void {
+    const interval = this.pollIntervals.get(jobId);
+    if (interval) {
+      clearInterval(interval);
+      this.pollIntervals.delete(jobId);
+      console.log(`📸 [Walrus] Stopped polling for job #${jobId}`);
     }
   }
 
   /**
-   * Get all pending photos
+   * Update item when upload completes (via polling or WebSocket)
    */
-  getPendingPhotos(): WalrusGalleryItem[] {
-    return Array.from(this.pendingPhotos.values());
+  private markJobAsBackedUp(jobId: number, data: { blobId: string; downloadUrl: string }): void {
+    const cacheKey = `job-${jobId}`;
+    const item = this.mediaCache.get(cacheKey);
+
+    if (!item) {
+      console.warn(`[Walrus] No cached item for job #${jobId}`);
+      return;
+    }
+
+    // Update item in place
+    const updatedItem: WalrusGalleryItem = {
+      ...item,
+      id: data.blobId,
+      blobId: data.blobId,
+      url: data.downloadUrl,
+      encrypted: true,
+      backedUp: true,
+      // Keep localUrl and decryptedUrl for continued display
+    };
+
+    // Re-key by blobId instead of jobId
+    this.mediaCache.delete(cacheKey);
+    this.mediaCache.set(data.blobId, updatedItem);
+
+    console.log(`✅ [Walrus] Job #${jobId} backed up: ${data.blobId.slice(0, 12)}...`);
+    this.notifyGalleryUpdate();
   }
 
   /**
-   * Clear all pending photos (e.g., on logout)
+   * Clear local items and stop all polling
    */
-  clearPendingPhotos(): void {
-    // Revoke all object URLs
-    this.pendingPhotos.forEach(item => {
-      if (item.decryptedUrl?.startsWith('blob:')) {
-        URL.revokeObjectURL(item.decryptedUrl);
+  clearLocalItems(): void {
+    // Stop all polling
+    for (const [, interval] of this.pollIntervals.entries()) {
+      clearInterval(interval);
+    }
+    this.pollIntervals.clear();
+
+    // Clear non-backed-up items
+    for (const [key, item] of this.mediaCache.entries()) {
+      if (!item.backedUp) {
+        if (item.decryptedUrl?.startsWith('blob:')) {
+          URL.revokeObjectURL(item.decryptedUrl);
+        }
+        this.mediaCache.delete(key);
       }
-    });
-    this.pendingPhotos.clear();
+    }
   }
 
   /**
-   * Initialize WebSocket connection for real-time upload notifications
+   * Initialize WebSocket for real-time upload notifications
    */
   private initializeWebSocket() {
     import('socket.io-client').then(({ io }) => {
@@ -145,9 +226,31 @@ class WalrusGalleryService {
         console.log('📡 [Walrus] Connected to WebSocket for gallery updates');
       });
 
-      // Listen for Walrus upload completion events
+      // Listen for Walrus upload completion events from backend
       this.socket.on('walrus:upload:complete', (data: any) => {
-        console.log('📸 [Walrus] New media uploaded:', data);
+        console.log('📸 [Walrus] Upload complete notification:', data);
+
+        // Try to match by timestamp + cameraId if we don't have jobId
+        // This handles cases where we missed the initial capture
+        if (data.blobId && data.downloadUrl) {
+          // Check if we already have this item
+          if (!this.mediaCache.has(data.blobId)) {
+            // Look for matching pending item by timestamp
+            for (const [, item] of this.mediaCache.entries()) {
+              if (!item.backedUp && item.cameraId === data.cameraId) {
+                const timeDiff = Math.abs(item.timestamp - (data.timestamp || 0));
+                if (timeDiff < 5000) {  // 5 second tolerance
+                  this.markJobAsBackedUp(item.jobId!, {
+                    blobId: data.blobId,
+                    downloadUrl: data.downloadUrl,
+                  });
+                  break;
+                }
+              }
+            }
+          }
+        }
+
         this.notifyGalleryUpdate();
       });
 
@@ -159,9 +262,6 @@ class WalrusGalleryService {
     });
   }
 
-  /**
-   * Subscribe to gallery update events
-   */
   onGalleryUpdate(callback: () => void): () => void {
     this.galleryUpdateListeners.add(callback);
     return () => {
@@ -169,9 +269,6 @@ class WalrusGalleryService {
     };
   }
 
-  /**
-   * Notify all listeners that gallery should refresh
-   */
   private notifyGalleryUpdate() {
     this.galleryUpdateListeners.forEach(listener => {
       try {
@@ -183,7 +280,7 @@ class WalrusGalleryService {
   }
 
   /**
-   * Fetch user's files from Walrus storage via backend
+   * Fetch user's files from backend and merge with local cache
    */
   async getUserFiles(walletAddress: string, includeShared: boolean = true): Promise<WalrusGalleryItem[]> {
     try {
@@ -194,101 +291,114 @@ class WalrusGalleryService {
 
       if (!response.ok) {
         console.error('[Walrus] Failed to fetch gallery:', response.statusText);
-        return [];
+        return this.getCachedItemsForWallet(walletAddress);
       }
 
       const data = await response.json();
 
       if (!data.success) {
         console.warn('[Walrus] Gallery request unsuccessful:', data.error);
-        return [];
+        return this.getCachedItemsForWallet(walletAddress);
       }
 
-      // Backend returns "items" array with all files (owned + shared)
       const allFiles = data.items || [];
-      const ownedCount = data.ownedCount || 0;
-      const sharedCount = data.sharedCount || 0;
+      console.log(`✅ [Walrus] Found ${data.ownedCount || 0} owned + ${data.sharedCount || 0} shared files`);
 
-      console.log(`✅ [Walrus] Found ${ownedCount} owned + ${sharedCount} shared files`);
-
-      // Transform backend response to gallery items
-      // Backend returns: id, blobId, url, type, cameraId, timestamp, encrypted, nonce, accessGrants
-      const walrusFiles = allFiles.map((item: any): WalrusGalleryItem => {
+      // Process backend files
+      for (const item of allFiles) {
         const isVideo = item.type === 'video' || item.fileType === 'video';
+        const blobId = item.blobId || item.id;
 
-        return {
-          id: item.blobId || item.id,
-          blobId: item.blobId || item.id,
-          name: `${(item.blobId || item.id).slice(0, 8)}_${item.type || 'photo'}`,
-          url: item.url || item.downloadUrl,  // Direct Walrus aggregator URL
-          type: isVideo ? 'video' : 'image',
-          mimeType: isVideo ? 'video/mp4' : 'image/jpeg',
-          timestamp: item.timestamp || Date.now(),
-          backupUrls: [],
-          walletAddress: item.walletAddress,
-          provider: 'walrus',
-          cameraId: item.cameraId,
-          // Encryption metadata
-          encrypted: item.encrypted !== false,  // Default to true
-          nonce: item.nonce,
-          originalSize: item.originalSize,
-          encryptedSize: item.encryptedSize,
-          accessGrants: item.accessGrants,
-          suiOwner: item.suiOwner,
-          metadata: {
-            camera: item.cameraId,
-          },
-        };
-      });
+        // Check if we already have this item (possibly from local capture)
+        const existingByBlob = this.mediaCache.get(blobId);
 
-      // Include pending local photos (not yet uploaded to Walrus)
-      // Filter to only include pending photos for this wallet
-      const pendingForWallet = this.getPendingPhotos().filter(
-        p => p.walletAddress === walletAddress
-      );
+        // Also check if we have a pending item for the same timestamp/camera
+        let matchingPendingKey: string | null = null;
+        for (const [key, cached] of this.mediaCache.entries()) {
+          if (!cached.backedUp && cached.cameraId === item.cameraId) {
+            const timeDiff = Math.abs(cached.timestamp - (item.timestamp || 0));
+            if (timeDiff < 5000) {
+              matchingPendingKey = key;
+              break;
+            }
+          }
+        }
 
-      if (pendingForWallet.length > 0) {
-        console.log(`📸 [Walrus] Including ${pendingForWallet.length} pending local photos`);
+        if (matchingPendingKey) {
+          // Upgrade pending item to backed up
+          const pending = this.mediaCache.get(matchingPendingKey)!;
+          const upgraded: WalrusGalleryItem = {
+            ...pending,
+            id: blobId,
+            blobId: blobId,
+            url: item.url || item.downloadUrl,
+            encrypted: item.encrypted !== false,
+            backedUp: true,
+            nonce: item.nonce,
+            suiOwner: item.suiOwner,
+            accessGrants: item.accessGrants,
+          };
+          this.mediaCache.delete(matchingPendingKey);
+          this.mediaCache.set(blobId, upgraded);
+          // Stop polling if still active
+          if (pending.jobId) this.stopPollingJobStatus(pending.jobId);
+          console.log(`📸 [Walrus] Upgraded pending item to backed-up: ${pending.name}`);
+        } else if (!existingByBlob) {
+          // New item from backend
+          const newItem: WalrusGalleryItem = {
+            id: blobId,
+            blobId: blobId,
+            name: `${blobId.slice(0, 8)}_${item.type || 'photo'}`,
+            url: item.url || item.downloadUrl,
+            type: isVideo ? 'video' : 'image',
+            mimeType: isVideo ? 'video/mp4' : 'image/jpeg',
+            timestamp: item.timestamp || Date.now(),
+            backupUrls: [],
+            walletAddress: item.walletAddress || walletAddress,
+            provider: 'walrus',
+            cameraId: item.cameraId,
+            encrypted: item.encrypted !== false,
+            nonce: item.nonce,
+            originalSize: item.originalSize,
+            encryptedSize: item.encryptedSize,
+            accessGrants: item.accessGrants,
+            suiOwner: item.suiOwner,
+            backedUp: true,
+            metadata: { camera: item.cameraId },
+          };
+          this.mediaCache.set(blobId, newItem);
+        }
       }
 
-      // Merge pending photos with Walrus files, sorted by timestamp (newest first)
-      return [...pendingForWallet, ...walrusFiles].sort((a, b) => b.timestamp - a.timestamp);
+      return this.getCachedItemsForWallet(walletAddress);
     } catch (error) {
       console.error('[Walrus] Error fetching gallery:', error);
-      // Still return pending photos even if Walrus fetch fails
-      return this.getPendingPhotos();
+      return this.getCachedItemsForWallet(walletAddress);
     }
   }
 
-  /**
-   * Get a specific file's metadata and access key
-   */
+  private getCachedItemsForWallet(walletAddress: string): WalrusGalleryItem[] {
+    return Array.from(this.mediaCache.values())
+      .filter(item => item.walletAddress === walletAddress)
+      .sort((a, b) => b.timestamp - a.timestamp);
+  }
+
   async getFileWithAccessKey(
     blobId: string,
     walletAddress: string
   ): Promise<{ file: WalrusGalleryItem | null; encryptedKey: string | null }> {
     try {
-      // First get file metadata
       const fileResponse = await fetch(`${this.backendUrl}/api/walrus/file/${blobId}`);
-
-      if (!fileResponse.ok) {
-        console.error('[Walrus] Failed to fetch file:', fileResponse.statusText);
-        return { file: null, encryptedKey: null };
-      }
+      if (!fileResponse.ok) return { file: null, encryptedKey: null };
 
       const fileData = await fileResponse.json();
+      if (!fileData.success) return { file: null, encryptedKey: null };
 
-      if (!fileData.success) {
-        return { file: null, encryptedKey: null };
-      }
-
-      // Then get user's access key
       const accessResponse = await fetch(
         `${this.backendUrl}/api/walrus/access-key/${blobId}/${walletAddress}`
       );
 
       let encryptedKey: string | null = null;
-
       if (accessResponse.ok) {
         const accessData = await accessResponse.json();
         if (accessData.success && accessData.encryptedKey) {
@@ -316,6 +426,7 @@ class WalrusGalleryService {
         accessGrants: item.accessGrants,
         suiOwner: item.suiOwner,
         walletAddress: item.walletAddress,
+        backedUp: true,
       };
 
       return { file, encryptedKey };
@@ -325,37 +436,36 @@ class WalrusGalleryService {
     }
   }
 
-  /**
-   * Get recent files with pagination
-   */
   async getRecentFiles(
     walletAddress: string,
     limit: number = 20,
     offset: number = 0
   ): Promise<WalrusGalleryItem[]> {
     const allFiles = await this.getUserFiles(walletAddress);
-
-    return allFiles
-      .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(offset, offset + limit);
+    return allFiles.slice(offset, offset + limit);
   }
 
-  /**
-   * Search files by camera or other metadata
-   */
   async searchFiles(
     walletAddress: string,
     query: string
   ): Promise<WalrusGalleryItem[]> {
     const allFiles = await this.getUserFiles(walletAddress);
-
     return allFiles.filter(file => {
       const cameraMatch = file.cameraId?.toLowerCase().includes(query.toLowerCase());
       const blobMatch = file.blobId.toLowerCase().includes(query.toLowerCase());
       return cameraMatch || blobMatch;
     });
   }
+
+  // Legacy compatibility
+  addPendingPhoto = this.addLocalPhoto.bind(this);
+  removePendingPhoto(_filename: string): void {
+    console.log('[Walrus] removePendingPhoto deprecated - items managed via jobId');
+  }
+  getPendingPhotos(): WalrusGalleryItem[] {
+    return Array.from(this.mediaCache.values()).filter(item => !item.backedUp);
+  }
+  clearPendingPhotos = this.clearLocalItems.bind(this);
 }
 
-// Export singleton instance
 export const walrusGalleryService = new WalrusGalleryService();

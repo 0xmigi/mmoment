@@ -1206,6 +1206,41 @@ export class UnifiedCameraService {
   }
 
   /**
+   * Get user's upload jobs from camera's upload queue.
+   * Used to find job_id for videos after natural recording stop.
+   */
+  public async getUserUploads(cameraId: string, walletAddress: string): Promise<CameraActionResponse<{ uploads: any[] }>> {
+    try {
+      this.log(`Getting user uploads from camera: ${cameraId} for wallet: ${walletAddress}`);
+
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      // Cast to JetsonCamera to access getUserUploads method
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.getUserUploads) {
+        return {
+          success: false,
+          error: 'Camera does not support getUserUploads'
+        };
+      }
+
+      return await jetsonCamera.getUserUploads(walletAddress);
+    } catch (error) {
+      this.log(`Get user uploads error for ${cameraId}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get user uploads'
+      };
+    }
+  }
+
+  /**
    * Check for gesture trigger
    */
   public async checkForGestureTrigger(cameraId?: string): Promise<{

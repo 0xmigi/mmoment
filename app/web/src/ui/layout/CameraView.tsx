@@ -989,38 +989,14 @@ export function CameraView() {
     }
 
     try {
+      // Note: Session is already set during check-in (Phase 3)
+      // Take photo immediately for instant feedback
+      const photoPromise = unifiedCameraService.takePhoto(currentCameraId);
+
+      // Show toast in parallel - don't block the capture
       updateToast("info", "Taking photo...");
 
-      // Note: Pre-capture transactions removed - activities are now buffered on Jetson
-      // and committed at checkout via the encrypted activity buffer system
-
-      // Ensure camera has a local session set (required for takePhoto)
-      // We use setSession instead of connect() to avoid calling /api/session/connect
-      // which conflicts with Phase 3's /api/checkin
-      const isConnected = await unifiedCameraService.isConnected(
-        currentCameraId
-      );
-      if (!isConnected && primaryWallet?.address) {
-        // Try to restore session from localStorage
-        const sessionKey = `mmoment_session_${primaryWallet.address}_${currentCameraId}`;
-        const storedSession = localStorage.getItem(sessionKey);
-        if (storedSession) {
-          try {
-            const sessionData = JSON.parse(storedSession);
-            await unifiedCameraService.setSession(currentCameraId, {
-              sessionId: sessionData.sessionId,
-              walletAddress: primaryWallet.address,
-              cameraPda: currentCameraId,
-              timestamp: sessionData.timestamp || Date.now(),
-              isActive: true
-            });
-          } catch (e) {
-            console.error('[CameraView] Failed to restore session from localStorage:', e);
-          }
-        }
-      }
-
-      const response = await unifiedCameraService.takePhoto(currentCameraId);
+      const response = await photoPromise;
 
       if (response.success && response.data) {
         updateToast("success", "Photo captured!");
@@ -1028,19 +1004,25 @@ export function CameraView() {
 
         // Add photo to gallery immediately (local-first)
         // This shows the photo instantly while Walrus upload happens in background
+        // The jobId from Jetson's upload queue tracks upload status
         const cameraApiUrl = unifiedCameraService.getCameraApiUrl(currentCameraId);
-        if (cameraApiUrl && response.data.filename && primaryWallet?.address) {
+        const jobId = response.data.storage_upload?.job_id || response.data.pipe_upload?.job_id;
+        if (cameraApiUrl && response.data.filename && primaryWallet?.address && jobId) {
           const localUrl = `${cameraApiUrl}/api/photos/${response.data.filename}`;
           walrusGalleryService.addPendingPhoto({
             filename: response.data.filename,
             localUrl: localUrl,
             blob: response.data.blob,
+            jobId: jobId,
             walletAddress: primaryWallet.address,
             cameraId: currentCameraId,
             timestamp: response.data.timestamp || Date.now(),
             type: 'image',
           });
-          console.log(`[CameraView] Added pending photo to gallery: ${response.data.filename}`);
+          console.log(`[CameraView] Added pending photo to gallery: ${response.data.filename} (job #${jobId})`);
+        } else if (cameraApiUrl && response.data.filename && primaryWallet?.address) {
+          // Fallback if no jobId (shouldn't happen but handle gracefully)
+          console.warn(`[CameraView] No jobId in capture response - photo won't track upload status`);
         }
 
         if (timelineRef.current?.refreshEvents) {
@@ -1095,38 +1077,15 @@ export function CameraView() {
     // and committed at checkout via the encrypted activity buffer system
 
     try {
+      // Note: Session is already set during check-in (Phase 3)
+      // Start recording immediately for instant feedback
       setIsRecording(true);
+      const recordPromise = unifiedCameraService.startVideoRecording(currentCameraId);
+
+      // Show toast in parallel - don't block the recording start
       updateToast("info", "Starting video recording...");
 
-      // Ensure camera has a local session set (required for video recording)
-      // We use setSession instead of connect() to avoid calling /api/session/connect
-      // which conflicts with Phase 3's /api/checkin
-      const isConnected = await unifiedCameraService.isConnected(
-        currentCameraId
-      );
-      if (!isConnected && primaryWallet?.address) {
-        // Try to restore session from localStorage
-        const sessionKey = `mmoment_session_${primaryWallet.address}_${currentCameraId}`;
-        const storedSession = localStorage.getItem(sessionKey);
-        if (storedSession) {
-          try {
-            const sessionData = JSON.parse(storedSession);
-            await unifiedCameraService.setSession(currentCameraId, {
-              sessionId: sessionData.sessionId,
-              walletAddress: primaryWallet.address,
-              cameraPda: currentCameraId,
-              timestamp: sessionData.timestamp || Date.now(),
-              isActive: true
-            });
-          } catch (e) {
-            console.error('[CameraView] Failed to restore session from localStorage:', e);
-          }
-        }
-      }
-
-      const recordResponse = await unifiedCameraService.startVideoRecording(
-        currentCameraId
-      );
+      const recordResponse = await recordPromise;
 
       if (!recordResponse.success) {
         throw new Error(`Failed to start recording: ${recordResponse.error}`);
@@ -1181,6 +1140,51 @@ export function CameraView() {
             }
 
             updateToast("success", "Video recorded!");
+
+            // Add video to gallery immediately (local-first)
+            // Query upload queue to find the job_id for this video
+            const cameraApiUrl = unifiedCameraService.getCameraApiUrl(currentCameraId);
+            if (cameraApiUrl && stopResponse.data.filename && primaryWallet?.address) {
+              try {
+                // Get recent uploads to find the job_id for this video
+                const uploadsResponse = await unifiedCameraService.getUserUploads(
+                  currentCameraId,
+                  primaryWallet.address
+                );
+
+                let jobId: number | undefined;
+                if (uploadsResponse.success && uploadsResponse.data?.uploads) {
+                  // Find upload matching this video (by filename or most recent video type)
+                  const videoUpload = uploadsResponse.data.uploads.find(
+                    (u: any) => u.file_path?.includes(stopResponse.data!.filename!) ||
+                      (u.file_type === 'video' && Date.now() - u.timestamp < 60000)
+                  );
+                  if (videoUpload) {
+                    jobId = videoUpload.id;
+                    console.log(`[CameraView] Found upload job #${jobId} for video: ${stopResponse.data.filename}`);
+                  }
+                }
+
+                if (jobId) {
+                  const localUrl = `${cameraApiUrl}/api/videos/${stopResponse.data.filename}`;
+                  walrusGalleryService.addLocalPhoto({
+                    filename: stopResponse.data.filename,
+                    localUrl: localUrl,
+                    blob: videoBlob,
+                    jobId: jobId,
+                    walletAddress: primaryWallet.address,
+                    cameraId: currentCameraId,
+                    timestamp: stopResponse.data.timestamp || Date.now(),
+                    type: 'video',
+                  });
+                  console.log(`[CameraView] Added video to gallery: ${stopResponse.data.filename} (job #${jobId})`);
+                } else {
+                  console.warn(`[CameraView] No jobId found for video - video won't track upload status`);
+                }
+              } catch (err) {
+                console.error('[CameraView] Error adding video to gallery:', err);
+              }
+            }
           } else {
             updateToast(
               "error",
