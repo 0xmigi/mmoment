@@ -110,7 +110,7 @@ export async function uploadToWalrus(
     // Type assertion needed due to @mysten/sui version mismatch between packages
     const result = await walrusClient.writeBlob({
       blob: new Uint8Array(encryptedData),
-      deletable: false,
+      deletable: true,
       epochs,
       signer: backendKeypair as any,
     });

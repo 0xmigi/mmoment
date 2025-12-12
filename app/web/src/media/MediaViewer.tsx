@@ -1,7 +1,7 @@
 import { IPFSMedia } from "../storage/ipfs/ipfs-service";
 import { unifiedIpfsService } from "../storage/ipfs/unified-ipfs-service";
 import { PipeGalleryItem } from "../storage/pipe/pipe-gallery-service";
-import { WalrusGalleryItem } from "../storage/walrus/walrus-gallery-service";
+import { WalrusGalleryItem, walrusGalleryService } from "../storage/walrus/walrus-gallery-service";
 import { pipeService } from "../storage/pipe/pipe-service";
 import { TimelineEvent } from "../timeline/timeline-types";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
@@ -136,6 +136,23 @@ export default function MediaViewer({
         );
         console.log(
           "🗑️ Pipe media deletion result:",
+          mediaId,
+          "success:",
+          success
+        );
+
+        if (success) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      } else if (media.provider === "walrus") {
+        console.log("🗑️ Starting Walrus media deletion for:", mediaId);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        success = await walrusGalleryService.deleteFile(
+          mediaId,
+          primaryWallet.address
+        );
+        console.log(
+          "🗑️ Walrus media deletion result:",
           mediaId,
           "success:",
           success

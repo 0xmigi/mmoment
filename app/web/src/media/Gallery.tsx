@@ -255,6 +255,22 @@ export default function MediaGallery({
         );
         setError("Deletion from Pipe storage is not yet supported");
         return;
+      } else if (storageType === "walrus") {
+        console.log("🗑️ Starting Walrus media deletion for:", mediaId);
+
+        // Add a small delay to allow UI to show loading state
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        success = await walrusGalleryService.deleteFile(
+          mediaId,
+          primaryWallet.address
+        );
+        console.log(
+          "🗑️ Walrus media deletion result:",
+          mediaId,
+          "success:",
+          success
+        );
       } else {
         console.log("🗑️ Starting IPFS media deletion for:", mediaId);
 

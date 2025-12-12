@@ -63,18 +63,21 @@ class WalrusGalleryService {
   /**
    * Add a local photo from capture response.
    * Uses jobId from Jetson's upload queue for tracking.
+   * If jobId is not provided, creates a temporary local-only item.
    */
   addLocalPhoto(photo: {
     filename: string;
     localUrl: string;
     blob?: Blob;
-    jobId: number;
+    jobId?: number;  // Optional - if not provided, won't track upload status
     walletAddress: string;
     cameraId?: string;
     timestamp?: number;
     type?: 'image' | 'video';
   }): void {
-    const cacheKey = `job-${photo.jobId}`;
+    // Use jobId if available, otherwise generate a temporary ID
+    const hasJobId = photo.jobId !== undefined && photo.jobId !== null;
+    const cacheKey = hasJobId ? `job-${photo.jobId}` : `local-${Date.now()}-${photo.filename}`;
 
     const item: WalrusGalleryItem = {
       id: cacheKey,
@@ -94,12 +97,14 @@ class WalrusGalleryService {
       decryptedUrl: photo.blob ? URL.createObjectURL(photo.blob) : photo.localUrl,
     };
 
-    console.log(`📸 [Walrus] Adding local photo: ${photo.filename} (job #${photo.jobId})`);
+    console.log(`📸 [Walrus] Adding local ${photo.type || 'photo'}: ${photo.filename}${hasJobId ? ` (job #${photo.jobId})` : ' (no job tracking)'}`);
     this.mediaCache.set(cacheKey, item);
     this.notifyGalleryUpdate();
 
-    // Start polling for upload completion
-    this.startPollingJobStatus(photo.jobId, photo.cameraId);
+    // Start polling for upload completion only if we have a jobId
+    if (hasJobId && photo.jobId !== undefined) {
+      this.startPollingJobStatus(photo.jobId, photo.cameraId);
+    }
   }
 
   /**
@@ -169,15 +174,18 @@ class WalrusGalleryService {
       return;
     }
 
-    // Update item in place
+    // Update item in place - keep using local URL for display
+    // The Walrus URL is stored but we prefer local/decrypted for playback
     const updatedItem: WalrusGalleryItem = {
       ...item,
       id: data.blobId,
       blobId: data.blobId,
-      url: data.downloadUrl,
+      // Keep the local URL for display - prefer decryptedUrl > localUrl > walrus URL
+      url: item.decryptedUrl || item.localUrl || data.downloadUrl,
       encrypted: true,
       backedUp: true,
-      // Keep localUrl and decryptedUrl for continued display
+      // Store Walrus URL as backup
+      backupUrls: [data.downloadUrl, ...(item.backupUrls || [])],
     };
 
     // Re-key by blobId instead of jobId
@@ -325,18 +333,21 @@ class WalrusGalleryService {
         }
 
         if (matchingPendingKey) {
-          // Upgrade pending item to backed up
+          // Upgrade pending item to backed up - keep local URL for display
           const pending = this.mediaCache.get(matchingPendingKey)!;
+          const walrusUrl = item.url || item.downloadUrl;
           const upgraded: WalrusGalleryItem = {
             ...pending,
             id: blobId,
             blobId: blobId,
-            url: item.url || item.downloadUrl,
+            // Prefer local URL for display, Walrus URL as backup
+            url: pending.decryptedUrl || pending.localUrl || walrusUrl,
             encrypted: item.encrypted !== false,
             backedUp: true,
             nonce: item.nonce,
             suiOwner: item.suiOwner,
             accessGrants: item.accessGrants,
+            backupUrls: [walrusUrl, ...(pending.backupUrls || [])],
           };
           this.mediaCache.delete(matchingPendingKey);
           this.mediaCache.set(blobId, upgraded);
@@ -455,6 +466,54 @@ class WalrusGalleryService {
       const blobMatch = file.blobId.toLowerCase().includes(query.toLowerCase());
       return cameraMatch || blobMatch;
     });
+  }
+
+  /**
+   * Delete a file from Walrus gallery
+   * This removes it from the backend database (soft delete)
+   * The actual blob may remain on Walrus until its epochs expire
+   */
+  async deleteFile(blobId: string, walletAddress: string): Promise<boolean> {
+    try {
+      console.log(`🗑️ [Walrus] Deleting blob ${blobId.slice(0, 12)}... for wallet ${walletAddress.slice(0, 8)}...`);
+
+      const response = await fetch(`${this.backendUrl}/api/walrus/delete/${blobId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ walletAddress }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('[Walrus] Delete failed:', errorData.error || response.statusText);
+        return false;
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Remove from local cache
+        const item = this.mediaCache.get(blobId);
+        if (item) {
+          // Revoke decrypted URL if exists
+          if (item.decryptedUrl?.startsWith('blob:')) {
+            URL.revokeObjectURL(item.decryptedUrl);
+          }
+          this.mediaCache.delete(blobId);
+        }
+
+        console.log(`✅ [Walrus] Blob ${blobId.slice(0, 12)}... deleted successfully`);
+        this.notifyGalleryUpdate();
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error('[Walrus] Error deleting file:', error);
+      return false;
+    }
   }
 
   // Legacy compatibility

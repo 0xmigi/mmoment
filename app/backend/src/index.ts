@@ -75,6 +75,7 @@ import {
   getWalrusFileByBlobId,
   getWalrusFilesForWallet,
   getWalrusFilesWithAccess,
+  deleteWalrusFile,
   WalrusFileMapping
 } from './database';
 
@@ -2548,6 +2549,55 @@ app.post("/api/walrus/decrypt/:blobId", async (req, res) => {
     console.error("❌ Failed to decrypt blob:", error);
     res.status(500).json({
       error: error instanceof Error ? error.message : "Failed to decrypt blob"
+    });
+  }
+});
+
+// Delete a Walrus blob from the gallery (soft delete from database)
+// Note: This removes the file from the user's gallery but the blob may still exist on Walrus
+// until its epochs expire. For blobs uploaded with deletable:true, we could add actual Walrus deletion.
+app.delete("/api/walrus/delete/:blobId", async (req, res) => {
+  const { blobId } = req.params;
+  const { walletAddress } = req.body;
+
+  if (!blobId) {
+    return res.status(400).json({ error: "Blob ID required" });
+  }
+
+  if (!walletAddress) {
+    return res.status(400).json({ error: "Wallet address required" });
+  }
+
+  try {
+    console.log(`🗑️ Deleting blob ${blobId.slice(0, 16)}... for wallet ${walletAddress.slice(0, 8)}...`);
+
+    // Verify the file exists and belongs to the user
+    const file = await getWalrusFileByBlobId(blobId);
+    if (!file) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    if (file.walletAddress !== walletAddress) {
+      return res.status(403).json({ error: "You don't have permission to delete this file" });
+    }
+
+    // Delete from database (soft delete - blob remains on Walrus until epochs expire)
+    const deleted = await deleteWalrusFile(blobId, walletAddress);
+
+    if (deleted) {
+      console.log(`✅ Blob ${blobId.slice(0, 16)}... removed from gallery`);
+      res.json({
+        success: true,
+        message: "File removed from gallery",
+        blobId
+      });
+    } else {
+      res.status(500).json({ error: "Failed to delete file" });
+    }
+  } catch (error) {
+    console.error("❌ Failed to delete blob:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to delete file"
     });
   }
 });

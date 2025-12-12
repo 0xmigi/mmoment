@@ -1394,6 +1394,30 @@ export async function getWalrusFilesWithAccess(walletAddress: string, limit: num
   });
 }
 
+// Delete a Walrus file from the database
+export async function deleteWalrusFile(blobId: string, walletAddress: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      reject(new Error('Database not initialized'));
+      return;
+    }
+
+    // Only delete if the wallet address owns the file
+    db.run(
+      'DELETE FROM walrus_files WHERE blob_id = ? AND wallet_address = ?',
+      [blobId, walletAddress],
+      function(this: { changes: number }, err: Error | null) {
+        if (err) {
+          reject(err);
+        } else {
+          // Return true if a row was deleted
+          resolve(this.changes > 0);
+        }
+      }
+    );
+  });
+}
+
 // ============================================================================
 // USER SUI WALLETS OPERATIONS (For Walrus Blob Ownership)
 // ============================================================================
