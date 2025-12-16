@@ -1826,6 +1826,317 @@ export class UnifiedCameraService {
       };
     }
   }
+
+  // ============================================
+  // CV DEV MODE APIs
+  // ============================================
+
+  /**
+   * Get CV Dev status
+   */
+  public async getCVDevStatus(cameraId: string): Promise<CameraActionResponse<{
+    enabled: boolean;
+    video_loaded: boolean;
+    video_path?: string;
+    playback_state?: {
+      playing: boolean;
+      current_frame: number;
+      total_frames: number;
+      fps: number;
+      speed: number;
+      loop: boolean;
+      progress: number;
+      current_time: number;
+      duration: number;
+    };
+  }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      // Cast to JetsonCamera to access CV dev methods
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.getCVDevStatus) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.getCVDevStatus();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get CV dev status'
+      };
+    }
+  }
+
+  /**
+   * List available CV dev videos
+   */
+  public async listCVDevVideos(cameraId: string): Promise<CameraActionResponse<{ videos: string[] }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.listCVDevVideos) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.listCVDevVideos();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to list CV dev videos'
+      };
+    }
+  }
+
+  /**
+   * Load a CV dev video
+   */
+  public async loadCVDevVideo(cameraId: string, path: string): Promise<CameraActionResponse<{
+    video_path: string;
+    total_frames: number;
+    fps: number;
+    duration: number;
+  }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.loadCVDevVideo) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.loadCVDevVideo(path);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to load CV dev video'
+      };
+    }
+  }
+
+  /**
+   * CV Dev playback control
+   */
+  public async cvDevPlaybackControl(cameraId: string, action: 'play' | 'pause' | 'restart'): Promise<CameraActionResponse> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevPlaybackControl) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevPlaybackControl(action);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : `Failed to ${action}`
+      };
+    }
+  }
+
+  /**
+   * Seek in CV dev video
+   */
+  public async cvDevSeek(cameraId: string, options: { frame?: number; time?: number; progress?: number }): Promise<CameraActionResponse<{
+    current_frame: number;
+    current_time: number;
+  }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevSeek) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevSeek(options);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to seek'
+      };
+    }
+  }
+
+  /**
+   * Set CV dev playback speed
+   */
+  public async cvDevSetSpeed(cameraId: string, speed: number): Promise<CameraActionResponse<{ speed: number }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevSetSpeed) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevSetSpeed(speed);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to set speed'
+      };
+    }
+  }
+
+  /**
+   * Step CV dev video frame
+   */
+  public async cvDevStep(cameraId: string, direction: 'forward' | 'backward' = 'forward'): Promise<CameraActionResponse<{
+    current_frame: number;
+    current_time: number;
+  }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevStep) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevStep(direction);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to step'
+      };
+    }
+  }
+
+  /**
+   * Set CV dev loop mode
+   */
+  public async cvDevSetLoop(cameraId: string, enabled: boolean): Promise<CameraActionResponse<{ loop: boolean }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevSetLoop) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevSetLoop(enabled);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to set loop'
+      };
+    }
+  }
+
+  /**
+   * Get CV dev playback state
+   */
+  public async cvDevGetPlaybackState(cameraId: string): Promise<CameraActionResponse<{
+    playing: boolean;
+    current_frame: number;
+    total_frames: number;
+    fps: number;
+    speed: number;
+    loop: boolean;
+    progress: number;
+    current_time: number;
+    duration: number;
+  }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevGetPlaybackState) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevGetPlaybackState();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get playback state'
+      };
+    }
+  }
 }
 
 // Export singleton instance

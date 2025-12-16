@@ -7,6 +7,7 @@ import { useCamera, CameraData } from "../../camera/CameraProvider";
 import { IRLAppsButton } from "../../camera/IRLAppsButton";
 import { CompetitionScoreboard } from "../../camera/CompetitionScoreboard";
 import { CompetitionControls } from "../../camera/CompetitionControls";
+import { CVDevPanel } from "../../camera/CVDevPanel";
 import { cameraStatus } from "../../camera/camera-status";
 import { CameraRegistry } from "../../camera/camera-registry";
 import { unifiedCameraService } from "../../camera/unified-camera-service";
@@ -16,6 +17,7 @@ import { CONFIG } from "../../core/config";
 import { ToastMessage } from "../../core/types/toast";
 import MediaGallery from "../../media/Gallery";
 import { walrusGalleryService } from "../../storage/walrus/walrus-gallery-service";
+import { getCVDevModeEnabled } from "../../storage/DeveloperSettings";
 import { StreamPlayer } from "../../media/StreamPlayer";
 import { Timeline } from "../../timeline/Timeline";
 import { timelineService } from "../../timeline/timeline-service";
@@ -196,6 +198,9 @@ export function CameraView() {
 
   // Add state for mobile camera modal
   const [isMobileCameraModalOpen, setIsMobileCameraModalOpen] = useState(false);
+
+  // CV Dev Mode state
+  const [cvDevModeEnabled, setCvDevModeEnabled] = useState(() => getCVDevModeEnabled());
 
   // Helper function to detect if we're using the Jetson camera
   // const isJetsonCamera = (cameraId: string | null): boolean => {
@@ -1222,6 +1227,18 @@ export function CameraView() {
     };
   }, []);
 
+  // Listen for CV Dev Mode changes
+  useEffect(() => {
+    const handleCvDevModeChange = (event: CustomEvent<{ enabled: boolean }>) => {
+      setCvDevModeEnabled(event.detail.enabled);
+    };
+
+    window.addEventListener('cvDevModeChanged', handleCvDevModeChange as EventListener);
+    return () => {
+      window.removeEventListener('cvDevModeChanged', handleCvDevModeChange as EventListener);
+    };
+  }, []);
+
   return (
     <>
       <div className="pb-40">
@@ -1285,6 +1302,7 @@ export function CameraView() {
                       <IRLAppsButton
                         cameraId={currentCameraId}
                         walletAddress={primaryWallet?.address}
+                        devMode={cvDevModeEnabled}
                         onEnrollmentComplete={() => {
                           updateToast("success", "Recognition token created! IRL apps are now unlocked.");
 
@@ -1372,6 +1390,13 @@ export function CameraView() {
                 </div>
 
                 <StreamPlayer />
+
+                {/* CV Dev Panel - shown when dev mode is enabled */}
+                {cvDevModeEnabled && currentCameraId && (
+                  <div className="mt-2">
+                    <CVDevPanel cameraId={currentCameraId} />
+                  </div>
+                )}
 
                 <div className="hidden sm:flex absolute -right-14 top-0 flex-col h-full z-[45]">
                   {/* Direct buttons for desktop */}

@@ -1,4 +1,4 @@
-import { PipeStorageSection } from "./PipeStorageSection";
+import { WalrusStorageSection } from "./WalrusStorageSection";
 import { RecognitionTokenModal } from "./RecognitionTokenModal";
 import { WalletBalanceModal } from "./WalletBalanceModal";
 import {
@@ -358,8 +358,8 @@ export function AccountPage() {
           </div>
         </div>
 
-        {/* Pipe Storage Section */}
-        <PipeStorageSection />
+        {/* Walrus Storage Section */}
+        <WalrusStorageSection />
 
         {/* Wallet Backup Section - responsive padding */}
         {isEmbeddedWallet && (

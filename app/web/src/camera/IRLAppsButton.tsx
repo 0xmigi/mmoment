@@ -8,13 +8,21 @@ interface IRLAppsButtonProps {
   cameraId: string;
   walletAddress?: string;
   onEnrollmentComplete?: () => void;
+  devMode?: boolean;  // When true, bypass wallet and embedding requirements
 }
 
-export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }: IRLAppsButtonProps) {
+// Dev mode fake wallet for testing
+const DEV_WALLET_ADDRESS = 'DevWallet1111111111111111111111111111111111';
+
+export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete, devMode = false }: IRLAppsButtonProps) {
   const [showAppsModal, setShowAppsModal] = useState(false);
   const [showEnrollment, setShowEnrollment] = useState(false);
   const [showPushupConfig, setShowPushupConfig] = useState(false);
   const facialEmbeddingStatus = useFacialEmbeddingStatus();
+
+  // In dev mode, use fake wallet and assume embedding exists
+  const effectiveWalletAddress = devMode ? DEV_WALLET_ADDRESS : walletAddress;
+  const effectiveHasEmbedding = devMode ? true : facialEmbeddingStatus.hasEmbedding;
 
 
   const handleIRLAppsClick = () => {
@@ -54,8 +62,8 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
     }
   ];
 
-  // Only show the button if we have a wallet address
-  if (!walletAddress) {
+  // Only show the button if we have a wallet address (or in dev mode)
+  if (!effectiveWalletAddress) {
     return null;
   }
 
@@ -64,11 +72,11 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
       <button
         onClick={handleIRLAppsClick}
         className="flex items-center space-x-2 bg-primary hover:bg-primary-hover text-white px-1.5 py-0.5 rounded shadow-lg transition-colors text-xs"
-        title={facialEmbeddingStatus.hasEmbedding ? "Access Apps" : "Create Recognition Token for Apps"}
+        title={effectiveHasEmbedding ? "Access Apps" : "Create Recognition Token for Apps"}
       >
         <Zap className="w-3.5 h-3.5" />
         <span className="font-medium">Apps</span>
-        {!facialEmbeddingStatus.hasEmbedding && (
+        {!effectiveHasEmbedding && (
           <Lock className="w-2.5 h-2.5 opacity-70" />
         )}
       </button>
@@ -89,8 +97,8 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
               </div>
             <div className="space-y-3 mb-4">
               {availableApps.map((app) => {
-                const isAccessible = facialEmbeddingStatus.hasEmbedding && app.enabled;
-                const needsToken = !facialEmbeddingStatus.hasEmbedding;
+                const isAccessible = effectiveHasEmbedding && app.enabled;
+                const needsToken = !effectiveHasEmbedding;
 
                 return (
                   <div key={app.id} className="flex items-center mb-4 bg-gray-50 rounded-lg p-3">
@@ -136,21 +144,25 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
               })}
             </div>
 
-            {facialEmbeddingStatus.hasEmbedding && (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                <h3 className="text-sm font-medium text-green-800 mb-1">Recognition Token Active</h3>
-                <p className="text-xs text-green-700">All apps unlocked across the network</p>
+            {effectiveHasEmbedding && (
+              <div className={`border rounded-lg p-3 ${devMode ? 'bg-yellow-50 border-yellow-200' : 'bg-green-50 border-green-200'}`}>
+                <h3 className={`text-sm font-medium mb-1 ${devMode ? 'text-yellow-800' : 'text-green-800'}`}>
+                  {devMode ? 'Dev Mode Active' : 'Recognition Token Active'}
+                </h3>
+                <p className={`text-xs ${devMode ? 'text-yellow-700' : 'text-green-700'}`}>
+                  {devMode ? 'Apps unlocked for development testing' : 'All apps unlocked across the network'}
+                </p>
               </div>
             )}
 
-            {!facialEmbeddingStatus.hasEmbedding && (
+            {!effectiveHasEmbedding && (
               <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
                 <h3 className="text-sm font-medium text-orange-800 mb-1">Apps Locked</h3>
                 <p className="text-xs text-orange-700">Create a recognition token to unlock</p>
               </div>
             )}
 
-              {!facialEmbeddingStatus.hasEmbedding && (
+              {!effectiveHasEmbedding && (
                 <div className="mt-6">
                   <button
                     onClick={() => {
@@ -215,10 +227,10 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete }:
       )}
 
       {/* Pushup Competition Config Modal */}
-      {showPushupConfig && (
+      {showPushupConfig && effectiveWalletAddress && (
         <PushupConfigModal
           cameraId={cameraId}
-          walletAddress={walletAddress}
+          walletAddress={effectiveWalletAddress}
           isOpen={showPushupConfig}
           onClose={() => setShowPushupConfig(false)}
           onStartCompetition={() => {

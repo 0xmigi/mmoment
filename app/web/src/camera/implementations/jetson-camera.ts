@@ -1796,4 +1796,324 @@ export class JetsonCamera implements ICamera {
       };
     }
   }
+
+  // ============================================
+  // CV DEV MODE APIs
+  // ============================================
+
+  /**
+   * Get CV Dev status
+   */
+  async getCVDevStatus(): Promise<CameraActionResponse<{
+    enabled: boolean;
+    video_loaded: boolean;
+    video_path?: string;
+    playback_state?: {
+      playing: boolean;
+      current_frame: number;
+      total_frames: number;
+      fps: number;
+      speed: number;
+      loop: boolean;
+      progress: number;
+      current_time: number;
+      duration: number;
+    };
+  }>> {
+    try {
+      this.log('Getting CV dev status');
+      const response = await this.makeApiCall('/api/dev/status', 'GET');
+      const data = await response.json();
+
+      // Response format from Jetson:
+      // { mode: "cv_dev", status: { running, health, fps, playback: { video_path, playing, current_frame, ... } } }
+      if (response.ok) {
+        const playback = data.status?.playback;
+        return {
+          success: true,
+          data: {
+            enabled: data.mode === 'cv_dev',
+            video_loaded: !!playback?.video_path,
+            video_path: playback?.video_path,
+            playback_state: playback ? {
+              playing: playback.playing,
+              current_frame: playback.current_frame,
+              total_frames: playback.total_frames,
+              fps: playback.video_fps,  // Jetson uses video_fps
+              speed: playback.speed,
+              loop: playback.loop,
+              progress: playback.progress,
+              current_time: playback.current_time,
+              duration: playback.duration
+            } : undefined
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to get CV dev status');
+    } catch (error) {
+      this.log('Get CV dev status error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get CV dev status'
+      };
+    }
+  }
+
+  /**
+   * List available dev videos
+   */
+  async listCVDevVideos(): Promise<CameraActionResponse<{ videos: string[] }>> {
+    try {
+      this.log('Listing CV dev videos');
+      const response = await this.makeApiCall('/api/dev/videos', 'GET');
+      const data = await response.json();
+
+      // Response format: { videos: [{name, path, size_mb}, ...], directory: "..." }
+      if (response.ok) {
+        // Videos are objects with name/path/size_mb - extract path or name as string
+        const videoList = (data.videos || []).map((v: { name: string; path: string; size_mb: number }) =>
+          v.path || v.name
+        );
+        return {
+          success: true,
+          data: {
+            videos: videoList
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to list videos');
+    } catch (error) {
+      this.log('List CV dev videos error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to list videos'
+      };
+    }
+  }
+
+  /**
+   * Load a video file for CV dev
+   */
+  async loadCVDevVideo(path: string): Promise<CameraActionResponse<{
+    video_path: string;
+    total_frames: number;
+    fps: number;
+    duration: number;
+  }>> {
+    try {
+      this.log('Loading CV dev video:', path);
+      const response = await this.makeApiCall('/api/dev/load', 'POST', { path });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            video_path: data.video_path,
+            total_frames: data.total_frames,
+            fps: data.fps,
+            duration: data.duration
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to load video');
+    } catch (error) {
+      this.log('Load CV dev video error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to load video'
+      };
+    }
+  }
+
+  /**
+   * CV Dev playback control
+   */
+  async cvDevPlaybackControl(action: 'play' | 'pause' | 'restart'): Promise<CameraActionResponse> {
+    try {
+      this.log('CV dev playback control:', action);
+      // Note: restart is at /api/dev/restart, not /api/dev/playback/restart
+      const endpoint = action === 'restart' ? '/api/dev/restart' : `/api/dev/playback/${action}`;
+      const response = await this.makeApiCall(endpoint, 'POST', {});
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return { success: true };
+      }
+
+      throw new Error(data.error || `Failed to ${action}`);
+    } catch (error) {
+      this.log('CV dev playback control error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : `Failed to ${action}`
+      };
+    }
+  }
+
+  /**
+   * Seek to position in CV dev video
+   */
+  async cvDevSeek(options: { frame?: number; time?: number; progress?: number }): Promise<CameraActionResponse<{
+    current_frame: number;
+    current_time: number;
+  }>> {
+    try {
+      this.log('CV dev seek:', options);
+      const response = await this.makeApiCall('/api/dev/playback/seek', 'POST', options);
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            current_frame: data.current_frame,
+            current_time: data.current_time
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to seek');
+    } catch (error) {
+      this.log('CV dev seek error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to seek'
+      };
+    }
+  }
+
+  /**
+   * Set playback speed
+   */
+  async cvDevSetSpeed(speed: number): Promise<CameraActionResponse<{ speed: number }>> {
+    try {
+      this.log('CV dev set speed:', speed);
+      const response = await this.makeApiCall('/api/dev/playback/speed', 'POST', { speed });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: { speed: data.speed }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to set speed');
+    } catch (error) {
+      this.log('CV dev set speed error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to set speed'
+      };
+    }
+  }
+
+  /**
+   * Step frame forward or backward
+   */
+  async cvDevStep(direction: 'forward' | 'backward' = 'forward'): Promise<CameraActionResponse<{
+    current_frame: number;
+    current_time: number;
+  }>> {
+    try {
+      this.log('CV dev step:', direction);
+      const response = await this.makeApiCall('/api/dev/playback/step', 'POST', { direction });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            current_frame: data.current_frame,
+            current_time: data.current_time
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to step');
+    } catch (error) {
+      this.log('CV dev step error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to step'
+      };
+    }
+  }
+
+  /**
+   * Toggle loop mode
+   */
+  async cvDevSetLoop(enabled: boolean): Promise<CameraActionResponse<{ loop: boolean }>> {
+    try {
+      this.log('CV dev set loop:', enabled);
+      const response = await this.makeApiCall('/api/dev/playback/loop', 'POST', { enabled });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: { loop: data.loop }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to set loop');
+    } catch (error) {
+      this.log('CV dev set loop error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to set loop'
+      };
+    }
+  }
+
+  /**
+   * Get playback state
+   */
+  async cvDevGetPlaybackState(): Promise<CameraActionResponse<{
+    playing: boolean;
+    current_frame: number;
+    total_frames: number;
+    fps: number;
+    speed: number;
+    loop: boolean;
+    progress: number;
+    current_time: number;
+    duration: number;
+  }>> {
+    try {
+      const response = await this.makeApiCall('/api/dev/playback/state', 'GET');
+      const data = await response.json();
+
+      // Response format: returns playback state directly (no success wrapper)
+      // { video_path, playing, current_frame, total_frames, current_time, duration, speed, loop, video_fps, progress, rotation_enabled }
+      if (response.ok) {
+        return {
+          success: true,
+          data: {
+            playing: data.playing,
+            current_frame: data.current_frame,
+            total_frames: data.total_frames,
+            fps: data.video_fps,  // Jetson uses video_fps
+            speed: data.speed,
+            loop: data.loop,
+            progress: data.progress,
+            current_time: data.current_time,
+            duration: data.duration
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to get playback state');
+    } catch (error) {
+      this.log('CV dev get playback state error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get playback state'
+      };
+    }
+  }
 } 
