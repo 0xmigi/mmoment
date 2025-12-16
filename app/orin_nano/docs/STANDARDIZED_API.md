@@ -82,6 +82,8 @@ All these endpoints are accessible to your frontend application and are the **ON
 
 These endpoints allow CV app development using pre-recorded video files instead of live camera.
 
+> **Session Bypass**: When `CV_DEV_MODE=true`, all session-protected endpoints bypass authentication. This allows testing CV apps (e.g., `/api/apps/load`, `/api/apps/activate`) without wallet check-in.
+
 ### Dev Status & Video Management
 - `GET /api/dev/status` - Get CV dev environment status
 - `GET /api/dev/videos` - List available test videos
