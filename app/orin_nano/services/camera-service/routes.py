@@ -122,6 +122,11 @@ def require_session(f):
     def decorated_function(*args, **kwargs):
         logger.info(f"🔍 require_session decorator called for endpoint: {f.__name__}")
 
+        # CV Dev Mode bypass - allow unauthenticated access for CV app testing
+        if os.environ.get('CV_DEV_MODE', 'false').lower() == 'true':
+            logger.info(f"🧪 CV_DEV_MODE: Bypassing session check for {f.__name__}")
+            return f(*args, **kwargs)
+
         if not request.json:
             return jsonify({"success": False, "error": "Request body required"}), 400
 
