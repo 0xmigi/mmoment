@@ -26,6 +26,7 @@ services:
       # Development: Mount code for live changes (comment out for production)
       - ./services/camera-service:/app
       - ./apps:/opt/mmoment/apps  # CV apps directory
+      - ./cv_dev:/app/cv_dev  # CV dev environment
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - /dev:/dev
     devices:
@@ -61,6 +62,11 @@ services:
       - STORAGE_PROVIDER=walrus
       - WALRUS_PUBLISHER_URL=https://walrus-mainnet-publisher-1.staketab.org
       - WALRUS_AGGREGATOR_URL=https://aggregator.walrus-mainnet.walrus.space
+      # Testing: Skip video uploads to Walrus (set to "true" to disable)
+      - SKIP_VIDEO_UPLOAD=true
+      # CV Dev Mode: Use video file instead of camera (no camera required)
+      - CV_DEV_MODE=true
+      # CV_DEV_VIDEO is optional - use /api/dev/load to select videos dynamically
       # Livepeer Configuration REMOVED - using WebRTC/WHIP for all streaming
       # - LIVEPEER_API_KEY=${LIVEPEER_API_KEY}
       # - LIVEPEER_STREAM_KEY=${LIVEPEER_STREAM_KEY}

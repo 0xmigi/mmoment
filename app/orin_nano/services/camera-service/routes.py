@@ -734,18 +734,25 @@ def register_routes(app):
                     device_signature = signed_event["device_signature"]
                     logger.info(f"📝 Video signed: {device_signature[:16]}...")
 
-                    # Queue background upload (returns immediately with job_id)
-                    upload_queue = get_upload_queue()
-                    job_id = upload_queue.add(
-                        file_path=video_path,
-                        file_type="video",
-                        wallet_address=wallet_address,
-                        camera_id=camera_pda,
-                        device_signature=device_signature,
-                        timestamp=latest_video.get("timestamp", 0),
-                    )
+                    # Check if video uploads are disabled for testing
+                    skip_video_upload = os.environ.get("SKIP_VIDEO_UPLOAD", "").lower() == "true"
 
-                    logger.info(f"🎥 Video recorded for {wallet_address[:8]}... -> queued as job #{job_id}")
+                    if skip_video_upload:
+                        # Skip upload for testing - return mock job_id
+                        job_id = -1
+                        logger.info(f"🎥 Video recorded for {wallet_address[:8]}... (UPLOAD SKIPPED - testing mode)")
+                    else:
+                        # Queue background upload (returns immediately with job_id)
+                        upload_queue = get_upload_queue()
+                        job_id = upload_queue.add(
+                            file_path=video_path,
+                            file_type="video",
+                            wallet_address=wallet_address,
+                            camera_id=camera_pda,
+                            device_signature=device_signature,
+                            timestamp=latest_video.get("timestamp", 0),
+                        )
+                        logger.info(f"🎥 Video recorded for {wallet_address[:8]}... -> queued as job #{job_id}")
 
                     # Buffer to timeline immediately (don't wait for upload)
                     try:
@@ -894,18 +901,25 @@ def register_routes(app):
                 device_signature = signed_event["device_signature"]
                 logger.info(f"📝 Video signed: {device_signature[:16]}...")
 
-                # Queue background upload
-                upload_queue = get_upload_queue()
-                job_id = upload_queue.add(
-                    file_path=video_path,
-                    file_type="video",
-                    wallet_address=wallet_address,
-                    camera_id=camera_pda,
-                    device_signature=device_signature,
-                    timestamp=latest_video.get("timestamp", 0),
-                )
+                # Check if video uploads are disabled for testing
+                skip_video_upload = os.environ.get("SKIP_VIDEO_UPLOAD", "").lower() == "true"
 
-                logger.info(f"🎥 Video recorded for {wallet_address[:8]}... -> queued as job #{job_id}")
+                if skip_video_upload:
+                    # Skip upload for testing - return mock job_id
+                    job_id = -1
+                    logger.info(f"🎥 Video recorded for {wallet_address[:8]}... (UPLOAD SKIPPED - testing mode)")
+                else:
+                    # Queue background upload
+                    upload_queue = get_upload_queue()
+                    job_id = upload_queue.add(
+                        file_path=video_path,
+                        file_type="video",
+                        wallet_address=wallet_address,
+                        camera_id=camera_pda,
+                        device_signature=device_signature,
+                        timestamp=latest_video.get("timestamp", 0),
+                    )
+                    logger.info(f"🎥 Video recorded for {wallet_address[:8]}... -> queued as job #{job_id}")
 
                 # Buffer to timeline
                 try:
@@ -997,11 +1011,8 @@ def register_routes(app):
         """Standardized session connect endpoint"""
         return connect()
 
-    @app.route("/api/session/disconnect", methods=["POST"])
-    @require_session
-    def api_session_disconnect():
-        """Standardized session disconnect endpoint"""
-        return disconnect()
+    # NOTE: /api/session/disconnect removed - use /api/checkout instead
+    # /api/checkout handles session end + timeline write + backend notification
 
     @app.route("/api/session/status/<wallet_address>")
     @sign_response
@@ -2018,6 +2029,7 @@ def register_routes(app):
             ), 500
 
     @app.route("/api/checkout", methods=["POST"])
+    @require_session
     def api_checkout_notification():
         """
         Checkout endpoint - Phase 3 Privacy Architecture.
@@ -2701,8 +2713,9 @@ def register_routes(app):
     # MJPEG stream removed - using WebRTC/WHIP for streaming now
     # See /api/stream/info for available streams
 
-    # Visualization routes - all public, no auth required
+    # Visualization routes - require session for security
     @app.route("/toggle_face_detection", methods=["POST"])
+    @require_session
     def toggle_face_detection():
         """
         Enable or disable face detection.
@@ -2726,6 +2739,7 @@ def register_routes(app):
         )
 
     @app.route("/toggle_face_visualization", methods=["POST"])
+    @require_session
     def toggle_face_visualization():
         """
         Toggle face visualization in camera frames
@@ -2745,6 +2759,7 @@ def register_routes(app):
             return jsonify({"success": False, "error": str(e)}), 500
 
     @app.route("/toggle_face_boxes", methods=["POST"])
+    @require_session
     def toggle_face_boxes():
         """
         Toggle face boxes in camera frames
@@ -2771,6 +2786,7 @@ def register_routes(app):
         return jsonify({"success": True, "settings": settings})
 
     @app.route("/toggle_gesture_visualization", methods=["POST"])
+    @require_session
     def toggle_gesture_visualization():
         """Enable or disable gesture detection visualization"""
         data = request.json or {}
@@ -2785,6 +2801,7 @@ def register_routes(app):
         return jsonify({"success": True, "enabled": enabled})
 
     @app.route("/toggle_pose_visualization", methods=["POST"])
+    @require_session
     def toggle_pose_visualization():
         """Enable or disable pose skeleton visualization"""
         data = request.json or {}
@@ -2804,6 +2821,7 @@ def register_routes(app):
         return jsonify({"success": True, "enabled": enabled})
 
     @app.route("/api/apps/load", methods=["POST"])
+    @require_session
     def api_apps_load():
         """Load a CV app"""
         data = request.json or {}
@@ -2831,6 +2849,7 @@ def register_routes(app):
             ), 500
 
     @app.route("/api/apps/activate", methods=["POST"])
+    @require_session
     def api_apps_activate():
         """Activate a CV app"""
         data = request.json or {}
@@ -2862,6 +2881,7 @@ def register_routes(app):
             ), 500
 
     @app.route("/api/apps/deactivate", methods=["POST"])
+    @require_session
     def api_apps_deactivate():
         """Deactivate current CV app"""
         services = get_services()
@@ -2876,6 +2896,7 @@ def register_routes(app):
         return jsonify({"success": True, "message": "App deactivated"})
 
     @app.route("/api/apps/status", methods=["GET"])
+    @require_session
     def api_apps_status():
         """Get current app status"""
         services = get_services()
@@ -2897,6 +2918,7 @@ def register_routes(app):
         )
 
     @app.route("/api/apps/competition/start", methods=["POST"])
+    @require_session
     def api_apps_competition_start():
         """Start a competition (for CompetitionApp types)"""
         data = request.json or {}
@@ -2926,6 +2948,7 @@ def register_routes(app):
             return jsonify({"success": False, "error": str(e)}), 500
 
     @app.route("/api/apps/competition/end", methods=["POST"])
+    @require_session
     def api_apps_competition_end():
         """End the current competition and buffer results to timeline"""
         services = get_services()
@@ -3074,39 +3097,12 @@ def register_routes(app):
 
         return jsonify(session_info)
 
-    @app.route("/disconnect", methods=["POST"])
-    @require_session
-    def disconnect():
-        """
-        Disconnect a wallet from the camera
-        Ends the session for the wallet
-        """
-        wallet_address = request.json.get("wallet_address")
-        session_id = request.json.get("session_id")
-
-        # End the session
-        session_service = get_services()["session"]
-        success = session_service.end_session(session_id, wallet_address)
-
-        # Check if this was the last active session
-        active_sessions = session_service.get_all_sessions()
-        if len(active_sessions) == 0:
-            # Disable face boxes when all users are disconnected
-            face_service = get_services()["face"]
-            face_service.enable_boxes(False)
-            logger.info("Face boxes disabled - all users disconnected")
-
-        return jsonify(
-            {
-                "success": success,
-                "message": "Disconnected from camera successfully"
-                if success
-                else "Failed to disconnect",
-            }
-        )
+    # NOTE: /disconnect removed - use /api/checkout instead
+    # /api/checkout handles session end + timeline write + backend notification
 
     # Face recognition routes
     @app.route("/recognize_face", methods=["POST"])
+    @require_session
     def recognize_face():
         """
         Recognize faces in the current frame
@@ -3444,6 +3440,7 @@ def register_routes(app):
         return jsonify(result)
 
     @app.route("/list_videos", methods=["GET"])
+    @require_session
     def list_videos():
         """
         List available videos
@@ -3460,6 +3457,7 @@ def register_routes(app):
         return jsonify({"success": True, "videos": videos, "count": len(videos)})
 
     @app.route("/list_photos", methods=["GET"])
+    @require_session
     def list_photos():
         """
         List available photos
@@ -3636,9 +3634,10 @@ def register_routes(app):
 
     # Camera reset route
     @app.route("/camera/reset", methods=["POST"])
+    @require_session
     def reset_camera():
         """
-        Reset the camera connection
+        Reset the camera connection - DANGEROUS: requires session
         """
         buffer_service = get_services()["buffer"]
 
@@ -3690,9 +3689,10 @@ def register_routes(app):
             return jsonify({"success": False, "error": str(e)}), 500
 
     @app.route("/clear_enrolled_faces", methods=["POST"])
+    @require_session
     def clear_enrolled_faces():
         """
-        Clear all enrolled faces
+        Clear all enrolled faces - DANGEROUS: requires session
         """
         face_service = get_services()["face"]
 

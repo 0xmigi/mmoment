@@ -26,6 +26,16 @@ logger.info(f"Using RTP port range: {os.environ.get('AIORTC_RTP_MIN_PORT')}-{os.
 from flask import Flask, jsonify
 from flask_cors import CORS
 
+# CV Dev Mode - Use video file instead of camera
+CV_DEV_MODE = os.environ.get('CV_DEV_MODE', 'false').lower() == 'true'
+CV_DEV_VIDEO = os.environ.get('CV_DEV_VIDEO', None)
+
+if CV_DEV_MODE:
+    print("=" * 60)
+    print("  CV DEV MODE ENABLED - Using video file instead of camera")
+    print(f"  Video: {CV_DEV_VIDEO or 'None (use /api/dev/load to load)'}")
+    print("=" * 60)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -55,7 +65,18 @@ def create_directories():
 # Initialize all services
 def init_services():
     """Initialize all services and return them in a dict"""
-    from services.buffer_service import get_buffer_service
+    # Use VideoBufferService in dev mode, otherwise use camera BufferService
+    if CV_DEV_MODE:
+        # Import from cv_dev without modifying sys.path (avoids import conflicts)
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("cv_dev", "/app/cv_dev/__init__.py")
+        cv_dev = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cv_dev)
+        get_buffer_service = lambda: cv_dev.get_video_buffer_service(CV_DEV_VIDEO)
+        logger.info("Using VideoBufferService for CV development")
+    else:
+        from services.buffer_service import get_buffer_service
+
     from services.gesture_service import get_gesture_service
     from services.capture_service import get_capture_service
     from services.session_service import get_session_service
@@ -316,7 +337,17 @@ def create_app(services):
     # Register routes
     from routes import register_routes
     register_routes(app)
-    
+
+    # Register CV dev routes if in dev mode
+    if CV_DEV_MODE:
+        try:
+            from cv_dev.routes import cv_dev_bp, init_dev_routes
+            init_dev_routes(services['buffer'])
+            app.register_blueprint(cv_dev_bp)
+            logger.info("CV Dev routes registered at /api/dev/*")
+        except Exception as e:
+            logger.error(f"Failed to register CV dev routes: {e}")
+
     return app
 
 # Main entry point
