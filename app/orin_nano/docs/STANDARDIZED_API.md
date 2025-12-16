@@ -2,39 +2,55 @@
 
 This document outlines the API endpoints for the mmoment camera system, clearly separating **public frontend APIs** from **internal service APIs**.
 
-## 🌐 PUBLIC FRONTEND ENDPOINTS 
+## 🔐 Authentication Model
+
+Most endpoints require a valid **session** established via Ed25519 signature verification:
+
+1. User signs message: `{wallet_address}|{timestamp}|{nonce}` with their wallet
+2. Call `/api/checkin` with the signature
+3. Subsequent requests include `wallet_address`, `request_timestamp`, `request_nonce`, `request_signature`
+
+**Session-protected endpoints** will return `403` with `"Invalid session - please check in first"` if not authenticated.
+
+---
+
+## 🌐 PUBLIC FRONTEND ENDPOINTS
 **(Accessible via jetson.mmoment.xyz/api/...)**
 
 All these endpoints are accessible to your frontend application and are the **ONLY ones** you should use in your frontend code.
 
-### Health & Status
+### Health & Status (Public - No Session Required)
 - `GET /api/health` - Health check with service status
 - `GET /api/status` - **[MAIN ENDPOINT]** Comprehensive system status including streaming and recording state
-
-### Camera Actions
-- `POST /api/capture` - Take a photo (requires session). Supports `annotated: true` parameter for CV overlay capture.
-- `POST /api/record` - Start/stop video recording (requires session)
-
-### Media Access
-- `GET /api/photos` - List available photos
-- `GET /api/videos` - List available videos
-- `GET /api/photos/{filename}` - Get specific photo
-- `GET /api/videos/{filename}` - Get specific video
+- `GET /api/stream/info` - Get all available stream URLs and connection info
 
 ### Session Management
-- `POST /api/session/connect` - Connect wallet and create session
-- `POST /api/session/disconnect` - Disconnect wallet and end session
+- `POST /api/checkin` - **Check in to camera** (requires Ed25519 signature)
+- `POST /api/checkout` - **Check out from camera** (requires session)
+- `GET /api/session/status/{wallet_address}` - Check if a wallet is checked in (public)
 
-### Computer Vision (Jetson-specific)
-- `POST /api/face/enroll` - Enroll face for recognition (requires session)
-- `POST /api/face/recognize` - Recognize faces in current frame
-- `POST /api/face/detect` - Detect faces in current frame (no recognition)
-- `GET /api/gesture/current` - Get current detected gesture
-- `POST /api/visualization/face` - Toggle face visualization
-- `POST /api/visualization/gesture` - Toggle gesture visualization
-- `POST /api/visualization/pose` - Toggle pose skeleton visualization
+> **Note:** `/api/session/disconnect` and `/disconnect` have been **removed**. Use `/api/checkout` instead.
 
-### CV Apps (Jetson-specific)
+### Camera Actions (Session Required)
+- `POST /api/capture` - Take a photo. Supports `annotated: true` for CV overlay capture.
+- `POST /api/record` - Start/stop video recording
+
+### Media Access (Session Required)
+- `GET /list_videos` - List available videos
+- `GET /list_photos` - List available photos
+- `GET /photos/{filename}` - Get specific photo (currently public - signed URLs planned)
+- `GET /videos/{filename}` - Get specific video (currently public - signed URLs planned)
+
+### Computer Vision (Session Required)
+- `POST /api/face/enroll` - Enroll face for recognition
+- `POST /recognize_face` - Recognize faces in current frame
+- `POST /toggle_face_detection` - Toggle face detection
+- `POST /toggle_face_visualization` - Toggle face visualization
+- `POST /toggle_face_boxes` - Toggle face boxes
+- `POST /toggle_gesture_visualization` - Toggle gesture visualization
+- `POST /toggle_pose_visualization` - Toggle pose skeleton visualization
+
+### CV Apps (Session Required)
 - `POST /api/apps/load` - Load a CV app (e.g., pushup counter)
 - `POST /api/apps/activate` - Activate a loaded CV app
 - `POST /api/apps/deactivate` - Deactivate current CV app
@@ -42,32 +58,71 @@ All these endpoints are accessible to your frontend application and are the **ON
 - `POST /api/apps/competition/start` - Start a competition with recognized users
 - `POST /api/apps/competition/end` - End the current competition
 
-### Facial NFT Endpoints (Jetson-specific)
-- `POST /api/face/enroll/prepare-transaction` - Prepare facial  transaction (requires session)
-- `POST /api/face/enroll/confirm` - Confirm facial NFT transaction (requires session)
+### Admin Actions (Session Required - Owner-only planned)
+- `POST /camera/reset` - Reset camera connection
+- `POST /clear_enrolled_faces` - Clear all enrolled faces
 
-### Streaming (Jetson-specific - WebRTC)
+> **Note:** These admin endpoints currently require any valid session. Future update will restrict to camera owner wallet only.
+
+### Streaming (Public)
 
 **Note:** Video streaming uses WebRTC via Socket.IO signaling, NOT REST API endpoints.
 
 - `GET /api/stream/webrtc/status` - Get P2P WebRTC service status
 - `GET /api/stream/whip/status` - Get WHIP publisher status (for WHEP fallback)
-- `GET /api/stream/info` - Get all available stream URLs and connection info
-
-#### WebRTC Architecture
-```
-Frontend ──Socket.IO──> Backend Signaling Server ──Socket.IO──> Jetson Camera
-              │
-              └── Events: register-viewer, webrtc-offer, webrtc-answer, webrtc-ice-candidate
-```
 
 #### Stream Types (Dual Stream)
-- **Clean stream**: Raw video without CV annotations (default)
-- **Annotated stream**: Video with face boxes, skeletons, app overlays
+- **Clean stream**: Raw video without CV annotations (default) - public
+- **Annotated stream**: Video with face boxes, skeletons, app overlays - should be session-gated (planned)
 
-#### Connection Methods
-1. **P2P WebRTC** (lowest latency, local network) - via Socket.IO signaling
-2. **WHEP Fallback** (remote viewing) - direct connection to MediaMTX server
+---
+
+## 🛠️ CV DEVELOPMENT ENDPOINTS
+**(Only available when `CV_DEV_MODE=true`)**
+
+These endpoints allow CV app development using pre-recorded video files instead of live camera.
+
+### Dev Status & Video Management
+- `GET /api/dev/status` - Get CV dev environment status
+- `GET /api/dev/videos` - List available test videos
+- `POST /api/dev/load` - Load a video file: `{"path": "video.mp4"}`
+- `GET /api/dev/help` - Get help on all dev endpoints
+
+### Playback Controls
+- `GET /api/dev/playback/state` - Get current playback state
+- `POST /api/dev/playback/play` - Resume playback
+- `POST /api/dev/playback/pause` - Pause playback
+- `POST /api/dev/playback/seek` - Seek: `{"frame": N}` or `{"time": S}` or `{"progress": 0.5}`
+- `POST /api/dev/playback/speed` - Set speed: `{"speed": 0.5}`
+- `POST /api/dev/playback/loop` - Toggle loop: `{"enabled": true}`
+- `POST /api/dev/playback/step` - Step frame: `{"direction": "forward"}`
+- `POST /api/dev/playback/rotation` - Toggle rotation: `{"enabled": false}`
+- `POST /api/dev/restart` - Restart video from beginning
+
+### Example Usage
+```bash
+# List available videos
+curl localhost:5002/api/dev/videos
+
+# Load a video
+curl -X POST localhost:5002/api/dev/load \
+  -H "Content-Type: application/json" \
+  -d '{"path": "pushup_sample.mp4"}'
+
+# Control playback
+curl -X POST localhost:5002/api/dev/playback/pause
+curl -X POST localhost:5002/api/dev/playback/seek -d '{"frame": 100}'
+curl -X POST localhost:5002/api/dev/playback/speed -d '{"speed": 0.5}'
+```
+
+### Adding Test Videos
+Place videos in `cv_dev/videos/` directory:
+```bash
+cd /mnt/nvme/mmoment/app/orin_nano/cv_dev/videos/
+yt-dlp -f "best[height<=720]" "https://www.youtube.com/watch?v=VIDEO_ID" -o my_video.mp4
+# Or download from Pexels:
+curl -L "https://videos.pexels.com/video-files/VIDEO_ID/..." -o video.mp4
+```
 
 ---
 
@@ -98,23 +153,31 @@ These endpoints are used for communication between Docker containers and service
 - `POST /api/biometric/create-session` - Internal biometric session
 - `POST /api/biometric/purge-session` - Internal session cleanup
 
+---
+
 ## Request/Response Format
 
-### Session Connect Request
+### Check-in Request (Ed25519 Signature Required)
 ```json
 {
-  "wallet_address": "string"
+  "wallet_address": "ABC123...",
+  "request_signature": "base58-encoded-signature",
+  "request_timestamp": 1234567890123,
+  "request_nonce": "random-uuid",
+  "display_name": "User Name",
+  "username": "username"
 }
 ```
 
-### Session Connect Response
+### Session-Protected Request Format
+All session-protected endpoints require:
 ```json
 {
-  "success": true,
-  "session_id": "string",
-  "wallet_address": "string",
-  "created_at": 1234567890,
-  "expires_at": 1234567890
+  "wallet_address": "ABC123...",
+  "request_timestamp": 1234567890123,
+  "request_nonce": "random-uuid",
+  "request_signature": "base58-encoded-signature",
+  // ... other endpoint-specific fields
 }
 ```
 
@@ -122,28 +185,15 @@ These endpoints are used for communication between Docker containers and service
 ```json
 {
   "wallet_address": "string",
+  "request_timestamp": 1234567890123,
+  "request_nonce": "random-uuid",
+  "request_signature": "base58-signature",
   "annotated": false,
   "event_metadata": {
     "app_id": "pushup",
     "event_type": "pushup_peak",
     "rep": 5
   }
-}
-```
-
-**Parameters:**
-- `wallet_address` (required): Wallet address for the capture
-- `annotated` (optional, default: false): If true, capture with CV annotations (face boxes, skeletons, app overlays)
-- `event_metadata` (optional): App-provided context stored with the capture
-
-### Capture Response
-```json
-{
-  "success": true,
-  "path": "/data/images/capture_123.jpg",
-  "timestamp": 1234567890,
-  "annotated": false,
-  "event_metadata": null
 }
 ```
 
@@ -175,7 +225,7 @@ These endpoints are used for communication between Docker containers and service
 ```json
 {
   "status": "ok",
-  "buffer_service": "Healthy", 
+  "buffer_service": "Healthy",
   "buffer_fps": 9.96,
   "active_sessions": 0,
   "timestamp": 1234567890,
@@ -188,196 +238,57 @@ These endpoints are used for communication between Docker containers and service
 }
 ```
 
-### Stream Info Response
-```json
-{
-  "success": true,
-  "camera_pda": "your-camera-pda",
-  "streams": {
-    "clean": {
-      "description": "Raw video stream without CV annotations",
-      "p2p": {
-        "available": true,
-        "signaling": "Socket.IO via backend"
-      },
-      "whep": {
-        "url": "http://mediamtx-server:8889/{camera_pda}/",
-        "available": true
-      }
-    },
-    "annotated": {
-      "description": "Video stream with CV annotations (face boxes, skeletons, app overlays)",
-      "p2p": {
-        "available": true,
-        "signaling": "Socket.IO via backend"
-      },
-      "whep": {
-        "url": "http://mediamtx-server:8889/{camera_pda}-annotated/",
-        "available": true
-      }
-    }
-  },
-  "default_stream": "clean"
-}
-```
+---
 
 ## Frontend Integration
 
-**IMPORTANT:** Your frontend should ONLY call the public endpoints listed above. Here are the key patterns:
-
-### 🎯 Essential Endpoints for Frontend
+### 🎯 Essential Flow
 
 ```javascript
-// 1. CHECK STREAMING STATUS (Most Important!)
-const status = await fetch('/api/status').then(r => r.json());
-const isStreaming = status.data.isStreaming;
-const isRecording = status.data.isRecording;
-
-// 2. HEALTH CHECK
-const health = await fetch('/api/health').then(r => r.json());
-
-// 3. SESSION MANAGEMENT
-const session = await fetch('/api/session/connect', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ wallet_address: 'your_wallet' })
-}).then(r => r.json());
-
-// 4. STREAMING (WebRTC via Socket.IO - NOT REST API)
-// P2P WebRTC streaming uses Socket.IO signaling, not REST endpoints.
-// The frontend connects to the backend signaling server which relays to the camera.
-//
-// Socket.IO Events (sent to backend signaling server):
-//   - 'register-viewer': { viewerId, streamType: 'clean' | 'annotated' }
-//   - 'viewer-wants-connection': { viewerId, streamType, cellularMode }
-//   - 'webrtc-answer': { viewerId, answer }
-//   - 'webrtc-ice-candidate': { viewerId, candidate }
-//
-// Socket.IO Events (received from backend):
-//   - 'webrtc-offer': { viewerId, offer }
-//   - 'webrtc-ice-candidate': { viewerId, candidate }
-//
-// Stream types:
-//   - 'clean': Raw video without CV annotations (default)
-//   - 'annotated': Video with face boxes, skeletons, app overlays
-//
-// For WHEP fallback (remote viewing), use the URLs from /api/stream/info
-
-// Get available stream URLs
-const streamInfo = await fetch('/api/stream/info').then(r => r.json());
-
-// 5. COMPUTER VISION (Jetson Only)
-const gesture = await fetch('/api/gesture/current').then(r => r.json());
-
-const faceEnroll = await fetch('/api/face/enroll', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ wallet_address: 'your_wallet', session_id: 'session_id' })
-}).then(r => r.json());
-
-// Toggle pose visualization
-await fetch('/api/visualization/pose', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ enabled: true })
-});
-
-// 6. CV APPS (Jetson Only)
-// Load pushup counter app
-await fetch('/api/apps/load', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ app_name: 'pushup' })
-});
-
-// Activate pushup counter app (starts processing frames, shows skeleton)
-await fetch('/api/apps/activate', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ app_name: 'pushup' })
-});
-
-// Start competition (automatically uses currently recognized users)
-await fetch('/api/apps/competition/start', {
+// 1. CHECK-IN (Required for most actions)
+const checkinResponse = await fetch('/api/checkin', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
-    competitors: [
-      { wallet_address: 'user_wallet', display_name: 'User Name' }
-    ],
-    duration_limit: 300  // Optional: time limit in seconds
+    wallet_address: walletPublicKey,
+    request_signature: signedMessage,  // Ed25519 signature
+    request_timestamp: Date.now(),
+    request_nonce: crypto.randomUUID(),
+    display_name: 'User Name'
   })
 });
 
-// Check app status (poll this to get live rep counts)
-const appStatus = await fetch('/api/apps/status').then(r => r.json());
-/* Returns:
-{
-  success: true,
-  active_app: 'pushup',
-  loaded_apps: ['pushup'],
-  state: {
-    active: true,  // Competition running
-    competitors: [
-      {
-        wallet_address: '...',
-        display_name: '...',
-        stats: {
-          reps: 7,
-          in_down_position: false,
-          current_angle: 165,
-          view: 'left',  // 'front', 'left', or 'right'
-          last_rep_time: 1234567890
-        },
-        track_id: 123
-      }
-    ],
-    elapsed: 45.2,  // Seconds elapsed
-    time_remaining: 254.8  // Seconds remaining (if duration_limit set)
-  }
-}
-*/
-
-// End competition
-await fetch('/api/apps/competition/end', { method: 'POST' });
-
-// Deactivate app (stops processing entirely)
-await fetch('/api/apps/deactivate', { method: 'POST' });
-
-// 7. MEDIA ACCESS
-const photos = await fetch('/api/photos').then(r => r.json());
-const videos = await fetch('/api/videos').then(r => r.json());
-
-// 8. PHOTO CAPTURE (with optional CV annotations)
-// Clean capture (default - raw frame without CV overlays)
-const cleanCapture = await fetch('/api/capture', {
+// 2. USE SESSION-PROTECTED ENDPOINTS
+// All subsequent requests need signature fields
+const captureResponse = await fetch('/api/capture', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
-    wallet_address: 'your_wallet'
+    wallet_address: walletPublicKey,
+    request_signature: newSignature,
+    request_timestamp: Date.now(),
+    request_nonce: crypto.randomUUID(),
+    annotated: true
   })
-}).then(r => r.json());
+});
 
-// Annotated capture (with face boxes, skeletons, app overlays)
-const annotatedCapture = await fetch('/api/capture', {
+// 3. CHECK-OUT when done
+await fetch('/api/checkout', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
-    wallet_address: 'your_wallet',
-    annotated: true,
-    event_metadata: {
-      app_id: 'pushup',
-      event_type: 'rep_complete',
-      rep: 10
-    }
+    wallet_address: walletPublicKey,
+    request_signature: signature,
+    request_timestamp: Date.now(),
+    request_nonce: crypto.randomUUID()
   })
-}).then(r => r.json());
+});
 ```
 
 ### ❌ DO NOT Call These From Frontend
-- Any `/api/blockchain/*` endpoints - These are internal only
-- Any `/api/biometric/*` endpoints - These are internal only  
-- Port 5001 or 5003 endpoints - These are not exposed publicly
+- Any `/api/blockchain/*` endpoints - Internal only
+- Any `/api/biometric/*` endpoints - Internal only
+- Port 5001 or 5003 endpoints - Not exposed publicly
 
 ### ✅ Frontend Architecture
 ```
@@ -388,19 +299,25 @@ Frontend → jetson.mmoment.xyz/api/* → Camera Service (Port 5002)
                               - Biometric Security (Port 5003)
 ```
 
-The Camera Service handles all the blockchain and biometric operations internally. Your frontend only needs to talk to the main API.
+---
 
-## Legacy Endpoints (Still Supported)
+## Removed/Deprecated Endpoints
 
-Some older endpoints are still supported for backward compatibility, but use the `/api/` versions above:
-- `/health` → `/api/health`
-- `/connect` → `/api/session/connect`
-- `/disconnect` → `/api/session/disconnect`
-- `/capture_moment` → `/api/capture`
-- `/start_recording` → `/api/record`
-- `/enroll_face` → `/api/face/enroll`
-- `/recognize_face` → `/api/face/recognize`
+These endpoints have been **removed**:
+- `/disconnect` - Use `/api/checkout` instead
+- `/api/session/disconnect` - Use `/api/checkout` instead
+
+The `/api/checkout` endpoint properly handles:
+- Session termination
+- Timeline activity buffering
+- Backend notification
+
+---
 
 ## Summary
 
-**Frontend developers:** Use only the 🌐 PUBLIC FRONTEND ENDPOINTS section above. All blockchain and biometric operations happen automatically behind the scenes when you use the main camera API endpoints.
+**Frontend developers:**
+1. Use `/api/checkin` with Ed25519 signature to establish session
+2. Include signature fields in all session-protected requests
+3. Use `/api/checkout` to end session (NOT `/disconnect`)
+4. Only use 🌐 PUBLIC FRONTEND ENDPOINTS listed above
