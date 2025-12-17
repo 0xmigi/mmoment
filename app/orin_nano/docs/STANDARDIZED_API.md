@@ -101,20 +101,46 @@ These endpoints allow CV app development using pre-recorded video files instead 
 - `POST /api/dev/playback/rotation` - Toggle rotation: `{"enabled": false}`
 - `POST /api/dev/restart` - Restart video from beginning
 
+### Track Linking (Identity Simulation)
+Link detected persons in the video to wallet addresses for CV app testing without face enrollment.
+
+- `GET /api/dev/tracks` - Get currently detected track_ids with bounding boxes
+- `GET /api/dev/tracks/links` - Get all current track-to-wallet links
+- `POST /api/dev/tracks/link` - Link a track to a wallet: `{"track_id": 1, "wallet_address": "ABC...", "display_name": "Test"}`
+- `POST /api/dev/tracks/unlink` - Unlink a track: `{"track_id": 1}`
+- `POST /api/dev/tracks/unlink-all` - Clear all track links
+
+**Flow:**
+1. Load a video with `/api/dev/load`
+2. Call `/api/dev/tracks` to see detected persons (each has a `track_id`)
+3. Link your wallet to a person: `/api/dev/tracks/link` with `track_id` and `wallet_address`
+4. CV apps now attribute that person's actions to your wallet
+5. Test pushup counting, competitions, etc. with the linked identity
+
 ### Example Usage
+> **Base URL**: `https://[camera-pda].mmoment.xyz` (via Cloudflare tunnel)
+
 ```bash
 # List available videos
-curl localhost:5002/api/dev/videos
+curl $CAMERA_URL/api/dev/videos
 
 # Load a video
-curl -X POST localhost:5002/api/dev/load \
+curl -X POST $CAMERA_URL/api/dev/load \
   -H "Content-Type: application/json" \
   -d '{"path": "pushup_sample.mp4"}'
 
 # Control playback
-curl -X POST localhost:5002/api/dev/playback/pause
-curl -X POST localhost:5002/api/dev/playback/seek -d '{"frame": 100}'
-curl -X POST localhost:5002/api/dev/playback/speed -d '{"speed": 0.5}'
+curl -X POST $CAMERA_URL/api/dev/playback/pause
+curl -X POST $CAMERA_URL/api/dev/playback/seek -d '{"frame": 100}'
+curl -X POST $CAMERA_URL/api/dev/playback/speed -d '{"speed": 0.5}'
+
+# Track linking - simulate identity
+curl $CAMERA_URL/api/dev/tracks  # See detected persons
+curl -X POST $CAMERA_URL/api/dev/tracks/link \
+  -H "Content-Type: application/json" \
+  -d '{"track_id": 1, "wallet_address": "YourWallet...", "display_name": "Dev User"}'
+curl $CAMERA_URL/api/dev/tracks/links  # See current links
+curl -X POST $CAMERA_URL/api/dev/tracks/unlink-all  # Clear all
 ```
 
 ### Adding Test Videos

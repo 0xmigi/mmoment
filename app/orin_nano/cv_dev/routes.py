@@ -2,10 +2,12 @@
 CV Dev API Routes
 
 Flask blueprint providing API endpoints for CV development environment.
+Includes dev-mode track linking for testing CV apps without face enrollment.
 """
 
 import os
 import logging
+from typing import Dict, Optional
 from flask import Blueprint, jsonify, request
 
 logger = logging.getLogger("CVDevRoutes")
@@ -16,12 +18,31 @@ cv_dev_bp = Blueprint('cv_dev', __name__, url_prefix='/api/dev')
 # Reference to video buffer service (set by register_blueprint)
 _video_buffer_service = None
 
+# Dev track-to-wallet linking state
+# Maps track_id -> {wallet_address, display_name, linked_at}
+_dev_track_links: Dict[int, Dict] = {}
+
 
 def init_dev_routes(video_buffer_service):
     """Initialize routes with video buffer service reference."""
     global _video_buffer_service
     _video_buffer_service = video_buffer_service
-    logger.info("CV Dev routes initialized")
+    logger.info("CV Dev routes initialized with track linking support")
+
+
+def get_dev_track_link(track_id: int) -> Optional[Dict]:
+    """
+    Get dev wallet link for a track_id (called by identity_tracker).
+
+    Returns:
+        Dict with wallet_address and display_name, or None if not linked
+    """
+    return _dev_track_links.get(track_id)
+
+
+def get_all_dev_track_links() -> Dict[int, Dict]:
+    """Get all dev track links."""
+    return _dev_track_links.copy()
 
 
 @cv_dev_bp.route('/status', methods=['GET'])
@@ -308,12 +329,200 @@ def get_help():
             "POST /api/dev/playback/speed": "Set speed (body: {speed: 1.0})",
             "POST /api/dev/playback/loop": "Set loop (body: {enabled: true})",
             "POST /api/dev/playback/step": "Step frame (body: {direction: 'forward'})",
-            "POST /api/dev/restart": "Restart video from beginning"
+            "POST /api/dev/restart": "Restart video from beginning",
+            "GET /api/dev/tracks": "Get currently detected track_ids",
+            "GET /api/dev/tracks/links": "Get current track-to-wallet links",
+            "POST /api/dev/tracks/link": "Link a track_id to wallet (body: {track_id, wallet_address, display_name})",
+            "POST /api/dev/tracks/unlink": "Unlink a track_id (body: {track_id})",
+            "POST /api/dev/tracks/unlink-all": "Unlink all tracks"
         },
         "examples": {
             "load_video": "curl -X POST localhost:5002/api/dev/load -H 'Content-Type: application/json' -d '{\"path\": \"pushups.mp4\"}'",
             "pause": "curl -X POST localhost:5002/api/dev/playback/pause",
             "seek_to_frame": "curl -X POST localhost:5002/api/dev/playback/seek -H 'Content-Type: application/json' -d '{\"frame\": 100}'",
-            "set_speed": "curl -X POST localhost:5002/api/dev/playback/speed -H 'Content-Type: application/json' -d '{\"speed\": 0.5}'"
+            "set_speed": "curl -X POST localhost:5002/api/dev/playback/speed -H 'Content-Type: application/json' -d '{\"speed\": 0.5}'",
+            "link_track": "curl -X POST localhost:5002/api/dev/tracks/link -H 'Content-Type: application/json' -d '{\"track_id\": 1, \"wallet_address\": \"ABC...\", \"display_name\": \"Test User\"}'"
         }
+    })
+
+
+# =========================================================================
+# Track Linking (Dev Mode Identity Simulation)
+# =========================================================================
+
+# Reference to services (set via init)
+_gpu_face_service = None
+
+
+def init_track_services(gpu_face_service):
+    """Initialize track linking with GPU face service reference."""
+    global _gpu_face_service
+    _gpu_face_service = gpu_face_service
+    logger.info("Track linking services initialized")
+
+
+@cv_dev_bp.route('/tracks', methods=['GET'])
+def get_detected_tracks():
+    """
+    Get currently detected track_ids from the video.
+
+    Returns list of tracks with their bounding boxes and any linked wallet info.
+    """
+    if _gpu_face_service is None:
+        return jsonify({"error": "GPU face service not initialized"}), 500
+
+    try:
+        # Get current detections from the face service
+        detections = _gpu_face_service.get_current_detections()
+
+        tracks = []
+        for det in detections:
+            if det.get('class') == 'person' and det.get('track_id') is not None:
+                track_id = int(det['track_id'])
+                track_info = {
+                    'track_id': track_id,
+                    'bbox': {
+                        'x1': int(det.get('x1', 0)),
+                        'y1': int(det.get('y1', 0)),
+                        'x2': int(det.get('x2', 0)),
+                        'y2': int(det.get('y2', 0))
+                    },
+                    'confidence': float(det.get('confidence', 0)),
+                    'linked': track_id in _dev_track_links
+                }
+
+                # Add link info if linked
+                if track_id in _dev_track_links:
+                    link = _dev_track_links[track_id]
+                    track_info['wallet_address'] = link['wallet_address']
+                    track_info['display_name'] = link.get('display_name')
+
+                tracks.append(track_info)
+
+        return jsonify({
+            "success": True,
+            "tracks": tracks,
+            "count": len(tracks)
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting tracks: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@cv_dev_bp.route('/tracks/links', methods=['GET'])
+def get_track_links():
+    """Get all current track-to-wallet links."""
+    links = []
+    for track_id, link in _dev_track_links.items():
+        links.append({
+            'track_id': track_id,
+            'wallet_address': link['wallet_address'],
+            'display_name': link.get('display_name'),
+            'linked_at': link.get('linked_at')
+        })
+
+    return jsonify({
+        "success": True,
+        "links": links,
+        "count": len(links)
+    })
+
+
+@cv_dev_bp.route('/tracks/link', methods=['POST'])
+def link_track():
+    """
+    Link a track_id to a wallet address.
+
+    This simulates a user being "recognized" in the video for CV app testing.
+    The linked wallet will receive all CV app events for that track.
+
+    Body: {
+        "track_id": 1,
+        "wallet_address": "ABC123...",
+        "display_name": "Test User"  // optional
+    }
+    """
+    import time
+
+    data = request.get_json() or {}
+
+    track_id = data.get('track_id')
+    wallet_address = data.get('wallet_address')
+    display_name = data.get('display_name')
+
+    if track_id is None:
+        return jsonify({"error": "track_id is required"}), 400
+
+    if not wallet_address:
+        return jsonify({"error": "wallet_address is required"}), 400
+
+    # Convert to int
+    track_id = int(track_id)
+
+    # Store the link
+    _dev_track_links[track_id] = {
+        'wallet_address': wallet_address,
+        'display_name': display_name or wallet_address[:8],
+        'linked_at': time.time()
+    }
+
+    logger.info(f"DEV: Linked track_id={track_id} to wallet={wallet_address[:8]}...")
+
+    return jsonify({
+        "success": True,
+        "message": f"Linked track {track_id} to {wallet_address[:8]}...",
+        "link": {
+            "track_id": track_id,
+            "wallet_address": wallet_address,
+            "display_name": display_name or wallet_address[:8]
+        }
+    })
+
+
+@cv_dev_bp.route('/tracks/unlink', methods=['POST'])
+def unlink_track():
+    """
+    Unlink a track_id from its wallet.
+
+    Body: {"track_id": 1}
+    """
+    data = request.get_json() or {}
+    track_id = data.get('track_id')
+
+    if track_id is None:
+        return jsonify({"error": "track_id is required"}), 400
+
+    track_id = int(track_id)
+
+    if track_id in _dev_track_links:
+        removed = _dev_track_links.pop(track_id)
+        logger.info(f"DEV: Unlinked track_id={track_id} from wallet={removed['wallet_address'][:8]}...")
+        return jsonify({
+            "success": True,
+            "message": f"Unlinked track {track_id}",
+            "removed": {
+                "track_id": track_id,
+                "wallet_address": removed['wallet_address']
+            }
+        })
+    else:
+        return jsonify({
+            "success": False,
+            "error": f"Track {track_id} not linked"
+        }), 404
+
+
+@cv_dev_bp.route('/tracks/unlink-all', methods=['POST'])
+def unlink_all_tracks():
+    """Unlink all tracks."""
+    count = len(_dev_track_links)
+    _dev_track_links.clear()
+
+    logger.info(f"DEV: Unlinked all {count} tracks")
+
+    return jsonify({
+        "success": True,
+        "message": f"Unlinked {count} tracks",
+        "count": count
     })

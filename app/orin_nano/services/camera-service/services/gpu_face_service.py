@@ -83,6 +83,10 @@ class GPUFaceService:
         self._results_lock = threading.Lock()
         self._detected_faces = []
         self._recognized_faces = {}
+
+        # Current frame detections (for dev track linking)
+        self._current_detections_lock = threading.Lock()
+        self._current_detections = []
         
         # Database paths
         self._faces_dir = os.path.expanduser("~/mmoment/app/orin_nano/camera_service/faces")
@@ -434,6 +438,10 @@ class GPUFaceService:
                 final_detections.append(enhanced)
 
             logger.info(f"[IDENTITY-TRACK] Merged {len(final_detections)} final detections")
+
+            # Store current detections for dev track linking
+            with self._current_detections_lock:
+                self._current_detections = final_detections.copy()
 
             # Forward to CV apps for competition processing
             try:
@@ -947,6 +955,18 @@ class GPUFaceService:
             'last_recognition': self.last_recognition,
             'similarity_threshold': self._similarity_threshold
         }
+
+    def get_current_detections(self) -> list:
+        """
+        Get current frame detections.
+
+        Used by dev mode to get currently visible track_ids for linking.
+
+        Returns:
+            List of detection dicts with track_id, bbox, wallet_address, etc.
+        """
+        with self._current_detections_lock:
+            return self._current_detections.copy()
 
     def set_similarity_threshold(self, threshold: float) -> bool:
         """Set similarity threshold for recognition"""

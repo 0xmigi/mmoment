@@ -341,10 +341,13 @@ def create_app(services):
     # Register CV dev routes if in dev mode
     if CV_DEV_MODE:
         try:
-            from cv_dev.routes import cv_dev_bp, init_dev_routes
+            from cv_dev.routes import cv_dev_bp, init_dev_routes, init_track_services
             init_dev_routes(services['buffer'])
+            # Initialize track linking with GPU face service for /api/dev/tracks endpoints
+            if 'gpu_face' in services:
+                init_track_services(services['gpu_face'])
             app.register_blueprint(cv_dev_bp)
-            logger.info("CV Dev routes registered at /api/dev/*")
+            logger.info("CV Dev routes registered at /api/dev/* (track linking enabled)")
         except Exception as e:
             logger.error(f"Failed to register CV dev routes: {e}")
 

@@ -13,6 +13,7 @@ NOTE: This module now uses IdentityStore as the single source of truth for
 all identity data. It focuses purely on the tracking logic.
 """
 
+import os
 import numpy as np
 import time
 import logging
@@ -23,6 +24,9 @@ import cv2
 from .identity_store import get_identity_store
 
 logger = logging.getLogger("IdentityTracker")
+
+# Check if CV dev mode is enabled
+CV_DEV_MODE = os.environ.get('CV_DEV_MODE', 'false').lower() == 'true'
 
 # Re-ID model for appearance-based tracking
 _reid_model = None
@@ -96,6 +100,28 @@ class IdentityTracker:
         get_reid_model()
 
         logger.info("Identity Tracker initialized with unified IdentityStore")
+
+    def _check_dev_track_link(self, track_id: int) -> Optional[Dict]:
+        """
+        Check if a track_id has a dev mode wallet link.
+
+        Only active when CV_DEV_MODE=true.
+
+        Returns:
+            Dict with wallet_address and display_name, or None
+        """
+        if not CV_DEV_MODE:
+            return None
+
+        try:
+            # Import here to avoid circular imports
+            from cv_dev.routes import get_dev_track_link
+            return get_dev_track_link(track_id)
+        except ImportError:
+            return None
+        except Exception as e:
+            logger.debug(f"Dev track link check failed: {e}")
+            return None
 
     def check_in_user(self, wallet_address: str, face_embedding: np.ndarray,
                       initial_bbox: Tuple[int, int, int, int], metadata: Dict = None) -> Dict:
@@ -219,6 +245,18 @@ class IdentityTracker:
 
                 # Check if this track is already identified
                 identity = self.store.get_identity_by_track(track_id)
+
+                # DEV MODE: Check for dev track links if no identity found
+                if not identity and CV_DEV_MODE:
+                    dev_link = self._check_dev_track_link(track_id)
+                    if dev_link:
+                        detection['wallet_address'] = dev_link['wallet_address']
+                        detection['identity_confidence'] = 1.0
+                        detection['tracking_method'] = 'dev_linked'
+                        detection['display_name'] = dev_link.get('display_name')
+                        print(f"[IDENTITY-TRACKER] 🧪 DEV LINK: track_id={track_id} -> {dev_link['wallet_address'][:8]}", flush=True, file=sys.stderr)
+                        enhanced_detections.append(detection)
+                        continue
 
                 if identity:
                     wallet_address = identity.wallet_address
