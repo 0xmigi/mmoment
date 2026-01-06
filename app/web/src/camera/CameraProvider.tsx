@@ -487,6 +487,21 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
               walletAddress
             }));
           }
+
+          // CRITICAL: Restore camera session after page refresh
+          // The camera instance needs currentSession set for takePhoto/startVideoRecording to work
+          // On page refresh, the camera instance is recreated but currentSession is not restored
+          const storedSession = existingSession ? JSON.parse(existingSession) : null;
+          if (storedSession) {
+            await unifiedCameraService.setSession(cameraId, {
+              sessionId: storedSession.sessionId || `restored_${Date.now()}`,
+              walletAddress: walletAddress,
+              cameraPda: cameraId,
+              timestamp: storedSession.timestamp || Date.now(),
+              isActive: true
+            });
+            console.log('[CameraProvider] Restored camera session after page refresh');
+          }
         } else {
           // Clear localStorage if Jetson says not checked in
           localStorage.removeItem(sessionKey);
@@ -509,6 +524,17 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
 
             if (sessionAge < maxAge) {
               setIsCheckedIn(true);
+
+              // Also restore camera session for localStorage fallback
+              await unifiedCameraService.setSession(cameraId, {
+                sessionId: session.sessionId || `restored_${Date.now()}`,
+                walletAddress: walletAddress,
+                cameraPda: cameraId,
+                timestamp: session.timestamp || Date.now(),
+                isActive: true
+              });
+              console.log('[CameraProvider] Restored camera session from localStorage fallback');
+
               notifyCheckInStatusChange(true);
               return;
             } else {

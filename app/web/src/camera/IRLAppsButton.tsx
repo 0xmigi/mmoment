@@ -37,28 +37,32 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete, d
       name: 'Pushup Competition',
       description: 'Compete in pushup challenges with friends',
       icon: <Dumbbell className="w-5 h-5" />,
-      enabled: true
+      enabled: true,
+      comingSoon: false
     },
     {
       id: 'basketball_tracker',
       name: 'Basketball Score Tracker',
       description: 'Track shots and scores automatically',
       icon: <ActivitySquare className="w-5 h-5" />,
-      enabled: true
+      enabled: false,
+      comingSoon: true
     },
     {
       id: 'bouldering_scoreboard',
       name: 'Bouldering Scoreboard',
       description: 'Track climbs and log progress',
       icon: <TrendingUp className="w-5 h-5" />,
-      enabled: true
+      enabled: false,
+      comingSoon: true
     },
     {
       id: 'contact_memory',
       name: 'Contact Memory',
       description: 'Remember everyone you meet',
       icon: <UserPlus className="w-5 h-5" />,
-      enabled: false
+      enabled: false,
+      comingSoon: true
     }
   ];
 
@@ -97,48 +101,57 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete, d
               </div>
             <div className="space-y-3 mb-4">
               {availableApps.map((app) => {
-                const isAccessible = effectiveHasEmbedding && app.enabled;
-                const needsToken = !effectiveHasEmbedding;
+                const isAccessible = effectiveHasEmbedding && app.enabled && !app.comingSoon;
+                const needsToken = !effectiveHasEmbedding && app.enabled && !app.comingSoon;
+                const isComingSoon = app.comingSoon;
 
                 return (
-                  <div key={app.id} className="flex items-center mb-4 bg-gray-50 rounded-lg p-3">
+                  <div
+                    key={app.id}
+                    onClick={() => {
+                      if (isAccessible) {
+                        if (app.id === 'pushup_competition') {
+                          setShowAppsModal(false);
+                          setShowPushupConfig(true);
+                        } else {
+                          console.log(`Launching app: ${app.id}`);
+                        }
+                      }
+                    }}
+                    className={`flex items-center mb-4 rounded-lg p-3 ${
+                      isComingSoon ? 'bg-gray-100 opacity-60' :
+                      isAccessible ? 'bg-gray-50 hover:bg-gray-100 cursor-pointer' :
+                      'bg-gray-50'
+                    }`}
+                  >
                     <div className={`w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center overflow-hidden ${
-                      isAccessible ? 'bg-green-50 text-green-600' : needsToken ? 'bg-orange-50 text-orange-600' : 'bg-gray-100 text-gray-400'
+                      isComingSoon ? 'bg-gray-200 text-gray-400' :
+                      isAccessible ? 'bg-green-50 text-green-600' :
+                      needsToken ? 'bg-orange-50 text-orange-600' : 'bg-gray-100 text-gray-400'
                     }`}>
                       {app.icon}
                     </div>
                     <div className="ml-3 flex-1">
-                      <div className="text-sm font-medium text-gray-900">{app.name}</div>
-                      <div className="text-xs text-gray-500">{app.description}</div>
+                      <div className={`text-sm font-medium ${isComingSoon ? 'text-gray-500' : 'text-gray-900'}`}>
+                        {app.name}
+                      </div>
+                      <div className={`text-xs ${isComingSoon ? 'text-gray-400' : 'text-gray-500'}`}>
+                        {app.description}
+                      </div>
                     </div>
-                    <button
-                      onClick={() => {
-                        if (isAccessible) {
-                          if (app.id === 'pushup_competition') {
-                            setShowAppsModal(false);
-                            setShowPushupConfig(true);
-                          } else {
-                            // TODO: Launch other apps
-                            console.log(`Launching app: ${app.id}`);
-                          }
-                        }
-                      }}
-                      disabled={!isAccessible}
-                      className={`p-2 rounded-full transition-colors ${
-                        isAccessible
-                          ? 'bg-primary hover:bg-primary-hover text-white'
-                          : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                      }`}
-                      title={isAccessible ? 'Start app' : needsToken ? 'Locked - need token' : 'Not available'}
-                    >
-                      {isAccessible ? (
-                        <Play className="w-4 h-4" fill="currentColor" />
-                      ) : needsToken ? (
+                    {isComingSoon ? (
+                      <span className="text-[10px] font-medium bg-gray-300 text-gray-600 px-2 py-1 rounded whitespace-nowrap">
+                        COMING SOON
+                      </span>
+                    ) : needsToken ? (
+                      <div className="p-2 rounded-full bg-gray-200 text-gray-400">
                         <Lock className="w-4 h-4" />
-                      ) : (
-                        <Play className="w-4 h-4" />
-                      )}
-                    </button>
+                      </div>
+                    ) : (
+                      <div className="p-2 rounded-full bg-primary text-white">
+                        <Play className="w-4 h-4" fill="currentColor" />
+                      </div>
+                    )}
                   </div>
                 );
               })}

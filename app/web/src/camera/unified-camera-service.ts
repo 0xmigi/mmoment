@@ -2111,6 +2111,7 @@ export class UnifiedCameraService {
     progress: number;
     current_time: number;
     duration: number;
+    rotation_enabled?: boolean;
   }>> {
     try {
       const camera = await this.getCamera(cameraId);
@@ -2134,6 +2135,207 @@ export class UnifiedCameraService {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to get playback state'
+      };
+    }
+  }
+
+  /**
+   * Set CV dev rotation mode
+   */
+  public async cvDevSetRotation(cameraId: string, enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevSetRotation) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevSetRotation(enabled);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to set rotation'
+      };
+    }
+  }
+
+  // ============================================
+  // CV DEV TRACK LINKING APIs
+  // ============================================
+
+  /**
+   * Get currently detected tracks
+   */
+  public async cvDevGetTracks(cameraId: string): Promise<CameraActionResponse<{
+    tracks: Array<{
+      track_id: number;
+      bbox: [number, number, number, number];
+      confidence?: number;
+    }>;
+  }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevGetTracks) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevGetTracks();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get tracks'
+      };
+    }
+  }
+
+  /**
+   * Get track-to-wallet links
+   */
+  public async cvDevGetTrackLinks(cameraId: string): Promise<CameraActionResponse<{
+    links: Array<{
+      track_id: number;
+      wallet_address: string;
+      display_name?: string;
+    }>;
+  }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevGetTrackLinks) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevGetTrackLinks();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get track links'
+      };
+    }
+  }
+
+  /**
+   * Link a track to a wallet address
+   */
+  public async cvDevLinkTrack(
+    cameraId: string,
+    trackId: number,
+    walletAddress: string,
+    displayName?: string
+  ): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevLinkTrack) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevLinkTrack(trackId, walletAddress, displayName);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to link track'
+      };
+    }
+  }
+
+  /**
+   * Unlink a track
+   */
+  public async cvDevUnlinkTrack(cameraId: string, trackId: number): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevUnlinkTrack) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevUnlinkTrack(trackId);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to unlink track'
+      };
+    }
+  }
+
+  /**
+   * Clear all track links
+   */
+  public async cvDevUnlinkAllTracks(cameraId: string): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevUnlinkAllTracks) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevUnlinkAllTracks();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to unlink all tracks'
       };
     }
   }

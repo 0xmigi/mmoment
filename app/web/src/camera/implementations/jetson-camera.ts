@@ -2083,6 +2083,7 @@ export class JetsonCamera implements ICamera {
     progress: number;
     current_time: number;
     duration: number;
+    rotation_enabled?: boolean;
   }>> {
     try {
       const response = await this.makeApiCall('/api/dev/playback/state', 'GET');
@@ -2102,7 +2103,8 @@ export class JetsonCamera implements ICamera {
             loop: data.loop,
             progress: data.progress,
             current_time: data.current_time,
-            duration: data.duration
+            duration: data.duration,
+            rotation_enabled: data.rotation_enabled
           }
         };
       }
@@ -2113,6 +2115,198 @@ export class JetsonCamera implements ICamera {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to get playback state'
+      };
+    }
+  }
+
+  /**
+   * Toggle rotation mode (for videos that need 180 degree rotation)
+   */
+  async cvDevSetRotation(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
+    try {
+      this.log('CV dev set rotation:', enabled);
+      const response = await this.makeApiCall('/api/dev/playback/rotation', 'POST', { enabled });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: { enabled: data.enabled ?? enabled }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to set rotation');
+    } catch (error) {
+      this.log('CV dev set rotation error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to set rotation'
+      };
+    }
+  }
+
+  // ============================================
+  // TRACK LINKING APIs (Identity Simulation)
+  // ============================================
+
+  /**
+   * Get currently detected tracks with bounding boxes
+   */
+  async cvDevGetTracks(): Promise<CameraActionResponse<{
+    tracks: Array<{
+      track_id: number;
+      bbox: [number, number, number, number];
+      confidence?: number;
+    }>;
+  }>> {
+    try {
+      this.log('Getting CV dev tracks');
+      const response = await this.makeApiCall('/api/dev/tracks', 'GET');
+      const data = await response.json();
+
+      if (response.ok) {
+        return {
+          success: true,
+          data: {
+            tracks: data.tracks || []
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to get tracks');
+    } catch (error) {
+      this.log('CV dev get tracks error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get tracks'
+      };
+    }
+  }
+
+  /**
+   * Get all current track-to-wallet links
+   */
+  async cvDevGetTrackLinks(): Promise<CameraActionResponse<{
+    links: Array<{
+      track_id: number;
+      wallet_address: string;
+      display_name?: string;
+    }>;
+  }>> {
+    try {
+      this.log('Getting CV dev track links');
+      const response = await this.makeApiCall('/api/dev/tracks/links', 'GET');
+      const data = await response.json();
+
+      if (response.ok) {
+        return {
+          success: true,
+          data: {
+            links: data.links || []
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to get track links');
+    } catch (error) {
+      this.log('CV dev get track links error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get track links'
+      };
+    }
+  }
+
+  /**
+   * Link a track to a wallet address
+   */
+  async cvDevLinkTrack(
+    trackId: number,
+    walletAddress: string,
+    displayName?: string
+  ): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      this.log('Linking track:', trackId, 'to wallet:', walletAddress);
+      const response = await this.makeApiCall('/api/dev/tracks/link', 'POST', {
+        track_id: trackId,
+        wallet_address: walletAddress,
+        display_name: displayName
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            message: data.message || `Track ${trackId} linked to ${walletAddress}`
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to link track');
+    } catch (error) {
+      this.log('CV dev link track error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to link track'
+      };
+    }
+  }
+
+  /**
+   * Unlink a track
+   */
+  async cvDevUnlinkTrack(trackId: number): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      this.log('Unlinking track:', trackId);
+      const response = await this.makeApiCall('/api/dev/tracks/unlink', 'POST', {
+        track_id: trackId
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            message: data.message || `Track ${trackId} unlinked`
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to unlink track');
+    } catch (error) {
+      this.log('CV dev unlink track error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to unlink track'
+      };
+    }
+  }
+
+  /**
+   * Clear all track links
+   */
+  async cvDevUnlinkAllTracks(): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      this.log('Unlinking all tracks');
+      const response = await this.makeApiCall('/api/dev/tracks/unlink-all', 'POST', {});
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            message: data.message || 'All tracks unlinked'
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to unlink all tracks');
+    } catch (error) {
+      this.log('CV dev unlink all tracks error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to unlink all tracks'
       };
     }
   }
