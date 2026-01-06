@@ -26,30 +26,33 @@ logger = logging.getLogger(__name__)
 
 class BlockchainSessionSync:
     """
-    Service that syncs blockchain check-in state with camera sessions.
-    Automatically enables/disables visual effects based on on-chain state.
+    Service that manages camera sessions and recognition token fetching.
+
+    Phase 3 Privacy Architecture:
+    - Check-ins are fully OFF-CHAIN (via /api/checkin with Ed25519 signature)
+    - Fetches recognition tokens (encrypted face embeddings) from blockchain
+    - Monitors for face-based auto-checkout
     """
-    
+
     def __init__(self, solana_middleware_url: str = None):
         # Camera service uses host networking, so connect via localhost
         self.solana_middleware_url = solana_middleware_url or os.environ.get('SOLANA_MIDDLEWARE_URL', 'http://localhost:5001')
         logger.info(f"🔧 BlockchainSessionSync initialized with URL: {self.solana_middleware_url}")
         self.is_running = False
         self.sync_thread = None
-        self.sync_interval = 10  # Check blockchain state every 10 seconds for faster recognition token activation
+        self.sync_interval = 10  # Check for face-based auto-checkout every 10 seconds
         self.stop_event = threading.Event()
-        
-        # Track current state
-        self.checked_in_wallets: Set[str] = set()
-        self.last_sync = 0
 
-        # ✅ NEW: Track when users were last seen in frame (for face-based auto-checkout)
+        # Track current state (populated via trigger_checkin/trigger_checkout API calls)
+        self.checked_in_wallets: Set[str] = set()
+
+        # Track when users were last seen in frame (for face-based auto-checkout)
         self.last_seen_at: Dict[str, float] = {}  # wallet_address -> timestamp
         self.auto_checkout_threshold = 1800  # 30 minutes in seconds
 
-        # Track when users checked in via API (to prevent race condition with blockchain polling)
+        # Track when users checked in via API
         self._api_checkin_times: Dict[str, float] = {}  # wallet_address -> timestamp
-        self._api_checkin_grace_period = 30  # seconds to ignore blockchain checkout after API check-in
+        self._api_checkin_grace_period = 30  # seconds grace period
 
         # Track when checkout activity was already buffered via API (to prevent duplicate checkout events)
         self._api_checkout_buffered: Dict[str, float] = {}  # wallet_address -> timestamp
@@ -98,188 +101,25 @@ class BlockchainSessionSync:
         logger.info("🔗 Blockchain session sync stopped")
         
     def _sync_loop(self):
-        """Main sync loop that checks blockchain state and monitors face-based auto-checkout"""
+        """Main sync loop that monitors face-based auto-checkout"""
         while self.is_running and not self.stop_event.is_set():
             try:
-                self._sync_blockchain_state()
-                # ✅ NEW: Monitor for face-based auto-checkout
                 self._monitor_face_based_checkout()
                 time.sleep(self.sync_interval)
             except Exception as e:
-                logger.error(f"Error in blockchain sync loop: {e}")
+                logger.error(f"Error in sync loop: {e}")
                 time.sleep(self.sync_interval)
                 
-    def _sync_blockchain_state(self):
-        """Sync current blockchain state with camera sessions"""
-        try:
-            # Get current checked-in wallets from blockchain via Solana middleware
-            checked_in_wallets = self._get_checked_in_wallets()
-
-            if checked_in_wallets is None:
-                return  # Error getting blockchain state
-
-            # ✅ CLEANUP: On first sync (startup/restart), remove stale data for users who checked out while camera was offline
-            is_first_sync = (self.last_sync == 0)
-            if is_first_sync:
-                self._cleanup_stale_identities(checked_in_wallets)
-
-            # Compare with current state
-            newly_checked_in = checked_in_wallets - self.checked_in_wallets
-            newly_checked_out = self.checked_in_wallets - checked_in_wallets
-
-            # Handle new check-ins
-            for wallet in newly_checked_in:
-                self._handle_check_in(wallet)
-
-            # Handle check-outs
-            for wallet in newly_checked_out:
-                self._handle_check_out(wallet)
-
-            # ✅ FIX: On first sync (startup/restart), fetch recognition tokens for all already-checked-in users
-            # This ensures users who were already checked-in before camera restart get their tokens loaded
-            if is_first_sync and len(checked_in_wallets) > 0:
-                logger.info(f"🔄 First sync detected - fetching recognition tokens for {len(checked_in_wallets)} already checked-in users")
-                for wallet in checked_in_wallets:
-                    # Only fetch token, don't re-create session (already handled by newly_checked_in)
-                    if wallet not in newly_checked_in:
-                        logger.info(f"🔐 Fetching recognition token for existing user: {wallet[:8]}...")
-                        self._fetch_and_decrypt_recognition_token(wallet)
-                        # Initialize last_seen tracking
-                        self.last_seen_at[wallet] = time.time()
-
-            # Update current state
-            self.checked_in_wallets = checked_in_wallets
-            self.last_sync = time.time()
-
-            # Log status periodically
-            if len(checked_in_wallets) > 0:
-                logger.debug(f"🔗 {len(checked_in_wallets)} wallets checked in on-chain: {list(checked_in_wallets)}")
-                
-        except Exception as e:
-            logger.error(f"Error syncing blockchain state: {e}")
-
-    def _cleanup_stale_identities(self, checked_in_wallets: Set[str]):
-        """
-        Remove stale identity data for users who checked out while camera was offline.
-
-        This ensures no user data persists on the camera after checkout, even if the
-        camera missed the checkout event due to being offline.
-
-        Args:
-            checked_in_wallets: Set of wallet addresses currently checked in on-chain
-        """
-        try:
-            # Get all wallets that have data stored locally (in memory or on disk)
-            local_wallets = set(self.identity_store.get_checked_in_wallets())
-
-            # Find wallets that are stored locally but NOT checked in on-chain
-            stale_wallets = local_wallets - checked_in_wallets
-
-            if stale_wallets:
-                logger.info(f"🧹 Found {len(stale_wallets)} stale identities - cleaning up data from missed checkouts")
-                for wallet in stale_wallets:
-                    logger.info(f"🗑️  Removing stale data for {wallet[:8]}... (checked out while camera was offline)")
-                    self._handle_check_out(wallet)
-            else:
-                logger.debug("✅ No stale identity data found on startup")
-
-        except Exception as e:
-            logger.error(f"Error cleaning up stale identities: {e}")
-
-    def _get_checked_in_wallets(self) -> Optional[Set[str]]:
-        """Get list of currently checked-in wallets from blockchain"""
-        try:
-            # Query the Solana middleware for checked-in users
-            response = requests.get(
-                f"{self.solana_middleware_url}/api/blockchain/checked-in-users",
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('success'):
-                    checked_in_users = data.get('checked_in_users', [])
-                    
-                    # Extract wallet addresses from the response
-                    checked_in_wallets = set()
-                    for user_info in checked_in_users:
-                        wallet_address = user_info.get('user')
-                        if wallet_address:
-                            checked_in_wallets.add(wallet_address)
-            
-                    logger.info(f"🔗 Blockchain sync: Found {len(checked_in_wallets)} checked-in wallets from blockchain")
-                    if len(checked_in_wallets) > 0:
-                        logger.info(f"🔗 Checked-in wallets: {list(checked_in_wallets)}")
-                    
-                    return checked_in_wallets
-                else:
-                    error_msg = data.get('error', 'Unknown error from Solana middleware')
-                    logger.error(f"🔗 Solana middleware returned error: {error_msg}")
-                    return None  # Return None on error to skip sync (prevents ghost checkouts)
-
-            else:
-                logger.error(f"🔗 Failed to get checked-in users from Solana middleware: HTTP {response.status_code}")
-                return None  # Return None on error to skip sync (prevents ghost checkouts)
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"🔗 Network error connecting to Solana middleware: {e}")
-            return None  # Return None on error to skip sync (prevents ghost checkouts)
-        except Exception as e:
-            logger.error(f"Error getting checked-in wallets from blockchain: {e}")
-            return None  # Return None on error to skip sync (prevents ghost checkouts)
-            
-    def _get_hardcoded_wallets(self) -> Set[str]:
-        """REMOVED - No more hardcoded fallbacks"""
-        return set()
-            
-    def _handle_check_in(self, wallet_address: str):
-        """Handle a wallet checking in on-chain"""
-        try:
-            logger.info(f"🎉 Wallet {wallet_address} checked in on-chain - enabling camera session")
-
-            # Create camera session automatically
-            if self.session_service:
-                session_info = self.session_service.create_session(wallet_address)
-                logger.info(f"✅ Created camera session {session_info['session_id']} for {wallet_address}")
-
-            # Check if user already has identity with profile (from /api/checkin)
-            existing_identity = self.identity_store.get_identity(wallet_address)
-            logger.info(f"🔍 [HANDLE-CHECKIN] existing_identity={existing_identity is not None}, display_name={existing_identity.display_name if existing_identity else 'N/A'}")
-            if existing_identity and existing_identity.display_name:
-                # User already checked in via /api/checkin with profile - just fetch token if needed
-                if existing_identity.face_embedding is None:
-                    logger.info(f"🔐 Fetching token for existing identity: {existing_identity.get_display_name()}")
-                    # Pass existing profile to preserve it
-                    profile = {
-                        'display_name': existing_identity.display_name,
-                        'username': existing_identity.username
-                    }
-                    self._fetch_and_decrypt_recognition_token(wallet_address, profile)
-                else:
-                    logger.info(f"✅ User {existing_identity.get_display_name()} already has face embedding")
-            else:
-                # No existing identity or no profile - this is from blockchain polling (user checked in while camera was offline)
-                self._fetch_and_decrypt_recognition_token(wallet_address)
-
-            # Initialize last_seen tracking for face-based auto-checkout
-            self.last_seen_at[wallet_address] = time.time()
-
-            # Log for monitoring
-            logger.info(f"📹 Camera now active for user: {wallet_address}")
-
-        except Exception as e:
-            logger.error(f"Error handling check-in for {wallet_address}: {e}")
-            
     def _handle_check_out(self, wallet_address: str):
-        """Handle a wallet checking out on-chain"""
+        """Handle wallet checkout - clean up session and identity data"""
         try:
             # Check if this wallet just checked in via API - prevent race condition
             api_checkin_time = self._api_checkin_times.get(wallet_address, 0)
             if time.time() - api_checkin_time < self._api_checkin_grace_period:
-                logger.info(f"⏳ Ignoring blockchain checkout for {wallet_address[:8]}... (within {self._api_checkin_grace_period}s grace period after API check-in)")
+                logger.info(f"⏳ Ignoring checkout for {wallet_address[:8]}... (within {self._api_checkin_grace_period}s grace period after API check-in)")
                 return
 
-            logger.info(f"👋 Wallet {wallet_address} checked out on-chain - disabling camera session")
+            logger.info(f"👋 Wallet {wallet_address} checked out - disabling camera session")
 
             # Clear API check-in time tracking
             self._api_checkin_times.pop(wallet_address, None)
@@ -506,7 +346,7 @@ class BlockchainSessionSync:
                 # Only auto-checkout users who have a local face embedding
                 # (users with recognition tokens)
                 if not self._has_local_face_embedding(wallet_address):
-                    continue  # Skip, will rely on on-chain timeout
+                    continue  # Skip users without recognition tokens
 
                 last_seen = self.last_seen_at.get(wallet_address, now)
                 time_not_seen = now - last_seen
@@ -546,11 +386,6 @@ class BlockchainSessionSync:
         except Exception as e:
             logger.error(f"❌ Error sending checkout transaction for {wallet_address}: {e}")
 
-    def force_sync(self):
-        """Force an immediate sync with blockchain state"""
-        logger.info("🔄 Force syncing blockchain state...")
-        self._sync_blockchain_state()
-
     def trigger_checkin(self, wallet_address: str, profile: dict = None):
         """
         Trigger check-in for a specific wallet with profile data.
@@ -566,7 +401,7 @@ class BlockchainSessionSync:
         self.checked_in_wallets.add(wallet_address)
         self.last_seen_at[wallet_address] = time.time()
 
-        # Record API check-in time to prevent race condition with blockchain polling
+        # Record API check-in time
         self._api_checkin_times[wallet_address] = time.time()
 
         # Create session if not already done
@@ -640,29 +475,20 @@ class BlockchainSessionSync:
                     logger.warning(f"[CHECKOUT] Error clearing facial data: {e}")
 
     def get_status(self) -> Dict:
-        """Get current sync status"""
+        """Get current session status"""
         return {
             'running': self.is_running,
             'sync_interval': self.sync_interval,
-            'last_sync': self.last_sync,
             'checked_in_wallets': list(self.checked_in_wallets),
             'total_checked_in': len(self.checked_in_wallets)
         }
 
     def is_wallet_checked_in(self, wallet_address: str) -> bool:
         """
-        Check if a specific wallet is currently checked in on-chain.
-        Uses cached data with optimistic assumption - if we haven't synced recently,
-        assume the user is still checked in to avoid blocking actions.
+        Check if a specific wallet is currently checked in (local state).
+        Phase 3: Check-ins are off-chain, so we use local tracked wallets.
         """
-        # If we have recent data, use it
-        if time.time() - self.last_sync < 300:  # 5 minutes grace period
-            return wallet_address in self.checked_in_wallets
-        
-        # If data is stale, be optimistic - assume user is still checked in
-        # This prevents blocking actions due to network issues or sync delays
-        logger.info(f"🔄 Blockchain data is stale ({time.time() - self.last_sync:.0f}s old), being optimistic for {wallet_address}")
-        return True
+        return wallet_address in self.checked_in_wallets
 
 # Global service instance
 _blockchain_session_sync = None

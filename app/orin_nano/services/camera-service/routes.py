@@ -29,17 +29,17 @@ from flask import (
 # Import device signer for DePIN authentication
 from services.device_signer import DeviceSigner
 
-# Import GPU face service for identity tracking
-try:
-    from services.gpu_face_service import get_gpu_face_service
-except ImportError:
-    get_gpu_face_service = None
+# Import native identity service for lightweight identity matching
+from services.native_identity_service import get_native_identity_service
 
 # Set up logging
 logger = logging.getLogger("CameraRoutes")
 
 # Initialize device signer (singleton)
 device_signer = DeviceSigner()
+
+# In-memory user profile store (native mode - no gpu_face service)
+_user_profiles: dict = {}
 
 # Our simple face recognition is always available
 FACENET_AVAILABLE = True
@@ -1275,270 +1275,403 @@ def register_routes(app):
                     {"success": False, "error": "Failed to decode base64 image"}
                 ), 400
 
-            # Get GPU face service
+            # Check for GPU face service or native mode
             services = get_services()
-            if "gpu_face" not in services:
-                return jsonify(
-                    {"success": False, "error": "GPU face service not available"}
-                ), 503
+            gpu_face_service = services.get("gpu_face")
+            use_native_mode = gpu_face_service is None
 
-            gpu_face_service = services["gpu_face"]
+            # If native mode, use native TensorRT pipeline
+            if use_native_mode:
+                try:
+                    from native_client import get_native_service
+                    native_service = get_native_service()
+                    if not native_service.is_ready():
+                        native_service.initialize()
+                except Exception as e:
+                    logger.error(f"Failed to get native service: {e}")
+                    return jsonify(
+                        {"success": False, "error": "Native inference service not available"}
+                    ), 503
+            else:
+                # Check if models are loaded for non-native mode
+                if not gpu_face_service._models_loaded:
+                    return jsonify(
+                        {"success": False, "error": "Face recognition models not loaded"}
+                    ), 503
 
-            # Check if models are loaded
-            if not gpu_face_service._models_loaded:
-                return jsonify(
-                    {"success": False, "error": "Face recognition models not loaded"}
-                ), 503
-
-            # Use InsightFace to detect and analyze faces for quality
+            # Extract embedding and analyze faces
             quality_score = 0
             quality_factors = {}
 
             try:
-                # Convert BGR to RGB for InsightFace
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                if use_native_mode:
+                    # Use native TensorRT pipeline for face detection and embedding
+                    logger.info("Using native TensorRT pipeline for face embedding extraction")
+                    result = native_service.process_image(frame)
 
-                # Get all faces detected by InsightFace
-                faces = gpu_face_service.face_embedder.get(frame_rgb)
+                    if result is None:
+                        return jsonify(
+                            {"success": False, "error": "Native inference failed"}
+                        ), 500
 
-                if len(faces) == 0:
-                    return jsonify(
-                        {
-                            "success": False,
-                            "error": "No face detected in image - please ensure your face is clearly visible",
-                            "quality_score": 0,
-                            "quality_factors": {"face_detected": False},
-                        }
-                    ), 400
+                    native_faces = result.get('faces', [])
+                    if len(native_faces) == 0:
+                        return jsonify(
+                            {
+                                "success": False,
+                                "error": "No face detected in image - please ensure your face is clearly visible",
+                                "quality_score": 0,
+                                "quality_factors": {"face_detected": False},
+                            }
+                        ), 400
 
-                # Get the largest/best face
-                face = max(
-                    faces,
-                    key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]),
-                )
+                    # Get the largest/best face from native results
+                    best_face = max(
+                        native_faces,
+                        key=lambda f: (f['bbox'][2] - f['bbox'][0]) * (f['bbox'][3] - f['bbox'][1]),
+                    )
+                    det_score = best_face.get('confidence', 0.9)
+                    embedding = np.array(best_face['embedding'], dtype=np.float32)
+                    # Native embeddings are already normalized
 
-                # Calculate quality score based on multiple factors
-                bbox = face.bbox
-                face_width = bbox[2] - bbox[0]
-                face_height = bbox[3] - bbox[1]
-                image_height, image_width = frame.shape[:2]
+                    # Use server's quality score directly (bbox coords are unreliable in full-frame mode)
+                    native_quality = best_face.get('quality', 0.5)
 
-                # 1. Face size score (larger faces are better)
-                face_area_ratio = (face_width * face_height) / (
-                    image_width * image_height
-                )
-                size_score = min(face_area_ratio * 200, 100)  # 0-100 scale
-                quality_factors["face_size"] = round(size_score, 1)
+                    # Calculate sharpness/lighting on the full image center region
+                    h, w = frame.shape[:2]
+                    # Use center 50% of image for quality metrics
+                    margin_x, margin_y = w // 4, h // 4
+                    center_region = frame[margin_y:h-margin_y, margin_x:w-margin_x]
 
-                # 2. Face position score (centered faces are better)
-                face_center_x = (bbox[0] + bbox[2]) / 2
-                face_center_y = (bbox[1] + bbox[3]) / 2
-                center_offset_x = abs(face_center_x - image_width / 2) / (
-                    image_width / 2
-                )
-                center_offset_y = abs(face_center_y - image_height / 2) / (
-                    image_height / 2
-                )
-                position_score = 100 - (center_offset_x + center_offset_y) * 50
-                quality_factors["face_position"] = round(max(position_score, 0), 1)
+                    gray_center = cv2.cvtColor(center_region, cv2.COLOR_BGR2GRAY)
+                    laplacian_var = cv2.Laplacian(gray_center, cv2.CV_64F).var()
+                    sharpness_score = min(laplacian_var / 10, 100)
 
-                # 3. Detection confidence (from InsightFace)
-                det_score = float(face.det_score) if hasattr(face, "det_score") else 0.9
-                confidence_score = det_score * 100
-                quality_factors["detection_confidence"] = round(confidence_score, 1)
-
-                # 4. Image sharpness (using Laplacian variance)
-                face_region = frame[
-                    int(bbox[1]) : int(bbox[3]), int(bbox[0]) : int(bbox[2])
-                ]
-                if face_region.size > 0:
-                    gray_face = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
-                    laplacian_var = cv2.Laplacian(gray_face, cv2.CV_64F).var()
-                    sharpness_score = min(laplacian_var / 10, 100)  # Normalize to 0-100
-                    quality_factors["image_sharpness"] = round(sharpness_score, 1)
-                else:
-                    quality_factors["image_sharpness"] = 50
-
-                # 5. Lighting quality (check histogram distribution)
-                if face_region.size > 0:
-                    hist = cv2.calcHist([gray_face], [0], None, [256], [0, 256])
+                    hist = cv2.calcHist([gray_center], [0], None, [256], [0, 256])
                     hist_normalized = hist.ravel() / hist.sum()
-                    # Check for good distribution (not too dark or bright)
                     low_light = hist_normalized[:50].sum()
                     high_light = hist_normalized[200:].sum()
-                    lighting_score = 100 - (low_light + high_light) * 100
-                    quality_factors["lighting_quality"] = round(
-                        max(lighting_score, 0), 1
+                    lighting_score = max(100 - (low_light + high_light) * 100, 0)
+
+                    # Combine: native quality (face detection) + image quality (sharpness/lighting)
+                    quality_score = round(
+                        native_quality * 100 * 0.5 +  # 50% from native face quality
+                        sharpness_score * 0.25 +       # 25% from sharpness
+                        lighting_score * 0.25,         # 25% from lighting
+                        1
                     )
-                else:
-                    quality_factors["lighting_quality"] = 50
 
-                # Calculate overall quality score (weighted average)
-                quality_score = (
-                    size_score * 0.25
-                    + position_score * 0.15
-                    + confidence_score * 0.30
-                    + quality_factors["image_sharpness"] * 0.15
-                    + quality_factors["lighting_quality"] * 0.15
-                )
-                quality_score = round(quality_score, 1)
+                    quality_factors = {
+                        "native_face_quality": round(native_quality * 100, 1),
+                        "detection_confidence": round(det_score * 100, 1),
+                        "image_sharpness": round(sharpness_score, 1),
+                        "lighting_quality": round(lighting_score, 1),
+                    }
 
-                # Extract embedding
-                embedding = face.normed_embedding
-                embedding_list = embedding.tolist()
+                    logger.info(f"[NATIVE] Quality: {quality_score}% (native={native_quality:.2f}, sharp={sharpness_score:.1f}, light={lighting_score:.1f})")
 
-                logger.info(f"Extracted embedding with quality score: {quality_score}%")
+                    # Skip the bbox-based quality calculation for native mode
+                    embedding_list = embedding.tolist()
+                    logger.info(f"Extracted embedding with quality score: {quality_score}%")
 
-                # Automatically store embedding locally for immediate recognition
-                # Since user is physically at camera taking selfie, enable recognition
-                if wallet_address:
-                    try:
-                        # Store embedding directly since we already extracted it with InsightFace
-                        # (avoid enroll_face() which requires YOLOv8 person detection)
-                        enrollment_metadata = {
-                            "source": "phone_camera",
-                            "quality_score": quality_score,
-                            "timestamp": int(time.time()),
-                        }
+                    # Store embedding locally
+                    if wallet_address:
+                        try:
+                            enrollment_metadata = {
+                                "source": "phone_camera",
+                                "quality_score": quality_score,
+                                "timestamp": int(time.time()),
+                            }
 
-                        # Store in memory for recognition
-                        with gpu_face_service._faces_lock:
-                            gpu_face_service._face_embeddings[wallet_address] = (
-                                embedding
+                            from services.native_identity_service import get_native_identity_service
+                            identity_service = get_native_identity_service()
+                            identity_service.add_identity(wallet_address, embedding, enrollment_metadata)
+                            logger.info(
+                                f"✅ Successfully stored face embedding via native identity service for {wallet_address[:8]}... - recognition enabled"
+                            )
+                        except Exception as enroll_error:
+                            logger.error(
+                                f"❌ Error storing face embedding locally for {wallet_address[:8]}...: {enroll_error}"
                             )
 
-                        # Store display name - use get_user_display_name to check _user_profiles first
-                        display_name = gpu_face_service.get_user_display_name(
-                            wallet_address
-                        )
-                        gpu_face_service._face_names[wallet_address] = display_name
-                        gpu_face_service._face_metadata[wallet_address] = (
-                            enrollment_metadata
-                        )
-
-                        # Save to disk
-                        gpu_face_service.save_face_embedding(
-                            wallet_address, embedding, enrollment_metadata
-                        )
-
-                        logger.info(
-                            f"✅ Successfully stored face embedding locally for {wallet_address[:8]}... - recognition enabled"
-                        )
-
-                    except Exception as enroll_error:
-                        logger.error(
-                            f"❌ Error storing face embedding locally for {wallet_address[:8]}...: {enroll_error}"
-                        )
-                        # Continue with embedding extraction even if local storage fails
-
-                # If encryption is requested and wallet address provided
-                if encrypt and wallet_address:
-                    try:
-                        # Create biometric session for encryption
-                        biometric_response = requests.post(
-                            "http://biometric-security:5003/api/biometric/create-session",
-                            json={
-                                "wallet_address": wallet_address,
-                                "session_duration": 300,  # 5 minutes for enrollment
-                            },
-                            timeout=10,
-                        )
-
-                        if biometric_response.status_code == 200:
-                            biometric_session = biometric_response.json()
-                            session_id = biometric_session["session_id"]
-
-                            # Encrypt the embedding
-                            encrypt_response = requests.post(
-                                "http://biometric-security:5003/api/biometric/encrypt-embedding",
+                    # Handle encryption and blockchain transaction for native mode
+                    if encrypt and wallet_address:
+                        try:
+                            # Create biometric session for encryption
+                            biometric_response = requests.post(
+                                "http://biometric-security:5003/api/biometric/create-session",
                                 json={
-                                    "embedding": embedding_list,
                                     "wallet_address": wallet_address,
-                                    "session_id": session_id,
-                                    "metadata": {
-                                        "quality_score": quality_score,
-                                        "timestamp": int(time.time()),
-                                        "source": "phone_camera",
-                                    },
+                                    "session_duration": 300,  # 5 minutes for enrollment
                                 },
-                                timeout=15,
+                                timeout=10,
                             )
 
-                            if encrypt_response.status_code == 200:
-                                encrypted_data = encrypt_response.json()
-                                token_package = encrypted_data["token_package"]
+                            if biometric_response.status_code == 200:
+                                biometric_session = biometric_response.json()
+                                session_id = biometric_session["session_id"]
 
-                                logger.info(
-                                    f"Successfully encrypted embedding for {wallet_address[:8]}..."
-                                )
-
-                                # Build Solana transaction on Jetson (like /api/face/enroll/prepare)
-                                logger.info(
-                                    f"Building Solana transaction for wallet: {wallet_address}"
-                                )
-
-                                solana_response = requests.post(
-                                    "http://solana-middleware:5001/api/blockchain/mint-recognition-token",
+                                # Encrypt the embedding
+                                encrypt_response = requests.post(
+                                    "http://biometric-security:5003/api/biometric/encrypt-embedding",
                                     json={
+                                        "embedding": embedding_list,
                                         "wallet_address": wallet_address,
-                                        "face_embedding": token_package,  # Send encrypted token package
-                                        "biometric_session_id": session_id,
+                                        "session_id": session_id,
+                                        "metadata": {
+                                            "quality_score": quality_score,
+                                            "timestamp": int(time.time()),
+                                            "source": "phone_camera",
+                                        },
                                     },
-                                    timeout=30,
+                                    timeout=15,
                                 )
 
-                                if solana_response.status_code != 200:
-                                    logger.error(
-                                        f"Solana middleware error: {solana_response.status_code}"
+                                if encrypt_response.status_code == 200:
+                                    encrypted_data = encrypt_response.json()
+                                    token_package = encrypted_data["token_package"]
+
+                                    logger.info(
+                                        f"Successfully encrypted embedding for {wallet_address[:8]}..."
                                     )
-                                    return jsonify(
-                                        {
-                                            "success": False,
-                                            "error": f"Solana middleware error: {solana_response.status_code}",
-                                        }
-                                    ), 500
 
-                                solana_data = solana_response.json()
+                                    solana_response = requests.post(
+                                        "http://solana-middleware:5001/api/blockchain/mint-recognition-token",
+                                        json={
+                                            "wallet_address": wallet_address,
+                                            "face_embedding": token_package,
+                                            "biometric_session_id": session_id,
+                                        },
+                                        timeout=30,
+                                    )
 
-                                logger.info(
-                                    f"Successfully prepared transaction for wallet: {wallet_address}"
-                                )
+                                    if solana_response.status_code != 200:
+                                        logger.error(f"Solana middleware error: {solana_response.status_code}")
+                                        return jsonify({"success": False, "error": f"Solana middleware error: {solana_response.status_code}"}), 500
 
-                                return jsonify(
-                                    {
+                                    solana_data = solana_response.json()
+                                    return jsonify({
                                         "success": True,
-                                        "transaction_buffer": solana_data[
-                                            "transaction_buffer"
-                                        ],
+                                        "transaction_buffer": solana_data["transaction_buffer"],
                                         "face_id": solana_data["face_id"],
                                         "encrypted": True,
-                                        "encryption_method": "AES-256-PBKDF2",
-                                        "session_id": session_id,
                                         "quality_score": quality_score,
                                         "quality_factors": quality_factors,
-                                        "quality_rating": api_face_extract_embedding.get_quality_rating(
-                                            quality_score
-                                        ),
-                                        "recommendations": api_face_extract_embedding.get_quality_recommendations(
-                                            quality_score, quality_factors
-                                        ),
-                                        "metadata": {
-                                            "wallet_address": wallet_address,
-                                            "timestamp": int(time.time()),
-                                            "biometric_session_id": session_id,
-                                            "encryption_method": "AES-256-PBKDF2",
-                                            "face_embedding_encrypted": True,
-                                            "embedding_size": len(embedding_list),
-                                            "embedding_type": "compact_512_dimensions",
-                                            "blockchain_optimized": True,
-                                        },
-                                    }
-                                )
-                    except Exception as encrypt_error:
-                        logger.warning(
-                            f"Encryption failed, returning unencrypted: {encrypt_error}"
+                                    })
+                        except Exception as encrypt_error:
+                            logger.warning(
+                                f"Encryption failed, returning unencrypted: {encrypt_error}"
+                            )
+                            # Fall through to return unencrypted
+
+                    # Return unencrypted for native mode (no wallet or encrypt failed)
+                    return jsonify(
+                        {
+                            "success": True,
+                            "embedding": embedding_list,
+                            "encrypted": False,
+                            "quality_score": quality_score,
+                            "quality_factors": quality_factors,
+                            "quality_rating": (
+                                "excellent" if quality_score >= 80 else
+                                "good" if quality_score >= 65 else
+                                "acceptable" if quality_score >= 50 else
+                                "poor"
+                            ),
+                        }
+                    )
+
+                else:
+                    # Non-native mode (InsightFace Python)
+                    # Convert BGR to RGB for InsightFace
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                    # Get all faces detected by InsightFace
+                    faces = gpu_face_service.face_embedder.get(frame_rgb)
+
+                    if len(faces) == 0:
+                        return jsonify(
+                            {
+                                "success": False,
+                                "error": "No face detected in image - please ensure your face is clearly visible",
+                                "quality_score": 0,
+                                "quality_factors": {"face_detected": False},
+                            }
+                        ), 400
+
+                    # Get the largest/best face
+                    face = max(
+                        faces,
+                        key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]),
+                    )
+                    bbox = face.bbox
+                    det_score = float(face.det_score) if hasattr(face, "det_score") else 0.9
+                    embedding = face.normed_embedding
+
+                    # Calculate quality score based on multiple factors for non-native mode
+                    face_width = bbox[2] - bbox[0]
+                    face_height = bbox[3] - bbox[1]
+                    image_height, image_width = frame.shape[:2]
+
+                    # 1. Face size score (larger faces are better)
+                    face_area_ratio = (face_width * face_height) / (
+                        image_width * image_height
+                    )
+                    size_score = min(face_area_ratio * 200, 100)  # 0-100 scale
+                    quality_factors["face_size"] = round(size_score, 1)
+
+                    # 2. Face position score (centered faces are better)
+                    face_center_x = (bbox[0] + bbox[2]) / 2
+                    face_center_y = (bbox[1] + bbox[3]) / 2
+                    center_offset_x = abs(face_center_x - image_width / 2) / (
+                        image_width / 2
+                    )
+                    center_offset_y = abs(face_center_y - image_height / 2) / (
+                        image_height / 2
+                    )
+                    position_score = 100 - (center_offset_x + center_offset_y) * 50
+                    quality_factors["face_position"] = round(max(position_score, 0), 1)
+
+                    # 3. Detection confidence
+                    confidence_score = det_score * 100
+                    quality_factors["detection_confidence"] = round(confidence_score, 1)
+
+                    # 4. Image sharpness (using Laplacian variance)
+                    face_region = frame[
+                        int(bbox[1]) : int(bbox[3]), int(bbox[0]) : int(bbox[2])
+                    ]
+                    if face_region.size > 0:
+                        gray_face = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+                        laplacian_var = cv2.Laplacian(gray_face, cv2.CV_64F).var()
+                        sharpness_score = min(laplacian_var / 10, 100)  # Normalize to 0-100
+                        quality_factors["image_sharpness"] = round(sharpness_score, 1)
+                    else:
+                        quality_factors["image_sharpness"] = 50
+
+                    # 5. Lighting quality (check histogram distribution)
+                    if face_region.size > 0:
+                        hist = cv2.calcHist([gray_face], [0], None, [256], [0, 256])
+                        hist_normalized = hist.ravel() / hist.sum()
+                        low_light = hist_normalized[:50].sum()
+                        high_light = hist_normalized[200:].sum()
+                        lighting_score = 100 - (low_light + high_light) * 100
+                        quality_factors["lighting_quality"] = round(
+                            max(lighting_score, 0), 1
                         )
-                        # Fall through to return unencrypted
+                    else:
+                        quality_factors["lighting_quality"] = 50
+
+                    # Calculate overall quality score (weighted average)
+                    quality_score = (
+                        size_score * 0.25
+                        + position_score * 0.15
+                        + confidence_score * 0.30
+                        + quality_factors["image_sharpness"] * 0.15
+                        + quality_factors["lighting_quality"] * 0.15
+                    )
+                    quality_score = round(quality_score, 1)
+
+                    embedding_list = embedding.tolist()
+                    logger.info(f"Extracted embedding with quality score: {quality_score}%")
+
+                    # Store embedding locally for non-native mode
+                    if wallet_address:
+                        try:
+                            enrollment_metadata = {
+                                "source": "phone_camera",
+                                "quality_score": quality_score,
+                                "timestamp": int(time.time()),
+                            }
+
+                            with gpu_face_service._faces_lock:
+                                gpu_face_service._face_embeddings[wallet_address] = embedding
+
+                            display_name = gpu_face_service.get_user_display_name(wallet_address)
+                            gpu_face_service._face_names[wallet_address] = display_name
+                            gpu_face_service._face_metadata[wallet_address] = enrollment_metadata
+
+                            gpu_face_service.save_face_embedding(
+                                wallet_address, embedding, enrollment_metadata
+                            )
+
+                            logger.info(
+                                f"✅ Successfully stored face embedding locally for {wallet_address[:8]}... - recognition enabled"
+                            )
+
+                        except Exception as enroll_error:
+                            logger.error(
+                                f"❌ Error storing face embedding locally for {wallet_address[:8]}...: {enroll_error}"
+                            )
+
+                    # If encryption is requested and wallet address provided
+                    if encrypt and wallet_address:
+                        try:
+                            # Create biometric session for encryption
+                            biometric_response = requests.post(
+                                "http://biometric-security:5003/api/biometric/create-session",
+                                json={
+                                    "wallet_address": wallet_address,
+                                    "session_duration": 300,  # 5 minutes for enrollment
+                                },
+                                timeout=10,
+                            )
+
+                            if biometric_response.status_code == 200:
+                                biometric_session = biometric_response.json()
+                                session_id = biometric_session["session_id"]
+
+                                # Encrypt the embedding
+                                encrypt_response = requests.post(
+                                    "http://biometric-security:5003/api/biometric/encrypt-embedding",
+                                    json={
+                                        "embedding": embedding_list,
+                                        "wallet_address": wallet_address,
+                                        "session_id": session_id,
+                                        "metadata": {
+                                            "quality_score": quality_score,
+                                            "timestamp": int(time.time()),
+                                            "source": "phone_camera",
+                                        },
+                                    },
+                                    timeout=15,
+                                )
+
+                                if encrypt_response.status_code == 200:
+                                    encrypted_data = encrypt_response.json()
+                                    token_package = encrypted_data["token_package"]
+
+                                    logger.info(
+                                        f"Successfully encrypted embedding for {wallet_address[:8]}..."
+                                    )
+
+                                    solana_response = requests.post(
+                                        "http://solana-middleware:5001/api/blockchain/mint-recognition-token",
+                                        json={
+                                            "wallet_address": wallet_address,
+                                            "face_embedding": token_package,
+                                            "biometric_session_id": session_id,
+                                        },
+                                        timeout=30,
+                                    )
+
+                                    if solana_response.status_code != 200:
+                                        logger.error(f"Solana middleware error: {solana_response.status_code}")
+                                        return jsonify({"success": False, "error": f"Solana middleware error: {solana_response.status_code}"}), 500
+
+                                    solana_data = solana_response.json()
+                                    return jsonify({
+                                        "success": True,
+                                        "transaction_buffer": solana_data["transaction_buffer"],
+                                        "face_id": solana_data["face_id"],
+                                        "encrypted": True,
+                                        "quality_score": quality_score,
+                                        "quality_factors": quality_factors,
+                                    })
+                        except Exception as encrypt_error:
+                            logger.warning(
+                                f"Encryption failed, returning unencrypted: {encrypt_error}"
+                            )
+                            # Fall through to return unencrypted
 
                 # Return unencrypted embedding with quality metrics
                 return jsonify(
@@ -1559,7 +1692,18 @@ def register_routes(app):
 
             except Exception as analysis_error:
                 logger.error(f"Face analysis error: {analysis_error}")
-                # Try basic extraction without quality scoring
+
+                # In native mode, no fallback available
+                if use_native_mode:
+                    return jsonify(
+                        {
+                            "success": False,
+                            "error": f"Face detection failed: {str(analysis_error)}",
+                            "quality_score": 0,
+                        }
+                    ), 400
+
+                # Non-native mode: try basic extraction without quality scoring
                 full_embedding = gpu_face_service.extract_face_embedding(frame)
 
                 if full_embedding is None:
@@ -1574,20 +1718,17 @@ def register_routes(app):
                 # Store embedding locally for fallback case too
                 if wallet_address:
                     try:
-                        # Store embedding directly since we already extracted it
                         fallback_metadata = {
                             "source": "phone_camera_fallback",
                             "quality_score": 50,
                             "timestamp": int(time.time()),
                         }
 
-                        # Store in memory for recognition
                         with gpu_face_service._faces_lock:
                             gpu_face_service._face_embeddings[wallet_address] = (
                                 full_embedding
                             )
 
-                        # Store display name - use get_user_display_name to check _user_profiles first
                         display_name = gpu_face_service.get_user_display_name(
                             wallet_address
                         )
@@ -1596,7 +1737,6 @@ def register_routes(app):
                             fallback_metadata
                         )
 
-                        # Save to disk
                         gpu_face_service.save_face_embedding(
                             wallet_address, full_embedding, fallback_metadata
                         )
@@ -1615,7 +1755,7 @@ def register_routes(app):
                         "success": True,
                         "embedding": full_embedding.tolist(),
                         "encrypted": False,
-                        "quality_score": 50,  # Unknown quality
+                        "quality_score": 50,
                         "quality_rating": "unknown",
                         "warning": "Quality assessment unavailable",
                     }
@@ -1761,17 +1901,9 @@ def register_routes(app):
             "transaction_signature": transaction_signature,
         }
 
-        # Store profile in both face services
-        services = get_services()
-
-        # Update simple face service
-        face_service = services["face"]
-        face_service.store_user_profile(wallet_address, user_profile)
-
-        # Update GPU face service if available
-        if "gpu_face" in services:
-            gpu_face_service = services["gpu_face"]
-            gpu_face_service.store_user_profile(wallet_address, user_profile)
+        # Store profile in native mode profile store
+        global _user_profiles
+        _user_profiles[wallet_address] = user_profile
 
         # Resolve display name with fallback hierarchy
         resolved_display_name = display_name or username or wallet_address[:8]
@@ -1800,13 +1932,10 @@ def register_routes(app):
                 {"success": False, "error": "Wallet address is required"}
             ), 400
 
-        # Get profile from face service
-        services = get_services()
-        face_service = services["face"]
-
-        # Try to get profile from face service
+        # Get profile from native mode profile store
+        global _user_profiles
         try:
-            profile = face_service.get_user_profile(wallet_address)
+            profile = _user_profiles.get(wallet_address)
             if profile:
                 resolved_display_name = (
                     profile.get("display_name")
@@ -1842,17 +1971,9 @@ def register_routes(app):
                 {"success": False, "error": "Wallet address is required"}
             ), 400
 
-        # Remove profile from both face services
-        services = get_services()
-
-        # Remove from simple face service
-        face_service = services["face"]
-        face_service.remove_user_profile(wallet_address)
-
-        # Remove from GPU face service if available
-        if "gpu_face" in services:
-            gpu_face_service = services["gpu_face"]
-            gpu_face_service.remove_user_profile(wallet_address)
+        # Remove profile from native mode profile store
+        global _user_profiles
+        _user_profiles.pop(wallet_address, None)
 
         camera_pda = get_camera_pda()
         logger.info(
@@ -2724,22 +2845,20 @@ def register_routes(app):
     def toggle_face_detection():
         """
         Enable or disable face detection.
-        Note: Face detection is now always enabled, but keeping this endpoint for compatibility.
+        Note: In native mode, face detection is handled by native C++ server.
         """
         data = request.json or {}
         enabled = data.get("enabled", True)
 
-        face_service = get_services()["face"]
-        face_service.enable_detection(True)  # Always enable face detection
-
-        # Log the request
-        logger.info(f"Face detection toggle requested: {enabled} (always on)")
+        # Native mode: face detection handled by native C++ server
+        logger.info(f"[Native Mode] Face detection toggle requested: {enabled}")
 
         return jsonify(
             {
                 "success": True,
                 "enabled": True,  # Always return true
-                "message": "Face detection is always enabled",
+                "mode": "native",
+                "message": "Face detection handled by native C++ server",
             }
         )
 
@@ -2747,13 +2866,30 @@ def register_routes(app):
     @require_session
     def toggle_face_visualization():
         """
-        Toggle face visualization in camera frames
+        Toggle face visualization in camera frames.
+
+        In native mode: Visualization is controlled by stream selection (clean vs annotated).
+        Client connects to different WHEP URLs for clean/annotated streams.
+        This endpoint acknowledges the preference for client-side state management.
         """
         data = request.json or {}
         enabled = data.get("enabled", True)
 
         try:
-            face_service = get_services()["face"]
+            services = get_services()
+            face_service = services.get("face")
+
+            # Native mode: no face service, visualization controlled by stream selection
+            if face_service is None:
+                logger.info(f"[Native Mode] Face visualization preference: {enabled} (stream selection controls actual visualization)")
+                return jsonify({
+                    "success": True,
+                    "enabled": enabled,
+                    "mode": "native",
+                    "message": "In native mode, connect to annotated stream for CV overlays"
+                })
+
+            # Non-native mode: toggle via face service
             face_service.enable_visualization(enabled)
             # Also enable/disable boxes when toggling visualization
             face_service.enable_boxes(enabled)
@@ -2774,7 +2910,18 @@ def register_routes(app):
         enabled = data.get("enabled", True)
 
         try:
-            face_service = get_services()["face"]
+            services = get_services()
+            face_service = services.get("face")
+
+            # Native mode: no face service
+            if face_service is None:
+                logger.info(f"[Native Mode] Face boxes preference: {enabled}")
+                return jsonify({
+                    "success": True,
+                    "enabled": enabled,
+                    "mode": "native"
+                })
+
             face_service.enable_boxes(enabled)
 
             return jsonify({"success": True, "enabled": enabled})
@@ -2785,7 +2932,21 @@ def register_routes(app):
     @app.route("/face_settings", methods=["GET"])
     def face_settings():
         """Get current face detection settings"""
-        face_service = get_services()["face"]
+        services = get_services()
+        face_service = services.get("face")
+
+        # Native mode: no face service
+        if face_service is None:
+            return jsonify({
+                "success": True,
+                "mode": "native",
+                "settings": {
+                    "visualization_enabled": True,
+                    "boxes_enabled": True,
+                    "message": "Native mode - settings controlled by stream selection"
+                }
+            })
+
         settings = face_service.get_settings()
 
         return jsonify({"success": True, "settings": settings})
@@ -2797,10 +2958,19 @@ def register_routes(app):
         data = request.json or {}
         enabled = data.get("enabled", True)
 
-        gesture_service = get_services()["gesture"]
-        gesture_service.enable_visualization(enabled)
+        # Native mode: gesture service not available
+        services = get_services()
+        gesture_service = services.get("gesture")
+        if gesture_service is None:
+            logger.info(f"[Native Mode] Gesture visualization preference: {enabled}")
+            return jsonify({
+                "success": True,
+                "enabled": enabled,
+                "mode": "native",
+                "message": "Gesture service not available in native mode"
+            })
 
-        # Log the toggle state
+        gesture_service.enable_visualization(enabled)
         logger.info(f"Gesture visualization toggled to: {enabled}")
 
         return jsonify({"success": True, "enabled": enabled})
@@ -2813,14 +2983,19 @@ def register_routes(app):
         enabled = data.get("enabled", True)
 
         services = get_services()
-        if "pose" not in services:
-            return jsonify(
-                {"success": False, "error": "Pose service not available"}
-            ), 404
+        pose_service = services.get("pose")
 
-        pose_service = services["pose"]
+        # Native mode: pose service not available, visualization controlled by stream selection
+        if pose_service is None:
+            logger.info(f"[Native Mode] Pose visualization preference: {enabled}")
+            return jsonify({
+                "success": True,
+                "enabled": enabled,
+                "mode": "native",
+                "message": "In native mode, connect to annotated stream for pose overlays"
+            })
+
         pose_service.visualization_enabled = enabled
-
         logger.info(f"Pose visualization toggled to: {enabled}")
 
         return jsonify({"success": True, "enabled": enabled})
@@ -2901,7 +3076,6 @@ def register_routes(app):
         return jsonify({"success": True, "message": "App deactivated"})
 
     @app.route("/api/apps/status", methods=["GET"])
-    @require_session
     def api_apps_status():
         """Get current app status"""
         services = get_services()
@@ -3048,19 +3222,11 @@ def register_routes(app):
         session_service = services["session"]
         session_info = session_service.create_session(wallet_address, user_profile, session_pda=session_pda)
 
-        # Store user profile in both face services for labeling
-        face_service = services["face"]
-        face_service.store_user_profile(wallet_address, user_profile)
-
-        # Update GPU face service if available
-        if "gpu_face" in services:
-            gpu_face_service = services["gpu_face"]
-            gpu_face_service.store_user_profile(wallet_address, user_profile)
-
-        # Enable face boxes for all connected users
-        face_service.enable_boxes(True)
+        # Store user profile in native mode profile store
+        global _user_profiles
+        _user_profiles[wallet_address] = user_profile
         logger.info(
-            f"Face boxes enabled for connected user: {display_name or username or wallet_address}"
+            f"Profile stored for connected user: {display_name or username or wallet_address}"
         )
 
         # Pre-authorize Pipe storage session for fast uploads
@@ -3110,19 +3276,17 @@ def register_routes(app):
     @require_session
     def recognize_face():
         """
-        Recognize faces in the current frame
-        Returns information about recognized faces
+        Get current face recognition status from native mode.
+        In native mode, face recognition happens continuously via the C++ server.
+        This endpoint returns the current recognition state.
         """
-        # Get wallet address if provided (for session validation)
         data = request.json or {}
         wallet_address = data.get("wallet_address")
         session_id = data.get("session_id")
 
-        logger.info(
-            f"[RECOGNIZE] Starting face recognition for wallet: {wallet_address}"
-        )
+        logger.info(f"[RECOGNIZE] Recognition status request for wallet: {wallet_address}")
 
-        # Check if session is valid (optional)
+        # Check if session is valid
         session_service = get_services()["session"]
         has_valid_session = (
             wallet_address
@@ -3130,97 +3294,52 @@ def register_routes(app):
             and session_service.validate_session(session_id, wallet_address)
         )
 
-        if has_valid_session:
-            logger.info(f"[RECOGNIZE] Valid session for wallet: {wallet_address}")
-        else:
-            logger.info(f"[RECOGNIZE] No valid session or anonymous recognition")
-
         try:
-            # Get services
-            buffer_service = get_services()["buffer"]
-            face_service = get_services()["face"]
+            # Native mode: get recognition status from identity service
+            from services.identity_store import get_identity_store
+            identity_store = get_identity_store()
+            identity_service = get_native_identity_service()
 
-            # Get the current frame
-            frame, timestamp = buffer_service.get_frame()
+            # Get current recognition state
+            status = identity_service.get_status()
+            checked_in_wallets = identity_store.get_checked_in_wallets()
 
-            if frame is None:
-                logger.warning(f"[RECOGNIZE] No frame available from buffer")
-                return jsonify({"success": False, "error": "No frame available"}), 500
-
-            logger.info(f"[RECOGNIZE] Got frame from buffer, running face detection")
-
-            # Make sure face detection is enabled
-            face_service.enable_detection(True)
-
-            # Force a face detection run on the current frame
-            face_detector = get_services()["face_detector"]
-            detected_faces = face_detector.detect_faces(frame)
-
-            logger.info(
-                f"[RECOGNIZE] Detected {len(detected_faces)} faces with face detector"
-            )
-
-            # Update the face service with detected faces
-            with face_service._results_lock:
-                face_service._detected_faces = detected_faces
-
-            # Get initial detection results
-            faces_info = face_service.get_faces()
-            logger.info(f"[RECOGNIZE] Detected {faces_info['detected_count']} faces")
-
-            # If faces are detected, process the frame for recognition
-            if faces_info["detected_count"] > 0:
-                logger.info(
-                    f"[RECOGNIZE] Running face recognition on {faces_info['detected_count']} faces"
-                )
-                # Use proper public API for face recognition
-                face_service.process_frame_for_recognition(frame)
-
-            # Get updated recognition info
-            faces_info = face_service.get_faces()
-            logger.info(
-                f"[RECOGNIZE] Recognition result: {faces_info['recognized_count']} faces recognized"
-            )
-
-            # Check if the requested wallet is in the recognized faces
+            # Check if requested wallet is being tracked
             wallet_recognized = False
             wallet_confidence = 0
+            if wallet_address:
+                identity = identity_store.get_identity(wallet_address)
+                if identity and identity.is_checked_in:
+                    wallet_recognized = True
+                    wallet_confidence = 1.0  # In native mode, matches are binary
+                    logger.info(f"[RECOGNIZE] Wallet {wallet_address} is checked in and trackable")
 
-            if wallet_address and wallet_address in faces_info["recognized_faces"]:
-                wallet_recognized = True
-                wallet_confidence = faces_info["recognized_faces"][wallet_address][
-                    4
-                ]  # Confidence is at index 4
-                logger.info(
-                    f"[RECOGNIZE] Wallet {wallet_address} recognized with confidence {wallet_confidence:.2f}"
-                )
+            # Get current frame for image response
+            buffer_service = get_services()["buffer"]
+            frame, timestamp = buffer_service.get_frame()
 
-            # Create a processed frame with face boxes for better UX
-            processed_frame = face_service.get_processed_frame(frame)
-            _, jpeg_data = cv2.imencode(".jpg", processed_frame)
-            image_base64 = base64.b64encode(jpeg_data).decode("utf-8")
+            image_base64 = None
+            if frame is not None:
+                _, jpeg_data = cv2.imencode(".jpg", frame)
+                image_base64 = base64.b64encode(jpeg_data).decode("utf-8")
 
-            # Return detailed information about all detected and recognized faces
             return jsonify(
                 {
                     "success": True,
-                    "detected_faces": faces_info["detected_count"],
-                    "recognized_faces": faces_info["recognized_count"],
-                    "recognized_data": {
-                        k: {"confidence": v[4]}
-                        for k, v in faces_info["recognized_faces"].items()
-                    },
+                    "mode": "native",
+                    "detected_faces": status.get("total_faces_processed", 0),
+                    "recognized_faces": status.get("currently_tracked", 0),
+                    "recognized_data": {w: {"confidence": 1.0} for w in checked_in_wallets},
                     "wallet_recognized": wallet_recognized,
                     "wallet_confidence": wallet_confidence,
                     "has_valid_session": has_valid_session,
-                    "include_image": True,
+                    "include_image": image_base64 is not None,
                     "image": image_base64,
                 }
             )
         except Exception as e:
             logger.error(f"[RECOGNIZE] Error in face recognition: {str(e)}")
             import traceback
-
             logger.error(traceback.format_exc())
             return jsonify(
                 {"success": False, "error": f"Face recognition failed: {str(e)}"}
@@ -3233,7 +3352,16 @@ def register_routes(app):
         Get the current detected gesture
         Returns the gesture name and confidence
         """
-        gesture_service = get_services()["gesture"]
+        services = get_services()
+        gesture_service = services.get("gesture")
+        if gesture_service is None:
+            return jsonify({
+                "success": True,
+                "gesture": "none",
+                "confidence": 0,
+                "mode": "native",
+                "message": "Gesture service not available in native mode"
+            })
         gesture_info = gesture_service.get_current_gesture()
 
         return jsonify({"success": True, **gesture_info})
@@ -3676,16 +3804,15 @@ def register_routes(app):
     @app.route("/get_enrolled_faces", methods=["GET"])
     def get_enrolled_faces():
         """
-        Get list of all enrolled faces
+        Get list of all enrolled faces (checked-in wallets with embeddings)
         Returns a list of wallet addresses
         """
-        face_service = get_services()["face"]
-
         try:
-            # Get list of enrolled faces
-            enrolled_faces = face_service.get_enrolled_faces()
+            # Native mode: use identity store
+            from services.identity_store import get_identity_store
+            identity_store = get_identity_store()
+            enrolled_faces = identity_store.get_checked_in_wallets()
 
-            # Return result
             return jsonify(
                 {"success": True, "faces": enrolled_faces, "count": len(enrolled_faces)}
             )
@@ -3698,20 +3825,24 @@ def register_routes(app):
     def clear_enrolled_faces():
         """
         Clear all enrolled faces - DANGEROUS: requires session
+        In native mode, this checks out all wallets and clears track associations.
         """
-        face_service = get_services()["face"]
-
         try:
-            # Clear all faces
-            success = face_service.clear_enrolled_faces()
+            # Native mode: check out all wallets from identity store
+            from services.identity_store import get_identity_store
+            identity_store = get_identity_store()
+            wallets = identity_store.get_checked_in_wallets()
+            for wallet in wallets:
+                identity_store.check_out(wallet)
 
-            # Return result
+            # Also clear track associations
+            identity_service = get_native_identity_service()
+            identity_service.clear_tracks()
+
             return jsonify(
                 {
-                    "success": success,
-                    "message": "All faces cleared successfully"
-                    if success
-                    else "Failed to clear faces",
+                    "success": True,
+                    "message": f"Cleared {len(wallets)} faces and track associations",
                 }
             )
         except Exception as e:

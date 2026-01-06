@@ -557,7 +557,7 @@ class IdentityStore:
 
             return best_match
 
-    def find_by_face(self, embedding: np.ndarray, threshold: float = 0.6) -> Optional[str]:
+    def find_by_face(self, embedding: np.ndarray, threshold: float = 0.70) -> Optional[str]:
         """
         Find an identity by face embedding similarity.
 

@@ -23,19 +23,41 @@ services:
       - ./data/recordings:/app/recordings
       - ./data/config:/app/config
       - ./data/device:/opt/mmoment/device  # Persistent device keypair storage
-      # Development: Mount code for live changes (comment out for production)
+      # Development mount - Python code changes work without rebuild
       - ./services/camera-service:/app
       - ./apps:/opt/mmoment/apps  # CV apps directory
       - ./cv_dev:/app/cv_dev  # CV dev environment
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - /dev:/dev
+      - /tmp/argus_socket:/tmp/argus_socket  # nvargus-daemon socket for CSI camera
+      - ~/.Xauthority:/root/.Xauthority:ro
+      # Host TensorRT libraries (nvidia runtime doesn't include these)
+      - /lib/aarch64-linux-gnu/libnvinfer.so.10.7.0:/lib/aarch64-linux-gnu/libnvinfer.so.10.7.0:ro
+      - /lib/aarch64-linux-gnu/libnvinfer_plugin.so.10.7.0:/lib/aarch64-linux-gnu/libnvinfer_plugin.so.10.7.0:ro
+      - /lib/aarch64-linux-gnu/libnvonnxparser.so.10.7.0:/lib/aarch64-linux-gnu/libnvonnxparser.so.10.7.0:ro
+      # Tegra EGL libraries for headless GPU buffer operations (NvBufSurface)
+      - /usr/lib/aarch64-linux-gnu/tegra-egl:/usr/lib/aarch64-linux-gnu/tegra-egl:ro
+      - /usr/share/glvnd/egl_vendor.d:/usr/share/glvnd/egl_vendor.d:ro
+      # Mount host's native directory with binary and TensorRT engines
+      - ./native/build:/app/native/build:ro
+      - ./native/yolov8n-pose-native.engine:/app/native/yolov8n-pose-native.engine:ro
+      - ./native/retinaface.engine:/app/native/retinaface.engine:ro
+      - ./native/arcface_r50.engine:/app/native/arcface_r50.engine:ro
+      - ./native/osnet_x0_25.engine:/app/native/osnet_x0_25.engine:ro
+    # Camera devices - native server now runs inside container
+    # DRI devices required for headless EGL on Jetson
     devices:
       - /dev/video0:/dev/video0
       - /dev/video1:/dev/video1
+      - /dev/dri:/dev/dri
     environment:
       - DISPLAY=${DISPLAY}
+      - XAUTHORITY=/root/.Xauthority
       - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,display
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,display,video
+      # Force nvidia EGL vendor for headless operation
+      - __EGL_VENDOR_LIBRARY_FILENAMES=/usr/lib/aarch64-linux-gnu/tegra-egl/nvidia.json
+      # Library paths for native binary (tegra-egl first for NvBufSurface EGL)
+      - LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu/tegra-egl:/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu/nvidia:/app/native:/app/native/build
       - BIOMETRIC_SECURITY_URL=http://biometric-security:5003
       - SOLANA_MIDDLEWARE_URL=http://solana-middleware:5001
       # Backend connection for WebRTC signaling and device registration
@@ -65,7 +87,9 @@ services:
       # Testing: Skip video uploads to Walrus (set to "true" to disable)
       - SKIP_VIDEO_UPLOAD=true
       # CV Dev Mode: Use video file instead of camera (no camera required)
-      - CV_DEV_MODE=true
+      - CV_DEV_MODE=false
+      # Native Mode: C++ TensorRT inference server runs inside this container
+      - NATIVE_MODE=true
       # CV_DEV_VIDEO is optional - use /api/dev/load to select videos dynamically
       # Livepeer Configuration REMOVED - using WebRTC/WHIP for all streaming
       # - LIVEPEER_API_KEY=${LIVEPEER_API_KEY}

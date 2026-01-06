@@ -177,10 +177,10 @@ class WHIPPublisher:
             'MEDIAMTX_URL', 'http://129.80.99.75:8889'
         )
 
-        # Stream name - use camera PDA for unique identification
-        self.stream_name = stream_name or os.environ.get(
-            'CAMERA_PDA', 'jetson-camera'
-        )
+        # Stream name - use camera PDA for unique identification (REQUIRED)
+        self.stream_name = stream_name or os.environ.get('CAMERA_PDA')
+        if not self.stream_name:
+            raise ValueError("CAMERA_PDA environment variable must be set")
 
         self.fps = fps
         self.buffer_service = None

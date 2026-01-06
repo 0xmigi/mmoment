@@ -41,6 +41,12 @@ class PushupApp(CompetitionApp):
         self.min_rep_time = 0.6       # Minimum time between reps (anti-cheat)
         self.confidence_threshold = 0.4  # Keypoint confidence threshold
 
+        # Body position validation thresholds (relative to body size, scale-invariant)
+        # These ensure person is actually in push-up position, not standing
+        # Ratios are relative to shoulder width (visible reference in front view)
+        self.max_torso_vertical_ratio = 1.5   # torso_vertical / shoulder_width - standing is typically 2.0+
+        self.max_wrist_above_ratio = 1.0      # wrist_above_shoulder / shoulder_width
+
         logger.info("PushupApp initialized with angle-based detection")
 
     def init_competitor_stats(self) -> Dict:
@@ -51,6 +57,8 @@ class PushupApp(CompetitionApp):
             'in_down_position': False,
             'current_angle': None,
             'view': None,  # 'front', 'left', 'right', or None
+            'position_valid': False,  # Whether in valid push-up position
+            'rejection_reason': None,  # Why position was rejected (if any)
         }
 
     def start_competition(self, competitors: List[Dict], duration_limit: int = None):
@@ -135,9 +143,22 @@ class PushupApp(CompetitionApp):
             stats['current_angle'] = None
             return
 
+        # Validate body position - must be in push-up position, not standing
+        is_valid_position, rejection_reason = self._is_in_pushup_position(keypoints, view)
+
+        if not is_valid_position:
+            # Not in push-up position - don't count anything
+            stats['view'] = view
+            stats['current_angle'] = elbow_angle
+            stats['position_valid'] = False
+            stats['rejection_reason'] = rejection_reason
+            return
+
         # Update stats
         stats['view'] = view
         stats['current_angle'] = elbow_angle
+        stats['position_valid'] = True
+        stats['rejection_reason'] = None
 
         # State machine: UP → DOWN → UP (completes rep)
         if elbow_angle < self.elbow_down_angle:
@@ -249,6 +270,120 @@ class PushupApp(CompetitionApp):
         except Exception as e:
             logger.debug(f"Angle calculation failed: {e}")
             return None
+
+    def _is_in_pushup_position(self, keypoints: np.ndarray, view: str) -> tuple[bool, str]:
+        """
+        Validate that person is actually in a push-up position, not standing.
+
+        Uses SCALE-INVARIANT ratios based on shoulder width, so it works
+        regardless of how far the person is from the camera.
+
+        Key insight for front-facing view:
+        - When STANDING: torso_vertical / shoulder_width is HIGH (1.5+)
+        - When in PUSH-UP: torso_vertical / shoulder_width is LOW (<0.8)
+
+        Args:
+            keypoints: COCO format keypoints array
+            view: Detected view ('front', 'left', 'right')
+
+        Returns:
+            (is_valid, reason) - True if in valid push-up position
+        """
+        conf_thresh = self.confidence_threshold
+
+        # COCO keypoint indices
+        left_shoulder = keypoints[5]
+        right_shoulder = keypoints[6]
+        left_wrist = keypoints[9]
+        right_wrist = keypoints[10]
+        left_hip = keypoints[11]
+        right_hip = keypoints[12]
+
+        if view == 'front':
+            # Check shoulder visibility (required for reference measurement)
+            shoulders_visible = (left_shoulder[2] > conf_thresh and
+                               right_shoulder[2] > conf_thresh)
+            hips_visible = (left_hip[2] > conf_thresh and
+                          right_hip[2] > conf_thresh)
+            wrists_visible = (left_wrist[2] > conf_thresh and
+                            right_wrist[2] > conf_thresh)
+
+            if not shoulders_visible:
+                return False, "shoulders_not_visible"
+
+            # Calculate shoulder width as our scale reference
+            shoulder_width = abs(right_shoulder[0] - left_shoulder[0])
+            if shoulder_width < 10:  # Too small to be reliable
+                return False, "shoulders_too_close"
+
+            avg_shoulder_y = (left_shoulder[1] + right_shoulder[1]) / 2
+            wrist_ratio = None  # Track for logging
+
+            # Check 1: Wrists should not be far above shoulders (rules out overhead arm movements)
+            if wrists_visible:
+                avg_wrist_y = (left_wrist[1] + right_wrist[1]) / 2
+                wrist_above_shoulder = avg_shoulder_y - avg_wrist_y  # positive = wrists above shoulders
+
+                wrist_ratio = wrist_above_shoulder / shoulder_width
+                if wrist_ratio > self.max_wrist_above_ratio:
+                    logger.info(f"REJECTED: wrists above shoulders (ratio={wrist_ratio:.2f} > {self.max_wrist_above_ratio})")
+                    return False, "wrists_above_head"
+
+            # Check 2: Body should be roughly horizontal
+            # When standing: torso_vertical / shoulder_width is HIGH (person is upright)
+            # When in push-up: torso_vertical / shoulder_width is LOW (body is horizontal, going into camera)
+            if hips_visible:
+                avg_hip_y = (left_hip[1] + right_hip[1]) / 2
+                torso_vertical = abs(avg_hip_y - avg_shoulder_y)
+
+                torso_ratio = torso_vertical / shoulder_width
+
+                # Only log occasionally to reduce spam (every ~30 frames worth)
+                # logger.debug(f"POSITION CHECK: torso_ratio={torso_ratio:.2f}, wrist_ratio={wrist_ratio if wrist_ratio else 'N/A'}")
+
+                if torso_ratio > self.max_torso_vertical_ratio:
+                    logger.info(f"REJECTED: standing position (torso_ratio={torso_ratio:.2f} > {self.max_torso_vertical_ratio})")
+                    return False, "standing_position"
+
+            return True, "valid"
+
+        elif view in ('left', 'right'):
+            # For side views, use shoulder-to-hip distance as reference
+            shoulder = left_shoulder if view == 'left' else right_shoulder
+            wrist = left_wrist if view == 'left' else right_wrist
+            hip = left_hip if view == 'left' else right_hip
+
+            if shoulder[2] < conf_thresh:
+                return False, "shoulder_not_visible"
+
+            # For side view, we need a different reference - use torso length when horizontal
+            # This is trickier, so we'll be more permissive
+            if hip[2] > conf_thresh:
+                # In side view during push-up, the torso should be roughly horizontal
+                # meaning shoulder and hip have similar Y values
+                torso_vertical = abs(hip[1] - shoulder[1])
+                torso_horizontal = abs(hip[0] - shoulder[0])
+
+                # If torso is more vertical than horizontal, probably standing
+                if torso_horizontal > 10:  # Avoid division issues
+                    verticality = torso_vertical / torso_horizontal
+                    if verticality > 1.5:  # More vertical than horizontal = standing
+                        logger.info(f"REJECTED: standing in side view (verticality={verticality:.2f})")
+                        return False, "standing_position"
+
+            # Check wrist position relative to shoulder
+            if wrist[2] > conf_thresh and hip[2] > conf_thresh:
+                body_scale = abs(hip[1] - shoulder[1]) + abs(hip[0] - shoulder[0])
+                if body_scale > 20:
+                    wrist_above = shoulder[1] - wrist[1]
+                    wrist_ratio = wrist_above / body_scale
+                    if wrist_ratio > self.max_wrist_above_ratio:
+                        logger.info(f"REJECTED: wrist above shoulder ({view} view, ratio={wrist_ratio:.2f})")
+                        return False, "wrist_above_head"
+
+            return True, "valid"
+
+        return True, "unknown_view"
 
     def _build_visualization(self) -> Dict:
         """

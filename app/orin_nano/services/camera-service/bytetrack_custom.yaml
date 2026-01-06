@@ -1,8 +1,0 @@
-# Custom ByteTrack configuration for persistent tracking
-tracker_type: bytetrack
-track_high_thresh: 0.5  # High confidence detection threshold
-track_low_thresh: 0.1   # Low confidence for maintaining existing tracks
-new_track_thresh: 0.6   # Threshold for creating new tracks
-track_buffer: 90        # Keep lost tracks for 90 frames (3 seconds at 30fps) - INCREASED from default 30
-match_thresh: 0.8       # Matching threshold for associating detections to tracks
-frame_rate: 30          # Expected frame rate
