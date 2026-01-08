@@ -1800,8 +1800,15 @@ export class UnifiedCameraService {
 
   /**
    * End a competition (if supported)
+   * @param cameraId Camera identifier
+   * @param competition Optional competition metadata (escrow info, mode, stake, etc.)
    */
-  public async endCompetition(cameraId: string): Promise<CameraActionResponse<{ result: any }>> {
+  public async endCompetition(cameraId: string, competition?: {
+    mode: string;
+    escrow_pda?: string;
+    stake_amount_sol?: number;
+    target_reps?: number;
+  }): Promise<CameraActionResponse<{ result: any }>> {
     try {
       const camera = await this.getCamera(cameraId);
       if (!camera) {
@@ -1818,7 +1825,7 @@ export class UnifiedCameraService {
         };
       }
 
-      return await camera.endCompetition();
+      return await camera.endCompetition(competition);
     } catch (error) {
       return {
         success: false,

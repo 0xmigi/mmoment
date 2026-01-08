@@ -26,6 +26,7 @@ interface CameraAccountData {
     location?: number[];
   };
   lastActivityAt?: { toNumber: () => number };
+  devicePubkey?: PublicKey; // Jetson device key for signing/settlement
 }
 
 // We need a type that can handle both Transaction and VersionedTransaction
@@ -85,6 +86,7 @@ export const fetchCameraByPublicKey = async (publicKey: string, connection: Conn
           owner: cameraAccount.owner.toString(),
           isActive: cameraAccount.isActive,
           activityCounter: cameraAccount.activityCounter?.toNumber() || 0,
+          devicePubkey: cameraAccount.devicePubkey?.toString() || undefined,
           metadata: {
             name: cameraAccount.metadata?.name || 'Unnamed Camera',
             model: cameraAccount.metadata?.model || 'Unknown Model',
@@ -127,6 +129,7 @@ export interface CameraData {
   activityCounter?: number;
   lastActivityType?: number;
   lastActivityAt?: number;
+  devicePubkey?: string; // Jetson device key for signing/settlement
   metadata: {
     name: string;
     model: string;
@@ -168,7 +171,7 @@ const SELECTED_CAMERA_STORAGE_KEY = 'selected_camera';
 const SESSION_STORAGE_PREFIX = 'mmoment_session_';
 
 export function CameraProvider({ children }: { children: React.ReactNode }) {
-  const { primaryWallet } = useDynamicContext();
+  const { primaryWallet, user } = useDynamicContext();
   const { primaryProfile } = useSocialProfile();
   const { program, loading: programLoading } = useProgram();
   // Get connection for session chain creation
@@ -610,8 +613,8 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
       // Step 3: Call Jetson check-in endpoint
       const result = await unifiedCameraService.checkin(cameraId, {
         ...signedParams,
-        display_name: primaryProfile?.displayName,
-        username: primaryProfile?.username
+        display_name: primaryProfile?.displayName || user?.alias || user?.email?.split('@')[0] || undefined,
+        username: primaryProfile?.username || user?.username || undefined
       });
 
       if (result.success && result.data) {

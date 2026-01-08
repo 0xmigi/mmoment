@@ -1119,6 +1119,18 @@ export interface SessionTimelineEvent {
       stats: { reps?: number; [key: string]: unknown };
     }>;
     user_stats: { reps?: number; [key: string]: unknown };
+    // Competition/prize metadata (if financialized)
+    competition?: {
+      mode: 'none' | 'bet' | 'prize';
+      escrowPda?: string;
+      stakeAmountSol: number;
+      targetReps?: number;
+      won: boolean;
+      amountWonSol: number;
+      amountLostSol: number;
+      lostTo?: string;
+      settlementTxId?: string;
+    };
   };
 }
 

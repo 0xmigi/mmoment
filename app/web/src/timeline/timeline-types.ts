@@ -52,6 +52,28 @@ export interface CVActivityResult {
   };
 }
 
+/** Competition/Prize metadata for financialized CV activities */
+export interface CompetitionMetadata {
+  /** Competition mode: 'none' | 'bet' | 'prize' */
+  mode: 'none' | 'bet' | 'prize';
+  /** Escrow PDA address (on-chain) */
+  escrowPda?: string;
+  /** Amount staked/deposited in SOL */
+  stakeAmountSol: number;
+  /** Target reps (for prize/threshold mode) */
+  targetReps?: number;
+  /** Did the user win? */
+  won: boolean;
+  /** Amount won in SOL (0 if lost) */
+  amountWonSol: number;
+  /** Amount lost in SOL (0 if won) */
+  amountLostSol: number;
+  /** Who received the lost funds (camera wallet for prize mode) */
+  lostTo?: string;
+  /** Settlement transaction signature */
+  settlementTxId?: string;
+}
+
 /** CV activity metadata (competition results, etc.) */
 export interface CVActivityMetadata {
   app_name: string;
@@ -62,6 +84,8 @@ export interface CVActivityMetadata {
     reps?: number;
     [key: string]: unknown;
   };
+  /** Competition/prize info (if financialized) */
+  competition?: CompetitionMetadata;
 }
 
 export interface TimelineEvent {

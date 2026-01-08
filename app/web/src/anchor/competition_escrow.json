@@ -1,0 +1,1036 @@
+{
+  "address": "32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ",
+  "metadata": {
+    "name": "competition_escrow",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Solana escrow program for spontaneous IRL competitions with pool/sponsored funding"
+  },
+  "instructions": [
+    {
+      "name": "cancel_competition",
+      "docs": [
+        "Cancel the competition and refund all participants",
+        "Only initiator can cancel",
+        "",
+        "# Arguments",
+        "* `reason` - Reason for cancellation",
+        "",
+        "# Remaining Accounts",
+        "Pass participant accounts in order for refunds"
+      ],
+      "discriminator": [
+        62,
+        4,
+        198,
+        98,
+        200,
+        41,
+        255,
+        72
+      ],
+      "accounts": [
+        {
+          "name": "initiator",
+          "docs": [
+            "The initiator cancelling the competition"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The escrow account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  101,
+                  116,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow.camera",
+                "account": "CompetitionEscrow"
+              },
+              {
+                "kind": "account",
+                "path": "escrow.created_at",
+                "account": "CompetitionEscrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "reason",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "create_competition",
+      "docs": [
+        "Create a new competition with invited participants",
+        "Initiator deposits their stake if participating",
+        "",
+        "# Arguments",
+        "* `args` - Competition configuration (invitees, stake, payout rule)",
+        "* `created_at` - Unix timestamp (used for PDA derivation)"
+      ],
+      "discriminator": [
+        110,
+        212,
+        234,
+        212,
+        118,
+        128,
+        158,
+        244
+      ],
+      "accounts": [
+        {
+          "name": "initiator",
+          "docs": [
+            "The person initiating/creating the competition"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "camera",
+          "docs": [
+            "The camera authorized to settle this competition (Jetson device key)"
+          ]
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The escrow account to create"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  101,
+                  116,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "camera"
+              },
+              {
+                "kind": "arg",
+                "path": "created_at"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateCompetitionArgs"
+            }
+          }
+        },
+        {
+          "name": "created_at",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "decline_competition",
+      "docs": [
+        "Decline an invite (no funds involved)"
+      ],
+      "discriminator": [
+        174,
+        182,
+        79,
+        124,
+        176,
+        118,
+        19,
+        171
+      ],
+      "accounts": [
+        {
+          "name": "participant",
+          "docs": [
+            "The participant declining the invite"
+          ],
+          "signer": true
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The escrow account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  101,
+                  116,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow.camera",
+                "account": "CompetitionEscrow"
+              },
+              {
+                "kind": "account",
+                "path": "escrow.created_at",
+                "account": "CompetitionEscrow"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "join_competition",
+      "docs": [
+        "Accept an invite and deposit stake into escrow"
+      ],
+      "discriminator": [
+        9,
+        202,
+        251,
+        16,
+        34,
+        54,
+        85,
+        243
+      ],
+      "accounts": [
+        {
+          "name": "participant",
+          "docs": [
+            "The participant accepting the invite"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The escrow account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  101,
+                  116,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow.camera",
+                "account": "CompetitionEscrow"
+              },
+              {
+                "kind": "account",
+                "path": "escrow.created_at",
+                "account": "CompetitionEscrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "settle_competition",
+      "docs": [
+        "Settle the competition with final results",
+        "Only the authorized camera can call this",
+        "Distributes funds to winner(s) based on payout rule",
+        "",
+        "# Arguments",
+        "* `results` - Score for each participant (e.g., push-up reps)",
+        "",
+        "# Remaining Accounts",
+        "Pass winner accounts in order for fund distribution"
+      ],
+      "discriminator": [
+        83,
+        121,
+        9,
+        141,
+        170,
+        133,
+        230,
+        151
+      ],
+      "accounts": [
+        {
+          "name": "camera",
+          "docs": [
+            "The camera (Jetson device key) authorized to settle"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The escrow account holding the funds"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  101,
+                  116,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow.camera",
+                "account": "CompetitionEscrow"
+              },
+              {
+                "kind": "account",
+                "path": "escrow.created_at",
+                "account": "CompetitionEscrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "camera_owner",
+          "docs": [
+            "The camera owner's wallet - receives failed prize funds in ThresholdSplit mode",
+            "This is the wallet that owns the camera in camera_network program"
+          ],
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "results",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "ParticipantResult"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "start_competition",
+      "docs": [
+        "Start the competition after invites are resolved or timeout",
+        "Can be called by initiator or camera"
+      ],
+      "discriminator": [
+        213,
+        149,
+        189,
+        30,
+        12,
+        88,
+        146,
+        54
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "Either the initiator or the camera can start"
+          ],
+          "signer": true
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The escrow account"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  101,
+                  116,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow.camera",
+                "account": "CompetitionEscrow"
+              },
+              {
+                "kind": "account",
+                "path": "escrow.created_at",
+                "account": "CompetitionEscrow"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "CompetitionEscrow",
+      "discriminator": [
+        160,
+        59,
+        187,
+        35,
+        242,
+        15,
+        134,
+        246
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "CompetitionCancelled",
+      "discriminator": [
+        178,
+        147,
+        104,
+        113,
+        148,
+        99,
+        0,
+        237
+      ]
+    },
+    {
+      "name": "CompetitionCreated",
+      "discriminator": [
+        20,
+        172,
+        54,
+        140,
+        71,
+        253,
+        74,
+        235
+      ]
+    },
+    {
+      "name": "CompetitionSettled",
+      "discriminator": [
+        255,
+        156,
+        63,
+        104,
+        211,
+        74,
+        119,
+        153
+      ]
+    },
+    {
+      "name": "CompetitionStarted",
+      "discriminator": [
+        241,
+        197,
+        148,
+        5,
+        184,
+        166,
+        186,
+        110
+      ]
+    },
+    {
+      "name": "ParticipantDeclined",
+      "discriminator": [
+        172,
+        65,
+        252,
+        64,
+        116,
+        129,
+        159,
+        122
+      ]
+    },
+    {
+      "name": "ParticipantJoined",
+      "discriminator": [
+        48,
+        182,
+        206,
+        15,
+        56,
+        181,
+        24,
+        253
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidStatus",
+      "msg": "Competition is not in the expected status for this operation"
+    },
+    {
+      "code": 6001,
+      "name": "UnauthorizedCamera",
+      "msg": "Only the authorized camera can settle this competition"
+    },
+    {
+      "code": 6002,
+      "name": "UnauthorizedInitiator",
+      "msg": "Only the initiator can cancel this competition"
+    },
+    {
+      "code": 6003,
+      "name": "NotInvited",
+      "msg": "Participant is not invited to this competition"
+    },
+    {
+      "code": 6004,
+      "name": "AlreadyJoined",
+      "msg": "Participant has already joined this competition"
+    },
+    {
+      "code": 6005,
+      "name": "InsufficientFunds",
+      "msg": "Insufficient funds to join competition"
+    },
+    {
+      "code": 6006,
+      "name": "MaxParticipantsReached",
+      "msg": "Maximum number of participants reached"
+    },
+    {
+      "code": 6007,
+      "name": "NoParticipants",
+      "msg": "No participants in the competition"
+    },
+    {
+      "code": 6008,
+      "name": "IncompleteResults",
+      "msg": "Results do not include all participants"
+    },
+    {
+      "code": 6009,
+      "name": "InviteExpired",
+      "msg": "Invite timeout has expired"
+    },
+    {
+      "code": 6010,
+      "name": "CannotCancel",
+      "msg": "Cannot cancel - competition is already active or settled"
+    },
+    {
+      "code": 6011,
+      "name": "NoWinners",
+      "msg": "No winners determined from results"
+    },
+    {
+      "code": 6012,
+      "name": "InvalidStakeAmount",
+      "msg": "Stake amount must be greater than zero"
+    },
+    {
+      "code": 6013,
+      "name": "NoInvitees",
+      "msg": "Must invite at least one participant"
+    },
+    {
+      "code": 6014,
+      "name": "ArithmeticOverflow",
+      "msg": "Arithmetic overflow occurred"
+    },
+    {
+      "code": 6015,
+      "name": "NoFundsToDistribute",
+      "msg": "Competition has no funds to distribute"
+    },
+    {
+      "code": 6016,
+      "name": "ParticipantNotInResults",
+      "msg": "Participant not found in results"
+    }
+  ],
+  "types": [
+    {
+      "name": "CompetitionCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "reason",
+            "type": "string"
+          },
+          {
+            "name": "refunded_to",
+            "type": {
+              "vec": "pubkey"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "CompetitionCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "initiator",
+            "type": "pubkey"
+          },
+          {
+            "name": "camera",
+            "type": "pubkey"
+          },
+          {
+            "name": "stake_per_person",
+            "type": "u64"
+          },
+          {
+            "name": "invitees",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "payout_rule",
+            "type": {
+              "defined": {
+                "name": "PayoutRule"
+              }
+            }
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CompetitionEscrow",
+      "docs": [
+        "Main escrow account for a competition",
+        "Seeds: [\"competition\", camera.key(), created_at.to_le_bytes()]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "initiator",
+            "docs": [
+              "Who initiated/created the competition"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "camera",
+            "docs": [
+              "Camera authorized to settle results (Jetson device key)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "stake_per_person",
+            "docs": [
+              "Amount each participant must deposit (lamports)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "participants",
+            "docs": [
+              "Participants who have deposited (includes initiator if they're participating)"
+            ],
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "pending_invites",
+            "docs": [
+              "Invited participants who haven't accepted yet"
+            ],
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "total_pool",
+            "docs": [
+              "Total lamports held in escrow"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "status",
+            "docs": [
+              "Current status of the competition"
+            ],
+            "type": {
+              "defined": {
+                "name": "CompetitionStatus"
+              }
+            }
+          },
+          {
+            "name": "payout_rule",
+            "docs": [
+              "How winnings are distributed"
+            ],
+            "type": {
+              "defined": {
+                "name": "PayoutRule"
+              }
+            }
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Unix timestamp when created"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "invite_timeout_secs",
+            "docs": [
+              "Timeout for pending invites (seconds from created_at)"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "winners",
+            "docs": [
+              "Winner(s) after settlement - could be multiple for threshold split"
+            ],
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CompetitionSettled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "winners",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "payout_per_winner",
+            "type": "u64"
+          },
+          {
+            "name": "total_distributed",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CompetitionStarted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "participants",
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "total_pool",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CompetitionStatus",
+      "docs": [
+        "Competition lifecycle status"
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pending"
+          },
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Settled"
+          },
+          {
+            "name": "Cancelled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateCompetitionArgs",
+      "docs": [
+        "Arguments for creating a competition"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "invitees",
+            "docs": [
+              "Participants to invite (excluding initiator if they're also participating)"
+            ],
+            "type": {
+              "vec": "pubkey"
+            }
+          },
+          {
+            "name": "initiator_participates",
+            "docs": [
+              "Whether initiator is also a participant"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "stake_per_person",
+            "docs": [
+              "Amount each participant stakes"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "payout_rule",
+            "docs": [
+              "Payout rule"
+            ],
+            "type": {
+              "defined": {
+                "name": "PayoutRule"
+              }
+            }
+          },
+          {
+            "name": "invite_timeout_secs",
+            "docs": [
+              "Timeout for invites in seconds (default: 60)"
+            ],
+            "type": {
+              "option": "u32"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ParticipantDeclined",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "participant",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ParticipantJoined",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "participant",
+            "type": "pubkey"
+          },
+          {
+            "name": "total_pool",
+            "type": "u64"
+          },
+          {
+            "name": "participants_count",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ParticipantResult",
+      "docs": [
+        "Result submitted for a participant at settlement"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "participant",
+            "type": "pubkey"
+          },
+          {
+            "name": "score",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PayoutRule",
+      "docs": [
+        "How competition winnings are distributed"
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "WinnerTakesAll"
+          },
+          {
+            "name": "ThresholdSplit",
+            "fields": [
+              {
+                "name": "min_reps",
+                "type": "u32"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

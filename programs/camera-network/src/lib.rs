@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-declare_id!("E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL"); // Updated program ID
+declare_id!("E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL"); // Deployed program ID
 
 mod error;
 mod state;

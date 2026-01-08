@@ -1,5 +1,5 @@
 import { Dialog } from '@headlessui/react';
-import { X, ExternalLink, Trophy, Users, Clock, Gift } from 'lucide-react';
+import { X, ExternalLink, Trophy, Users, Clock, Gift, Target, Coins, CheckCircle, XCircle } from 'lucide-react';
 import { CVActivityMetadata } from '../timeline/timeline-types';
 
 interface ProfileModalProps {
@@ -258,8 +258,100 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
                           </div>
                         )}
 
-                        {/* Prize/Bounty (future) */}
-                        {action.prize && (
+                        {/* Competition/Prize Section */}
+                        {action.cvActivity.competition && action.cvActivity.competition.mode !== 'none' && (
+                          <div className="mt-2 pt-2 border-t border-gray-200/75 space-y-2">
+                            <div className="text-xs font-medium text-gray-500 flex items-center gap-1">
+                              <Coins className="w-3 h-3" />
+                              {action.cvActivity.competition.mode === 'prize' ? 'Prize' : 'Bet'}
+                            </div>
+
+                            {/* Competition type and stake */}
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div className="bg-white rounded px-2 py-1.5">
+                                <div className="text-gray-500 text-[10px]">Type</div>
+                                <div className="font-medium text-gray-900">
+                                  {action.cvActivity.participant_count === 1 ? 'vs Self' : 'vs Group'}
+                                </div>
+                              </div>
+                              <div className="bg-white rounded px-2 py-1.5">
+                                <div className="text-gray-500 text-[10px]">Staked</div>
+                                <div className="font-medium text-gray-900">
+                                  {action.cvActivity.competition.stakeAmountSol} SOL
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Target (for prize mode) */}
+                            {action.cvActivity.competition.targetReps && (
+                              <div className="flex items-center gap-2 text-xs bg-white rounded px-2 py-1.5">
+                                <Target className="w-3 h-3 text-gray-400" />
+                                <span className="text-gray-500">Target:</span>
+                                <span className="font-medium text-gray-900">
+                                  {action.cvActivity.competition.targetReps} reps
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Result */}
+                            <div className={`flex items-center justify-between rounded px-2 py-1.5 ${
+                              action.cvActivity.competition.won
+                                ? 'bg-green-50 border border-green-200'
+                                : 'bg-red-50 border border-red-200'
+                            }`}>
+                              <div className="flex items-center gap-2">
+                                {action.cvActivity.competition.won ? (
+                                  <CheckCircle className="w-4 h-4 text-green-600" />
+                                ) : (
+                                  <XCircle className="w-4 h-4 text-red-600" />
+                                )}
+                                <span className={`text-sm font-medium ${
+                                  action.cvActivity.competition.won ? 'text-green-700' : 'text-red-700'
+                                }`}>
+                                  {action.cvActivity.competition.won ? 'Won!' : 'Lost'}
+                                </span>
+                              </div>
+                              <div className={`text-sm font-bold ${
+                                action.cvActivity.competition.won ? 'text-green-700' : 'text-red-700'
+                              }`}>
+                                {action.cvActivity.competition.won
+                                  ? `+${action.cvActivity.competition.amountWonSol} SOL`
+                                  : `-${action.cvActivity.competition.amountLostSol} SOL`
+                                }
+                              </div>
+                            </div>
+
+                            {/* Lost to info (for failed prize) */}
+                            {!action.cvActivity.competition.won && action.cvActivity.competition.lostTo && (
+                              <div className="text-[10px] text-gray-500">
+                                Funds sent to camera: {action.cvActivity.competition.lostTo.slice(0, 4)}...{action.cvActivity.competition.lostTo.slice(-4)}
+                              </div>
+                            )}
+
+                            {/* On-chain links */}
+                            <div className="flex flex-wrap gap-2 text-[10px]">
+                              {action.cvActivity.competition.escrowPda && (
+                                <button
+                                  onClick={() => window.open(`https://solscan.io/account/${action.cvActivity?.competition?.escrowPda}?cluster=devnet`, '_blank')}
+                                  className="text-primary hover:text-primary-hover flex items-center gap-1"
+                                >
+                                  Escrow <ExternalLink className="w-2.5 h-2.5" />
+                                </button>
+                              )}
+                              {action.cvActivity.competition.settlementTxId && (
+                                <button
+                                  onClick={() => window.open(`https://solscan.io/tx/${action.cvActivity?.competition?.settlementTxId}?cluster=devnet`, '_blank')}
+                                  className="text-primary hover:text-primary-hover flex items-center gap-1"
+                                >
+                                  Settlement Tx <ExternalLink className="w-2.5 h-2.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Legacy Prize/Bounty support */}
+                        {action.prize && !action.cvActivity.competition && (
                           <div className="flex items-center gap-2 pt-1 text-xs">
                             <Gift className="w-3 h-3 text-green-600" />
                             <span className="text-green-700 font-medium">

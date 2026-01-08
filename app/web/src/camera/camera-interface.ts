@@ -146,7 +146,12 @@ export interface ICamera {
 
   // Competition support (for CompetitionApp types)
   startCompetition?(competitors: Array<{ wallet_address: string; display_name: string }>, durationLimit?: number): Promise<CameraActionResponse<{ message: string }>>;
-  endCompetition?(): Promise<CameraActionResponse<{ result: any }>>;
+  endCompetition?(competition?: {
+    mode: string;
+    escrow_pda?: string;
+    stake_amount_sol?: number;
+    target_reps?: number;
+  }): Promise<CameraActionResponse<{ result: any }>>;
 
   // Session management
   getCurrentSession(): CameraSession | null;

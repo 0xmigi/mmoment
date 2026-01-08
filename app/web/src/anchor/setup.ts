@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { AnchorProvider, Program, Idl, setProvider } from '@coral-xyz/anchor';
+import { AnchorProvider, Program, Idl, setProvider, BN } from '@coral-xyz/anchor';
 import { PublicKey, Keypair } from '@solana/web3.js';
 import { useConnection, useAnchorWallet } from '@solana/wallet-adapter-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { isSolanaWallet } from '@dynamic-labs/solana';
 import { IDL } from './idl';
 import type { CameraNetwork } from './idl';
+import { COMPETITION_ESCROW_IDL } from './competition-escrow-idl';
 
 // Updated program ID to match the one in lib.rs
 export const CAMERA_ACTIVATION_PROGRAM_ID = new PublicKey("E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL");
@@ -13,12 +14,22 @@ export const CAMERA_ACTIVATION_PROGRAM_ID = new PublicKey("E67WTa1NpFVoapXwYYQmX
 // Camera Network Program ID (same as the activation program ID)
 export const CAMERA_NETWORK_PROGRAM_ID = new PublicKey("E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL");
 
+// Competition Escrow Program ID
+export const COMPETITION_ESCROW_PROGRAM_ID = new PublicKey("32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ");
+
 // Global cache to prevent multiple initializations
 let globalProgramInstance: Program<CameraNetwork> | null = null;
 let lastWalletAddress: string | null = null;
 let setupInProgress = false;
 let lastSetupAttempt = 0;
 const SETUP_COOLDOWN_MS = 5000; // 5 seconds cooldown between setup attempts
+
+// Global cache for Competition Escrow program
+// Note: Using 'any' because Anchor 0.30+ IDL format differs from the Idl type
+let globalCompetitionEscrowInstance: Program<any> | null = null;
+let lastEscrowWalletAddress: string | null = null;
+let escrowSetupInProgress = false;
+let lastEscrowSetupAttempt = 0;
 
 /**
  * Hook to use the Camera Activation program
@@ -337,6 +348,115 @@ export const findUserSessionChainPDA = (user: PublicKey) => {
 };
 
 /**
+ * Hook to use the Competition Escrow program
+ * Follows the same pattern as useCameraActivationProgram
+ */
+export function useCompetitionEscrowProgram() {
+  const { connection } = useConnection();
+  const dynamicContext = useDynamicContext();
+  const { primaryWallet } = dynamicContext;
+
+  const [program, setProgram] = useState<Program<any> | null>(globalCompetitionEscrowInstance);
+  const [loading, setLoading] = useState<boolean>(!globalCompetitionEscrowInstance);
+  const [error, setError] = useState<Error | null>(null);
+
+  const walletAddress = primaryWallet?.address;
+  const isWalletConnected = !!walletAddress;
+
+  const setupAttemptedRef = useRef(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const setupProgram = async () => {
+      const now = Date.now();
+      if (escrowSetupInProgress || (now - lastEscrowSetupAttempt < SETUP_COOLDOWN_MS)) {
+        return;
+      }
+
+      if (globalCompetitionEscrowInstance && walletAddress === lastEscrowWalletAddress) {
+        if (mounted) {
+          setProgram(globalCompetitionEscrowInstance);
+          setLoading(false);
+          setError(null);
+        }
+        return;
+      }
+
+      escrowSetupInProgress = true;
+      lastEscrowSetupAttempt = now;
+      setupAttemptedRef.current = true;
+
+      try {
+        if (!isWalletConnected || !primaryWallet) {
+          console.log('[CompetitionEscrow] No wallet connected, skipping program setup');
+          if (mounted) {
+            setLoading(false);
+          }
+          escrowSetupInProgress = false;
+          return;
+        }
+
+        if (!isSolanaWallet(primaryWallet)) {
+          throw new Error('This is not a Solana wallet');
+        }
+
+        if (!connection) {
+          throw new Error('No connection available');
+        }
+
+        console.log('[CompetitionEscrow] Setting up program with wallet:', walletAddress);
+
+        const dummyWallet = {
+          publicKey: new PublicKey(primaryWallet.address),
+          signTransaction: async (tx: any) => tx,
+          signAllTransactions: async (txs: any) => txs,
+        } as any;
+
+        const provider = new AnchorProvider(
+          connection,
+          dummyWallet,
+          { commitment: "confirmed" }
+        );
+
+        const prog = new Program(
+          COMPETITION_ESCROW_IDL as any,
+          COMPETITION_ESCROW_PROGRAM_ID,
+          provider
+        );
+
+        console.log('[CompetitionEscrow] Program initialized successfully');
+
+        globalCompetitionEscrowInstance = prog;
+        lastEscrowWalletAddress = walletAddress;
+
+        if (mounted) {
+          setProgram(prog);
+          setError(null);
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error('[CompetitionEscrow] Failed to setup program:', err);
+        if (mounted) {
+          setError(err instanceof Error ? err : new Error(String(err)));
+          setLoading(false);
+        }
+      } finally {
+        escrowSetupInProgress = false;
+      }
+    };
+
+    if (!setupAttemptedRef.current || walletAddress !== lastEscrowWalletAddress) {
+      setupProgram();
+    }
+
+    return () => { mounted = false; };
+  }, [connection, walletAddress, primaryWallet, dynamicContext]);
+
+  return { program, loading, error, isWalletConnected };
+}
+
+/**
  * Alias for useCameraActivationProgram for backward compatibility
  */
 export function useProgram() {
@@ -442,4 +562,65 @@ export function useProgram() {
   }, [connection, primaryWallet?.address]);
 
   return { program, loading, error };
-} 
+}
+
+// ============================================
+// Competition Escrow PDA Helpers
+// ============================================
+
+/**
+ * Find the Competition Escrow PDA for a given camera and creation timestamp
+ * Seeds: ["competition", camera.key(), created_at.to_le_bytes()]
+ */
+export const findCompetitionEscrowPDA = (camera: PublicKey, createdAt: BN | bigint | number) => {
+  const createdAtBN = BN.isBN(createdAt) ? createdAt : new BN(createdAt.toString());
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("competition"),
+      camera.toBuffer(),
+      createdAtBN.toArrayLike(Buffer, "le", 8)
+    ],
+    COMPETITION_ESCROW_PROGRAM_ID
+  );
+};
+
+/**
+ * Helper type for competition status
+ */
+export type CompetitionStatusType = 'pending' | 'active' | 'settled' | 'cancelled';
+
+/**
+ * Parse competition status from on-chain account
+ * Handles both camelCase and PascalCase variants from different Anchor versions
+ */
+export const parseCompetitionStatus = (status: any): CompetitionStatusType => {
+  // Check PascalCase (Anchor 0.30+ IDL format)
+  if (status.Pending !== undefined) return 'pending';
+  if (status.Active !== undefined) return 'active';
+  if (status.Settled !== undefined) return 'settled';
+  if (status.Cancelled !== undefined) return 'cancelled';
+  // Check lowercase (older format or runtime deserialization)
+  if (status.pending !== undefined) return 'pending';
+  if (status.active !== undefined) return 'active';
+  if (status.settled !== undefined) return 'settled';
+  if (status.cancelled !== undefined) return 'cancelled';
+  return 'pending';
+};
+
+/**
+ * Convert lamports to SOL for display
+ */
+export const lamportsToSol = (lamports: bigint | BN | number): number => {
+  const value = typeof lamports === 'bigint' ? Number(lamports) : BN.isBN(lamports) ? lamports.toNumber() : lamports;
+  return value / 1_000_000_000;
+};
+
+/**
+ * Convert SOL to lamports for transactions
+ */
+export const solToLamports = (sol: number): BN => {
+  return new BN(Math.floor(sol * 1_000_000_000));
+};
+
+
+export { BN } from '@coral-xyz/anchor';

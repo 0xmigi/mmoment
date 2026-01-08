@@ -1771,11 +1771,19 @@ export class JetsonCamera implements ICamera {
 
   /**
    * End a competition
+   * @param competition Optional competition metadata (escrow info, mode, stake, etc.)
    */
-  async endCompetition(): Promise<CameraActionResponse<{ result: any }>> {
+  async endCompetition(competition?: {
+    mode: string;
+    escrow_pda?: string;
+    stake_amount_sol?: number;
+    target_reps?: number;
+  }): Promise<CameraActionResponse<{ result: any }>> {
     try {
-      this.log('Ending competition');
-      const response = await this.makeApiCall('/api/apps/competition/end', 'POST', {});
+      this.log('Ending competition', competition);
+      const response = await this.makeApiCall('/api/apps/competition/end', 'POST', {
+        competition: competition || {}
+      });
       const data = await response.json();
 
       if (response.ok && data.success) {

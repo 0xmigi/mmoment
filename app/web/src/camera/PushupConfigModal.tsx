@@ -1,7 +1,11 @@
 import { Dialog } from '@headlessui/react';
-import { X, Users, DollarSign, Play, Loader2 } from 'lucide-react';
+import { X, Users, Play, Loader2, AlertCircle, Trophy, Swords } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { unifiedCameraService } from './unified-camera-service';
+import { useCompetitionEscrow } from '../hooks/useCompetitionEscrow';
+import { useCamera } from './CameraProvider';
+
+type CompetitionMode = 'none' | 'bet' | 'prize';
 
 interface Competitor {
   wallet_address: string;
@@ -28,8 +32,20 @@ export function PushupConfigModal({
   const [recognizedUsers, setRecognizedUsers] = useState<Competitor[]>([]);
   const [selectedCompetitors, setSelectedCompetitors] = useState<Set<string>>(new Set());
   const [duration, setDuration] = useState<number>(300); // Default 5 minutes
-  const [betAmount, setBetAmount] = useState<number>(0);
+  const [competitionMode, setCompetitionMode] = useState<CompetitionMode>('none');
+  const [stakeAmount, setStakeAmount] = useState<number>(0.01);
+  const [prizeAmount, setPrizeAmount] = useState<number>(0.01);
+  const [targetPushups, setTargetPushups] = useState<number>(10);
   const [error, setError] = useState<string | null>(null);
+
+  // Competition escrow integration
+  const { selectedCamera } = useCamera();
+  const {
+    createCompetition,
+    loading: escrowLoading,
+    error: escrowError,
+    clearError: clearEscrowError
+  } = useCompetitionEscrow();
 
   // Fetch currently recognized users (those with recognition tokens who are checked in)
   useEffect(() => {
@@ -98,6 +114,7 @@ export function PushupConfigModal({
     try {
       setIsLoading(true);
       setError(null);
+      clearEscrowError();
 
       // Get selected competitor details - store for later use
       const competitors = recognizedUsers
@@ -107,10 +124,80 @@ export function PushupConfigModal({
           display_name: user.display_name
         }));
 
+      // Get invitees (competitors excluding current user)
+      const invitees = competitors
+        .filter(c => c.wallet_address !== walletAddress)
+        .map(c => c.wallet_address);
+
+      // If competition mode is enabled, create on-chain escrow
+      let escrowPda: string | null = null;
+      let createdAt: number | null = null;
+
+      if (competitionMode !== 'none' && selectedCamera?.devicePubkey) {
+        console.log('[PushupConfigModal] Creating on-chain competition escrow...', { mode: competitionMode });
+
+        if (competitionMode === 'bet') {
+          // Bet mode: everyone stakes, winner takes all
+          const result = await createCompetition({
+            cameraDevicePubkey: selectedCamera.devicePubkey,
+            invitees,
+            stakePerPersonSol: stakeAmount,
+            payoutRule: 'winnerTakesAll',
+            initiatorParticipates: true,
+            inviteTimeoutSecs: 60,
+          });
+
+          if (!result) {
+            throw new Error(escrowError || 'Failed to create competition escrow');
+          }
+
+          escrowPda = result.escrowPda;
+          createdAt = result.createdAt;
+        } else if (competitionMode === 'prize') {
+          // Prize mode: initiator deposits prize, threshold split for winners
+          const result = await createCompetition({
+            cameraDevicePubkey: selectedCamera.devicePubkey,
+            invitees,
+            stakePerPersonSol: prizeAmount, // Initiator deposits this as the prize
+            payoutRule: 'thresholdSplit',
+            thresholdMinReps: targetPushups,
+            initiatorParticipates: true, // Initiator can also compete
+            inviteTimeoutSecs: 60,
+          });
+
+          if (!result) {
+            throw new Error(escrowError || 'Failed to create prize escrow');
+          }
+
+          escrowPda = result.escrowPda;
+          createdAt = result.createdAt;
+        }
+
+        console.log('[PushupConfigModal] Competition escrow created:', escrowPda);
+      }
+
       // Store competitors and duration in sessionStorage for the start/stop controls
       sessionStorage.setItem('competition_competitors', JSON.stringify(competitors));
       sessionStorage.setItem('competition_duration', duration.toString());
       sessionStorage.setItem('competition_app', 'pushup');
+      sessionStorage.setItem('competition_mode', competitionMode);
+
+      // Store escrow info if created
+      if (escrowPda) {
+        sessionStorage.setItem('competition_escrow_pda', escrowPda);
+        sessionStorage.setItem('competition_escrow_created_at', createdAt!.toString());
+        const amount = competitionMode === 'prize' ? prizeAmount : stakeAmount;
+        sessionStorage.setItem('competition_stake_sol', amount.toString());
+        if (competitionMode === 'prize') {
+          sessionStorage.setItem('competition_target_pushups', targetPushups.toString());
+        }
+      } else {
+        // Clear any existing escrow data for non-staked competitions
+        sessionStorage.removeItem('competition_escrow_pda');
+        sessionStorage.removeItem('competition_escrow_created_at');
+        sessionStorage.removeItem('competition_stake_sol');
+        sessionStorage.removeItem('competition_target_pushups');
+      }
 
       // Load the pushup app
       const loadResult = await unifiedCameraService.loadApp(cameraId, 'pushup');
@@ -238,49 +325,171 @@ export function PushupConfigModal({
               </select>
             </div>
 
-            {/* Betting Section (Placeholder for future implementation) */}
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-              <div className="flex items-center space-x-2 mb-2">
-                <DollarSign className="w-5 h-5 text-gray-400" />
-                <h3 className="text-sm font-medium text-gray-500">Put Your Money Where Your Muscles Are</h3>
-              </div>
-              <p className="text-xs text-gray-500">
-                Bet on yourself or challenge friends - coming soon!
-              </p>
-              <div className="mt-3">
-                <input
-                  type="number"
-                  value={betAmount}
-                  onChange={(e) => setBetAmount(Number(e.target.value))}
-                  placeholder="0.00 SOL"
-                  disabled
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white opacity-50 cursor-not-allowed"
-                />
+            {/* Competition Mode Selection */}
+            <div>
+              <label className="block text-sm font-medium text-gray-900 mb-3">
+                Competition Mode
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => setCompetitionMode('none')}
+                  className={`p-3 rounded-lg border-2 transition-all text-center ${
+                    competitionMode === 'none'
+                      ? 'border-primary bg-primary-light'
+                      : 'border-gray-200 bg-gray-50 hover:border-gray-300'
+                  }`}
+                >
+                  <Play className={`w-5 h-5 mx-auto mb-1 ${competitionMode === 'none' ? 'text-primary' : 'text-gray-400'}`} />
+                  <span className={`text-xs font-medium ${competitionMode === 'none' ? 'text-gray-900' : 'text-gray-500'}`}>
+                    Just Play
+                  </span>
+                </button>
+                <button
+                  onClick={() => setCompetitionMode('prize')}
+                  className={`p-3 rounded-lg border-2 transition-all text-center ${
+                    competitionMode === 'prize'
+                      ? 'border-yellow-500 bg-yellow-50'
+                      : 'border-gray-200 bg-gray-50 hover:border-gray-300'
+                  }`}
+                >
+                  <Trophy className={`w-5 h-5 mx-auto mb-1 ${competitionMode === 'prize' ? 'text-yellow-500' : 'text-gray-400'}`} />
+                  <span className={`text-xs font-medium ${competitionMode === 'prize' ? 'text-gray-900' : 'text-gray-500'}`}>
+                    Prize
+                  </span>
+                </button>
+                <button
+                  onClick={() => setCompetitionMode('bet')}
+                  className={`p-3 rounded-lg border-2 transition-all text-center ${
+                    competitionMode === 'bet'
+                      ? 'border-primary bg-primary-light'
+                      : 'border-gray-200 bg-gray-50 hover:border-gray-300'
+                  }`}
+                >
+                  <Swords className={`w-5 h-5 mx-auto mb-1 ${competitionMode === 'bet' ? 'text-primary' : 'text-gray-400'}`} />
+                  <span className={`text-xs font-medium ${competitionMode === 'bet' ? 'text-gray-900' : 'text-gray-500'}`}>
+                    Bet
+                  </span>
+                </button>
               </div>
             </div>
+
+            {/* Prize Mode Config */}
+            {competitionMode === 'prize' && (
+              <div className="border-2 border-yellow-500 bg-yellow-50 rounded-lg p-4 space-y-4">
+                {!selectedCamera?.devicePubkey && (
+                  <div className="flex items-center space-x-2 p-2 bg-orange-50 border border-orange-200 rounded-lg">
+                    <AlertCircle className="w-4 h-4 text-orange-500 flex-shrink-0" />
+                    <p className="text-xs text-orange-700">
+                      Camera device key not found. Prizes require a registered Jetson device.
+                    </p>
+                  </div>
+                )}
+                <p className="text-xs text-gray-600">
+                  Deposit a prize. Hit the target to win it back!
+                </p>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Prize Amount</label>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={prizeAmount}
+                      onChange={(e) => setPrizeAmount(Number(e.target.value))}
+                      disabled={!selectedCamera?.devicePubkey}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:opacity-50"
+                    />
+                    <span className="text-sm font-medium text-gray-700">SOL</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Target Pushups</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={targetPushups}
+                    onChange={(e) => setTargetPushups(Number(e.target.value))}
+                    disabled={!selectedCamera?.devicePubkey}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:opacity-50"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Complete {targetPushups} pushups to win the prize
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Bet Mode Config */}
+            {competitionMode === 'bet' && (
+              <div className="border-2 border-primary bg-primary-light rounded-lg p-4 space-y-3">
+                {!selectedCamera?.devicePubkey && (
+                  <div className="flex items-center space-x-2 p-2 bg-orange-50 border border-orange-200 rounded-lg">
+                    <AlertCircle className="w-4 h-4 text-orange-500 flex-shrink-0" />
+                    <p className="text-xs text-orange-700">
+                      Camera device key not found. Bets require a registered Jetson device.
+                    </p>
+                  </div>
+                )}
+                <p className="text-xs text-gray-600">
+                  Each participant bets SOL. Winner takes all!
+                </p>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Bet Amount (per person)</label>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={stakeAmount}
+                      onChange={(e) => setStakeAmount(Number(e.target.value))}
+                      disabled={!selectedCamera?.devicePubkey}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+                    />
+                    <span className="text-sm font-medium text-gray-700">SOL</span>
+                  </div>
+                </div>
+                {stakeAmount > 0 && selectedCompetitors.size > 0 && (
+                  <div className="text-xs text-gray-600">
+                    Total pot: <span className="font-semibold">{(stakeAmount * selectedCompetitors.size).toFixed(2)} SOL</span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Footer */}
           <div className="p-4 border-t border-gray-100">
             <button
               onClick={handleLoadApp}
-              disabled={isLoading || selectedCompetitors.size === 0}
+              disabled={isLoading || escrowLoading || selectedCompetitors.size === 0}
               className="w-full bg-primary text-white py-3 px-4 rounded-lg hover:bg-primary-hover transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
             >
-              {isLoading ? (
+              {isLoading || escrowLoading ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Loading App...</span>
+                  <span>{escrowLoading ? (competitionMode === 'prize' ? 'Depositing Prize...' : 'Placing Bet...') : 'Loading App...'}</span>
                 </>
               ) : (
                 <>
                   <Play className="w-5 h-5" />
-                  <span>Load App ({selectedCompetitors.size} {selectedCompetitors.size === 1 ? 'competitor' : 'competitors'})</span>
+                  <span>
+                    {competitionMode === 'prize' && prizeAmount > 0
+                      ? `Deposit ${prizeAmount} SOL Prize & Load App`
+                      : competitionMode === 'bet' && stakeAmount > 0
+                      ? `Bet ${stakeAmount} SOL & Load App`
+                      : `Load App (${selectedCompetitors.size} ${selectedCompetitors.size === 1 ? 'competitor' : 'competitors'})`
+                    }
+                  </span>
                 </>
               )}
             </button>
             <p className="text-xs text-gray-500 text-center mt-2">
-              Position yourself in frame, then use Start/Stop controls to begin
+              {competitionMode === 'prize' && prizeAmount > 0
+                ? `Prize deposited. Competitors who hit ${targetPushups} pushups split the pot.`
+                : competitionMode === 'bet' && stakeAmount > 0
+                ? 'Your bet is placed. Invites sent to other competitors.'
+                : 'Position yourself in frame, then use Start/Stop controls to begin'
+              }
             </p>
           </div>
         </Dialog.Panel>
