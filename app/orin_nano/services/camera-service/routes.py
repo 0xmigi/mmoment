@@ -32,8 +32,16 @@ from services.device_signer import DeviceSigner
 # Import native identity service for lightweight identity matching
 from services.native_identity_service import get_native_identity_service
 
+# Import competition settlement service for on-chain escrow settlement
+from services.competition_settlement import settle_competition
+
 # Set up logging
 logger = logging.getLogger("CameraRoutes")
+
+# Competition settlement configuration
+CAMERA_OWNER_WALLET = os.environ.get("CAMERA_OWNER_WALLET", "")
+SOLANA_RPC_URL = os.environ.get("SOLANA_RPC_URL", "https://api.devnet.solana.com")
+DEVICE_KEYPAIR_PATH = "/opt/mmoment/device/device-keypair.json"
 
 # Initialize device signer (singleton)
 device_signer = DeviceSigner()
@@ -1242,7 +1250,9 @@ def register_routes(app):
                     {"success": False, "error": "You must be checked in at this camera to create a recognition token", "checked_in": False}
                 ), 403
 
-            # Decode base64 image
+            # Decode base64 image with EXIF rotation handling
+            # Phone selfies have EXIF orientation metadata - cv2.imdecode ignores it
+            # Without this fix, portrait selfies come in as landscape (face sideways)
             try:
                 if image_data.startswith("data:image"):
                     # Remove data URL prefix (data:image/jpeg;base64,)
@@ -1250,16 +1260,31 @@ def register_routes(app):
 
                 # Decode base64 to bytes
                 import base64
+                import io
+                from PIL import Image, ImageOps
 
                 image_bytes = base64.b64decode(image_data)
 
-                # Convert to numpy array
+                # Use PIL to decode with EXIF rotation handling
+                pil_image = Image.open(io.BytesIO(image_bytes))
+                original_size = pil_image.size  # (width, height)
+
+                # Apply EXIF transpose - rotates image based on EXIF orientation tag
+                pil_image = ImageOps.exif_transpose(pil_image)
+                corrected_size = pil_image.size
+
+                # Convert PIL RGB to OpenCV BGR
                 import numpy as np
+                if pil_image.mode != 'RGB':
+                    pil_image = pil_image.convert('RGB')
+                frame = np.array(pil_image)
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
-                nparr = np.frombuffer(image_bytes, np.uint8)
-
-                # Decode image
-                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if frame is not None:
+                    h, w = frame.shape[:2]
+                    orientation = "PORTRAIT" if h > w else "LANDSCAPE"
+                    rotated = original_size != corrected_size
+                    logger.info(f"📸 [SELFIE] Raw: {original_size[0]}x{original_size[1]} -> EXIF corrected: {w}x{h} ({orientation}) [rotated={rotated}]")
 
                 if frame is None:
                     return jsonify(
@@ -1306,7 +1331,10 @@ def register_routes(app):
             try:
                 if use_native_mode:
                     # Use native TensorRT pipeline for face detection and embedding
-                    logger.info("Using native TensorRT pipeline for face embedding extraction")
+                    # With Python InsightFace alignment for exact ArcFace compatibility
+                    logger.info("Using native TensorRT + Python InsightFace alignment for face embedding extraction")
+
+                    # Step 1: Detect face and get landmarks from C++ RetinaFace
                     result = native_service.process_image(frame)
 
                     if result is None:
@@ -1331,7 +1359,13 @@ def register_routes(app):
                         key=lambda f: (f['bbox'][2] - f['bbox'][0]) * (f['bbox'][3] - f['bbox'][1]),
                     )
                     det_score = best_face.get('confidence', 0.9)
+                    landmarks = best_face.get('landmarks')
+
+                    # Use the C++ TensorRT embedding directly
+                    # Both phone selfie and camera stream now use the same C++ alignment
                     embedding = np.array(best_face['embedding'], dtype=np.float32)
+                    logger.info("Using C++ TensorRT embedding for face registration")
+
                     # Native embeddings are already normalized
 
                     # Use server's quality score directly (bbox coords are unreliable in full-frame mode)
@@ -3130,6 +3164,8 @@ def register_routes(app):
     @require_session
     def api_apps_competition_end():
         """End the current competition and buffer results to timeline"""
+        import asyncio
+
         services = get_services()
         if "app_manager" not in services:
             return jsonify(
@@ -3146,6 +3182,18 @@ def register_routes(app):
             ), 400
 
         try:
+            # Get request body for competition metadata
+            data = request.json or {}
+            competition_meta = data.get("competition")
+            # Frontend sends wallet_address, not user_wallet
+            user_wallet = data.get("user_wallet") or data.get("wallet_address")
+
+            # DEBUG: Log what we received
+            logger.info(f"[CompetitionEnd] Received data: {data}")
+            logger.info(f"[CompetitionEnd] competition_meta: {competition_meta}")
+            logger.info(f"[CompetitionEnd] user_wallet: {user_wallet}")
+            logger.info(f"[CompetitionEnd] CAMERA_OWNER_WALLET configured: {bool(CAMERA_OWNER_WALLET)}")
+
             # Get competition info before ending
             active_app = app_manager.active_app
             app_name = getattr(active_app, "name", active_app.__class__.__name__.lower().replace("app", ""))
@@ -3156,6 +3204,65 @@ def register_routes(app):
 
             # Buffer CV activity to timeline for each participant
             competitors = result.get("competitors", [])
+            cv_activity_meta = {}
+
+            # If competition has escrow, settle on-chain
+            if competition_meta and competition_meta.get("escrow_pda"):
+                if not CAMERA_OWNER_WALLET:
+                    logger.warning("CAMERA_OWNER_WALLET not configured, skipping settlement")
+                else:
+                    try:
+                        # Build participant results from CV tracking data
+                        participant_results = [
+                            {"wallet_address": c["wallet_address"], "score": c.get("stats", {}).get("reps", 0)}
+                            for c in competitors
+                            if c.get("wallet_address")
+                        ]
+
+                        logger.info(f"Settling competition escrow: {competition_meta['escrow_pda']}")
+
+                        # Get device keypair from signer
+                        camera_keypair = device_signer.get_keypair()
+                        if not camera_keypair:
+                            raise Exception("Device keypair not available")
+
+                        # Run async settlement
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            settlement = loop.run_until_complete(settle_competition(
+                                escrow_pda=competition_meta["escrow_pda"],
+                                camera_keypair=camera_keypair,
+                                camera_owner_pubkey=CAMERA_OWNER_WALLET,
+                                participant_results=participant_results,
+                                rpc_url=SOLANA_RPC_URL,
+                            ))
+                        finally:
+                            loop.close()
+
+                        # Add settlement to activity metadata for timeline display
+                        if settlement.get("success"):
+                            logger.info(f"Competition settled successfully: {settlement.get('tx_signature')}")
+                            cv_activity_meta["competition"] = {
+                                "mode": competition_meta.get("mode", "prize"),
+                                "escrowPda": competition_meta["escrow_pda"],
+                                "stakeAmountSol": competition_meta.get("stake_amount_sol", 0),
+                                "targetReps": competition_meta.get("target_reps"),
+                                "won": user_wallet in settlement.get("winners", []) if user_wallet else False,
+                                "amountWonSol": settlement.get("payout_per_winner_sol", 0) if user_wallet in settlement.get("winners", []) else 0,
+                                "amountLostSol": competition_meta.get("stake_amount_sol", 0) if user_wallet and user_wallet not in settlement.get("winners", []) else 0,
+                                "lostTo": CAMERA_OWNER_WALLET if not settlement.get("winners") and competition_meta.get("mode") == "prize" else None,
+                                "settlementTxId": settlement.get("tx_signature"),
+                            }
+                            result["settlement"] = settlement
+                        else:
+                            logger.error(f"Competition settlement failed: {settlement.get('error')}")
+                            result["settlement_error"] = settlement.get("error")
+
+                    except Exception as settle_err:
+                        logger.error(f"Failed to settle competition: {settle_err}", exc_info=True)
+                        result["settlement_error"] = str(settle_err)
+
             if competitors:
                 try:
                     import time
@@ -3173,6 +3280,7 @@ def register_routes(app):
                         app_name=app_name,
                         competitors=competitors,
                         duration_seconds=duration_seconds,
+                        metadata=cv_activity_meta if cv_activity_meta else None,
                     )
                     logger.info(f"CV activity buffered for {len(competitors)} competitors")
                 except Exception as timeline_err:

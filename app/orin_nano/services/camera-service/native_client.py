@@ -236,6 +236,61 @@ class NativeInferenceClient:
             self.disconnect()
             return None
 
+    def process_aligned_face(self, aligned_face: np.ndarray) -> Optional[Dict[str, Any]]:
+        """
+        Get ArcFace embedding from a pre-aligned 112x112 BGR face image.
+
+        This bypasses RetinaFace detection - the face is already aligned by
+        Python InsightFace's norm_crop() for exact compatibility.
+
+        Args:
+            aligned_face: 112x112 BGR image from InsightFace norm_crop
+
+        Returns:
+            Dict with 'success' and 'embedding' (512 floats), or None on error
+        """
+        if not self.connected:
+            logger.error("Not connected to native server")
+            return None
+
+        try:
+            # Validate input
+            if aligned_face.shape != (112, 112, 3):
+                logger.error(f"Invalid aligned face shape: {aligned_face.shape}, expected (112, 112, 3)")
+                return None
+
+            # Send process_aligned_face request
+            request = {'cmd': 'process_aligned_face'}
+            req_data = json.dumps(request).encode()
+            self.socket.sendall(struct.pack('>I', len(req_data)) + req_data)
+
+            # Send raw aligned face bytes (112 * 112 * 3 = 37632 bytes)
+            face_bytes = aligned_face.astype(np.uint8).tobytes()
+            self.socket.sendall(face_bytes)
+
+            # Receive response
+            header = self._recv_exact(4)
+            if not header:
+                raise ConnectionError("Failed to receive response header")
+
+            resp_len = struct.unpack('>I', header)[0]
+            resp_data = self._recv_exact(resp_len)
+            if not resp_data:
+                raise ConnectionError("Failed to receive response")
+
+            result = json.loads(resp_data.decode())
+
+            if 'error' in result:
+                logger.error(f"Server error: {result['error']}")
+                return None
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error processing aligned face: {e}")
+            self.disconnect()
+            return None
+
     def __del__(self):
         self.disconnect()
 
@@ -321,6 +376,35 @@ class NativeInferenceService:
 
         if result is None:
             raise RuntimeError("Failed to process image - server connection lost")
+
+        return result
+
+    def process_aligned_face(self, aligned_face: np.ndarray) -> Optional[Dict[str, Any]]:
+        """
+        Get ArcFace embedding from a pre-aligned 112x112 BGR face image.
+
+        This bypasses RetinaFace detection - the face is already aligned by
+        Python InsightFace's norm_crop() for exact compatibility.
+
+        Args:
+            aligned_face: 112x112 BGR image from InsightFace norm_crop
+
+        Returns:
+            Dict with 'success' and 'embedding' (512 floats), or None on error
+        """
+        if not self._initialized:
+            raise RuntimeError("Native service not initialized")
+
+        result = self._client.process_aligned_face(aligned_face)
+
+        if result is None:
+            # Connection lost, try to reconnect
+            logger.warning("Lost connection during process_aligned_face, attempting reconnect...")
+            if self._client.connect():
+                result = self._client.process_aligned_face(aligned_face)
+
+        if result is None:
+            raise RuntimeError("Failed to process aligned face - server connection lost")
 
         return result
 

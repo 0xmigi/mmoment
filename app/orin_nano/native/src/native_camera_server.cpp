@@ -119,6 +119,12 @@ extern "C" void launchConvertBGRToBGRx(
     cudaStream_t stream
 );
 
+// Convert 112x112 BGR to ArcFace input format (for process_aligned_face)
+extern "C" void launchConvertAlignedBGRToArcFaceInput(
+    const void* src, void* dst,
+    cudaStream_t stream
+);
+
 // =============================================================================
 // Global State
 // =============================================================================
@@ -153,6 +159,15 @@ static void* g_gpuProcessBGRx = nullptr;    // Converted to BGRx for InsightFace
 static const int MAX_PROCESS_WIDTH = 1920;
 static const int MAX_PROCESS_HEIGHT = 1920;
 static std::mutex g_processImageMutex;       // Protect process_image resources
+
+// Aligned face buffers (for process_aligned_face - Python InsightFace alignment)
+static void* g_gpuAlignedBGR = nullptr;     // 112x112 BGR input from Python
+static void* g_gpuAlignedFloat = nullptr;   // 112x112 RGB float CHW for ArcFace
+static std::mutex g_alignedFaceMutex;        // Protect aligned face resources
+
+// CRITICAL: InsightFace/ArcFace mutex - TensorRT contexts are NOT thread-safe!
+// Must lock whenever calling g_insightFace from any thread
+static std::mutex g_insightFaceMutex;
 
 // Latest result (protected by mutex)
 static NativeFrameResult g_latestResult = {};
@@ -415,6 +430,8 @@ void handleClient(int clientSock) {
 
             // Run InsightFace on full image (no person bbox, use full frame)
             // pitch = width * 4 for BGRx
+            // Lock InsightFace - TensorRT contexts are NOT thread-safe!
+            std::lock_guard<std::mutex> faceLock(g_insightFaceMutex);
             auto faces = g_insightFace->process(
                 g_gpuProcessBGRx,
                 width, height, width * 4,
@@ -450,6 +467,59 @@ void handleClient(int clientSock) {
             response += "],\"inference_ms\":0}";
 
             std::cout << "[Server] Extracted " << faces.size() << " faces from image" << std::endl;
+
+            uint32_t len = htonl(response.size());
+            sendAll(clientSock, &len, 4);
+            sendAll(clientSock, response.c_str(), response.size());
+
+        } else if (msg.find("\"process_aligned_face\"") != std::string::npos) {
+            // =================================================================
+            // Process pre-aligned 112x112 face through ArcFace ONLY
+            // This bypasses RetinaFace detection - face is already aligned by
+            // Python InsightFace norm_crop() for exact compatibility
+            // =================================================================
+
+            // Receive 112x112 BGR image (37632 bytes = 112 * 112 * 3)
+            const int FACE_SIZE = 112;
+            const size_t imageSize = FACE_SIZE * FACE_SIZE * 3;
+            std::vector<uint8_t> alignedFace(imageSize);
+
+            if (!recvAll(clientSock, alignedFace.data(), imageSize)) {
+                std::cerr << "[Server] Failed to receive aligned face data" << std::endl;
+                break;
+            }
+
+            std::cout << "[Server] Processing pre-aligned 112x112 face for ArcFace" << std::endl;
+
+            // Lock aligned face resources AND InsightFace mutex (TensorRT is NOT thread-safe!)
+            std::lock_guard<std::mutex> lock(g_alignedFaceMutex);
+            std::lock_guard<std::mutex> faceLock(g_insightFaceMutex);
+
+            // Copy BGR image to GPU
+            cudaMemcpy(g_gpuAlignedBGR, alignedFace.data(), imageSize, cudaMemcpyHostToDevice);
+
+            // Convert BGR to RGB float CHW with ArcFace normalization [-1, 1]
+            launchConvertAlignedBGRToArcFaceInput(g_gpuAlignedBGR, g_gpuAlignedFloat, g_stream);
+            cudaStreamSynchronize(g_stream);
+
+            // Run ArcFace to get 512-dim embedding
+            float embedding[512];
+            bool success = g_insightFace->getEmbeddingFromAligned(g_gpuAlignedFloat, embedding);
+
+            // Build JSON response
+            std::string response;
+            if (success) {
+                response = "{\"success\":true,\"embedding\":[";
+                for (int e = 0; e < 512; e++) {
+                    if (e > 0) response += ",";
+                    response += std::to_string(embedding[e]);
+                }
+                response += "]}";
+                std::cout << "[Server] ArcFace embedding extracted successfully" << std::endl;
+            } else {
+                response = "{\"success\":false,\"error\":\"ArcFace inference failed\"}";
+                std::cerr << "[Server] ArcFace inference failed" << std::endl;
+            }
 
             uint32_t len = htonl(response.size());
             sendAll(clientSock, &len, 4);
@@ -601,6 +671,11 @@ int main(int argc, char* argv[]) {
     cudaMalloc(&g_gpuProcessBGR, MAX_PROCESS_WIDTH * MAX_PROCESS_HEIGHT * 3);   // BGR input
     cudaMalloc(&g_gpuProcessBGRx, MAX_PROCESS_WIDTH * MAX_PROCESS_HEIGHT * 4);  // BGRx for InsightFace
     std::cout << "[Init] Allocated process_image buffers (max " << MAX_PROCESS_WIDTH << "x" << MAX_PROCESS_HEIGHT << ")" << std::endl;
+
+    // Allocate buffers for process_aligned_face (Python InsightFace alignment)
+    cudaMalloc(&g_gpuAlignedBGR, 112 * 112 * 3);                     // 112x112 BGR input
+    cudaMalloc(&g_gpuAlignedFloat, 112 * 112 * 3 * sizeof(float));   // 112x112 RGB float CHW
+    std::cout << "[Init] Allocated aligned face buffers (112x112)" << std::endl;
 
     // Allocate CPU buffer for ROTATED frame output (BGR, 3 channels, portrait orientation)
     g_latestFrameCPU.resize(ROTATED_WIDTH * ROTATED_HEIGHT * 3);
@@ -822,6 +897,8 @@ int main(int argc, char* argv[]) {
                         float px2 = ty2;                          // portX2 = landY2
                         float py2 = FRAME_WIDTH - 1 - tx1;        // portY2 = W-1-landX1
 
+                        // Lock InsightFace - TensorRT contexts are NOT thread-safe!
+                        std::lock_guard<std::mutex> faceLock(g_insightFaceMutex);
                         auto faces = g_insightFace->process(
                             g_gpuRotatedFrame,
                             ROTATED_WIDTH, ROTATED_HEIGHT, ROTATED_WIDTH * 4,  // 720x1280, pitch=720*4
@@ -875,16 +952,24 @@ int main(int argc, char* argv[]) {
                 g_reidUpdateCounter = 0;
 
                 // Compute ReID for each mature track
+                // IMPORTANT: Use ROTATED frame so person appears upright for OSNet
                 for (auto& track : trackedTracks) {
                     if (track.score > 0.5f && track.hits >= 3) {
                         float tx1, ty1, tx2, ty2;
                         track.getSmoothedBox(tx1, ty1, tx2, ty2);
 
+                        // Convert landscape bbox to portrait coordinates for rotated frame
+                        // For 90° CCW rotation: portrait(x,y) = (landY, srcW - 1 - landX)
+                        float px1 = ty1;                          // portX1 = landY1
+                        float py1 = FRAME_WIDTH - 1 - tx2;        // portY1 = W-1-landX2
+                        float px2 = ty2;                          // portX2 = landY2
+                        float py2 = FRAME_WIDTH - 1 - tx1;        // portY2 = W-1-landX1
+
                         float embedding[512];
                         bool success = g_reidEngine->getEmbeddingFromCrop(
-                            gpuFramePtr,
-                            FRAME_WIDTH, FRAME_HEIGHT, pitch,
-                            tx1, ty1, tx2, ty2,
+                            g_gpuRotatedFrame,
+                            ROTATED_WIDTH, ROTATED_HEIGHT, ROTATED_WIDTH * 4,  // 720x1280 BGRx
+                            px1, py1, px2, py2,
                             embedding
                         );
 
@@ -1070,6 +1155,8 @@ int main(int argc, char* argv[]) {
     cudaFree(g_gpuRotatedBGR);
     cudaFree(g_gpuProcessBGR);
     cudaFree(g_gpuProcessBGRx);
+    cudaFree(g_gpuAlignedBGR);
+    cudaFree(g_gpuAlignedFloat);
     cudaStreamDestroy(g_stream);
 
     // Free engines

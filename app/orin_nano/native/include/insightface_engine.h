@@ -135,6 +135,10 @@ public:
     // Compute cosine similarity between two embeddings
     static float cosineSimilarity(const float* emb1, const float* emb2);
 
+    // Get embedding from pre-aligned 112x112 face (already in GPU as RGB float CHW)
+    // Input must be already converted to ArcFace format: 112x112 RGB float CHW, [-1,1] normalized
+    bool getEmbeddingFromAligned(void* alignedFaceGpu, float* embedding);
+
 private:
     RetinaFaceEngine m_detector;
     ArcFaceEngine m_recognizer;

@@ -170,27 +170,25 @@ class NativeBufferService:
                 # Frame is already rotated on GPU by native server (720x1280 portrait)
                 # No CPU rotation needed!
 
-                # Update buffer
+                # Extract detection results from native server
+                persons = result.get('persons', [])
+                faces = result.get('faces', [])
+                timing = result.get('timing', {})
+
+                # Run identity matching OUTSIDE the lock (can be slow due to embedding comparisons)
+                # This prevents health check timeouts by not holding _buffer_lock during slow operations
+                if self._identity_service:
+                    persons = self._identity_service.process_native_results(persons, faces, frame)
+
+                # Update buffer - now just quick assignments, no slow operations
                 with self._buffer_lock:
                     self._frame_buffer.append((frame, current_time))
                     self._latest_frame = frame
                     self._latest_timestamp = current_time
                     self._frame_counter += 1
-
-                    # Store detection results
-                    persons = result.get('persons', [])
-                    faces = result.get('faces', [])
-                    self._latest_timing = result.get('timing', {})
-
-                    # Run identity matching using native embeddings
-                    # ALWAYS call to enhance persons with track mappings, even if no faces detected
-                    # Pass frame for body appearance extraction
-                    if self._identity_service:
-                        persons = self._identity_service.process_native_results(persons, faces, frame)
-
+                    self._latest_timing = timing
                     self._latest_persons = persons
                     self._latest_faces = faces
-
                     # Update dimensions
                     self._height, self._width = frame.shape[:2]
 
@@ -334,11 +332,14 @@ class NativeBufferService:
     # 9=left_wrist, 10=right_wrist, 11=left_hip, 12=right_hip,
     # 13=left_knee, 14=right_knee, 15=left_ankle, 16=right_ankle
     SKELETON = [
-        (0, 1), (0, 2), (1, 3), (2, 4),  # Head
+        # Head connections disabled - no face annotations
+        # (0, 1), (0, 2), (1, 3), (2, 4),  # Head
         (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),  # Arms
         (5, 11), (6, 12), (11, 12),  # Torso
         (11, 13), (13, 15), (12, 14), (14, 16)  # Legs
     ]
+    # Face keypoint indices to skip (nose, eyes, ears)
+    FACE_KEYPOINTS = {0, 1, 2, 3, 4}
     KPS_THRESHOLD = 0.5  # Keypoint confidence threshold
 
     def _draw_native_annotations(self, frame: np.ndarray, persons: list, faces: list) -> np.ndarray:
@@ -369,19 +370,91 @@ class NativeBufferService:
 
                 # Check if person is recognized
                 wallet_address = person.get('wallet_address')
+                face_similarity = person.get('face_similarity')
+
                 if wallet_address:
-                    # Get display name from identity store
+                    # Get display name - try identity store first, then session service fallback
                     from .identity_store import get_identity_store
+                    from .session_service import get_session_service
                     identity_store = get_identity_store()
                     display_name = identity_store.get_display_name(wallet_address)
 
-                    # Recognized - draw green box with display name
+                    # Fallback to session_service if we got truncated wallet (timing issue)
+                    if display_name == wallet_address[:8]:
+                        session_service = get_session_service()
+                        session = session_service.get_session_by_wallet(wallet_address)
+                        if session and session.get('display_name'):
+                            display_name = session['display_name']
+                        elif session and session.get('username'):
+                            display_name = session['username']
+
+                    # Build label with face similarity
+                    if face_similarity is not None:
+                        label_text = f"{display_name} ({face_similarity:.2f})"
+                    else:
+                        label_text = display_name
+
+                    # Recognized - draw green box
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
-                    cv2.putText(frame, display_name, (x1, y1 - 10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
+                    # Draw compact label with black background and green border
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    font_scale = 0.55
+                    thickness = 2
+                    (text_w, text_h), baseline = cv2.getTextSize(label_text, font, font_scale, thickness)
+
+                    # Position label above the box
+                    label_x = x1
+                    label_y = y1 - 8
+                    padding = 3
+
+                    # Label box coordinates
+                    box_x1 = label_x - padding
+                    box_y1 = label_y - text_h - padding
+                    box_x2 = label_x + text_w + padding
+                    box_y2 = label_y + baseline + padding
+
+                    # Draw black filled background
+                    cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), (0, 0, 0), -1)
+
+                    # Draw green border to match person bounding box
+                    cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), (0, 255, 0), 1)
+
+                    # Draw white text
+                    cv2.putText(frame, label_text, (label_x, label_y),
+                               font, font_scale, (255, 255, 255), thickness)
                 else:
                     # Unknown - draw yellow box
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+
+                    # Show label for unrecognized people
+                    label_text = "Unrecognized"
+                    if face_similarity is not None:
+                        label_text = f"Unrecognized ({face_similarity:.2f})"
+
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    font_scale = 0.55
+                    thickness = 2
+                    (text_w, text_h), baseline = cv2.getTextSize(label_text, font, font_scale, thickness)
+
+                    label_x = x1
+                    label_y = y1 - 8
+                    padding = 3
+
+                    # Label box coordinates
+                    box_x1 = label_x - padding
+                    box_y1 = label_y - text_h - padding
+                    box_x2 = label_x + text_w + padding
+                    box_y2 = label_y + baseline + padding
+
+                    # Draw dark background
+                    cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), (0, 0, 0), -1)
+
+                    # Draw yellow border to match person bounding box
+                    cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), (0, 255, 255), 1)
+
+                    cv2.putText(frame, label_text, (label_x, label_y),
+                               font, font_scale, (255, 255, 255), thickness)
 
             # Get and transform keypoints
             keypoints = person.get('keypoints', [])
@@ -411,8 +484,10 @@ class NativeBufferService:
                             0 <= x2 < w and 0 <= y2 < h):
                             cv2.line(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
 
-            # Draw keypoint circles (only confident ones)
-            for px, py, pc in kps_transformed:
+            # Draw keypoint circles (only confident ones, skip face keypoints)
+            for idx, (px, py, pc) in enumerate(kps_transformed):
+                if idx in self.FACE_KEYPOINTS:
+                    continue  # Skip face keypoints
                 if pc > self.KPS_THRESHOLD and 0 <= px < w and 0 <= py < h:
                     cv2.circle(frame, (px, py), 4, (255, 0, 0), -1)
 

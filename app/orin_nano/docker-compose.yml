@@ -76,6 +76,10 @@ services:
       - CAMERA_PROGRAM_ID=E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL
       # CAMERA_PDA will be set dynamically after device registration
       - SOLANA_RPC_URL=https://api.devnet.solana.com
+      # Competition Escrow Program ID
+      - COMPETITION_PROGRAM_ID=32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ
+      # Camera owner wallet - receives failed prize funds in ThresholdSplit mode
+      - CAMERA_OWNER_WALLET=${CAMERA_OWNER_WALLET}
       # Cloudflare Configuration for DNS automation
       - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
       - CLOUDFLARE_ZONE_ID=${CLOUDFLARE_ZONE_ID}

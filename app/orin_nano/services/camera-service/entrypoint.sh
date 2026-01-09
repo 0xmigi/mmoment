@@ -60,4 +60,9 @@ trap cleanup EXIT SIGTERM SIGINT
 # Start Python service
 echo "Starting Python camera service..."
 cd /app
+
+# Force unbuffered Python output so logs appear immediately
+# This is critical for debugging freezes - otherwise logs are stuck in buffer
+export PYTHONUNBUFFERED=1
+
 exec python3 main.py

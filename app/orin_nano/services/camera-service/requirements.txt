@@ -8,12 +8,15 @@ numpy==1.24.4
 mediapipe==0.10.9
 ultralytics==8.2.103
 insightface==0.7.3
+scikit-image>=0.21.0  # Required for InsightFace face alignment (norm_crop)
+onnxruntime>=1.18.0  # Required for InsightFace import (we use TensorRT for inference)
 
 # Networking and encryption
 requests==2.32.3
 cryptography==44.0.0
 
 # Blockchain
+solana==0.34.0
 solders==0.21.0
 base58==2.1.1
 

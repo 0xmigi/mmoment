@@ -930,4 +930,48 @@ extern "C" void launchCropPersonToReID(
     );
 }
 
+// =============================================================================
+// Convert 112x112 BGR uint8 to RGB float CHW with ArcFace normalization
+// For processing pre-aligned faces from Python InsightFace norm_crop
+// =============================================================================
+__global__ void convertAlignedBGRToArcFaceInput(
+    const unsigned char* __restrict__ src,  // 112x112 BGR (HWC)
+    float* __restrict__ dst                  // 112x112 RGB float (CHW)
+) {
+    const int SIZE = 112;
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x >= SIZE || y >= SIZE) return;
+
+    // Read BGR
+    int srcIdx = (y * SIZE + x) * 3;
+    float b = src[srcIdx + 0];
+    float g = src[srcIdx + 1];
+    float r = src[srcIdx + 2];
+
+    // Normalize to [-1, 1] for ArcFace (same as InsightFace)
+    r = (r - 127.5f) / 127.5f;
+    g = (g - 127.5f) / 127.5f;
+    b = (b - 127.5f) / 127.5f;
+
+    // Write CHW format (channels first)
+    int pixelIdx = y * SIZE + x;
+    dst[0 * SIZE * SIZE + pixelIdx] = r;  // R channel
+    dst[1 * SIZE * SIZE + pixelIdx] = g;  // G channel
+    dst[2 * SIZE * SIZE + pixelIdx] = b;  // B channel
+}
+
+extern "C" void launchConvertAlignedBGRToArcFaceInput(
+    const void* src, void* dst,
+    cudaStream_t stream
+) {
+    const int SIZE = 112;
+    dim3 block(16, 16);
+    dim3 grid((SIZE + block.x - 1) / block.x, (SIZE + block.y - 1) / block.y);
+    convertAlignedBGRToArcFaceInput<<<grid, block, 0, stream>>>(
+        (const unsigned char*)src, (float*)dst
+    );
+}
+
 } // namespace mmoment

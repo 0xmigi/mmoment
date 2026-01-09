@@ -596,4 +596,10 @@ float InsightFacePipeline::cosineSimilarity(const float* emb1, const float* emb2
     return dot;
 }
 
+bool InsightFacePipeline::getEmbeddingFromAligned(void* alignedFaceGpu, float* embedding) {
+    // Input: 112x112 RGB float CHW, already normalized to [-1, 1]
+    // Just run ArcFace directly - no detection or alignment needed
+    return m_recognizer.getEmbedding(alignedFaceGpu, embedding);
+}
+
 } // namespace mmoment

@@ -194,7 +194,7 @@ async def fetch_escrow_account(
 
 async def settle_competition(
     escrow_pda: str,
-    camera_keypair_path: str,
+    camera_keypair,  # Can be Keypair object or path string
     camera_owner_pubkey: str,
     participant_results: List[Dict[str, Any]],
     rpc_url: str = "https://api.devnet.solana.com",
@@ -204,7 +204,7 @@ async def settle_competition(
 
     Args:
         escrow_pda: The escrow PDA address (base58)
-        camera_keypair_path: Path to the camera's keypair JSON file
+        camera_keypair: Either a Keypair object or path to keypair JSON file
         camera_owner_pubkey: The camera owner's wallet address (receives funds if no winners in prize mode)
         participant_results: List of {"wallet_address": str, "score": int}
         rpc_url: Solana RPC URL
@@ -215,8 +215,9 @@ async def settle_competition(
     try:
         logger.info(f"[SettlementService] Settling escrow: {escrow_pda}")
 
-        # Load camera keypair
-        camera_keypair = load_keypair(camera_keypair_path)
+        # Handle keypair - can be object or path
+        if isinstance(camera_keypair, str):
+            camera_keypair = load_keypair(camera_keypair)
         camera_pubkey = camera_keypair.pubkey()
 
         # Parse pubkeys
