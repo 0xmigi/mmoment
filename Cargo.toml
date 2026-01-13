@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "programs/camera-network",
+    "programs/competition-escrow",
 ]
 resolver = "2"
 

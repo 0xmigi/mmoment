@@ -1,4 +1,5 @@
 // src/components/EventListener.tsx
+// NEW PRIVACY ARCHITECTURE: Uses TimelineUpdated event which doesn't expose user info
 
 import { useEffect, useState } from 'react';
 import { useProgram } from '../anchor/setup';
@@ -6,8 +7,8 @@ import { useProgram } from '../anchor/setup';
 interface Event {
   timestamp: string;
   signature: string;
-  user?: string;
   cameraAccount?: string;
+  activityCount?: number;
 }
 
 export default function EventListener() {
@@ -18,15 +19,15 @@ export default function EventListener() {
     if (!program) return;
 
     let eventListener: number | null = null;
-    
+
     try {
-      // Use ActivityRecorded event which is defined in the Solana program
-      eventListener = program.addEventListener('ActivityRecorded', (event: any) => {
+      // Use TimelineUpdated event (privacy-preserving - no user info exposed)
+      eventListener = program.addEventListener('TimelineUpdated', (event: any) => {
         const newEvent: Event = {
           timestamp: new Date().toISOString(),
           signature: event.signature,
-          user: event.user?.toString(),
-          cameraAccount: event.camera?.toString() // field is likely called 'camera' based on program
+          cameraAccount: event.camera?.toString(),
+          activityCount: event.activityCount?.toNumber?.() || event.activityCount
         };
         setEvents(prev => [...prev, newEvent]);
       });
@@ -54,8 +55,10 @@ export default function EventListener() {
       {events.map((event, index) => (
         <div key={index} className="mb-4 last:mb-0">
           <p className="text-gray-800">Time: {event.timestamp}</p>
-          <p className="text-gray-800">User: {event.user}</p>
           <p className="text-gray-800">Camera: {event.cameraAccount}</p>
+          {event.activityCount && (
+            <p className="text-gray-800">Activities: {event.activityCount}</p>
+          )}
         </div>
       ))}
     </div>

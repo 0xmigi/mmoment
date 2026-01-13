@@ -1,13 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState, forwardRef, useRef, useCallback, useMemo } from 'react';
-import { Camera, Video, Power, User, Radio, Signal } from 'lucide-react';
+import { Camera, Video, Power, User, Radio, Activity } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { ProfileModal } from '../profile/ProfileModal';
 import MediaViewer from '../media/MediaViewer';
 import { timelineService } from './timeline-service';
-import { socialService } from '../auth/social/social-service';
-import { TimelineEvent, TimelineEventType, TimelineUser } from './timeline-types';
+import { TimelineEvent, TimelineEventType, TimelineUser, CVActivityMetadata } from './timeline-types';
 import { IPFSMedia } from '../storage/ipfs/ipfs-service';
+import { CONFIG } from '../core/config';
 
 interface TimelineProps {
   filter?: 'all' | 'camera' | 'my';
@@ -15,12 +15,18 @@ interface TimelineProps {
   variant?: 'camera' | 'full';
   cameraId?: string;
   mobileOverlay?: boolean;
+  /** Pre-populated events for historical/static display (skips real-time subscription) */
+  initialEvents?: TimelineEvent[];
+  /** Whether to show the profile stack at the bottom (default: true for camera variant) */
+  showProfileStack?: boolean;
+  /** Show absolute timestamps (e.g. "12:34 PM") instead of relative (e.g. "5 minutes ago") */
+  showAbsoluteTime?: boolean;
 }
 
 // Get the display count based on screen width
 const getDisplayCount = () => {
-  if (typeof window === 'undefined') return 13;
-  return window.innerWidth < 768 ? 17 : 13;
+  if (typeof window === 'undefined') return 10;
+  return window.innerWidth < 768 ? 14 : 10;
 };
 
 // Get mobile timeline count based on proportional scaling with stream window
@@ -40,8 +46,35 @@ const getMobileTimelineCount = () => {
   return Math.round(minItems + (maxItems - minItems) * curvedRatio);
 };
 
+// Format CV activity text based on metadata
+const formatCVActivityText = (cvActivity?: CVActivityMetadata): string => {
+  if (!cvActivity) {
+    return 'completed a CV activity';
+  }
+
+  const { app_name, user_stats, results, participant_count } = cvActivity;
+  const reps = user_stats?.reps ?? 0;
+
+  // Format app name nicely (pushup -> push-ups)
+  const appDisplayName = app_name === 'pushup' ? 'push-ups' :
+                         app_name === 'pullup' ? 'pull-ups' :
+                         app_name === 'squat' ? 'squats' : app_name;
+
+  // Single participant - just show their count
+  if (participant_count === 1) {
+    return `completed ${reps} ${appDisplayName}`;
+  }
+
+  // Multiple participants - show rank and count
+  const userResult = results?.find(r => r.stats?.reps === reps);
+  const rank = userResult?.rank ?? 1;
+  const rankSuffix = rank === 1 ? 'st' : rank === 2 ? 'nd' : rank === 3 ? 'rd' : 'th';
+
+  return `finished ${rank}${rankSuffix} with ${reps} ${appDisplayName}`;
+};
+
 // Add this function before the Timeline component
-const getEventText = (type: TimelineEventType): string => {
+const getEventText = (type: TimelineEventType, cvActivity?: CVActivityMetadata): string => {
   switch (type) {
     case 'photo_captured':
       return 'took a photo';
@@ -52,9 +85,7 @@ const getEventText = (type: TimelineEventType): string => {
     case 'user_connected':
       return 'connected';
     case 'stream_started':
-      return 'started the stream';
-    case 'stream_ended':
-      return 'ended the stream';
+      return 'started a stream';
     case 'check_in':
       return 'checked in to the camera';
     case 'check_out':
@@ -63,11 +94,23 @@ const getEventText = (type: TimelineEventType): string => {
       return 'was checked out by cleanup bot';
     case 'face_enrolled':
       return 'enrolled their face';
+    case 'cv_activity':
+      return formatCVActivityText(cvActivity);
+    case 'other':
+      return 'performed an action';
+    default:
+      return 'performed an action';
   }
 };
 
-export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full', cameraId, mobileOverlay = false }, ref) => {
-  const [events, setEvents] = useState<TimelineEvent[]>([]);
+// Format absolute timestamp (e.g. "12:34 PM")
+const formatAbsoluteTime = (timestamp: number): string => {
+  const date = new Date(timestamp);
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full', cameraId, mobileOverlay = false, initialEvents, showProfileStack, showAbsoluteTime = false }, ref) => {
+  const [events, setEvents] = useState<TimelineEvent[]>(initialEvents || []);
   const [selectedUser, setSelectedUser] = useState<TimelineUser | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -83,7 +126,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   const enrichEventWithUserInfo = useCallback((event: TimelineEvent): TimelineEvent => {
     // First check if we have the profile in our userProfiles map
     const storedProfile = userProfiles[event.user.address];
-    
+
     if (storedProfile) {
       return {
         ...event,
@@ -91,7 +134,8 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
           ...event.user,
           displayName: storedProfile.displayName || event.user.displayName,
           username: storedProfile.username || event.user.username,
-          pfpUrl: storedProfile.pfpUrl || event.user.pfpUrl
+          pfpUrl: storedProfile.pfpUrl || event.user.pfpUrl,
+          provider: storedProfile.provider || event.user.provider
         }
       };
     }
@@ -135,7 +179,8 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
               ...event.user,
               displayName: socialCred.oauthDisplayName || event.user.displayName,
               username: socialCred.oauthUsername || event.user.username,
-              pfpUrl: socialCred.oauthAccountPhotos?.[0] || event.user.pfpUrl
+              pfpUrl: socialCred.oauthAccountPhotos?.[0] || event.user.pfpUrl,
+              provider: socialCred.oauthProvider || event.user.provider
             }
           };
         }
@@ -151,68 +196,57 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       // Get unique addresses that we don't already have profiles for
       const addresses = events
         .map(event => event.user.address)
-        .filter((address, index, self) => 
+        .filter((address, index, self) =>
           self.indexOf(address) === index && !userProfiles[address]
         );
-      
-      if (addresses.length === 0) return;
-      
-      // Create a temporary object to store new profiles
-      const newProfiles: Record<string, any> = {};
-      
-      // Process each address
-      for (const address of addresses) {
-        try {
-          // Skip if we already fetched this address
-          if (userProfiles[address]) continue;
-          
-          // Try to get profiles from DynamicAuth verified credentials
-          if (user?.verifiedCredentials) {
-            const matchingCreds = user.verifiedCredentials.filter(
-              cred => cred.address === address
-            );
-            
-            if (matchingCreds.length > 0) {
-              const profiles = socialService.getProfileFromVerifiedCredentials(matchingCreds);
-              if (profiles.length > 0) {
-                newProfiles[address] = {
-                  ...profiles[0],
-                  address
-                };
-                continue;
-              }
-            }
-          }
-          
-          // If we didn't find a profile from DynamicAuth, try fetching from our API
-          const profiles = await socialService.getProfilesByAddress(address);
-          if (profiles.length > 0) {
-            // Use the first profile (prioritizing Farcaster if available)
-            const farcasterProfile = profiles.find(p => p.provider === 'farcaster');
-            const profile = farcasterProfile || profiles[0];
-            
-            newProfiles[address] = {
-              ...profile,
-              address
-            };
-          }
-          
-        } catch (error) {
-          console.error(`Error fetching profile for address ${address}:`, error);
-        }
+
+      if (addresses.length === 0) {
+        return;
       }
-      
-      // Update our profiles state if we found any new ones
-      if (Object.keys(newProfiles).length > 0) {
-        setUserProfiles(prev => ({
-          ...prev,
-          ...newProfiles
-        }));
+
+      try {
+        // Fetch profiles from backend in batch
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/profile/batch`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ walletAddresses: addresses }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch profiles from backend');
+        }
+
+        const data = await response.json();
+        const backendProfiles = data.profiles || {};
+
+        // Convert backend profiles to the format we need
+        const newProfiles: Record<string, any> = {};
+        for (const [address, profile] of Object.entries(backendProfiles)) {
+          newProfiles[address] = {
+            address,
+            displayName: (profile as any).displayName,
+            username: (profile as any).username,
+            pfpUrl: (profile as any).profileImage,
+            provider: (profile as any).provider
+          };
+        }
+
+        // Update our profiles state
+        if (Object.keys(newProfiles).length > 0) {
+          setUserProfiles(prev => ({
+            ...prev,
+            ...newProfiles
+          }));
+        }
+      } catch (error) {
+        console.error('[Timeline] Error fetching profiles from backend:', error);
       }
     };
-    
+
     fetchUserProfiles();
-  }, [events, user?.verifiedCredentials, userProfiles]);
+  }, [events]); // Only depend on events, not userProfiles to avoid infinite loop
 
 
   // Update display count on window resize
@@ -228,35 +262,51 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     return () => window.removeEventListener('resize', handleResize);
   }, [variant]);
 
-  // Timeline service integration
+  // Update events when initialEvents changes (for historical mode)
   useEffect(() => {
-    if (!cameraId) return;
+    if (initialEvents) {
+      setEvents(initialEvents);
+    }
+  }, [initialEvents]);
 
-    // Join the camera room
+  // Timeline service integration (skip if using initialEvents for historical display)
+  // Note: We intentionally exclude enrichEventWithUserInfo from deps to avoid infinite loops
+  // Profile enrichment happens separately via displayEvents useMemo
+  useEffect(() => {
+    if (!cameraId || initialEvents) return;
+
+    // Join the camera room (only once per cameraId)
     timelineService.joinCamera(cameraId);
+
+    // Initialize with existing events from the service (for when navigating back)
+    // This fixes events disappearing when switching tabs and coming back
+    const existingState = timelineService.getState();
+    if (existingState.events.length > 0 && existingState.currentCameraId === cameraId) {
+      console.log(`[Timeline] Restoring ${existingState.events.length} existing events for camera ${cameraId}`);
+      setEvents(existingState.events);
+    }
 
     // Subscribe to timeline events
     const unsubscribe = timelineService.subscribe((event) => {
       console.log('Timeline event received:', event);
-      const enrichedEvent = enrichEventWithUserInfo(event);
       setEvents(prev => {
         // Find the correct position to insert the event (newest first)
         const index = prev.findIndex(e => e.timestamp < event.timestamp);
         const newEvents = [...prev];
-        
+
         // Remove any existing event with the same ID
         const existingIndex = newEvents.findIndex(e => e.id === event.id);
         if (existingIndex !== -1) {
           newEvents.splice(existingIndex, 1);
         }
-        
+
         // Insert the event at the correct position
         if (index === -1) {
-          newEvents.push(enrichedEvent);
+          newEvents.push(event);
         } else {
-          newEvents.splice(index, 0, enrichedEvent);
+          newEvents.splice(index, 0, event);
         }
-        
+
         // Keep only the last 100 events
         return newEvents.slice(0, 100);
       });
@@ -270,10 +320,6 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
         },
         refreshTimeline: () => {
           timelineService.refreshEvents();
-          // Also request from server if connected
-          if (cameraId) {
-            timelineService.joinCamera(cameraId);
-          }
         }
       };
     }
@@ -281,7 +327,8 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     return () => {
       unsubscribe();
     };
-  }, [cameraId, enrichEventWithUserInfo]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraId, initialEvents]);
 
   // Filter events based on selected filter
   const filteredEvents = useMemo(() => {
@@ -327,8 +374,6 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
         return <Video className={iconClass} />;
       case 'stream_started':
         return <Radio className={`${iconClass} ${isOverlay ? '' : 'text-red-500'}`} />;
-      case 'stream_ended':
-        return <Signal className={`${iconClass} ${isOverlay ? '' : 'text-gray-400'}`} />;
       case 'check_in':
         return <User className={`${iconClass} ${isOverlay ? '' : 'text-green-500'}`} />;
       case 'check_out':
@@ -336,7 +381,9 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       case 'auto_check_out':
         return <User className={`${iconClass} ${isOverlay ? '' : 'text-orange-500'}`} />;
       case 'face_enrolled':
-        return <User className={`${iconClass} ${isOverlay ? '' : 'text-blue-500'}`} />;
+        return <User className={`${iconClass} ${isOverlay ? '' : 'text-primary'}`} />;
+      case 'cv_activity':
+        return <Activity className={`${iconClass} ${isOverlay ? '' : 'text-purple-500'}`} />;
       default:
         return <User className={iconClass} />;
     }
@@ -370,18 +417,18 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
 
   return (
     <div className="w-full relative" ref={timelineRef}>
-      {/* Container - desktop uses JavaScript calculation, mobile uses CSS width-based */}
-      <div 
+      {/* Container with fixed height for desktop camera variant */}
+      <div
         className="relative"
-        style={{ 
+        style={{
           height: variant === 'camera' && !mobileOverlay
-            ? `${(displayCount + 1) * 3.5}rem`
+            ? '45rem'  // Extends past the gallery on desktop
             : 'auto'
         }}
       >
-        {/* Vertical timeline line */}
-        <div className="absolute left-[4px] md:left-[6px] top-0 h-full w-px bg-gray-200" />
-        
+        {/* Vertical timeline line - stops above the profile stack curve */}
+        <div className="absolute left-[4px] md:left-[6px] top-0 bottom-14 w-px bg-gray-200" />
+
         <div className="space-y-4 md:space-y-6 w-full">
           {displayEvents.length === 0 ? (
             <p className={`text-sm pl-16 ${mobileOverlay ? 'text-white' : 'text-gray-500'}`}>No activity yet</p>
@@ -411,7 +458,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                           e.stopPropagation();
                           handleProfileClick(event);
                         }}
-                        className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
+                        className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary-muted transition-all"
                       >
                         {event.user.pfpUrl ? (
                           <img 
@@ -441,19 +488,21 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                             handleProfileClick(event);
                           }}
                           className={`font-medium cursor-pointer transition-colors ${
-                            mobileOverlay ? 'hover:text-gray-300' : 'hover:text-blue-600'
+                            mobileOverlay ? 'hover:text-gray-300' : 'hover:text-primary'
                           }`}
                         >
                           {event.user.displayName || event.user.username || 
                            `${event.user.address.slice(0, 6)}...${event.user.address.slice(-4)}`}
                         </span>
                         {' '}
-                        {getEventText(event.type)}
+                        {getEventText(event.type, event.cvActivity)}
                       </p>
                       <p className={`${mobileOverlay ? 'text-[10px]' : 'text-xs'} ${mobileOverlay ? 'text-gray-300' : 'text-gray-500'}`}>
-                        {event.timestamp > Date.now() - 60000 
-                          ? 'less than a minute ago'
-                          : `${Math.floor((Date.now() - event.timestamp) / 60000)} minutes ago`
+                        {showAbsoluteTime
+                          ? formatAbsoluteTime(event.timestamp)
+                          : event.timestamp > Date.now() - 60000
+                            ? 'less than a minute ago'
+                            : `${Math.floor((Date.now() - event.timestamp) / 60000)} minutes ago`
                         }
                       </p>
                     </div>
@@ -463,59 +512,59 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
             </>
           )}
         </div>
-      </div>
 
-      {/* Profile Stack with connected timeline */}
-      {variant === 'camera' && (
-        <div className="relative">
-          {/* Corner and horizontal line container */}
-          <div className="absolute left-0 top-0 w-full">
-            {/* L-shaped corner with rounded curve using CSS */}
-            <div className="absolute left-[4px] md:left-[6px] w-[12px] h-[12px]">
-              {/* Curved corner */}
-              <div 
-                className="absolute left-0 bottom-0 w-[12px] h-[12px] border-b border-l border-gray-200 rounded-bl-[12px]"
-                style={{ borderBottomLeftRadius: '12px' }}
-              />
-              {/* Horizontal part of the L - made longer */}
-              <div className="absolute left-[11px] bottom-0 w-[32px] h-px bg-gray-200" />
+        {/* Profile Stack at bottom of timeline with curved connector */}
+        {(showProfileStack ?? variant === 'camera') && displayEvents.filter(e => e).length > 0 && (
+          <div className="absolute bottom-2 left-0 right-0">
+            {/* Vertical connector from main line down to curve - bridges the gap */}
+            <div className="absolute left-[4px] md:left-[6px] -top-10 w-px h-10 bg-gray-200" />
+            {/* L-shaped corner with rounded curve */}
+            <div className="absolute left-[4px] md:left-[6px] top-0 w-[12px] h-[12px]">
+              <div className="w-[12px] h-[12px] border-b border-l border-gray-200 rounded-bl-[12px]" />
             </div>
-          </div>
+            {/* Horizontal line from curve to avatars */}
+            <div className="absolute left-[16px] md:left-[18px] top-[11px] w-[28px] md:w-[36px] h-px bg-gray-200" />
 
-          {/* Profile stack - adjusted padding to align with curve */}
-          <div className="pl-10 md:pl-14">
-            <div className="flex items-center">
-              <div className="flex -space-x-1.5 md:-space-x-2">
-                {Array.from(new Set(events.map(e => e.user.address)))
-                  .slice(0, 6)
-                  .map((address, i) => {
-                    const event = events.find(e => e.user.address === address);
-                    return (
-                      <div
-                        key={address}
-                        className="relative w-6 h-6 md:w-8 md:h-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center overflow-hidden"
-                        style={{ zIndex: 6 - i }}
-                      >
-                        {event?.user.pfpUrl ? (
-                          <img 
-                            src={event.user.pfpUrl} 
-                            alt={event.user.displayName || event.user.username || 'User'} 
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <User className="w-3 h-3 md:w-4 md:h-4 text-gray-600" />
-                        )}
-                      </div>
-                    );
-                  })}
+            {/* Profile stack - aligned with curve */}
+            <div className="pl-12 md:pl-14 pt-0.5">
+              <div className="flex items-center">
+                <div className="flex -space-x-1.5 md:-space-x-2">
+                  {Array.from(new Set(displayEvents.filter(e => e).map(e => e.user.address)))
+                    .slice(0, 6)
+                    .map((address, i) => {
+                      const event = displayEvents.find(e => e?.user.address === address);
+                      const profile = userProfiles[address];
+                      const pfpUrl = event?.user.pfpUrl || profile?.pfpUrl;
+                      const displayName = event?.user.displayName || profile?.displayName;
+                      const username = event?.user.username || profile?.username;
+
+                      return (
+                        <div
+                          key={address}
+                          className="relative w-6 h-6 md:w-8 md:h-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center overflow-hidden"
+                          style={{ zIndex: 6 - i }}
+                        >
+                          {pfpUrl ? (
+                            <img
+                              src={pfpUrl}
+                              alt={displayName || username || 'User'}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <User className="w-3 h-3 md:w-4 md:h-4 text-gray-600" />
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+                <span className={`ml-3 text-xs md:text-sm font-medium ${mobileOverlay ? 'text-white' : 'text-gray-600'}`}>
+                  {new Set(displayEvents.filter(e => e).map(e => e.user.address)).size || 0} Recently active
+                </span>
               </div>
-              <span className={`ml-3 text-xs md:text-sm font-medium ${mobileOverlay ? 'text-white' : 'text-gray-600'}`}>
-                {new Set(events.map(e => e.user.address)).size || 0} Recently active
-              </span>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Profile Modal */}
       {selectedUser && selectedEvent && (
@@ -531,6 +580,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
             username: selectedUser.username,
             displayName: selectedUser.displayName,
             pfpUrl: selectedUser.pfpUrl,
+            provider: selectedUser.provider, // Include provider field from backend
             verifiedCredentials: 
               user?.verifiedCredentials?.some(cred => 
                 cred.address === selectedUser.address)
@@ -558,7 +608,8 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
             type: selectedEvent.type,
             timestamp: selectedEvent.timestamp,
             transactionId: selectedEvent.transactionId,
-            mediaUrl: selectedEvent.mediaUrl
+            mediaUrl: selectedEvent.mediaUrl,
+            cvActivity: selectedEvent.cvActivity
           }}
         />
       )}

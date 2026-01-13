@@ -189,10 +189,17 @@ const getJetsonCameraUrl = () => {
 
 // Get WebSocket URL for timeline updates from Railway backend
 const getTimelineWebSocketUrl = () => {
+  // Check for environment variable override first
+  const envBackendUrl = import.meta.env.VITE_BACKEND_URL;
+  if (envBackendUrl) {
+    // Convert HTTP URL to WS URL
+    return envBackendUrl.replace('https://', 'wss://').replace('http://', 'ws://');
+  }
+
   // In development, try to connect to the local server first
   if (window.location.hostname.includes('localhost')) {
-    // Use HTTP for health check and WS for socket connection
-    return "ws://192.168.1.232:3001";
+    // Use localhost for local development
+    return "ws://localhost:3001";
   }
   return "wss://mmoment-production.up.railway.app";
 };
@@ -222,9 +229,9 @@ export const CONFIG = {
   pdaToSubdomain,
   getCameraUrlWithFallback,
   // Timeline backend is your Railway service
-  BACKEND_URL: isProduction
+  BACKEND_URL: import.meta.env.VITE_BACKEND_URL || (isProduction
     ? "https://mmoment-production.up.railway.app"
-    : "http://localhost:3001",
+    : "http://localhost:3001"),
   isProduction,
   isCloudflareProxy: isCloudflareProxy(),
   isMobileBrowser: isMobileBrowser(),
@@ -232,17 +239,16 @@ export const CONFIG = {
   TIMELINE_WS_URL: getTimelineWebSocketUrl(),
   CAMERA_PDA: import.meta.env.VITE_CAMERA_PDA || 'EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA',
   // Jetson camera PDA
-  JETSON_CAMERA_PDA: 'FZ4DgqxLCNpLp1vyvvSZ5A24uyBEUdavvkm5qFE6D54t',
+  JETSON_CAMERA_PDA: 'ArQxL9kzhZ8QhJtNodnuMvkd3HGdkwSsTzbD4qD9QqKv',
   isUsingDifferentLocalPorts: isUsingDifferentLocalPorts(),
   
   // Known camera configurations with PDA-based URLs
   KNOWN_CAMERAS: {
     // Jetson Orin Nano
-    'H1WoNBkWJgNcePeyr65xEEwjFgGDboSpL5UbJan5VyhG': {
+    'ArQxL9kzhZ8QhJtNodnuMvkd3HGdkwSsTzbD4qD9QqKv': {
       type: 'jetson',
       name: 'Jetson Orin Nano Camera',
       description: 'NVIDIA Jetson Orin Nano with advanced computer vision',
-      // Legacy URL for backward compatibility
       legacyUrl: 'https://jetson.mmoment.xyz'
     },
     // Pi5 Camera

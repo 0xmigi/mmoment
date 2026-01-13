@@ -1,20 +1,22 @@
 [toolchain]
 
 [features]
-seeds = true
-skip-lint = false
+resolution = true
+skip-lint = true
 
 [programs.devnet]
 camera_network = "E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL"
+competition_escrow = "32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ"
 
 [programs.localnet]
 camera_network = "E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL"
+competition_escrow = "32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Devnet"
+cluster = "devnet"
 wallet = "target/deploy/camera_network-authority.json"
 
 [scripts]
@@ -22,6 +24,11 @@ camera-network = "node scripts/camera-network-client.js"
 face-checkin = "node scripts/face-recognition-checkin.js"
 face-test = "node scripts/face-recognition-test.js"
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+# Build individual programs (use these instead of plain `anchor build`)
+build-camera = "anchor build -p camera_network"
+build-escrow = "anchor build -p competition_escrow"
+
+[hooks]
 
 [test]
 startup_wait = 10000

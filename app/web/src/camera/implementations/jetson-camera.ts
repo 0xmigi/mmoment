@@ -5,28 +5,30 @@
  * the standardized camera interface.
  */
 
-import { 
-  ICamera, 
-  CameraCapabilities, 
-  CameraStatus, 
-  CameraStreamInfo, 
-  CameraActionResponse, 
-  CameraMediaResponse, 
-  CameraGestureResponse, 
-  CameraSession 
+import {
+  ICamera,
+  CameraCapabilities,
+  CameraStatus,
+  CameraStreamInfo,
+  CameraActionResponse,
+  CameraMediaResponse,
+  CameraGestureResponse,
+  CameraSession
 } from '../camera-interface';
 import { DeviceSignedResponse } from '../camera-types';
 import { hasValidDeviceSignature, logDeviceSignature } from '../device-signature-utils';
+import { createSignedRequest } from '../request-signer';
 
 export class JetsonCamera implements ICamera {
   public readonly cameraId: string;
   public readonly cameraType: string = 'jetson';
   public apiUrl: string;
-  
+
   private debugMode = true;
   private currentSession: CameraSession | null = null;
   private lastStreamingStatus: boolean | undefined;
   private lastStreamInfo: CameraStreamInfo | null = null;
+  private primaryWallet: any = null; // Dynamic Labs wallet for request signing
 
   // CURRENT LIVEPEER ACCOUNT (1000 minutes remaining)
   private static readonly CURRENT_PLAYBACK_ID = '6315myh7iojrn5uk';
@@ -44,6 +46,15 @@ export class JetsonCamera implements ICamera {
     this.cameraId = cameraId;
     this.apiUrl = apiUrl;
     this.log('JetsonCamera initialized for:', cameraId, 'at', apiUrl);
+  }
+
+  /**
+   * Set the wallet for request signing (ed25519 authentication)
+   * This enables cryptographic proof that requests come from the wallet owner
+   */
+  setWallet(wallet: any): void {
+    this.primaryWallet = wallet;
+    this.log('Wallet set for request signing:', wallet?.address?.slice(0, 8) + '...');
   }
 
   private log(...args: any[]) {
@@ -96,14 +107,37 @@ export class JetsonCamera implements ICamera {
     }
   }
 
-  private async makeApiCall(endpoint: string, method: string, data?: any): Promise<Response> {
-    const url = `${this.apiUrl}${endpoint}`;
+  private async makeApiCall(endpoint: string, method: string, data?: any, retryCount = 0): Promise<Response> {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 1000; // 1 second base delay
+
+    // Add cache-busting timestamp for GET requests to prevent connection reuse issues
+    const separator = endpoint.includes('?') ? '&' : '?';
+    const cacheBuster = method === 'GET' ? `${separator}_t=${Date.now()}` : '';
+    const url = `${this.apiUrl}${endpoint}${cacheBuster}`;
+
     this.log(`Making ${method} request to: ${url}`);
-    
-    if (data) {
-      this.log(`Request data:`, data);
+
+    // Sign the request if wallet is available (for POST/PUT requests with data)
+    let signedData = data;
+    if (method !== 'GET' && data && this.primaryWallet) {
+      try {
+        const signedParams = await createSignedRequest(this.primaryWallet);
+        if (signedParams) {
+          signedData = { ...data, ...signedParams };
+          this.log('✅ Request signed with ed25519');
+        } else {
+          this.log('⚠️ Request signing unavailable, sending unsigned');
+        }
+      } catch (signError) {
+        this.log('⚠️ Request signing failed:', signError);
+      }
     }
-    
+
+    if (signedData) {
+      this.log(`Request data:`, signedData);
+    }
+
     try {
       const response = await fetch(url, {
         method,
@@ -112,17 +146,34 @@ export class JetsonCamera implements ICamera {
         },
         mode: 'cors',
         credentials: 'omit',
-        body: method !== 'GET' && data ? JSON.stringify(data) : undefined
+        cache: 'no-store', // Force fresh connection (browser-level, doesn't trigger CORS)
+        body: method !== 'GET' && signedData ? JSON.stringify(signedData) : undefined
       });
-      
+
       this.log(`Response status: ${response.status} ${response.statusText}`);
-      
+
       if (!response.ok) {
         this.log(`HTTP error: ${response.status} ${response.statusText}`);
       }
-      
+
       return response;
     } catch (error) {
+      // Check if it's an SSL/connection error that we can retry
+      const isRetryableError = error instanceof TypeError && (
+        error.message.includes('ERR_SSL_PROTOCOL_ERROR') ||
+        error.message.includes('ERR_CONNECTION') ||
+        error.message.includes('Failed to fetch') ||
+        error.message.includes('network')
+      );
+
+      if (isRetryableError && retryCount < MAX_RETRIES) {
+        const delay = RETRY_DELAY * Math.pow(2, retryCount); // Exponential backoff
+        this.log(`Retryable error, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return this.makeApiCall(endpoint, method, data, retryCount + 1);
+      }
+
       this.log('Fetch error:', error);
       throw error;
     }
@@ -305,6 +356,9 @@ export class JetsonCamera implements ICamera {
           isOnline = data.online;
         }
 
+        // Extract active session count from response (Phase 3 Privacy Architecture)
+        const activeSessionCount = data.data?.activeSessionCount ?? data.activeSessionCount ?? 0;
+
         return {
           success: true,
           data: {
@@ -312,7 +366,8 @@ export class JetsonCamera implements ICamera {
             isStreaming: streamingStatus,
             isRecording: data.recording || data.data?.recording || false,
             lastSeen: Date.now(),
-            owner: this.currentSession?.walletAddress
+            owner: this.currentSession?.walletAddress,
+            activeSessionCount: activeSessionCount
           }
         };
       } else {
@@ -379,11 +434,13 @@ export class JetsonCamera implements ICamera {
               
               return {
                 success: true,
-                data: { 
+                data: {
                   blob: photoBlob,
                   filename: data.filename,
                   timestamp: data.timestamp || Date.now(),
-                  size: photoBlob.size
+                  size: photoBlob.size,
+                  storage_upload: data.storage_upload,
+                  pipe_upload: data.pipe_upload
                 }
               };
             } else {
@@ -567,14 +624,16 @@ export class JetsonCamera implements ICamera {
             
             if (videoResponse.success && videoResponse.data?.blob) {
               this.log('Video file retrieved successfully:', videoResponse.data.blob.size, 'bytes');
-              
+
               return {
                 success: true,
-                data: { 
+                data: {
                   blob: videoResponse.data.blob,
                   filename: data.filename,
                   timestamp: data.timestamp || Date.now(),
-                  size: videoResponse.data.blob.size
+                  size: videoResponse.data.blob.size,
+                  storage_upload: data.storage_upload,
+                  pipe_upload: data.pipe_upload
                 }
               };
             } else {
@@ -826,6 +885,39 @@ export class JetsonCamera implements ICamera {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to get most recent video'
+      };
+    }
+  }
+
+  /**
+   * Get user's upload jobs from the upload queue.
+   * Used to find job_id for videos after natural recording stop.
+   */
+  async getUserUploads(walletAddress: string): Promise<CameraActionResponse<{ uploads: any[] }>> {
+    try {
+      this.log('Getting user uploads for:', walletAddress);
+
+      const response = await this.makeApiCall(`/api/uploads?wallet_address=${encodeURIComponent(walletAddress)}`, 'GET');
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          return {
+            success: true,
+            data: { uploads: data.uploads || [] }
+          };
+        }
+      }
+
+      return {
+        success: false,
+        error: 'Failed to get user uploads'
+      };
+    } catch (error) {
+      this.log('Get user uploads error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get user uploads'
       };
     }
   }
@@ -1089,7 +1181,7 @@ export class JetsonCamera implements ICamera {
     try {
       this.log(`Toggling face visualization: ${enabled}`);
       this.log(`Making API call to: ${this.apiUrl}/api/visualization/face`);
-      
+
       const response = await this.makeApiCall('/api/visualization/face', 'POST', {
         enabled
       });
@@ -1097,10 +1189,10 @@ export class JetsonCamera implements ICamera {
       this.log(`Response status: ${response.status} ${response.statusText}`);
       const data = await response.json();
       this.log(`Response data:`, data);
-      
+
       if (response.ok && data.success) {
         this.log('Face visualization toggled successfully:', data.enabled);
-        return { 
+        return {
           success: true,
           data: { enabled: data.enabled }
         };
@@ -1116,8 +1208,49 @@ export class JetsonCamera implements ICamera {
     }
   }
 
+  async togglePoseVisualization(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
+    try {
+      this.log(`Toggling pose visualization: ${enabled}`);
+      this.log(`Making API call to: ${this.apiUrl}/api/visualization/pose`);
+
+      const response = await this.makeApiCall('/api/visualization/pose', 'POST', {
+        enabled
+      });
+
+      this.log(`Response status: ${response.status} ${response.statusText}`);
+      const data = await response.json();
+      this.log(`Response data:`, data);
+
+      if (response.ok && data.success) {
+        this.log('Pose visualization toggled successfully:', data.enabled);
+        return {
+          success: true,
+          data: { enabled: data.enabled }
+        };
+      } else {
+        throw new Error(data.error || 'Failed to toggle pose visualization');
+      }
+    } catch (error) {
+      this.log('Pose visualization toggle error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to toggle pose visualization'
+      };
+    }
+  }
+
   getCurrentSession(): CameraSession | null {
     return this.currentSession;
+  }
+
+  /**
+   * Set the current session locally without making an API call.
+   * Used when session was created via /api/checkin (Phase 3) to avoid
+   * calling /api/session/connect which would create a duplicate session.
+   */
+  setSession(session: CameraSession): void {
+    this.currentSession = session;
+    this.log('Session set locally (no API call):', session);
   }
 
   getGestureControlsStatus(): boolean {
@@ -1457,5 +1590,732 @@ export class JetsonCamera implements ICamera {
     if (score >= 70) return 'acceptable';
     if (score >= 60) return 'poor';
     return 'very_poor';
+  }
+
+  /**
+   * Recognize faces in current frame
+   */
+  async recognizeFaces(): Promise<CameraActionResponse<{ recognized_data: Record<string, any> }>> {
+    try {
+      this.log('Recognizing faces in current frame');
+      const response = await this.makeApiCall('/api/face/recognize', 'POST', {});
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            recognized_data: data.recognized_data || {}
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to recognize faces');
+    } catch (error) {
+      this.log('Face recognition error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to recognize faces'
+      };
+    }
+  }
+
+  /**
+   * Load a CV app
+   */
+  async loadApp(appName: string): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      this.log(`Loading CV app: ${appName}`);
+      const response = await this.makeApiCall('/api/apps/load', 'POST', {
+        app_name: appName
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            message: data.message || `App ${appName} loaded successfully`
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to load app');
+    } catch (error) {
+      this.log('Load app error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to load app'
+      };
+    }
+  }
+
+  /**
+   * Activate a CV app
+   */
+  async activateApp(appName: string): Promise<CameraActionResponse<{ active_app: string }>> {
+    try {
+      this.log(`Activating CV app: ${appName}`);
+      const response = await this.makeApiCall('/api/apps/activate', 'POST', {
+        app_name: appName
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            active_app: data.active_app || appName
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to activate app');
+    } catch (error) {
+      this.log('Activate app error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to activate app'
+      };
+    }
+  }
+
+  /**
+   * Deactivate current CV app
+   */
+  async deactivateApp(): Promise<CameraActionResponse> {
+    try {
+      this.log('Deactivating CV app');
+      const response = await this.makeApiCall('/api/apps/deactivate', 'POST', {});
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true
+        };
+      }
+
+      throw new Error(data.error || 'Failed to deactivate app');
+    } catch (error) {
+      this.log('Deactivate app error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to deactivate app'
+      };
+    }
+  }
+
+  /**
+   * Get CV app status
+   */
+  async getAppStatus(): Promise<CameraActionResponse<{ active_app: string | null; loaded_apps: string[]; state: any }>> {
+    try {
+      this.log('Getting CV app status');
+      const response = await this.makeApiCall('/api/apps/status', 'GET');
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            active_app: data.active_app || null,
+            loaded_apps: data.loaded_apps || [],
+            state: data.state || {}
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to get app status');
+    } catch (error) {
+      this.log('Get app status error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get app status'
+      };
+    }
+  }
+
+  /**
+   * Start a competition
+   */
+  async startCompetition(
+    competitors: Array<{ wallet_address: string; display_name: string }>,
+    durationLimit?: number
+  ): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      this.log(`Starting competition with ${competitors.length} competitors`);
+      const response = await this.makeApiCall('/api/apps/competition/start', 'POST', {
+        competitors,
+        duration_limit: durationLimit
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            message: data.message || 'Competition started successfully'
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to start competition');
+    } catch (error) {
+      this.log('Start competition error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to start competition'
+      };
+    }
+  }
+
+  /**
+   * End a competition
+   * @param competition Optional competition metadata (escrow info, mode, stake, etc.)
+   */
+  async endCompetition(competition?: {
+    mode: string;
+    escrow_pda?: string;
+    stake_amount_sol?: number;
+    target_reps?: number;
+  }): Promise<CameraActionResponse<{ result: any }>> {
+    try {
+      this.log('Ending competition', competition);
+      const response = await this.makeApiCall('/api/apps/competition/end', 'POST', {
+        competition: competition || {}
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            result: data.result || {}
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to end competition');
+    } catch (error) {
+      this.log('End competition error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to end competition'
+      };
+    }
+  }
+
+  // ============================================
+  // CV DEV MODE APIs
+  // ============================================
+
+  /**
+   * Get CV Dev status
+   */
+  async getCVDevStatus(): Promise<CameraActionResponse<{
+    enabled: boolean;
+    video_loaded: boolean;
+    video_path?: string;
+    playback_state?: {
+      playing: boolean;
+      current_frame: number;
+      total_frames: number;
+      fps: number;
+      speed: number;
+      loop: boolean;
+      progress: number;
+      current_time: number;
+      duration: number;
+    };
+  }>> {
+    try {
+      this.log('Getting CV dev status');
+      const response = await this.makeApiCall('/api/dev/status', 'GET');
+      const data = await response.json();
+
+      // Response format from Jetson:
+      // { mode: "cv_dev", status: { running, health, fps, playback: { video_path, playing, current_frame, ... } } }
+      if (response.ok) {
+        const playback = data.status?.playback;
+        return {
+          success: true,
+          data: {
+            enabled: data.mode === 'cv_dev',
+            video_loaded: !!playback?.video_path,
+            video_path: playback?.video_path,
+            playback_state: playback ? {
+              playing: playback.playing,
+              current_frame: playback.current_frame,
+              total_frames: playback.total_frames,
+              fps: playback.video_fps,  // Jetson uses video_fps
+              speed: playback.speed,
+              loop: playback.loop,
+              progress: playback.progress,
+              current_time: playback.current_time,
+              duration: playback.duration
+            } : undefined
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to get CV dev status');
+    } catch (error) {
+      this.log('Get CV dev status error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get CV dev status'
+      };
+    }
+  }
+
+  /**
+   * List available dev videos
+   */
+  async listCVDevVideos(): Promise<CameraActionResponse<{ videos: string[] }>> {
+    try {
+      this.log('Listing CV dev videos');
+      const response = await this.makeApiCall('/api/dev/videos', 'GET');
+      const data = await response.json();
+
+      // Response format: { videos: [{name, path, size_mb}, ...], directory: "..." }
+      if (response.ok) {
+        // Videos are objects with name/path/size_mb - extract path or name as string
+        const videoList = (data.videos || []).map((v: { name: string; path: string; size_mb: number }) =>
+          v.path || v.name
+        );
+        return {
+          success: true,
+          data: {
+            videos: videoList
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to list videos');
+    } catch (error) {
+      this.log('List CV dev videos error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to list videos'
+      };
+    }
+  }
+
+  /**
+   * Load a video file for CV dev
+   */
+  async loadCVDevVideo(path: string): Promise<CameraActionResponse<{
+    video_path: string;
+    total_frames: number;
+    fps: number;
+    duration: number;
+  }>> {
+    try {
+      this.log('Loading CV dev video:', path);
+      const response = await this.makeApiCall('/api/dev/load', 'POST', { path });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            video_path: data.video_path,
+            total_frames: data.total_frames,
+            fps: data.fps,
+            duration: data.duration
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to load video');
+    } catch (error) {
+      this.log('Load CV dev video error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to load video'
+      };
+    }
+  }
+
+  /**
+   * CV Dev playback control
+   */
+  async cvDevPlaybackControl(action: 'play' | 'pause' | 'restart'): Promise<CameraActionResponse> {
+    try {
+      this.log('CV dev playback control:', action);
+      // Note: restart is at /api/dev/restart, not /api/dev/playback/restart
+      const endpoint = action === 'restart' ? '/api/dev/restart' : `/api/dev/playback/${action}`;
+      const response = await this.makeApiCall(endpoint, 'POST', {});
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return { success: true };
+      }
+
+      throw new Error(data.error || `Failed to ${action}`);
+    } catch (error) {
+      this.log('CV dev playback control error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : `Failed to ${action}`
+      };
+    }
+  }
+
+  /**
+   * Seek to position in CV dev video
+   */
+  async cvDevSeek(options: { frame?: number; time?: number; progress?: number }): Promise<CameraActionResponse<{
+    current_frame: number;
+    current_time: number;
+  }>> {
+    try {
+      this.log('CV dev seek:', options);
+      const response = await this.makeApiCall('/api/dev/playback/seek', 'POST', options);
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            current_frame: data.current_frame,
+            current_time: data.current_time
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to seek');
+    } catch (error) {
+      this.log('CV dev seek error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to seek'
+      };
+    }
+  }
+
+  /**
+   * Set playback speed
+   */
+  async cvDevSetSpeed(speed: number): Promise<CameraActionResponse<{ speed: number }>> {
+    try {
+      this.log('CV dev set speed:', speed);
+      const response = await this.makeApiCall('/api/dev/playback/speed', 'POST', { speed });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: { speed: data.speed }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to set speed');
+    } catch (error) {
+      this.log('CV dev set speed error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to set speed'
+      };
+    }
+  }
+
+  /**
+   * Step frame forward or backward
+   */
+  async cvDevStep(direction: 'forward' | 'backward' = 'forward'): Promise<CameraActionResponse<{
+    current_frame: number;
+    current_time: number;
+  }>> {
+    try {
+      this.log('CV dev step:', direction);
+      const response = await this.makeApiCall('/api/dev/playback/step', 'POST', { direction });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            current_frame: data.current_frame,
+            current_time: data.current_time
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to step');
+    } catch (error) {
+      this.log('CV dev step error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to step'
+      };
+    }
+  }
+
+  /**
+   * Toggle loop mode
+   */
+  async cvDevSetLoop(enabled: boolean): Promise<CameraActionResponse<{ loop: boolean }>> {
+    try {
+      this.log('CV dev set loop:', enabled);
+      const response = await this.makeApiCall('/api/dev/playback/loop', 'POST', { enabled });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: { loop: data.loop }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to set loop');
+    } catch (error) {
+      this.log('CV dev set loop error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to set loop'
+      };
+    }
+  }
+
+  /**
+   * Get playback state
+   */
+  async cvDevGetPlaybackState(): Promise<CameraActionResponse<{
+    playing: boolean;
+    current_frame: number;
+    total_frames: number;
+    fps: number;
+    speed: number;
+    loop: boolean;
+    progress: number;
+    current_time: number;
+    duration: number;
+    rotation_enabled?: boolean;
+  }>> {
+    try {
+      const response = await this.makeApiCall('/api/dev/playback/state', 'GET');
+      const data = await response.json();
+
+      // Response format: returns playback state directly (no success wrapper)
+      // { video_path, playing, current_frame, total_frames, current_time, duration, speed, loop, video_fps, progress, rotation_enabled }
+      if (response.ok) {
+        return {
+          success: true,
+          data: {
+            playing: data.playing,
+            current_frame: data.current_frame,
+            total_frames: data.total_frames,
+            fps: data.video_fps,  // Jetson uses video_fps
+            speed: data.speed,
+            loop: data.loop,
+            progress: data.progress,
+            current_time: data.current_time,
+            duration: data.duration,
+            rotation_enabled: data.rotation_enabled
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to get playback state');
+    } catch (error) {
+      this.log('CV dev get playback state error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get playback state'
+      };
+    }
+  }
+
+  /**
+   * Toggle rotation mode (for videos that need 180 degree rotation)
+   */
+  async cvDevSetRotation(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
+    try {
+      this.log('CV dev set rotation:', enabled);
+      const response = await this.makeApiCall('/api/dev/playback/rotation', 'POST', { enabled });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: { enabled: data.enabled ?? enabled }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to set rotation');
+    } catch (error) {
+      this.log('CV dev set rotation error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to set rotation'
+      };
+    }
+  }
+
+  // ============================================
+  // TRACK LINKING APIs (Identity Simulation)
+  // ============================================
+
+  /**
+   * Get currently detected tracks with bounding boxes
+   */
+  async cvDevGetTracks(): Promise<CameraActionResponse<{
+    tracks: Array<{
+      track_id: number;
+      bbox: [number, number, number, number];
+      confidence?: number;
+    }>;
+  }>> {
+    try {
+      this.log('Getting CV dev tracks');
+      const response = await this.makeApiCall('/api/dev/tracks', 'GET');
+      const data = await response.json();
+
+      if (response.ok) {
+        return {
+          success: true,
+          data: {
+            tracks: data.tracks || []
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to get tracks');
+    } catch (error) {
+      this.log('CV dev get tracks error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get tracks'
+      };
+    }
+  }
+
+  /**
+   * Get all current track-to-wallet links
+   */
+  async cvDevGetTrackLinks(): Promise<CameraActionResponse<{
+    links: Array<{
+      track_id: number;
+      wallet_address: string;
+      display_name?: string;
+    }>;
+  }>> {
+    try {
+      this.log('Getting CV dev track links');
+      const response = await this.makeApiCall('/api/dev/tracks/links', 'GET');
+      const data = await response.json();
+
+      if (response.ok) {
+        return {
+          success: true,
+          data: {
+            links: data.links || []
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to get track links');
+    } catch (error) {
+      this.log('CV dev get track links error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get track links'
+      };
+    }
+  }
+
+  /**
+   * Link a track to a wallet address
+   */
+  async cvDevLinkTrack(
+    trackId: number,
+    walletAddress: string,
+    displayName?: string
+  ): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      this.log('Linking track:', trackId, 'to wallet:', walletAddress);
+      const response = await this.makeApiCall('/api/dev/tracks/link', 'POST', {
+        track_id: trackId,
+        wallet_address: walletAddress,
+        display_name: displayName
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            message: data.message || `Track ${trackId} linked to ${walletAddress}`
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to link track');
+    } catch (error) {
+      this.log('CV dev link track error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to link track'
+      };
+    }
+  }
+
+  /**
+   * Unlink a track
+   */
+  async cvDevUnlinkTrack(trackId: number): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      this.log('Unlinking track:', trackId);
+      const response = await this.makeApiCall('/api/dev/tracks/unlink', 'POST', {
+        track_id: trackId
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            message: data.message || `Track ${trackId} unlinked`
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to unlink track');
+    } catch (error) {
+      this.log('CV dev unlink track error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to unlink track'
+      };
+    }
+  }
+
+  /**
+   * Clear all track links
+   */
+  async cvDevUnlinkAllTracks(): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      this.log('Unlinking all tracks');
+      const response = await this.makeApiCall('/api/dev/tracks/unlink-all', 'POST', {});
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: {
+            message: data.message || 'All tracks unlinked'
+          }
+        };
+      }
+
+      throw new Error(data.error || 'Failed to unlink all tracks');
+    } catch (error) {
+      this.log('CV dev unlink all tracks error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to unlink all tracks'
+      };
+    }
   }
 } 

@@ -6,20 +6,28 @@
  * detects camera types and routes operations to the appropriate implementation.
  */
 
-import { 
-  ICamera, 
-  CameraActionResponse, 
-  CameraMediaResponse, 
-  CameraStreamInfo, 
+import {
+  ICamera,
+  CameraActionResponse,
+  CameraMediaResponse,
+  CameraStreamInfo,
   CameraStatus,
   CameraSession,
   CameraGestureResponse
 } from './camera-interface';
 import { cameraRegistry } from './camera-registry';
+import { CONFIG } from '../core/config';
 
 export class UnifiedCameraService {
   private static instance: UnifiedCameraService | null = null;
   private debugMode = true;
+
+  // Cache for getComprehensiveState to prevent duplicate concurrent requests
+  private comprehensiveStateCache = new Map<string, {
+    promise: Promise<any>;
+    timestamp: number;
+  }>();
+  private readonly COMPREHENSIVE_STATE_CACHE_TTL = 2000; // 2 seconds cache
 
   private constructor() {
     this.log('UnifiedCameraService initialized');
@@ -36,6 +44,26 @@ export class UnifiedCameraService {
     if (this.debugMode) {
       console.log('[UnifiedCameraService]', ...args);
     }
+  }
+
+  private processComprehensiveState(statusResponse: any, streamResponse: any, cameraId: string) {
+    // Check consistency between status and stream info
+    const statusStreaming = statusResponse.success ? statusResponse.data?.isStreaming || false : false;
+    const streamActive = streamResponse.success ? streamResponse.data?.isActive || false : false;
+    const isConsistent = statusStreaming === streamActive;
+
+    if (!isConsistent) {
+      this.log(`⚠️ State inconsistency detected for ${cameraId}:`, {
+        statusStreaming,
+        streamActive
+      });
+    }
+
+    return {
+      status: statusResponse,
+      streamInfo: streamResponse,
+      isConsistent
+    };
   }
 
   /**
@@ -68,6 +96,18 @@ export class UnifiedCameraService {
    */
   public getCameraType(cameraId: string): string | null {
     return cameraRegistry.getCameraType(cameraId);
+  }
+
+  /**
+   * Get camera API URL by ID (for direct API calls)
+   */
+  public getCameraApiUrl(cameraId: string): string | null {
+    if (!cameraId) return null;
+    try {
+      return CONFIG.getCameraApiUrlByPda(cameraId);
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -166,6 +206,33 @@ export class UnifiedCameraService {
       return camera ? camera.isConnected() : false;
     } catch (error) {
       this.log(`Error checking connection for ${cameraId}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Set session locally without making an API call.
+   * Used when session was created via /api/checkin (Phase 3) to set the
+   * camera's currentSession without calling /api/session/connect.
+   */
+  public async setSession(cameraId: string, session: CameraSession): Promise<boolean> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        this.log(`Cannot set session - camera not found: ${cameraId}`);
+        return false;
+      }
+
+      if (camera.setSession) {
+        camera.setSession(session);
+        this.log(`Session set for ${cameraId}:`, session.sessionId);
+        return true;
+      } else {
+        this.log(`Camera ${cameraId} does not support setSession`);
+        return false;
+      }
+    } catch (error) {
+      this.log(`Error setting session for ${cameraId}:`, error);
       return false;
     }
   }
@@ -553,6 +620,35 @@ export class UnifiedCameraService {
   }
 
   /**
+   * Toggle pose visualization (if supported)
+   */
+  public async togglePoseVisualization(cameraId: string, enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.togglePoseVisualization) {
+        return {
+          success: false,
+          error: 'Pose visualization not supported by this camera'
+        };
+      }
+
+      return await camera.togglePoseVisualization(enabled);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to toggle pose visualization'
+      };
+    }
+  }
+
+  /**
    * Enroll face for recognition (if supported)
    */
   public async enrollFace(cameraId: string, walletAddress: string): Promise<CameraActionResponse<{ enrolled: boolean; faceId: string }>> {
@@ -716,14 +812,27 @@ export class UnifiedCameraService {
   }
 
   /**
-   * Unified check-in - handles everything in one atomic operation
-   * Eliminates race conditions by triggering immediate blockchain sync
+   * Check-in to camera with Ed25519 cryptographic handshake
+   *
+   * PHASE 3 PRIVACY ARCHITECTURE:
+   * Check-in requires a cryptographic signature to prove wallet ownership.
+   * This prevents impersonation and ensures the camera knows FOR CERTAIN who is checked in.
+   *
+   * @param cameraId - Camera PDA
+   * @param profile.wallet_address - User's wallet address (base58)
+   * @param profile.request_signature - Ed25519 signature (base58 encoded)
+   * @param profile.request_timestamp - Unix timestamp in ms when signed
+   * @param profile.request_nonce - Random UUID for replay protection
+   * @param profile.display_name - Optional display name for timeline
+   * @param profile.username - Optional username for timeline
    */
   public async checkin(cameraId: string, profile: {
     wallet_address: string;
+    request_signature: string;    // Required: Ed25519 signature (base58)
+    request_timestamp: number;    // Required: Unix ms timestamp
+    request_nonce: string;        // Required: UUID for replay protection
     display_name?: string;
     username?: string;
-    transaction_signature?: string;
   }): Promise<CameraActionResponse<{
     wallet_address: string;
     display_name: string;
@@ -776,6 +885,137 @@ export class UnifiedCameraService {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unified check-in failed'
+      };
+    }
+  }
+
+  /**
+   * Notify Jetson about checkout - passes transaction signature for Solscan link
+   *
+   * @param cameraId - Camera PDA
+   * @param data - Checkout data with wallet address and transaction signature
+   */
+  public async checkout(cameraId: string, data: {
+    wallet_address: string;
+    transaction_signature: string;
+  }): Promise<CameraActionResponse<{
+    wallet_address: string;
+    session_id: string;
+    message: string;
+  }>> {
+    try {
+      this.log(`[DEBUG] Checkout notification to camera: ${cameraId}`, data);
+
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        this.log(`[ERROR] Camera not found: ${cameraId}`);
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const apiUrl = (camera as any).apiUrl;
+      const url = `${apiUrl}/api/checkout`;
+      this.log(`[DEBUG] Making checkout notification request to: ${url}`);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        credentials: 'omit',
+        body: JSON.stringify(data)
+      });
+
+      this.log(`[DEBUG] Response status: ${response.status}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.log(`[ERROR] HTTP error response: ${errorText}`);
+        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      this.log(`[SUCCESS] Checkout notification successful for ${cameraId}`, result);
+
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      this.log(`[ERROR] Error during checkout notification to ${cameraId}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Checkout notification failed'
+      };
+    }
+  }
+
+  /**
+   * Check if a user is currently checked in at a camera
+   *
+   * PHASE 3 PRIVACY ARCHITECTURE:
+   * Queries the Jetson directly (source of truth) to check session status.
+   * This is consistent with how activeSessionCount already works.
+   *
+   * @param cameraId - Camera PDA
+   * @param walletAddress - User's wallet address to check
+   * @returns { isCheckedIn: boolean, activeSessionCount: number }
+   */
+  public async getSessionStatus(cameraId: string, walletAddress: string): Promise<CameraActionResponse<{
+    isCheckedIn: boolean;
+    activeSessionCount: number;
+  }>> {
+    try {
+      this.log(`[SESSION-STATUS] Checking session for ${walletAddress.slice(0, 8)}... at camera ${cameraId.slice(0, 8)}...`);
+
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        this.log(`[SESSION-STATUS] Camera not found: ${cameraId}`);
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`,
+          data: { isCheckedIn: false, activeSessionCount: 0 }
+        };
+      }
+
+      const apiUrl = (camera as any).apiUrl;
+      const url = `${apiUrl}/api/session/status/${walletAddress}`;
+      this.log(`[SESSION-STATUS] Querying: ${url}`);
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        credentials: 'omit'
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.log(`[SESSION-STATUS] Error: ${errorText}`);
+        return {
+          success: false,
+          error: `HTTP ${response.status}: ${errorText}`,
+          data: { isCheckedIn: false, activeSessionCount: 0 }
+        };
+      }
+
+      const result = await response.json();
+      this.log(`[SESSION-STATUS] Result: isCheckedIn=${result.isCheckedIn}, activeCount=${result.activeSessionCount}`);
+
+      return {
+        success: true,
+        data: {
+          isCheckedIn: result.isCheckedIn,
+          activeSessionCount: result.activeSessionCount
+        }
+      };
+    } catch (error) {
+      this.log(`[SESSION-STATUS] Error:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to check session status',
+        data: { isCheckedIn: false, activeSessionCount: 0 }
       };
     }
   }
@@ -961,6 +1201,41 @@ export class UnifiedCameraService {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to get most recent video'
+      };
+    }
+  }
+
+  /**
+   * Get user's upload jobs from camera's upload queue.
+   * Used to find job_id for videos after natural recording stop.
+   */
+  public async getUserUploads(cameraId: string, walletAddress: string): Promise<CameraActionResponse<{ uploads: any[] }>> {
+    try {
+      this.log(`Getting user uploads from camera: ${cameraId} for wallet: ${walletAddress}`);
+
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      // Cast to JetsonCamera to access getUserUploads method
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.getUserUploads) {
+        return {
+          success: false,
+          error: 'Camera does not support getUserUploads'
+        };
+      }
+
+      return await jetsonCamera.getUserUploads(walletAddress);
+    } catch (error) {
+      this.log(`Get user uploads error for ${cameraId}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get user uploads'
       };
     }
   }
@@ -1280,29 +1555,45 @@ export class UnifiedCameraService {
         };
       }
 
-      // Get both status and stream info in parallel
-      const [statusResponse, streamResponse] = await Promise.all([
-        camera.getStatus(),
-        camera.getStreamInfo()
-      ]);
+      // Check cache first to prevent duplicate concurrent requests
+      const now = Date.now();
+      const cached = this.comprehensiveStateCache.get(cameraId);
 
-      // Check consistency between status and stream info
-      const statusStreaming = statusResponse.success ? statusResponse.data?.isStreaming || false : false;
-      const streamActive = streamResponse.success ? streamResponse.data?.isActive || false : false;
-      const isConsistent = statusStreaming === streamActive;
-
-      if (!isConsistent) {
-        this.log(`⚠️ State inconsistency detected for ${cameraId}:`, {
-          statusStreaming,
-          streamActive
-        });
+      if (cached && (now - cached.timestamp) < this.COMPREHENSIVE_STATE_CACHE_TTL) {
+        this.log(`Using cached comprehensive state for ${cameraId}`);
+        return cached.promise;
       }
 
-      return {
-        status: statusResponse,
-        streamInfo: streamResponse,
-        isConsistent
-      };
+      // Create new request and cache it
+      const fetchPromise = (async () => {
+        // Get both status and stream info in parallel
+        const [statusResponse, streamResponse] = await Promise.all([
+          camera.getStatus(),
+          camera.getStreamInfo()
+        ]);
+
+        return { statusResponse, streamResponse };
+      })();
+
+      // Cache the promise
+      this.comprehensiveStateCache.set(cameraId, {
+        promise: fetchPromise.then(({ statusResponse, streamResponse }) => {
+          // Process and return
+          const result = this.processComprehensiveState(statusResponse, streamResponse, cameraId);
+
+          // Clear cache after TTL
+          setTimeout(() => {
+            this.comprehensiveStateCache.delete(cameraId);
+          }, this.COMPREHENSIVE_STATE_CACHE_TTL);
+
+          return result;
+        }),
+        timestamp: now
+      });
+
+      const { statusResponse, streamResponse } = await fetchPromise;
+
+      return this.processComprehensiveState(statusResponse, streamResponse, cameraId);
     } catch (error) {
       this.log(`Error getting comprehensive state for ${cameraId}:`, error);
       
@@ -1325,6 +1616,733 @@ export class UnifiedCameraService {
           data: { isActive: false, streamUrl: '', playbackId: '', format: 'mjpeg' as const }
         },
         isConsistent: false
+      };
+    }
+  }
+
+  /**
+   * Recognize faces in current frame (if supported)
+   */
+  public async recognizeFaces(cameraId: string): Promise<CameraActionResponse<{ recognized_data: Record<string, any> }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.recognizeFaces) {
+        return {
+          success: false,
+          error: 'Face recognition not supported by this camera'
+        };
+      }
+
+      return await camera.recognizeFaces();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to recognize faces'
+      };
+    }
+  }
+
+  /**
+   * Load a CV app (if supported)
+   */
+  public async loadApp(cameraId: string, appName: string): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.loadApp) {
+        return {
+          success: false,
+          error: 'CV apps not supported by this camera'
+        };
+      }
+
+      return await camera.loadApp(appName);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to load app'
+      };
+    }
+  }
+
+  /**
+   * Activate a CV app (if supported)
+   */
+  public async activateApp(cameraId: string, appName: string): Promise<CameraActionResponse<{ active_app: string }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.activateApp) {
+        return {
+          success: false,
+          error: 'CV apps not supported by this camera'
+        };
+      }
+
+      return await camera.activateApp(appName);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to activate app'
+      };
+    }
+  }
+
+  /**
+   * Deactivate current CV app (if supported)
+   */
+  public async deactivateApp(cameraId: string): Promise<CameraActionResponse> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.deactivateApp) {
+        return {
+          success: false,
+          error: 'CV apps not supported by this camera'
+        };
+      }
+
+      return await camera.deactivateApp();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to deactivate app'
+      };
+    }
+  }
+
+  /**
+   * Get CV app status (if supported)
+   */
+  public async getAppStatus(cameraId: string): Promise<CameraActionResponse<{ active_app: string | null; loaded_apps: string[]; state: any }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.getAppStatus) {
+        return {
+          success: false,
+          error: 'CV apps not supported by this camera'
+        };
+      }
+
+      return await camera.getAppStatus();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get app status'
+      };
+    }
+  }
+
+  /**
+   * Start a competition (if supported)
+   */
+  public async startCompetition(
+    cameraId: string,
+    competitors: Array<{ wallet_address: string; display_name: string }>,
+    durationLimit?: number
+  ): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.startCompetition) {
+        return {
+          success: false,
+          error: 'Competitions not supported by this camera'
+        };
+      }
+
+      return await camera.startCompetition(competitors, durationLimit);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to start competition'
+      };
+    }
+  }
+
+  /**
+   * End a competition (if supported)
+   * @param cameraId Camera identifier
+   * @param competition Optional competition metadata (escrow info, mode, stake, etc.)
+   */
+  public async endCompetition(cameraId: string, competition?: {
+    mode: string;
+    escrow_pda?: string;
+    stake_amount_sol?: number;
+    target_reps?: number;
+  }): Promise<CameraActionResponse<{ result: any }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      if (!camera.endCompetition) {
+        return {
+          success: false,
+          error: 'Competitions not supported by this camera'
+        };
+      }
+
+      return await camera.endCompetition(competition);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to end competition'
+      };
+    }
+  }
+
+  // ============================================
+  // CV DEV MODE APIs
+  // ============================================
+
+  /**
+   * Get CV Dev status
+   */
+  public async getCVDevStatus(cameraId: string): Promise<CameraActionResponse<{
+    enabled: boolean;
+    video_loaded: boolean;
+    video_path?: string;
+    playback_state?: {
+      playing: boolean;
+      current_frame: number;
+      total_frames: number;
+      fps: number;
+      speed: number;
+      loop: boolean;
+      progress: number;
+      current_time: number;
+      duration: number;
+    };
+  }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      // Cast to JetsonCamera to access CV dev methods
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.getCVDevStatus) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.getCVDevStatus();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get CV dev status'
+      };
+    }
+  }
+
+  /**
+   * List available CV dev videos
+   */
+  public async listCVDevVideos(cameraId: string): Promise<CameraActionResponse<{ videos: string[] }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.listCVDevVideos) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.listCVDevVideos();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to list CV dev videos'
+      };
+    }
+  }
+
+  /**
+   * Load a CV dev video
+   */
+  public async loadCVDevVideo(cameraId: string, path: string): Promise<CameraActionResponse<{
+    video_path: string;
+    total_frames: number;
+    fps: number;
+    duration: number;
+  }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.loadCVDevVideo) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.loadCVDevVideo(path);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to load CV dev video'
+      };
+    }
+  }
+
+  /**
+   * CV Dev playback control
+   */
+  public async cvDevPlaybackControl(cameraId: string, action: 'play' | 'pause' | 'restart'): Promise<CameraActionResponse> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevPlaybackControl) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevPlaybackControl(action);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : `Failed to ${action}`
+      };
+    }
+  }
+
+  /**
+   * Seek in CV dev video
+   */
+  public async cvDevSeek(cameraId: string, options: { frame?: number; time?: number; progress?: number }): Promise<CameraActionResponse<{
+    current_frame: number;
+    current_time: number;
+  }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevSeek) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevSeek(options);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to seek'
+      };
+    }
+  }
+
+  /**
+   * Set CV dev playback speed
+   */
+  public async cvDevSetSpeed(cameraId: string, speed: number): Promise<CameraActionResponse<{ speed: number }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevSetSpeed) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevSetSpeed(speed);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to set speed'
+      };
+    }
+  }
+
+  /**
+   * Step CV dev video frame
+   */
+  public async cvDevStep(cameraId: string, direction: 'forward' | 'backward' = 'forward'): Promise<CameraActionResponse<{
+    current_frame: number;
+    current_time: number;
+  }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevStep) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevStep(direction);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to step'
+      };
+    }
+  }
+
+  /**
+   * Set CV dev loop mode
+   */
+  public async cvDevSetLoop(cameraId: string, enabled: boolean): Promise<CameraActionResponse<{ loop: boolean }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevSetLoop) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevSetLoop(enabled);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to set loop'
+      };
+    }
+  }
+
+  /**
+   * Get CV dev playback state
+   */
+  public async cvDevGetPlaybackState(cameraId: string): Promise<CameraActionResponse<{
+    playing: boolean;
+    current_frame: number;
+    total_frames: number;
+    fps: number;
+    speed: number;
+    loop: boolean;
+    progress: number;
+    current_time: number;
+    duration: number;
+    rotation_enabled?: boolean;
+  }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevGetPlaybackState) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevGetPlaybackState();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get playback state'
+      };
+    }
+  }
+
+  /**
+   * Set CV dev rotation mode
+   */
+  public async cvDevSetRotation(cameraId: string, enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevSetRotation) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevSetRotation(enabled);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to set rotation'
+      };
+    }
+  }
+
+  // ============================================
+  // CV DEV TRACK LINKING APIs
+  // ============================================
+
+  /**
+   * Get currently detected tracks
+   */
+  public async cvDevGetTracks(cameraId: string): Promise<CameraActionResponse<{
+    tracks: Array<{
+      track_id: number;
+      bbox: [number, number, number, number];
+      confidence?: number;
+    }>;
+  }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevGetTracks) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevGetTracks();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get tracks'
+      };
+    }
+  }
+
+  /**
+   * Get track-to-wallet links
+   */
+  public async cvDevGetTrackLinks(cameraId: string): Promise<CameraActionResponse<{
+    links: Array<{
+      track_id: number;
+      wallet_address: string;
+      display_name?: string;
+    }>;
+  }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevGetTrackLinks) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevGetTrackLinks();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get track links'
+      };
+    }
+  }
+
+  /**
+   * Link a track to a wallet address
+   */
+  public async cvDevLinkTrack(
+    cameraId: string,
+    trackId: number,
+    walletAddress: string,
+    displayName?: string
+  ): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevLinkTrack) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevLinkTrack(trackId, walletAddress, displayName);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to link track'
+      };
+    }
+  }
+
+  /**
+   * Unlink a track
+   */
+  public async cvDevUnlinkTrack(cameraId: string, trackId: number): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevUnlinkTrack) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevUnlinkTrack(trackId);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to unlink track'
+      };
+    }
+  }
+
+  /**
+   * Clear all track links
+   */
+  public async cvDevUnlinkAllTracks(cameraId: string): Promise<CameraActionResponse<{ message: string }>> {
+    try {
+      const camera = await this.getCamera(cameraId);
+      if (!camera) {
+        return {
+          success: false,
+          error: `Camera not found: ${cameraId}`
+        };
+      }
+
+      const jetsonCamera = camera as any;
+      if (!jetsonCamera.cvDevUnlinkAllTracks) {
+        return {
+          success: false,
+          error: 'CV dev mode not supported by this camera'
+        };
+      }
+
+      return await jetsonCamera.cvDevUnlinkAllTracks();
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to unlink all tracks'
       };
     }
   }

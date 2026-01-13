@@ -1,35 +1,45 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { Image, Video } from 'lucide-react';
 import MediaViewer from './MediaViewer';
 import { unifiedIpfsService } from '../storage/ipfs/unified-ipfs-service';
 import { IPFSMedia } from '../storage/ipfs/ipfs-service';
 import { pipeGalleryService, PipeGalleryItem } from '../storage/pipe/pipe-gallery-service';
+import { walrusGalleryService, WalrusGalleryItem } from '../storage/walrus/walrus-gallery-service';
+import { decryptWalrusBlob, revokeDecryptedUrl } from '../storage/walrus/walrus-decryption';
 
 interface MediaGalleryProps {
   mode?: "recent" | "archive";
   maxRecentItems?: number;
   cameraId?: string;
+  hideTitle?: boolean;
+  mediaType?: "all" | "photos" | "videos";
 }
 
 export default function MediaGallery({
   mode = "recent",
   maxRecentItems = 5,
   cameraId,
+  hideTitle = false,
+  mediaType = "all",
 }: MediaGalleryProps) {
   const { primaryWallet } = useDynamicContext();
-  const [media, setMedia] = useState<(IPFSMedia | PipeGalleryItem)[]>([]);
+  const [media, setMedia] = useState<(IPFSMedia | PipeGalleryItem | WalrusGalleryItem)[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [, setDeleting] = useState<string | null>(null);
   const [selectedMedia, setSelectedMedia] = useState<
-    IPFSMedia | PipeGalleryItem | null
+    IPFSMedia | PipeGalleryItem | WalrusGalleryItem | null
   >(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
-  const [storageType, setStorageType] = useState<"pinata" | "pipe">("pinata");
+  // Default to 'walrus' storage (new default)
+  const [storageType, setStorageType] = useState<"pinata" | "pipe" | "walrus">("walrus");
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  // Track decrypted URLs for cleanup - use ref to avoid re-render loops
+  const decryptedUrlsRef = useRef<Map<string, string>>(new Map());
 
   // Add click handler for media items
-  const handleMediaClick = (media: IPFSMedia | PipeGalleryItem) => {
+  const handleMediaClick = (media: IPFSMedia | PipeGalleryItem | WalrusGalleryItem) => {
     console.log(
       "Viewing media with transaction ID:",
       (media as IPFSMedia).transactionId || "none"
@@ -37,6 +47,14 @@ export default function MediaGallery({
     setSelectedMedia(media);
     setIsViewerOpen(true);
   };
+
+  // Cleanup decrypted URLs on unmount
+  useEffect(() => {
+    const urlsRef = decryptedUrlsRef;
+    return () => {
+      urlsRef.current.forEach((url) => revokeDecryptedUrl(url));
+    };
+  }, []);
 
   // Check storage type preference on mount and when it changes
   useEffect(() => {
@@ -52,6 +70,29 @@ export default function MediaGallery({
 
     return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
+
+  // Subscribe to real-time gallery updates for Pipe or Walrus storage
+  useEffect(() => {
+    if (storageType === "pipe") {
+      const unsubscribe = pipeGalleryService.onGalleryUpdate(() => {
+        console.log("📡 Pipe gallery update received, refreshing...");
+        setRefreshTrigger(prev => prev + 1);
+      });
+
+      return () => {
+        unsubscribe();
+      };
+    } else if (storageType === "walrus") {
+      const unsubscribe = walrusGalleryService.onGalleryUpdate(() => {
+        console.log("📡 Walrus gallery update received, refreshing...");
+        setRefreshTrigger(prev => prev + 1);
+      });
+
+      return () => {
+        unsubscribe();
+      };
+    }
+  }, [storageType]);
 
   useEffect(() => {
     let isSubscribed = true;
@@ -72,9 +113,44 @@ export default function MediaGallery({
       try {
         setError(null);
 
-        let allMedia: (IPFSMedia | PipeGalleryItem)[] = [];
+        let allMedia: (IPFSMedia | PipeGalleryItem | WalrusGalleryItem)[] = [];
 
-        if (storageType === "pipe") {
+        if (storageType === "walrus") {
+          // Get media from Walrus storage
+          console.log(
+            "📦 Fetching media from Walrus storage for:",
+            primaryWallet.address
+          );
+          const walrusFiles = await walrusGalleryService.getUserFiles(
+            primaryWallet.address
+          );
+
+          // Decrypt encrypted files
+          const decryptedFiles = await Promise.all(
+            walrusFiles.map(async (file) => {
+              if (file.encrypted && !file.decryptedUrl) {
+                // Check if we already have a decrypted URL cached in ref
+                const cachedUrl = decryptedUrlsRef.current.get(file.blobId);
+                if (cachedUrl) {
+                  console.log(`[Gallery] Using cached decrypted URL for ${file.blobId.slice(0, 8)}...`);
+                  return { ...file, decryptedUrl: cachedUrl, url: cachedUrl };
+                }
+
+                // Decrypt the file
+                const result = await decryptWalrusBlob(file.blobId, primaryWallet.address);
+                if (result.success && result.objectUrl) {
+                  // Cache the decrypted URL in ref (doesn't trigger re-render)
+                  decryptedUrlsRef.current.set(file.blobId, result.objectUrl);
+                  return { ...file, decryptedUrl: result.objectUrl, url: result.objectUrl };
+                }
+                console.warn(`Failed to decrypt ${file.blobId}: ${result.error}`);
+              }
+              return file;
+            })
+          );
+
+          allMedia = decryptedFiles;
+        } else if (storageType === "pipe") {
           // Get media from Pipe storage
           console.log(
             "📦 Fetching media from Pipe storage for:",
@@ -161,7 +237,7 @@ export default function MediaGallery({
       isSubscribed = false;
       clearInterval(interval);
     };
-  }, [primaryWallet?.address, mode, maxRecentItems, cameraId, storageType]);
+  }, [primaryWallet?.address, mode, maxRecentItems, cameraId, storageType, refreshTrigger]);
 
   const handleDelete = async (mediaId: string) => {
     if (!primaryWallet?.address) return;
@@ -179,6 +255,22 @@ export default function MediaGallery({
         );
         setError("Deletion from Pipe storage is not yet supported");
         return;
+      } else if (storageType === "walrus") {
+        console.log("🗑️ Starting Walrus media deletion for:", mediaId);
+
+        // Add a small delay to allow UI to show loading state
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        success = await walrusGalleryService.deleteFile(
+          mediaId,
+          primaryWallet.address
+        );
+        console.log(
+          "🗑️ Walrus media deletion result:",
+          mediaId,
+          "success:",
+          success
+        );
       } else {
         console.log("🗑️ Starting IPFS media deletion for:", mediaId);
 
@@ -231,14 +323,24 @@ export default function MediaGallery({
     );
   }
 
+  // Filter media by type
+  const filteredMedia = media.filter(item => {
+    if (mediaType === "all") return true;
+    if (mediaType === "photos") return item.type === "image";
+    if (mediaType === "videos") return item.type === "video";
+    return true;
+  });
+
   const title =
-    mode === "recent" ? `Your recents` : `Gallery (${media.length})`;
+    mode === "recent" ? `Your recents` : `Gallery (${filteredMedia.length})`;
 
   return (
     <div className="max-w-3xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl text-left font-bold text-gray-800">{title}</h2>
-      </div>
+      {!hideTitle && (
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl text-left font-bold text-gray-800">{title}</h2>
+        </div>
+      )}
 
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
@@ -248,18 +350,20 @@ export default function MediaGallery({
 
       {loading ? (
         <div className="text-left py-4">Loading your media...</div>
-      ) : media.length === 0 ? (
+      ) : filteredMedia.length === 0 ? (
         <div className="text-left py-4 text-gray-500">
           {mode === "recent"
             ? "No media in current session"
-            : "No archived media found"}
+            : mediaType === "all"
+              ? "No archived media found"
+              : `No ${mediaType} found`}
         </div>
       ) : (
         <div
           className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3"
           data-testid="media-gallery"
         >
-          {media.map((item) => (
+          {filteredMedia.map((item) => (
             <div
               key={item.id}
               className="relative group cursor-pointer aspect-square"
@@ -272,7 +376,7 @@ export default function MediaGallery({
                     src={item.url}
                     className="w-full h-full object-cover"
                     onError={(e) => {
-                      console.error("IPFS video playback error:", {
+                      console.error("Video playback error:", {
                         mediaId: item.id,
                         url: item.url,
                         mimeType: item.mimeType,

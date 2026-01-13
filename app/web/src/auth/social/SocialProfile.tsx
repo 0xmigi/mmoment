@@ -78,7 +78,7 @@ export function SocialProfile() {
               <div 
                 key={`${profile.provider}-${profile.id}`}
                 className={`flex items-center justify-between p-2 rounded-lg cursor-pointer hover:bg-gray-50 ${
-                  primaryProfile.id === profile.id ? 'bg-blue-50 border border-blue-100' : ''
+                  primaryProfile.id === profile.id ? 'bg-primary-light border border-primary-light' : ''
                 }`}
                 onClick={() => setPrimaryProfile(profile.id)}
               >
@@ -111,7 +111,7 @@ export function SocialProfile() {
                   </div>
                 </div>
                 {primaryProfile.id === profile.id && (
-                  <span className="text-xs font-medium text-blue-600">Primary</span>
+                  <span className="text-xs font-medium text-primary">Primary</span>
                 )}
               </div>
             ))}

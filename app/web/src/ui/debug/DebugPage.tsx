@@ -105,7 +105,7 @@ export function DebugPage() {
           </pre>
         )}
         <button 
-          className="mt-2 px-3 py-1 bg-blue-500 text-white rounded"
+          className="mt-2 px-3 py-1 bg-primary text-white rounded"
           onClick={async () => {
             setCameraStatus({ loading: true, result: null });
             const result = await checkCameraConnection();
@@ -126,7 +126,7 @@ export function DebugPage() {
           </pre>
         )}
         <button 
-          className="mt-2 px-3 py-1 bg-blue-500 text-white rounded"
+          className="mt-2 px-3 py-1 bg-primary text-white rounded"
           onClick={async () => {
             setTimelineStatus({ loading: true, result: null });
             const result = await checkTimelineConnection();

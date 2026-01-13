@@ -1,11 +1,11 @@
 # Solana Middleware Service
 
-Real Solana blockchain integration for the mmoment camera system. This service handles all blockchain operations including session management, facial NFT minting, and camera network interactions.
+Real Solana blockchain integration for the mmoment camera system. This service handles all blockchain operations including session management, on-chain identity verification, and camera network interactions.
 
 ## Features
 
 - **Real Solana Integration**: Connects to Solana devnet with actual program interactions
-- **Facial NFT Minting**: Create NFTs from facial embeddings with on-chain metadata
+- **On-Chain Identity**: Store encrypted facial embeddings on-chain for identity verification
 - **Session Management**: Secure wallet-based sessions with encryption
 - **Camera Network**: Integration with deployed camera network program
 - **Biometric Security**: Encrypted storage and retrieval of facial data
@@ -114,7 +114,7 @@ POST /api/session/disconnect
 
 ```javascript
 // Prepare face enrollment transaction
-POST /api/blockchain/mint-facial-nft
+POST /api/blockchain/enroll-face
 {
   "wallet_address": "user_wallet_address",
   "session_id": "session_id",
@@ -127,7 +127,7 @@ POST /api/blockchain/mint-facial-nft
   "transaction_buffer": "base64_encoded_transaction_data",
   "face_id": "generated_face_id",
   "metadata": {
-    "face_nft_pda": "derived_pda_address",
+    "recognition_token_pda": "derived_pda_address",
     "instruction": "enrollFace",
     "program_id": "your_program_id"
   }
@@ -178,8 +178,8 @@ GET /api/wallet/status?wallet_address=user_wallet_address
   "balance": "1.2345 SOL",
   "balance_lamports": 1234500000,
   "address": "user_wallet_address",
-  "has_face_nft": true,
-  "face_nft_pda": "derived_face_nft_address"
+  "has_recognition_token": true,
+  "recognition_token_pda": "derived_recognition_token_address"
 }
 ```
 
@@ -187,9 +187,9 @@ GET /api/wallet/status?wallet_address=user_wallet_address
 
 ### Face Enrollment Flow
 
-1. **Frontend calls** `/api/blockchain/mint-facial-nft`
-2. **Middleware derives** face NFT PDA using seeds: `["face-nft", user_wallet]`
-3. **Middleware builds** `enrollFace` instruction with encrypted embedding
+1. **Frontend calls** `/api/blockchain/enroll-face`
+2. **Middleware derives** recognition token PDA using seeds: `["recognition-token", user_wallet]`
+3. **Middleware builds** `upsertRecognitionToken` instruction with encrypted embedding
 4. **Middleware returns** serialized transaction data to frontend
 5. **Frontend wallet signs** and submits transaction to Solana
 6. **Frontend calls** `/api/face/enroll/confirm` with transaction signature
@@ -213,11 +213,11 @@ The middleware correctly derives Program Derived Addresses (PDAs) according to y
 # Camera PDA
 seeds = [b"camera", camera_name.encode(), user_wallet_bytes]
 
-# Session PDA  
+# Session PDA
 seeds = [b"session", user_wallet_bytes, camera_pda_bytes]
 
-# Face NFT PDA
-seeds = [b"face-nft", user_wallet_bytes]
+# Recognition Token PDA
+seeds = [b"recognition-token", user_wallet_bytes]
 ```
 
 ## 🔍 Testing & Verification
@@ -247,7 +247,7 @@ curl -X POST http://localhost:5001/api/session/connect \
 
 ### Test Transaction Building
 ```bash
-curl -X POST http://localhost:5001/api/blockchain/mint-facial-nft \
+curl -X POST http://localhost:5001/api/blockchain/enroll-face \
   -H "Content-Type: application/json" \
   -d '{
     "wallet_address": "your_test_wallet",
@@ -268,7 +268,7 @@ Your frontend needs to:
 Example frontend code:
 ```javascript
 // 1. Get transaction data from middleware
-const response = await fetch('/api/blockchain/mint-facial-nft', {
+const response = await fetch('/api/blockchain/enroll-face', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({

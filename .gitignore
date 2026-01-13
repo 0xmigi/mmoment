@@ -144,6 +144,9 @@ app/orin_nano/camera_service_new/test_results/
 
 # Credentials
 *.json
+!app/backend/src/idl.json
+!app/web/src/anchor/*.json
+!target/idl/*.json
 *.pem
 *.key
 
@@ -189,3 +192,16 @@ Thumbs.db
 # Environment files
 .env
 .env.local
+
+# Docker build artifacts in camera-service
+app/orin_nano/services/camera-service/native/
+
+# Runtime databases
+*.db
+upload_queue.db
+
+# Backup files
+*.backup
+
+# Device credentials (sensitive)
+device-keypair.enc

@@ -5,6 +5,8 @@
  * Integrates with existing MMOMENT storage provider pattern.
  */
 
+import { CONFIG } from '../../core/config';
+
 export interface PipeMedia {
   id: string;
   url: string;
@@ -42,8 +44,12 @@ export class PipeService implements PipeStorageProvider {
   readonly name = "Pipe Network";
 
   private credentials: PipeCredentials | null = null;
-  private baseUrl = "https://us-west-00-firestarter.pipenetwork.com";
+  // Use us-west-01 for consistency with backend (mainnet endpoint)
+  private baseUrl = "https://us-west-01-firestarter.pipenetwork.com";
   private initPromise: Promise<void>;
+  // Upload retry configuration
+  private readonly maxRetries = 3;
+  private readonly retryDelayMs = 1000;
 
   constructor() {
     this.initPromise = this.initializeCredentials();
@@ -60,7 +66,7 @@ export class PipeService implements PipeStorageProvider {
    */
   async loadCredentialsForWallet(walletAddress: string): Promise<void> {
     try {
-      const response = await fetch(`/api/pipe/credentials?wallet=${encodeURIComponent(walletAddress)}`);
+      const response = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/credentials?wallet=${encodeURIComponent(walletAddress)}`);
       if (response.ok) {
         this.credentials = await response.json();
         console.log(`✅ Pipe credentials loaded for ${walletAddress.slice(0, 8)}...`);
@@ -86,7 +92,7 @@ export class PipeService implements PipeStorageProvider {
       );
 
       // Call backend to create Pipe account using wallet address as username
-      const response = await fetch("/api/pipe/create-account", {
+      const response = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/create-account`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -137,34 +143,65 @@ export class PipeService implements PipeStorageProvider {
       throw new Error("Pipe credentials not available");
     }
 
-    const formData = new FormData();
-
     // Generate MMOMENT filename
     const timestamp = metadata?.timestamp || new Date().toISOString();
     const cameraId = metadata?.cameraId || "web";
     const extension = type === "video" ? "mp4" : "jpg";
     const filename = `mmoment_${type}_${cameraId}_${timestamp}.${extension}`;
 
-    formData.append("file", blob, filename);
+    // Retry logic for resilient uploads
+    let lastError: Error | null = null;
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      try {
+        const formData = new FormData();
+        formData.append("file", blob, filename);
 
-    const uploadUrl = new URL(`${this.baseUrl}/priorityUpload`);
-    uploadUrl.searchParams.append("user_id", this.credentials.userId);
-    uploadUrl.searchParams.append("user_app_key", this.credentials.userAppKey);
+        const uploadUrl = new URL(`${this.baseUrl}/priorityUpload`);
+        uploadUrl.searchParams.append("user_id", this.credentials.userId);
+        uploadUrl.searchParams.append("user_app_key", this.credentials.userAppKey);
 
-    const response = await fetch(uploadUrl.toString(), {
-      method: "POST",
-      body: formData,
-    });
+        // Add timeout via AbortController (2 min for videos, 30s for images)
+        const controller = new AbortController();
+        const timeoutMs = type === "video" ? 120000 : 30000;
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Pipe upload failed: ${error}`);
+        const response = await fetch(uploadUrl.toString(), {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(`Pipe upload failed (${response.status}): ${error}`);
+        }
+
+        const result = await response.text(); // Pipe returns filename as string
+        console.log(`✅ Uploaded to Pipe: ${result} (attempt ${attempt})`);
+
+        return result;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+
+        // Don't retry on abort (timeout)
+        if (lastError.name === "AbortError") {
+          throw new Error(`Upload timed out after ${type === "video" ? "2 minutes" : "30 seconds"}`);
+        }
+
+        console.warn(`⚠️ Upload attempt ${attempt}/${this.maxRetries} failed:`, lastError.message);
+
+        if (attempt < this.maxRetries) {
+          // Exponential backoff
+          const delay = this.retryDelayMs * Math.pow(2, attempt - 1);
+          console.log(`   Retrying in ${delay}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
     }
 
-    const result = await response.text(); // Pipe returns filename as string
-    console.log(`✅ Uploaded to Pipe: ${result}`);
-
-    return result;
+    throw lastError || new Error("Upload failed after all retries");
   }
 
   async getMediaForWallet(walletAddress: string): Promise<PipeMedia[]> {
@@ -246,33 +283,120 @@ export class PipeService implements PipeStorageProvider {
     return response.blob();
   }
 
-  async deleteMedia(fileId: string, _walletAddress: string): Promise<boolean> {
+  async deleteMedia(fileId: string, walletAddress: string): Promise<boolean> {
     if (!this.credentials) {
       throw new Error("Pipe credentials not available");
     }
 
     try {
-      const response = await fetch(`${this.baseUrl}/deleteFile`, {
+      console.log(`🗑️ Deleting file ${fileId} from Pipe...`);
+
+      // Use backend endpoint which uses the new SDK
+      const response = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/delete/${encodeURIComponent(walletAddress)}/${encodeURIComponent(fileId)}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error(`Failed to delete ${fileId} from Pipe:`, error);
+        return false;
+      }
+
+      const result = await response.json();
+      console.log(`✅ Deleted ${fileId} from Pipe:`, result);
+      return true;
+    } catch (error) {
+      console.error("Error deleting from Pipe:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Create a public share link for a file
+   */
+  async createShareLink(
+    fileId: string,
+    walletAddress: string,
+    options?: { title?: string; description?: string }
+  ): Promise<{ success: boolean; shareUrl?: string; linkHash?: string; error?: string }> {
+    if (!this.credentials) {
+      return {
+        success: false,
+        error: "Pipe credentials not available",
+      };
+    }
+
+    try {
+      console.log(`🔗 Creating share link for ${fileId}...`);
+
+      const response = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/share/${encodeURIComponent(walletAddress)}/${encodeURIComponent(fileId)}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          user_id: this.credentials.userId,
-          user_app_key: this.credentials.userAppKey,
-          file_name: fileId,
+          title: options?.title,
+          description: options?.description,
         }),
       });
 
       if (!response.ok) {
-        console.error(`Failed to delete ${fileId} from Pipe`);
+        const error = await response.json();
+        console.error("Failed to create share link:", error);
+        return {
+          success: false,
+          error: error.error || "Failed to create share link",
+        };
+      }
+
+      const result = await response.json();
+      console.log(`✅ Share link created:`, result.shareUrl);
+
+      return {
+        success: true,
+        shareUrl: result.shareUrl,
+        linkHash: result.linkHash,
+      };
+    } catch (error) {
+      console.error("Error creating share link:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to create share link",
+      };
+    }
+  }
+
+  /**
+   * Delete a public share link
+   */
+  async deleteShareLink(linkHash: string, walletAddress: string): Promise<boolean> {
+    if (!this.credentials) {
+      throw new Error("Pipe credentials not available");
+    }
+
+    try {
+      console.log(`🗑️ Deleting share link ${linkHash}...`);
+
+      const response = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/share/${encodeURIComponent(walletAddress)}/${encodeURIComponent(linkHash)}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error("Failed to delete share link:", error);
         return false;
       }
 
-      console.log(`✅ Deleted ${fileId} from Pipe`);
+      console.log(`✅ Share link deleted`);
       return true;
     } catch (error) {
-      console.error("Error deleting from Pipe:", error);
+      console.error("Error deleting share link:", error);
       return false;
     }
   }
@@ -284,7 +408,7 @@ export class PipeService implements PipeStorageProvider {
 
     try {
       // Check SOL balance via backend proxy to avoid CORS issues
-      const solResponse = await fetch(`/api/pipe/proxy/checkWallet`, {
+      const solResponse = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/proxy/checkWallet`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -307,7 +431,7 @@ export class PipeService implements PipeStorageProvider {
       // Check PIPE token balance via backend proxy
       let pipeBalance = 0;
       try {
-        const pipeResponse = await fetch(`/api/pipe/proxy/checkCustomToken`, {
+        const pipeResponse = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/proxy/checkCustomToken`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -347,7 +471,7 @@ export class PipeService implements PipeStorageProvider {
       console.log(`🔄 Swapping ${solAmount} SOL for PIPE tokens...`);
 
       // Try without token_mint parameter first
-      const response = await fetch(`/api/pipe/proxy/exchangeSolForTokens`, {
+      const response = await fetch(`${CONFIG.BACKEND_URL}/api/pipe/proxy/exchangeSolForTokens`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

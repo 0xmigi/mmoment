@@ -26,7 +26,7 @@ export const StreamControls = ({ onStreamToggle, isStreaming = false, isLoading 
             <button
                 onClick={handleStreamClick}
                 disabled={isLoading || initLoading || !isInitialized}
-                className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-black transition-colors rounded-xl"
+                className="w-16 h-full flex items-center justify-center hover:text-primary text-black transition-colors rounded-xl"
                 aria-label={isStreaming ? "Stop Stream" : "Start Stream"}
             >
                 {isLoading || initLoading ? (

@@ -184,24 +184,24 @@ export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps)
 
             {/* Sponsored Gas Banner */}
             <div className="mb-4 pb-3 border-b border-gray-200">
-              <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-3 border border-blue-100">
+              <div className="bg-gradient-to-r from-primary-light to-purple-50 rounded-lg p-3 border border-primary-light">
                 <div className="flex justify-between items-start mb-2">
                   <div className="flex-1">
-                    <div className="text-xs font-medium text-blue-900 mb-1">🎁 Free Transactions</div>
-                    <div className="text-xs text-blue-700">
+                    <div className="text-xs font-medium text-primary mb-1">🎁 Free Transactions</div>
+                    <div className="text-xs text-primary">
                       First 10 transactions on us!
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-lg font-bold text-blue-600">
+                    <div className="text-lg font-bold text-primary">
                       {sponsorshipQuota.total - sponsorshipQuota.used}/{sponsorshipQuota.total}
                     </div>
-                    <div className="text-xs text-blue-600">remaining</div>
+                    <div className="text-xs text-primary">remaining</div>
                   </div>
                 </div>
-                <div className="w-full bg-blue-200/50 rounded-full h-1.5 mb-2">
+                <div className="w-full bg-primary-light/50 rounded-full h-1.5 mb-2">
                   <div
-                    className="bg-blue-500 h-1.5 rounded-full transition-all"
+                    className="bg-primary h-1.5 rounded-full transition-all"
                     style={{ width: `${((sponsorshipQuota.total - sponsorshipQuota.used) / sponsorshipQuota.total) * 100}%` }}
                   />
                 </div>
@@ -211,7 +211,7 @@ export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps)
                     className={`w-full py-2 px-3 rounded-md text-xs font-medium transition-colors ${
                       sponsoredGasEnabled
                         ? 'bg-green-500 text-white hover:bg-green-600'
-                        : 'bg-white text-blue-600 border border-blue-300 hover:bg-blue-50'
+                        : 'bg-white text-primary border border-primary-light hover:bg-primary-light'
                     }`}
                   >
                     {sponsoredGasEnabled ? '✓ Sponsored Gas Enabled' : 'Enable Sponsored Gas'}
@@ -231,7 +231,7 @@ export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps)
               {/* SOL Token */}
               <div className="flex items-center justify-between py-2">
                 <div className="flex items-center">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center mr-3">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-primary flex items-center justify-center mr-3">
                     <span className="text-white text-xs font-bold">SOL</span>
                   </div>
                   <div>
@@ -258,7 +258,7 @@ export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps)
               {/* USDC Token (Coming Soon) */}
               <div className="flex items-center justify-between py-2 opacity-50">
                 <div className="flex items-center">
-                  <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center mr-3">
+                  <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center mr-3">
                     <span className="text-white text-sm font-bold">$</span>
                   </div>
                   <div>

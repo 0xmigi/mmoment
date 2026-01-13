@@ -13,11 +13,18 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-# Solana imports for blockchain reading
+# Solana imports for blockchain reading and writing
 from solana.rpc.api import Client
 from solders.pubkey import Pubkey
-from solana.rpc.types import MemcmpOpts
+from solders.keypair import Keypair
+from solders.instruction import Instruction, AccountMeta
+from solders.transaction import Transaction
+from solders.system_program import ID as SYSTEM_PROGRAM_ID
+from solders.message import Message
+from solana.rpc.types import MemcmpOpts, TxOpts
+from solana.rpc.commitment import Confirmed
 import base58
+import struct
 
 # Configure logging
 logging.basicConfig(
@@ -910,26 +917,308 @@ def is_user_checked_in(user_pubkey: str, camera_pubkey: str) -> bool:
         session_pda = derive_session_pda(user_pubkey, camera_pubkey, CAMERA_PROGRAM_ID)
         if not session_pda:
             return False
-        
+
         # Try to fetch the account
         response = solana_client.get_account_info(Pubkey.from_string(session_pda))
-        
+
         if response.value and response.value.data:
             # Account exists, decode to check if user is actually checked in
             account_data = base64.b64decode(response.value.data[0])
-            
+
             # Extract check-in time (8 bytes starting at offset 72)
             checkin_time_bytes = account_data[72:80]
             checkin_time = int.from_bytes(checkin_time_bytes, byteorder='little', signed=True)
-            
+
             # If checkin_time > 0, user is checked in
             return checkin_time > 0
-        
+
         return False
-        
+
     except Exception as e:
         logger.error(f"Error checking if user {user_pubkey} is checked in: {e}")
         return False
+
+
+# ============================================================================
+# Phase 3 Privacy Architecture: Write to Camera Timeline
+# ============================================================================
+
+# Device keypair for signing transactions
+_device_keypair = None
+
+def get_device_keypair() -> Keypair:
+    """Load the device keypair for signing transactions."""
+    global _device_keypair
+    if _device_keypair is not None:
+        return _device_keypair
+
+    # Try production path first, then local path
+    paths = [
+        '/opt/mmoment/device/device-keypair.enc',
+        os.path.expanduser('~/.mmoment/device-keypair.enc')
+    ]
+
+    for keypair_path in paths:
+        if os.path.exists(keypair_path):
+            try:
+                # Get hardware key for decryption
+                hardware_key = _get_hardware_key()
+                cipher = Fernet(hardware_key)
+
+                with open(keypair_path, 'rb') as f:
+                    encrypted_data = f.read()
+
+                decrypted_data = cipher.decrypt(encrypted_data)
+                keypair_data = json.loads(decrypted_data.decode())
+
+                _device_keypair = Keypair.from_bytes(bytes(keypair_data['private_key']))
+                logger.info(f"Loaded device keypair: {_device_keypair.pubkey()}")
+                return _device_keypair
+
+            except Exception as e:
+                logger.warning(f"Failed to load keypair from {keypair_path}: {e}")
+                continue
+
+    raise ValueError("Device keypair not found - device may not be registered")
+
+
+def _get_hardware_key():
+    """Generate hardware-bound encryption key (same as DeviceSigner)"""
+    try:
+        serial = None
+
+        # First try shared machine-id (created by camera service at startup)
+        # This ensures both services use the same key derivation
+        shared_id_path = '/app/config/shared-machine-id'
+        if os.path.exists(shared_id_path):
+            serial = open(shared_id_path).read().strip()
+            logger.info(f"Using shared machine-id for key derivation: {serial[:8]}...")
+
+        # Fallback to standard locations
+        if not serial:
+            try:
+                with open('/proc/cpuinfo', 'r') as f:
+                    cpu_info = f.read()
+                    for line in cpu_info.split('\n'):
+                        if 'Serial' in line:
+                            serial = line.split(':')[1].strip()
+                            break
+            except:
+                pass
+
+        if not serial or serial == '0000000000000000':
+            try:
+                serial = open('/sys/class/net/eth0/address').read().strip()
+            except:
+                try:
+                    serial = open('/etc/machine-id').read().strip()
+                except:
+                    pass
+
+        if not serial:
+            raise ValueError("No hardware identifier found")
+
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=b'mmoment_depin_device_v1',
+            iterations=100000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(serial.encode()))
+        return key
+
+    except Exception as e:
+        logger.warning(f"Hardware key generation failed: {e}, using dev fallback")
+        return base64.urlsafe_b64encode(b'mmoment_dev_key_32_bytes_long!!')
+
+
+def derive_camera_timeline_pda(camera_pubkey: str) -> tuple:
+    """Derive the CameraTimeline PDA for a camera."""
+    try:
+        camera_pk = Pubkey.from_string(camera_pubkey)
+        program_pk = Pubkey.from_string(CAMERA_PROGRAM_ID)
+
+        seeds = [b"camera-timeline", bytes(camera_pk)]
+        pda, bump = Pubkey.find_program_address(seeds, program_pk)
+        return str(pda), bump
+
+    except Exception as e:
+        logger.error(f"Error deriving camera timeline PDA: {e}")
+        return None, None
+
+
+def serialize_activity_data(activity: dict) -> bytes:
+    """Serialize an ActivityData struct for the Solana instruction."""
+    # ActivityData layout:
+    # - timestamp: i64 (8 bytes)
+    # - activity_type: u8 (1 byte)
+    # - encrypted_content: Vec<u8> (4 bytes length + data)
+    # - nonce: [u8; 12] (12 bytes)
+    # - access_grants: Vec<Vec<u8>> (4 bytes outer length + inner vecs)
+
+    data = b''
+
+    # timestamp (i64, little-endian)
+    data += struct.pack('<q', activity['timestamp'])
+
+    # activity_type (u8)
+    data += struct.pack('<B', activity['activity_type'])
+
+    # encrypted_content (Vec<u8>)
+    encrypted_content = bytes(activity['encrypted_content'])
+    data += struct.pack('<I', len(encrypted_content))
+    data += encrypted_content
+
+    # nonce ([u8; 12])
+    nonce = bytes(activity['nonce'])
+    if len(nonce) != 12:
+        raise ValueError(f"Nonce must be 12 bytes, got {len(nonce)}")
+    data += nonce
+
+    # access_grants (Vec<Vec<u8>>)
+    access_grants = activity.get('access_grants', [])
+    data += struct.pack('<I', len(access_grants))
+    for grant in access_grants:
+        grant_bytes = bytes(grant)
+        data += struct.pack('<I', len(grant_bytes))
+        data += grant_bytes
+
+    return data
+
+
+def build_write_timeline_instruction(activities: list, signer: Pubkey, camera_pda: str, timeline_pda: str) -> Instruction:
+    """Build the write_to_camera_timeline instruction."""
+    # Instruction discriminator for write_to_camera_timeline
+    # This is the first 8 bytes of SHA256("global:write_to_camera_timeline")
+    discriminator = hashlib.sha256(b"global:write_to_camera_timeline").digest()[:8]
+
+    # Serialize instruction data
+    instruction_data = discriminator
+
+    # Serialize activities Vec
+    instruction_data += struct.pack('<I', len(activities))
+    for activity in activities:
+        activity_bytes = serialize_activity_data(activity)
+        instruction_data += activity_bytes
+
+    # Build accounts list
+    accounts = [
+        AccountMeta(pubkey=signer, is_signer=True, is_writable=True),  # signer (fee payer)
+        AccountMeta(pubkey=Pubkey.from_string(camera_pda), is_signer=False, is_writable=True),  # camera
+        AccountMeta(pubkey=Pubkey.from_string(timeline_pda), is_signer=False, is_writable=True),  # camera_timeline
+        AccountMeta(pubkey=SYSTEM_PROGRAM_ID, is_signer=False, is_writable=False),  # system_program
+    ]
+
+    return Instruction(
+        program_id=Pubkey.from_string(CAMERA_PROGRAM_ID),
+        accounts=accounts,
+        data=instruction_data
+    )
+
+
+@app.route('/api/blockchain/write-camera-timeline', methods=['POST'])
+def api_write_camera_timeline():
+    """
+    Phase 3 Privacy Architecture: Write encrypted activities to CameraTimeline.
+
+    This endpoint:
+    1. Takes pre-encrypted activities from the camera service
+    2. Builds the write_to_camera_timeline instruction
+    3. Signs with the device keypair
+    4. Submits the transaction to Solana
+
+    The transaction contains NO USER INFORMATION - complete anonymity.
+
+    Expected body:
+    {
+        "activities": [
+            {
+                "timestamp": 1699000000,
+                "activity_type": 2,
+                "encrypted_content": [bytes...],
+                "nonce": [12 bytes],
+                "access_grants": [[bytes...], ...]
+            },
+            ...
+        ]
+    }
+    """
+    try:
+        data = request.json
+        activities = data.get('activities', [])
+
+        if not activities:
+            return jsonify({"error": "No activities provided"}), 400
+
+        logger.info(f"[WRITE-TIMELINE] Writing {len(activities)} activities to camera timeline")
+
+        # Get device keypair for signing
+        try:
+            device_keypair = get_device_keypair()
+        except Exception as e:
+            logger.error(f"[WRITE-TIMELINE] Failed to load device keypair: {e}")
+            return jsonify({"error": "Device keypair not available"}), 500
+
+        # Get camera PDA
+        camera_pda = get_camera_pda()
+        if not camera_pda:
+            return jsonify({"error": "Camera PDA not configured"}), 500
+
+        # Derive camera timeline PDA
+        timeline_pda, bump = derive_camera_timeline_pda(camera_pda)
+        if not timeline_pda:
+            return jsonify({"error": "Failed to derive timeline PDA"}), 500
+
+        logger.info(f"[WRITE-TIMELINE] Camera: {camera_pda[:16]}..., Timeline: {timeline_pda[:16]}...")
+
+        # Build the instruction
+        instruction = build_write_timeline_instruction(
+            activities=activities,
+            signer=device_keypair.pubkey(),
+            camera_pda=camera_pda,
+            timeline_pda=timeline_pda
+        )
+
+        # Get recent blockhash
+        blockhash_response = solana_client.get_latest_blockhash()
+        if not blockhash_response.value:
+            return jsonify({"error": "Failed to get blockhash"}), 500
+
+        recent_blockhash = blockhash_response.value.blockhash
+
+        # Build and sign transaction
+        message = Message.new_with_blockhash(
+            [instruction],
+            device_keypair.pubkey(),
+            recent_blockhash
+        )
+        tx = Transaction.new_unsigned(message)
+        tx.sign([device_keypair], recent_blockhash)
+
+        # Send transaction
+        tx_opts = TxOpts(skip_confirmation=False, preflight_commitment=Confirmed)
+        result = solana_client.send_transaction(tx, opts=tx_opts)
+
+        if result.value:
+            signature = str(result.value)
+            logger.info(f"[WRITE-TIMELINE] Transaction successful: {signature[:16]}...")
+            return jsonify({
+                "success": True,
+                "signature": signature,
+                "activities_count": len(activities),
+                "camera_pda": camera_pda,
+                "timeline_pda": timeline_pda
+            })
+        else:
+            logger.error(f"[WRITE-TIMELINE] Transaction failed: {result}")
+            return jsonify({"error": "Transaction failed"}), 500
+
+    except Exception as e:
+        logger.error(f"[WRITE-TIMELINE] Error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     # Ensure the middleware has the required Python packages

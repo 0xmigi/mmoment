@@ -1,5 +1,6 @@
 import { Dialog } from '@headlessui/react';
-import { X, ExternalLink } from 'lucide-react';
+import { X, ExternalLink, Trophy, Users, Clock, Gift, Target, Coins, CheckCircle, XCircle } from 'lucide-react';
+import { CVActivityMetadata } from '../timeline/timeline-types';
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -11,6 +12,7 @@ interface ProfileModalProps {
     pfpUrl?: string;
     farcasterUsername?: string;
     bio?: string;
+    provider?: string; // From backend profile (e.g., 'farcaster', 'twitter')
     verifiedCredentials?: {
       oauthProvider: string;
       oauthDisplayName?: string;
@@ -24,17 +26,28 @@ interface ProfileModalProps {
     timestamp: number;
     transactionId?: string;
     mediaUrl?: string;
+    cvActivity?: CVActivityMetadata;
+    /** Future: Prize/bounty earned for completing this action */
+    prize?: {
+      amount: number;
+      currency: string;
+      from?: string; // Who issued the prize
+    };
   };
 }
 
 export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProps) {
   if (!isOpen) return null;
 
-  // Get social identity credentials
+  // Get social identity credentials (from current user's verifiedCredentials)
   const farcasterCred = user?.verifiedCredentials?.find(cred => cred.oauthProvider === 'farcaster');
   const twitterCred = user?.verifiedCredentials?.find(cred => cred.oauthProvider === 'twitter');
-  
-  // Prioritize Farcaster, then Twitter
+
+  // Check if we have backend profile data (for other users)
+  const hasBackendProfile = user.provider && user.username;
+  const backendProvider = user.provider?.toLowerCase();
+
+  // Prioritize Farcaster, then Twitter (from verifiedCredentials)
   const primarySocialCred = farcasterCred || twitterCred;
   
   // Get display information
@@ -43,18 +56,6 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
   
   // Only use wallet as fallback
   const displayIdentity = displayName || `${user.address.slice(0, 4)}...${user.address.slice(-4)}`;
-
-  const handleWarpcastClick = () => {
-    if (farcasterCred?.oauthUsername) {
-      window.open(`https://warpcast.com/${farcasterCred.oauthUsername.replace('@', '')}`, '_blank');
-    }
-  };
-  
-  const handleTwitterClick = () => {
-    if (twitterCred?.oauthUsername) {
-      window.open(`https://twitter.com/${twitterCred.oauthUsername.replace('@', '')}`, '_blank');
-    }
-  };
 
   const handleExplorerClick = () => {
     if (action?.transactionId) {
@@ -73,6 +74,37 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
       hour12: true
     }).format(date);
   };
+
+  // Format app name nicely (pushup -> Push-ups)
+  const formatAppName = (appName: string): string => {
+    const mapping: Record<string, string> = {
+      'pushup': 'Push-ups',
+      'pullup': 'Pull-ups',
+      'squat': 'Squats',
+      'situp': 'Sit-ups',
+      'jumping_jack': 'Jumping Jacks',
+    };
+    return mapping[appName] || appName.charAt(0).toUpperCase() + appName.slice(1).replace(/_/g, ' ');
+  };
+
+  // Get rank suffix (1st, 2nd, 3rd, etc.)
+  const getRankSuffix = (rank: number): string => {
+    if (rank === 1) return 'st';
+    if (rank === 2) return 'nd';
+    if (rank === 3) return 'rd';
+    return 'th';
+  };
+
+  // Get rank color for styling
+  const getRankColor = (rank: number): string => {
+    if (rank === 1) return 'text-yellow-600 bg-yellow-50';
+    if (rank === 2) return 'text-gray-500 bg-gray-100';
+    if (rank === 3) return 'text-amber-700 bg-amber-50';
+    return 'text-gray-600 bg-gray-50';
+  };
+
+  // Check if this is a CV activity
+  const isCVActivity = action?.type === 'cv_activity' && action?.cvActivity;
 
 
   return (
@@ -122,46 +154,56 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
 
             {/* Connected Accounts */}
             <div className="space-y-2">
-              {/* Farcaster Account */}
-              {farcasterCred && (
+              {/* Farcaster Account - from verifiedCredentials OR backend */}
+              {(farcasterCred || (hasBackendProfile && backendProvider === 'farcaster')) && (
                 <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-medium text-gray-700">Farcaster</span>
-                      {farcasterCred === primarySocialCred && (
-                        <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">source</span>
+                      {(farcasterCred === primarySocialCred || (hasBackendProfile && backendProvider === 'farcaster')) && (
+                        <span className="text-[10px] text-primary bg-primary-light px-1.5 py-0.5 rounded">source</span>
                       )}
                     </div>
                     <div className="text-xs text-gray-500">
-                      @{farcasterCred.oauthUsername?.replace('@', '')}
+                      @{farcasterCred?.oauthUsername?.replace('@', '') || user.username?.replace('@', '')}
                     </div>
                   </div>
-                  <button 
-                    onClick={handleWarpcastClick}
-                    className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
+                  <button
+                    onClick={() => {
+                      const username = farcasterCred?.oauthUsername || user.username;
+                      if (username) {
+                        window.open(`https://farcaster.xyz/${username.replace('@', '')}`, '_blank');
+                      }
+                    }}
+                    className="text-xs text-primary hover:text-primary-hover transition-colors flex items-center gap-1"
                   >
                     View <ExternalLink className="w-3 h-3" />
                   </button>
                 </div>
               )}
-              
-              {/* Twitter Account */}
-              {twitterCred && (
+
+              {/* Twitter Account - from verifiedCredentials OR backend */}
+              {(twitterCred || (hasBackendProfile && backendProvider === 'twitter')) && (
                 <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-medium text-gray-700">X / Twitter</span>
-                      {primarySocialCred === twitterCred && (
-                        <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">source</span>
+                      {(primarySocialCred === twitterCred || (hasBackendProfile && backendProvider === 'twitter')) && (
+                        <span className="text-[10px] text-primary bg-primary-light px-1.5 py-0.5 rounded">source</span>
                       )}
                     </div>
                     <div className="text-xs text-gray-500">
-                      @{twitterCred.oauthUsername?.replace('@', '')}
+                      @{twitterCred?.oauthUsername?.replace('@', '') || user.username?.replace('@', '')}
                     </div>
                   </div>
-                  <button 
-                    onClick={handleTwitterClick}
-                    className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
+                  <button
+                    onClick={() => {
+                      const username = twitterCred?.oauthUsername || user.username;
+                      if (username) {
+                        window.open(`https://twitter.com/${username.replace('@', '')}`, '_blank');
+                      }
+                    }}
+                    className="text-xs text-primary hover:text-primary-hover transition-colors flex items-center gap-1"
                   >
                     View <ExternalLink className="w-3 h-3" />
                   </button>
@@ -175,29 +217,176 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
                 <div className="text-xs font-medium text-gray-500">Action</div>
                 <div className="bg-gray-50 px-2 py-2 rounded-lg">
                   <div className="space-y-2">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900 capitalize">
-                        {action.type.replace(/_/g, ' ')}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {formatDate(action.timestamp)}
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between pt-1 border-t border-gray-200/75">
-                      <div className="text-[10px] font-mono text-gray-500">
-                        {action.transactionId ? `${action.transactionId.slice(0, 8)}...${action.transactionId.slice(-8)}` : 'Processing...'}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {action.transactionId && (
-                          <button
-                            onClick={handleExplorerClick}
-                            className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1"
-                          >
-                            View Tx <ExternalLink className="w-3 h-3" />
-                          </button>
+                    {/* CV Activity - Rich Display */}
+                    {isCVActivity && action.cvActivity ? (
+                      <>
+                        {/* Main activity summary */}
+                        <div className="flex items-start gap-2">
+                          <div className="flex-1">
+                            <div className="text-sm font-medium text-gray-900">
+                              Completed {action.cvActivity.user_stats?.reps ?? 0} {formatAppName(action.cvActivity.app_name)}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {formatDate(action.timestamp)}
+                            </div>
+                          </div>
+                          {/* Rank badge for competitions */}
+                          {action.cvActivity.participant_count > 1 && (
+                            <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getRankColor(action.cvActivity.results?.find(r => r.stats?.reps === action.cvActivity?.user_stats?.reps)?.rank ?? 1)}`}>
+                              <Trophy className="w-3 h-3" />
+                              {(() => {
+                                const rank = action.cvActivity.results?.find(r => r.stats?.reps === action.cvActivity?.user_stats?.reps)?.rank ?? 1;
+                                return `${rank}${getRankSuffix(rank)}`;
+                              })()}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Competition details */}
+                        {action.cvActivity.participant_count > 1 && (
+                          <div className="flex items-center gap-3 text-xs text-gray-500 pt-1">
+                            <div className="flex items-center gap-1">
+                              <Users className="w-3 h-3" />
+                              <span>{action.cvActivity.participant_count} participants</span>
+                            </div>
+                            {action.cvActivity.duration_seconds && (
+                              <div className="flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                <span>{Math.round(action.cvActivity.duration_seconds)}s</span>
+                              </div>
+                            )}
+                          </div>
                         )}
+
+                        {/* Competition/Prize Section */}
+                        {action.cvActivity.competition && action.cvActivity.competition.mode !== 'none' && (
+                          <div className="mt-2 pt-2 border-t border-gray-200/75 space-y-2">
+                            <div className="text-xs font-medium text-gray-500 flex items-center gap-1">
+                              <Coins className="w-3 h-3" />
+                              {action.cvActivity.competition.mode === 'prize' ? 'Prize' : 'Bet'}
+                            </div>
+
+                            {/* Competition type and stake */}
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div className="bg-white rounded px-2 py-1.5">
+                                <div className="text-gray-500 text-[10px]">Type</div>
+                                <div className="font-medium text-gray-900">
+                                  {action.cvActivity.participant_count === 1 ? 'vs Self' : 'vs Group'}
+                                </div>
+                              </div>
+                              <div className="bg-white rounded px-2 py-1.5">
+                                <div className="text-gray-500 text-[10px]">Staked</div>
+                                <div className="font-medium text-gray-900">
+                                  {action.cvActivity.competition.stakeAmountSol} SOL
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Target (for prize mode) */}
+                            {action.cvActivity.competition.targetReps && (
+                              <div className="flex items-center gap-2 text-xs bg-white rounded px-2 py-1.5">
+                                <Target className="w-3 h-3 text-gray-400" />
+                                <span className="text-gray-500">Target:</span>
+                                <span className="font-medium text-gray-900">
+                                  {action.cvActivity.competition.targetReps} reps
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Result */}
+                            <div className={`flex items-center justify-between rounded px-2 py-1.5 ${
+                              action.cvActivity.competition.won
+                                ? 'bg-green-50 border border-green-200'
+                                : 'bg-red-50 border border-red-200'
+                            }`}>
+                              <div className="flex items-center gap-2">
+                                {action.cvActivity.competition.won ? (
+                                  <CheckCircle className="w-4 h-4 text-green-600" />
+                                ) : (
+                                  <XCircle className="w-4 h-4 text-red-600" />
+                                )}
+                                <span className={`text-sm font-medium ${
+                                  action.cvActivity.competition.won ? 'text-green-700' : 'text-red-700'
+                                }`}>
+                                  {action.cvActivity.competition.won ? 'Won!' : 'Lost'}
+                                </span>
+                              </div>
+                              <div className={`text-sm font-bold ${
+                                action.cvActivity.competition.won ? 'text-green-700' : 'text-red-700'
+                              }`}>
+                                {action.cvActivity.competition.won
+                                  ? `+${action.cvActivity.competition.amountWonSol} SOL`
+                                  : `-${action.cvActivity.competition.amountLostSol} SOL`
+                                }
+                              </div>
+                            </div>
+
+                            {/* Lost to info (for failed prize) */}
+                            {!action.cvActivity.competition.won && action.cvActivity.competition.lostTo && (
+                              <div className="text-[10px] text-gray-500">
+                                Funds sent to camera: {action.cvActivity.competition.lostTo.slice(0, 4)}...{action.cvActivity.competition.lostTo.slice(-4)}
+                              </div>
+                            )}
+
+                            {/* On-chain links */}
+                            <div className="flex flex-wrap gap-2 text-[10px]">
+                              {action.cvActivity.competition.escrowPda && (
+                                <button
+                                  onClick={() => window.open(`https://solscan.io/account/${action.cvActivity?.competition?.escrowPda}?cluster=devnet`, '_blank')}
+                                  className="text-primary hover:text-primary-hover flex items-center gap-1"
+                                >
+                                  Escrow <ExternalLink className="w-2.5 h-2.5" />
+                                </button>
+                              )}
+                              {action.cvActivity.competition.settlementTxId && (
+                                <button
+                                  onClick={() => window.open(`https://solscan.io/tx/${action.cvActivity?.competition?.settlementTxId}?cluster=devnet`, '_blank')}
+                                  className="text-primary hover:text-primary-hover flex items-center gap-1"
+                                >
+                                  Settlement Tx <ExternalLink className="w-2.5 h-2.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Legacy Prize/Bounty support */}
+                        {action.prize && !action.cvActivity.competition && (
+                          <div className="flex items-center gap-2 pt-1 text-xs">
+                            <Gift className="w-3 h-3 text-green-600" />
+                            <span className="text-green-700 font-medium">
+                              Earned {action.prize.amount} {action.prize.currency}
+                              {action.prize.from && <span className="text-gray-500"> from {action.prize.from}</span>}
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      /* Standard action display for non-CV activities */
+                      <div>
+                        <div className="text-sm font-medium text-gray-900 capitalize">
+                          {action.type.replace(/_/g, ' ')}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {formatDate(action.timestamp)}
+                        </div>
                       </div>
-                    </div>
+                    )}
+
+                    {/* Transaction link - only show for on-chain actions (check-outs, financialized actions) */}
+                    {(action.type === 'check_out' || action.type === 'auto_check_out' || action.prize) && action.transactionId && (
+                      <div className="flex items-center justify-between pt-1 border-t border-gray-200/75">
+                        <div className="text-[10px] font-mono text-gray-500">
+                          {action.transactionId.slice(0, 8)}...{action.transactionId.slice(-8)}
+                        </div>
+                        <button
+                          onClick={handleExplorerClick}
+                          className="text-xs text-primary hover:text-primary-hover transition-colors flex items-center gap-1"
+                        >
+                          View Tx <ExternalLink className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

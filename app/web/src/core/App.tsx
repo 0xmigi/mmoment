@@ -2,11 +2,15 @@ import { BrowserRouter } from 'react-router-dom';
 import Router from './Router';
 import { NotificationProvider } from '../ui/feedback/NotificationProvider';
 import { CameraProvider } from '../camera/CameraProvider';
-import { PinataSettings } from '../storage';
+import { DeveloperSettings } from '../storage';
 import { CONFIG } from './config';
+import { useProfileSync } from '../auth/useProfileSync';
 
 function App() {
-  // Only show PinataSettings in development mode
+  // Auto-sync user profile to backend when wallet connects
+  useProfileSync();
+
+  // Only show DeveloperSettings in development mode
   const isDevelopment = !CONFIG.isProduction;
 
   return (
@@ -15,7 +19,7 @@ function App() {
         <BrowserRouter>
           <Router />
         </BrowserRouter>
-        {isDevelopment && <PinataSettings />}
+        {isDevelopment && <DeveloperSettings />}
       </CameraProvider>
     </NotificationProvider>
   );

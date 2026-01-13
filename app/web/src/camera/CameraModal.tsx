@@ -1,19 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { useState, useEffect } from 'react';
 import { Dialog } from '@headlessui/react';
-import { X, ExternalLink, Camera, User } from 'lucide-react';
+import { X, ExternalLink, Camera, User, KeyRound, Loader2 } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { useConnection } from '@solana/wallet-adapter-react';
-import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
-import { Program, AnchorProvider } from '@coral-xyz/anchor';
-import { IDL } from '../anchor/idl';
-import { CAMERA_ACTIVATION_PROGRAM_ID } from '../anchor/setup';
 import { isSolanaWallet } from '@dynamic-labs/solana';
-import { timelineService } from '../timeline/timeline-service';
 import { unifiedCameraService } from './unified-camera-service';
-import { useSocialProfile } from '../auth/social/useSocialProfile';
+import { useCamera } from './CameraProvider';
 import { CONFIG } from '../core/config';
-import { buildAndSponsorTransaction } from '../services/gas-sponsorship';
+import { useUserSessionChain, fetchAuthorityPublicKey } from '../hooks/useUserSessionChain';
+import { useProgram, findUserSessionChainPDA } from '../anchor/setup';
+import { useConnection } from '@solana/wallet-adapter-react';
+import { PublicKey, SystemProgram } from '@solana/web3.js';
 
 interface CameraModalProps {
   isOpen: boolean;
@@ -38,18 +35,20 @@ interface CameraModalProps {
 
 export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: CameraModalProps) {
   const { primaryWallet } = useDynamicContext();
-  const { connection } = useConnection();
-  const { primaryProfile } = useSocialProfile();
-  const [isCheckedIn, setIsCheckedIn] = useState(false);
-  const [loading, setLoading] = useState(false);
+  // Use unified check-in state from CameraProvider (Phase 3 Privacy Architecture)
+  const { isCheckedIn, isCheckingIn, checkInError, checkIn, checkOut, refreshCheckInStatus } = useCamera();
   const [error, setError] = useState<string | null>(null);
 
-  // Configuration states for Jetson camera features
-  const [gestureVisualization, setGestureVisualization] = useState(false);
-  const [faceVisualization, setFaceVisualization] = useState(false);
-  const [gestureControls, setGestureControls] = useState(false);
+  // Session keychain state (required for privacy architecture)
+  const { hasSessionChain, isLoading: sessionChainLoading, refetch: refetchSessionChain } = useUserSessionChain();
+  const { program } = useProgram();
+  const { connection } = useConnection();
+  const [isCreatingSessionChain, setIsCreatingSessionChain] = useState(false);
+  const [sessionChainError, setSessionChainError] = useState<string | null>(null);
+
+  // Configuration state for Jetson camera CV overlay (consolidated from face+pose)
+  const [cvOverlayEnabled, setCvOverlayEnabled] = useState(false);
   const [configLoading, setConfigLoading] = useState(false);
-  const [currentGesture, setCurrentGesture] = useState<{ gesture: string; confidence: number } | null>(null);
 
   // State for active users analytics
   const [activeUsersCount, setActiveUsersCount] = useState<number>(0);
@@ -61,7 +60,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
   // Check if this is a Jetson camera (has advanced features)
   const isJetsonCamera = camera.id === CONFIG.JETSON_CAMERA_PDA || camera.model === 'jetson' || camera.model === 'jetson_orin_nano';
 
-  // Add more frequent status updates to the parent component
+  // Notify parent component when check-in status changes (backwards compatibility)
   useEffect(() => {
     if (onCheckStatusChange) {
       console.log("[CameraModal] Notifying parent of check-in status:", isCheckedIn);
@@ -69,34 +68,31 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   }, [isCheckedIn, onCheckStatusChange]);
 
-  // Add a more frequent check for session status and active users
+  // Refresh check-in status and active users when modal opens
   useEffect(() => {
     if (!isOpen || !camera.id) return;
 
-    console.log("[CameraModal] Checking session status and active users on open");
+    console.log("[CameraModal] Modal opened - refreshing check-in status and active users");
 
-    // Only check session status if wallet is connected
+    // Refresh check-in status from context (queries Jetson)
     if (primaryWallet?.address) {
-      checkSessionStatus();
+      refreshCheckInStatus();
     }
 
     // Always fetch active users (doesn't need wallet)
     fetchActiveUsersForCamera();
 
-    // Also set up a periodic check while the modal is open
+    // Poll active users only (much less frequently - every 15 seconds)
     const intervalId = setInterval(() => {
-      console.log("[CameraModal] Periodic session status and active users check");
-      if (primaryWallet?.address) {
-        checkSessionStatus();
-      }
+      console.log("[CameraModal] Periodic active users check");
       fetchActiveUsersForCamera();
-    }, 3000); // Check every 3 seconds
+    }, 15000);
 
     return () => {
-      console.log("[CameraModal] Cleaning up session status and active users check");
+      console.log("[CameraModal] Cleaning up active users check");
       clearInterval(intervalId);
     };
-  }, [isOpen, camera.id, primaryWallet]);
+  }, [isOpen, camera.id, primaryWallet?.address, refreshCheckInStatus]);
 
   // Clear errors and load configuration when modal opens
   useEffect(() => {
@@ -108,34 +104,36 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
         if (isJetsonCamera && camera.id) {
           try {
             console.log('[CameraModal] Loading current computer vision state...');
-            
-            // Load gesture controls state from unified service
-            const gestureControlsEnabled = await unifiedCameraService.getGestureControlsStatus(camera.id);
-            setGestureControls(gestureControlsEnabled);
-            console.log('[CameraModal] Gesture controls state:', gestureControlsEnabled);
-            
-            // Load visualization states from localStorage (persist across modal opens)
-            const storedGestureViz = localStorage.getItem(`jetson_gesture_viz_${camera.id}`) === 'true';
-            const storedFaceViz = localStorage.getItem(`jetson_face_viz_${camera.id}`) === 'true';
-            
-            setGestureVisualization(storedGestureViz);
-            setFaceVisualization(storedFaceViz);
-            
-            console.log('[CameraModal] Loaded visualization states - Gesture:', storedGestureViz, 'Face:', storedFaceViz);
-            
+
+            // Load CV overlay state from localStorage (persist across modal opens)
+            // Check new key first, then migrate from old keys for backwards compatibility
+            let storedCvOverlay = localStorage.getItem(`jetson_cv_overlay_${camera.id}`) === 'true';
+
+            // Migrate from old separate keys if new key doesn't exist
+            if (!localStorage.getItem(`jetson_cv_overlay_${camera.id}`)) {
+              const oldFaceViz = localStorage.getItem(`jetson_face_viz_${camera.id}`) === 'true';
+              const oldPoseViz = localStorage.getItem(`jetson_pose_viz_${camera.id}`) === 'true';
+              storedCvOverlay = oldFaceViz || oldPoseViz;
+              // Clean up old keys
+              localStorage.removeItem(`jetson_face_viz_${camera.id}`);
+              localStorage.removeItem(`jetson_pose_viz_${camera.id}`);
+              if (storedCvOverlay) {
+                localStorage.setItem(`jetson_cv_overlay_${camera.id}`, 'true');
+              }
+            }
+
+            setCvOverlayEnabled(storedCvOverlay);
+            console.log('[CameraModal] Loaded CV overlay state:', storedCvOverlay);
+
             console.log('[CameraModal] Computer vision configuration loaded successfully');
           } catch (error) {
             console.error('Error loading computer vision configuration:', error);
-            // Set defaults on error
-            setGestureVisualization(false);
-            setFaceVisualization(false);
-            setGestureControls(false);
+            // Set default on error
+            setCvOverlayEnabled(false);
           }
         } else {
-          // Reset states for non-Jetson cameras
-          setGestureVisualization(false);
-          setFaceVisualization(false);
-          setGestureControls(false);
+          // Reset state for non-Jetson cameras
+          setCvOverlayEnabled(false);
         }
       }
     };
@@ -154,174 +152,37 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     };
   }, [isJetsonCamera, camera.id]);
 
-  // Poll current gesture when modal is open and gesture visualization is enabled
-  useEffect(() => {
-    let intervalId: NodeJS.Timeout;
-    
-    if (isOpen && isJetsonCamera && camera.id && (gestureVisualization || gestureControls)) {
-      const pollGesture = async () => {
-        try {
-          const result = await unifiedCameraService.getCurrentGesture(camera.id);
-          if (result.success && result.data) {
-            setCurrentGesture({
-              gesture: result.data.gesture || 'none',
-              confidence: result.data.confidence || 0
-            });
-          } else {
-            setCurrentGesture(null);
-          }
-        } catch (error) {
-          console.error('Error polling gesture:', error);
-          setCurrentGesture(null);
-        }
-      };
 
-      // Poll immediately and then every 2 seconds
-      pollGesture();
-      intervalId = setInterval(pollGesture, 2000);
-    } else {
-      setCurrentGesture(null);
-    }
+  // NOTE: Session status checking is now handled by CameraProvider.refreshCheckInStatus()
+  // which queries Jetson (the source of truth) and updates localStorage as needed
 
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
-  }, [isOpen, isJetsonCamera, camera.id, gestureVisualization, gestureControls]);
-
-  const checkSessionStatus = async () => {
-    if (!camera.id || !primaryWallet?.address || !connection) return;
-    
-    try {
-      const program = await initializeProgram();
-      const userPublicKey = new PublicKey(primaryWallet.address);
-      const cameraPublicKey = new PublicKey(camera.id);
-
-      // Find the session PDA
-      const [sessionPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from('session'),
-          userPublicKey.toBuffer(),
-          cameraPublicKey.toBuffer()
-        ],
-        CAMERA_ACTIVATION_PROGRAM_ID
-      );
-
-      // Check if session account exists (use getAccountInfo to avoid decode errors from old sessions)
-      try {
-        const sessionAccountInfo = await connection.getAccountInfo(sessionPda);
-        if (sessionAccountInfo && sessionAccountInfo.data.length === 102) {
-          // New session structure (102 bytes) - try to decode
-          try {
-            await program.account.userSession.fetch(sessionPda);
-            console.log("[CameraModal] Session exists, setting checked-in: true");
-            setIsCheckedIn(true);
-          } catch (decodeErr) {
-            console.log("[CameraModal] Session exists but can't decode, setting checked-in: false");
-            setIsCheckedIn(false);
-          }
-        } else if (sessionAccountInfo) {
-          // Old session structure - consider not checked in
-          console.log("[CameraModal] Old session structure detected, setting checked-in: false");
-          setIsCheckedIn(false);
-        } else {
-          console.log("[CameraModal] No session found, setting checked-in: false");
-          setIsCheckedIn(false);
-        }
-      } catch (err) {
-        console.log("[CameraModal] Error checking session, setting checked-in: false");
-        setIsCheckedIn(false);
-      }
-    } catch (err) {
-      console.error('[CameraModal] Error checking session status:', err);
-      setIsCheckedIn(false);
-    }
-  };
-
-  // Function to fetch active users count for this specific camera
+  // NEW PRIVACY ARCHITECTURE: Sessions are managed off-chain by Jetson
+  // Active users count comes from Jetson's session management
   const fetchActiveUsersForCamera = async () => {
-    if (!camera.id || !connection) return;
+    if (!camera.id) return;
 
     try {
       setLoadingActiveUsers(true);
-      console.log('[CameraModal] Fetching active users for camera:', camera.id);
+      console.log('[CameraModal] Fetching active users from Jetson for camera:', camera.id);
 
-      // Create a read-only program instance (no wallet needed for reading data)
-      const provider = new AnchorProvider(
-        connection,
-        {} as any, // No wallet needed for read-only operations
-        { commitment: 'confirmed' }
-      );
-      const program = new Program(IDL as any, CAMERA_ACTIVATION_PROGRAM_ID, provider);
+      // Try to get active session count from Jetson
+      // This will be implemented in Phase 3 - for now, use camera status
+      const statusResult = await unifiedCameraService.getStatus(camera.id);
 
-      // Fetch only NEW session accounts (102 bytes) to avoid decode errors from old sessions (94 bytes)
-      const sessionAccounts = await connection.getProgramAccounts(program.programId, {
-        filters: [
-          { dataSize: 102 }  // New session structure size
-        ]
-      });
-
-      console.log('[CameraModal] Found', sessionAccounts.length, 'new session accounts (102 bytes)');
-
-      // Count sessions for this specific camera
-      let count = 0;
-      for (const accountInfo of sessionAccounts) {
-        try {
-          const session = program.coder.accounts.decode('userSession', accountInfo.account.data);
-          const sessionCameraKey = session.camera.toString();
-
-          console.log('[CameraModal] Session decoded - Camera:', sessionCameraKey, 'Looking for:', camera.id);
-
-          if (sessionCameraKey === camera.id) {
-            count++;
-            console.log('[CameraModal] ✅ Found active session for this camera');
-          }
-        } catch (error) {
-          console.error('[CameraModal] ❌ Failed to decode session:', error);
-          continue;
-        }
+      if (statusResult.success && statusResult.data) {
+        // Jetson returns active session count in status (to be added in Phase 3)
+        const count = (statusResult.data as any).activeSessionCount || 0;
+        setActiveUsersCount(count);
+        console.log('[CameraModal] Active users count from Jetson:', count);
+      } else {
+        console.log('[CameraModal] Could not fetch active users from Jetson');
+        setActiveUsersCount(0);
       }
-      
-      setActiveUsersCount(count);
-      console.log('[CameraModal] Active users count for this camera:', count);
     } catch (error) {
       console.error('[CameraModal] Error fetching active users:', error);
       // Don't reset count on error - keep showing last known state
     } finally {
       setLoadingActiveUsers(false);
-    }
-  };
-
-  // Initialize program when needed
-  const initializeProgram = async () => {
-    if (!primaryWallet?.address || !connection) {
-      throw new Error('Wallet or connection not available');
-    }
-
-    // Check if it's a Solana wallet
-    if (!isSolanaWallet(primaryWallet)) {
-      throw new Error('This is not a Solana wallet');
-    }
-
-    try {
-      // Create a provider using the connection and wallet
-      const provider = new AnchorProvider(
-        connection,
-        {
-          publicKey: new PublicKey(primaryWallet.address),
-          // We'll handle signing separately
-          signTransaction: async (tx: Transaction) => tx,
-          signAllTransactions: async (txs: Transaction[]) => txs,
-        } as any,
-        { commitment: 'confirmed' }
-      );
-
-      // Create the program
-      return new Program(IDL as any, CAMERA_ACTIVATION_PROGRAM_ID, provider);
-    } catch (error) {
-      console.error('Error initializing program:', error);
-      throw new Error('Failed to initialize Solana program');
     }
   };
 
@@ -347,37 +208,9 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   };
 
-  // Add check-in event to timeline
-  const addCheckInEvent = (transactionId: string) => {
-    if (primaryWallet?.address) {
-      timelineService.emitEvent({
-        type: 'check_in',
-        user: {
-          address: primaryWallet.address,
-          displayName: primaryProfile?.displayName,
-          username: primaryProfile?.username
-        },
-        timestamp: Date.now(),
-        transactionId: transactionId,
-        cameraId: camera.id
-      });
-    }
-  };
-
-  // Add check-out event to timeline
-  const addCheckOutEvent = (transactionId: string) => {
-    if (primaryWallet?.address) {
-      timelineService.emitEvent({
-        type: 'check_out',
-        user: {
-          address: primaryWallet.address
-        },
-        timestamp: Date.now(),
-        transactionId: transactionId,
-        cameraId: camera.id
-      });
-    }
-  };
+  // NOTE: Check-in/check-out timeline events are now created by the Jetson camera
+  // via buffer_checkin_activity() and buffer_checkout_activity() for proper encryption
+  // and privacy-preserving timeline architecture. Frontend no longer emits these directly.
 
   // Test visualization endpoints directly
   const testVisualizationEndpoints = async () => {
@@ -404,459 +237,162 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     }
   };
 
-  // Handle gesture visualization toggle
-  const handleGestureVisualizationToggle = async () => {
+
+  // Handle CV overlay toggle (consolidated face + pose into one toggle)
+  // This switches between 'clean' and 'annotated' WebRTC streams
+  const handleCvOverlayToggle = async () => {
     setConfigLoading(true);
     try {
-      const newState = !gestureVisualization;
-      console.log('[CameraModal] Toggling gesture visualization to:', newState);
-      
-      const result = await unifiedCameraService.toggleGestureVisualization(camera.id, newState);
-      
-      if (result.success) {
-        setGestureVisualization(newState);
+      const newState = !cvOverlayEnabled;
+      console.log('[CameraModal] Toggling CV overlay to:', newState);
+
+      // Toggle both face and pose visualization on the Jetson
+      // The annotated stream includes all CV overlays when enabled
+      const faceResult = await unifiedCameraService.toggleFaceVisualization(camera.id, newState);
+      const poseResult = await unifiedCameraService.togglePoseVisualization(camera.id, newState);
+
+      if (faceResult.success && poseResult.success) {
+        setCvOverlayEnabled(newState);
         // Persist state to localStorage
-        localStorage.setItem(`jetson_gesture_viz_${camera.id}`, newState.toString());
-        console.log('[CameraModal] Gesture visualization toggled successfully to:', newState);
-        
-        // Force refresh the stream to show changes immediately
-        const streamElements = document.querySelectorAll('img[src*="/stream"], video');
-        streamElements.forEach(element => {
-          if (element instanceof HTMLImageElement && element.src.includes('/stream')) {
-            const currentSrc = element.src;
-            element.src = '';
-            setTimeout(() => {
-              element.src = currentSrc + (currentSrc.includes('?') ? '&' : '?') + 't=' + Date.now();
-            }, 100);
-          }
-        });
+        localStorage.setItem(`jetson_cv_overlay_${camera.id}`, newState.toString());
+        console.log('[CameraModal] CV overlay toggled successfully to:', newState);
+
+        // Dispatch custom event to notify StreamPlayer to switch stream type
+        window.dispatchEvent(new CustomEvent('visualizationToggle', {
+          detail: { cameraId: camera.id, type: 'cv_overlay', enabled: newState }
+        }));
       } else {
-        console.error('[CameraModal] Failed to toggle gesture visualization:', result.error);
-        setError(result.error || 'Failed to toggle gesture visualization');
-      }
-    } catch (error) {
-      console.error('[CameraModal] Error toggling gesture visualization:', error);
-      setError(error instanceof Error ? error.message : 'Failed to toggle gesture visualization');
-    } finally {
-      setConfigLoading(false);
-    }
-  };
-
-  // Handle face visualization toggle
-  const handleFaceVisualizationToggle = async () => {
-    setConfigLoading(true);
-    try {
-      const newState = !faceVisualization;
-      console.log('[CameraModal] Toggling face visualization to:', newState);
-      
-      const result = await unifiedCameraService.toggleFaceVisualization(camera.id, newState);
-      
-      if (result.success) {
-        setFaceVisualization(newState);
-        // Persist state to localStorage
-        localStorage.setItem(`jetson_face_viz_${camera.id}`, newState.toString());
-        console.log('[CameraModal] Face visualization toggled successfully to:', newState);
-        
-        // Force refresh the stream to show changes immediately
-        const streamElements = document.querySelectorAll('img[src*="/stream"], video');
-        streamElements.forEach(element => {
-          if (element instanceof HTMLImageElement && element.src.includes('/stream')) {
-            const currentSrc = element.src;
-            element.src = '';
-            setTimeout(() => {
-              element.src = currentSrc + (currentSrc.includes('?') ? '&' : '?') + 't=' + Date.now();
-            }, 100);
-          }
-        });
-      } else {
-        console.error('[CameraModal] Failed to toggle face visualization:', result.error);
-        setError(result.error || 'Failed to toggle face visualization');
-      }
-    } catch (error) {
-      console.error('[CameraModal] Error toggling face visualization:', error);
-      setError(error instanceof Error ? error.message : 'Failed to toggle face visualization');
-    } finally {
-      setConfigLoading(false);
-    }
-  };
-
-  // Handle gesture controls toggle
-  const handleGestureControlsToggle = async () => {
-    setConfigLoading(true);
-    try {
-      const newState = !gestureControls;
-      const result = await unifiedCameraService.toggleGestureControls(camera.id, newState);
-      
-      if (result.success) {
-        setGestureControls(newState);
-      } else {
-        setError(result.error || 'Failed to toggle gesture controls');
-      }
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to toggle gesture controls');
-    } finally {
-      setConfigLoading(false);
-    }
-  };
-
-  // Handle check-in
-  const handleCheckIn = async () => {
-    if (!camera.id || !primaryWallet?.address) {
-      setError('No camera or wallet available');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const program = await initializeProgram();
-      const userPublicKey = new PublicKey(primaryWallet.address);
-      const cameraPublicKey = new PublicKey(camera.id);
-
-      // Find the session PDA
-      const [sessionPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from('session'),
-          userPublicKey.toBuffer(),
-          cameraPublicKey.toBuffer()
-        ],
-        CAMERA_ACTIVATION_PROGRAM_ID
-      );
-
-      // Check if user already has an active session - if so, check out first
-      try {
-        const sessionAccountInfo = await connection.getAccountInfo(sessionPda);
-        if (sessionAccountInfo) {
-          console.log('[CameraModal] Existing session found, checking out first');
-
-        // Check out existing session
-        const checkOutIx = await program.methods
-          .checkOut()
-          .accounts({
-            closer: userPublicKey,
-            camera: cameraPublicKey,
-            session: sessionPda,
-            sessionUser: userPublicKey,
-            rentDestination: userPublicKey, // Rent goes back to user
-          })
-          .instruction();
-
-        const checkOutTx = new Transaction().add(checkOutIx);
-        const { blockhash: checkOutBlockhash } = await connection.getLatestBlockhash();
-        checkOutTx.recentBlockhash = checkOutBlockhash;
-        checkOutTx.feePayer = userPublicKey;
-
-        // Sign and send checkout transaction
-        let signedCheckOutTx;
-        if (typeof (primaryWallet as any).getSigner === 'function') {
-          const signer = await (primaryWallet as any).getSigner();
-          signedCheckOutTx = await signer.signTransaction(checkOutTx);
-        } else {
-          signedCheckOutTx = await (primaryWallet as any).signTransaction(checkOutTx);
-        }
-
-          const checkOutSig = await connection.sendRawTransaction(signedCheckOutTx.serialize());
-          await connection.confirmTransaction(checkOutSig, 'confirmed');
-          console.log('[CameraModal] Checked out existing session:', checkOutSig);
-        }
-      } catch (err) {
-        // No existing session - this is fine, continue with check-in
-        console.log('[CameraModal] No existing session found, proceeding with check-in');
-      }
-
-      // Derive recognition token PDA and check if it exists
-      const [recognitionTokenPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('recognition-token'), userPublicKey.toBuffer()],
-        program.programId
-      );
-
-      // Check if recognition token account exists
-      let hasRecognitionToken = false;
-      try {
-        await program.account.recognitionToken.fetch(recognitionTokenPda);
-        hasRecognitionToken = true;
-        console.log('[CameraModal] Recognition token found for user');
-      } catch (err) {
-        console.log('[CameraModal] No recognition token found for user');
-      }
-
-      // Create the accounts object for check-in
-      // NOTE: payer will be set to the fee payer (gas sponsor) in the transaction
-      const accounts: any = {
-        user: userPublicKey,
-        payer: userPublicKey, // This will be overridden by the fee payer in gas sponsorship
-        camera: cameraPublicKey,
-        recognitionToken: hasRecognitionToken ? recognitionTokenPda : null, // Pass null for optional accounts that don't exist
-        session: sessionPda,
-        systemProgram: SystemProgram.programId
-      };
-
-      // Build check-in transaction function
-      const buildCheckInTx = async () => {
-        const ix = await program.methods
-          .checkIn(false) // false = don't require face recognition
-          .accounts(accounts)
-          .instruction();
-
-        return new Transaction().add(ix);
-      };
-
-      // Check if user has enabled sponsored gas
-      const sponsoredGasEnabled = localStorage.getItem('sponsoredGasEnabled') === 'true';
-      let signature: string;
-
-      if (sponsoredGasEnabled) {
-        // Use sponsored gas if enabled
-        console.log('[CameraModal] Attempting sponsored check-in...');
-        const signer = await (primaryWallet as any).getSigner();
-        const sponsorResult = await buildAndSponsorTransaction(
-          userPublicKey,
-          signer,
-          buildCheckInTx,
-          'check_in',
-          connection
-        );
-
-        if (!sponsorResult.success) {
-          // Fallback to regular transaction if sponsorship fails
-          console.log('[CameraModal] Sponsorship failed, falling back to regular transaction');
-          const checkInTx = await buildCheckInTx();
-          const { blockhash } = await connection.getLatestBlockhash();
-          checkInTx.recentBlockhash = blockhash;
-          checkInTx.feePayer = userPublicKey;
-
-          const signedTx = await signer.signTransaction(checkInTx);
-          signature = await connection.sendRawTransaction(signedTx.serialize());
-          await connection.confirmTransaction(signature, 'confirmed');
-        } else {
-          signature = sponsorResult.signature!;
-          console.log('✅ [CameraModal] Sponsored check-in successful!', signature);
-        }
-      } else {
-        // Use regular self-paid transaction
-        console.log('[CameraModal] Executing regular check-in transaction...');
-        const checkInTx = await buildCheckInTx();
-        const { blockhash } = await connection.getLatestBlockhash();
-        checkInTx.recentBlockhash = blockhash;
-        checkInTx.feePayer = userPublicKey;
-
-        const signer = await (primaryWallet as any).getSigner();
-        const signedTx = await signer.signTransaction(checkInTx);
-        signature = await connection.sendRawTransaction(signedTx.serialize());
-        await connection.confirmTransaction(signature, 'confirmed');
-        console.log('✅ [CameraModal] Check-in transaction confirmed successfully:', signature);
-      }
-
-      // 🎉 NEW: Use unified check-in endpoint - no more race conditions!
-      // This triggers immediate blockchain sync and recognition token loading
-      console.log('🚀 [CameraModal] Calling unified check-in endpoint...');
-      try {
-        const checkinResult = await unifiedCameraService.checkin(camera.id, {
-          wallet_address: primaryWallet.address,
-          display_name: primaryProfile?.displayName,
-          username: primaryProfile?.username,
-          transaction_signature: signature
-        });
-
-        if (checkinResult.success) {
-          console.log('✅ [CameraModal] Unified check-in successful!', checkinResult.data);
-          console.log(`   Display name: ${checkinResult.data?.display_name}`);
-          console.log(`   Session ID: ${checkinResult.data?.session_id}`);
-        } else {
-          console.warn('⚠️  [CameraModal] Unified check-in failed:', checkinResult.error);
-          // Fall back to old method if unified check-in fails
-          console.log('📤 [CameraModal] Falling back to separate profile send...');
-          await unifiedCameraService.sendUserProfile(camera.id, {
-            wallet_address: primaryWallet.address,
-            display_name: primaryProfile?.displayName,
-            username: primaryProfile?.username
-          });
-        }
-      } catch (err) {
-        console.error('❌ [CameraModal] Unified check-in error:', err);
-        // Don't fail the overall check-in if this fails
-      }
-
-      setIsCheckedIn(true);
-
-      // Add to timeline
-      addCheckInEvent(signature);
-
-      // Refresh the timeline
-      timelineService.refreshEvents();
-
-      // Refresh active users count
-      await fetchActiveUsersForCamera();
-
-      // Notify parent component
-      if (onCheckStatusChange) {
-        onCheckStatusChange(true);
-      }
-      
-    } catch (error) {
-      console.error('Check-in error:', error);
-      
-      if (error instanceof Error) {
-        let errorMsg = error.message;
-        
-        // Check for common error messages and provide more user-friendly versions
-        if (errorMsg.includes('custom program error: 0x64')) {
-          errorMsg = 'Program error: The camera may not be configured correctly.';
-        } else if (errorMsg.includes('insufficient funds')) {
-          errorMsg = 'Insufficient SOL in your wallet. Please add more SOL and try again.';
-        } else if (errorMsg.includes('already in use')) {
-          errorMsg = 'You are already checked in to this camera.';
-          setIsCheckedIn(true);
-          return;
-        } else if (errorMsg.length > 150) {
-          // If the error message is too long, provide a shorter, more general message
-          errorMsg = 'An error occurred during check-in. Please check the console for details.';
-        }
-        
+        const errorMsg = faceResult.error || poseResult.error || 'Failed to toggle CV overlay';
+        console.error('[CameraModal] Failed to toggle CV overlay:', errorMsg);
         setError(errorMsg);
-      } else {
-        setError('Unknown error during check-in');
       }
+    } catch (error) {
+      console.error('[CameraModal] Error toggling CV overlay:', error);
+      setError(error instanceof Error ? error.message : 'Failed to toggle CV overlay');
     } finally {
-      setLoading(false);
+      setConfigLoading(false);
     }
   };
 
-  // Handle check-out
+  // Check-in handler using unified context (Phase 3 Privacy Architecture)
+  const handleCheckIn = async () => {
+    setError(null);
+
+    console.log('[CameraModal] Starting check-in via CameraProvider context...');
+    const success = await checkIn();
+
+    if (success) {
+      console.log('[CameraModal] Check-in successful');
+      // Refresh active users count
+      await fetchActiveUsersForCamera();
+    } else {
+      // Show error from context
+      setError(checkInError || 'Failed to check in to camera');
+    }
+  };
+
+  // Check-out handler using unified context (Phase 3 Privacy Architecture)
   const handleCheckOut = async () => {
-    if (!camera.id || !primaryWallet?.address) {
-      setError('No camera or wallet available');
+    setError(null);
+
+    console.log('[CameraModal] Starting check-out via CameraProvider context...');
+    const success = await checkOut();
+
+    if (success) {
+      console.log('[CameraModal] Check-out successful');
+      // Refresh active users count
+      await fetchActiveUsersForCamera();
+    } else {
+      // Show error from context
+      setError(checkInError || 'Failed to check out from camera');
+    }
+  };
+
+  // Handler for creating session keychain (one-time setup before first check-in)
+  const handleCreateSessionChain = async () => {
+    if (!primaryWallet?.address) {
+      setSessionChainError('Wallet not connected');
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    if (!isSolanaWallet(primaryWallet)) {
+      setSessionChainError('Not a Solana wallet');
+      return;
+    }
+
+    if (!program || !connection) {
+      setSessionChainError('Please wait for wallet to fully load and try again');
+      return;
+    }
+
+    setIsCreatingSessionChain(true);
+    setSessionChainError(null);
 
     try {
-      const program = await initializeProgram();
       const userPublicKey = new PublicKey(primaryWallet.address);
-      const cameraPublicKey = new PublicKey(camera.id);
+      const [sessionChainPda] = findUserSessionChainPDA(userPublicKey);
 
-      // Find the session PDA
-      const [sessionPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from('session'),
-          userPublicKey.toBuffer(),
-          cameraPublicKey.toBuffer()
-        ],
-        CAMERA_ACTIVATION_PROGRAM_ID
-      );
-
-      // Fetch the session account to get the actual user
-      const sessionAccount = await program.account.userSession.fetch(sessionPda) as any;
-      console.log('[CameraModal] Session account data:', {
-        user: sessionAccount.user.toString(),
-        camera: sessionAccount.camera.toString(),
-        checkInTime: new Date(sessionAccount.checkInTime.toNumber() * 1000).toISOString(),
-      });
-
-      // Build check-out transaction function
-      const buildCheckOutTx = async () => {
-        const ix = await program.methods
-          .checkOut()
-          .accounts({
-            closer: userPublicKey,
-            camera: cameraPublicKey,
-            session: sessionPda,
-            sessionUser: sessionAccount.user as PublicKey,  // Use actual session user
-            rentDestination: userPublicKey, // Rent goes back to user on self-checkout
-          })
-          .instruction();
-
-        return new Transaction().add(ix);
-      };
-
-      // Check if user has enabled sponsored gas
-      const sponsoredGasEnabled = localStorage.getItem('sponsoredGasEnabled') === 'true';
-      let signature: string;
-
-      if (sponsoredGasEnabled) {
-        // Use sponsored gas if enabled
-        console.log('[CameraModal] Attempting sponsored check-out...');
-        const signer = await (primaryWallet as any).getSigner();
-        const sponsorResult = await buildAndSponsorTransaction(
-          userPublicKey,
-          signer,
-          buildCheckOutTx,
-          'check_out',
-          connection
-        );
-
-        if (!sponsorResult.success) {
-          // Fallback to regular transaction if sponsorship fails
-          console.log('[CameraModal] Sponsorship failed, falling back to regular transaction');
-          const checkOutTx = await buildCheckOutTx();
-          const { blockhash } = await connection.getLatestBlockhash();
-          checkOutTx.recentBlockhash = blockhash;
-          checkOutTx.feePayer = userPublicKey;
-
-          const signedTx = await signer.signTransaction(checkOutTx);
-          signature = await connection.sendRawTransaction(signedTx.serialize());
-          await connection.confirmTransaction(signature, 'confirmed');
-        } else {
-          signature = sponsorResult.signature!;
-          console.log('✅ [CameraModal] Sponsored check-out successful!', signature);
-        }
-      } else {
-        // Use regular self-paid transaction
-        console.log('[CameraModal] Executing regular check-out transaction...');
-        const checkOutTx = await buildCheckOutTx();
-        const { blockhash } = await connection.getLatestBlockhash();
-        checkOutTx.recentBlockhash = blockhash;
-        checkOutTx.feePayer = userPublicKey;
-
-        const signer = await (primaryWallet as any).getSigner();
-        const signedTx = await signer.signTransaction(checkOutTx);
-        signature = await connection.sendRawTransaction(signedTx.serialize());
-        await connection.confirmTransaction(signature, 'confirmed');
-        console.log('✅ [CameraModal] Check-out transaction confirmed successfully:', signature);
+      // Fetch authority public key from backend
+      console.log('[CameraModal] Fetching authority for session chain...');
+      const authority = await fetchAuthorityPublicKey();
+      if (!authority) {
+        throw new Error('Could not connect to backend. Please try again.');
       }
 
-      // Remove user profile from camera after successful check-out
-      try {
-        const removeResult = await unifiedCameraService.removeUserProfile(camera.id, primaryWallet.address);
-        if (removeResult.success) {
-          console.log('[CameraModal] User profile removed successfully from camera');
-        } else {
-          console.warn('[CameraModal] Failed to remove user profile from camera:', removeResult.error);
-        }
-      } catch (err) {
-        console.warn('[CameraModal] Failed to remove user profile from camera:', err);
-        // Don't fail the check-out if this fails
+      console.log('[CameraModal] Creating session chain...');
+      console.log('[CameraModal] User:', userPublicKey.toString());
+      console.log('[CameraModal] Authority:', authority.toString());
+
+      // Build the transaction
+      const tx = await program.methods
+        .createUserSessionChain()
+        .accounts({
+          user: userPublicKey,
+          authority: authority,
+          userSessionChain: sessionChainPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .transaction();
+
+      // Get blockhash
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = userPublicKey;
+
+      // Sign with Dynamic wallet
+      console.log('[CameraModal] Requesting signature...');
+      const signer = await (primaryWallet as any).getSigner();
+      const signedTx = await signer.signTransaction(tx);
+
+      // Send and confirm
+      console.log('[CameraModal] Sending transaction...');
+      const signature = await connection.sendRawTransaction(signedTx.serialize());
+      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
+
+      console.log('[CameraModal] Session keychain created successfully!');
+
+      // Refresh the session chain status
+      await refetchSessionChain();
+
+    } catch (error: any) {
+      console.error('[CameraModal] Session chain creation error:', error);
+
+      let errorMessage = 'Failed to create session keychain';
+      if (error.message?.includes('User rejected')) {
+        errorMessage = 'Transaction cancelled. Please try again.';
+      } else if (error.message?.includes('insufficient funds')) {
+        errorMessage = 'Insufficient SOL for transaction (~0.003 SOL needed)';
+      } else if (error.message?.includes('already in use')) {
+        errorMessage = 'Session keychain already exists!';
+        // Refresh to update UI
+        await refetchSessionChain();
+      } else if (error.message) {
+        errorMessage = error.message;
       }
 
-      setIsCheckedIn(false);
-
-      // Add to timeline
-      addCheckOutEvent(signature);
-
-      // Refresh the timeline
-      timelineService.refreshEvents();
-
-      // Refresh active users count
-      await fetchActiveUsersForCamera();
-
-      // Notify parent component
-      if (onCheckStatusChange) {
-        onCheckStatusChange(false);
-      }
-      
-    } catch (error) {
-      console.error('Check-out error:', error);
-      
-      if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError('Unknown error during check-out');
-      }
+      setSessionChainError(errorMessage);
     } finally {
-      setLoading(false);
+      setIsCreatingSessionChain(false);
     }
   };
 
@@ -900,7 +436,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                   <div className="space-y-2">
                     <button
                       onClick={handleDevCameraClick}
-                      className="text-xs bg-yellow-100 hover:bg-yellow-200 text-yellow-800 px-3 py-1.5 rounded flex items-center justify-center w-full transition-colors"
+                      className="text-xs bg-primary-light hover:bg-primary-muted text-primary px-3 py-1.5 rounded flex items-center justify-center w-full transition-colors"
                     >
                       Connect to Pi5 <ExternalLink className="h-3 w-3 ml-1" />
                     </button>
@@ -909,7 +445,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                         const baseUrl = window.location.origin;
                         window.location.href = `${baseUrl}/app/camera/${CONFIG.JETSON_CAMERA_PDA}`;
                       }}
-                      className="text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 px-3 py-1.5 rounded flex items-center justify-center w-full transition-colors"
+                      className="text-xs bg-primary-light hover:bg-primary-muted text-primary px-3 py-1.5 rounded flex items-center justify-center w-full transition-colors"
                     >
                       Connect to Orin Nano <ExternalLink className="h-3 w-3 ml-1" />
                     </button>
@@ -921,8 +457,8 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
               <>
                 {/* Camera PDA */}
                 <div className="flex items-center mb-4">
-                  <div className="w-10 h-10 rounded-full bg-blue-50 flex-shrink-0 flex items-center justify-center overflow-hidden">
-                    <Camera className="w-5 h-5 text-blue-500" />
+                  <div className="w-10 h-10 rounded-full bg-primary-light flex-shrink-0 flex items-center justify-center overflow-hidden">
+                    <Camera className="w-5 h-5 text-primary" />
                   </div>
                   <div className="ml-3 flex-1">
                     <div className="text-sm text-gray-700">Camera</div>
@@ -930,7 +466,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                   </div>
                   <button
                     onClick={handleCameraExplorerClick}
-                    className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center"
+                    className="text-xs text-primary hover:text-primary-hover transition-colors flex items-center"
                   >
                     View <ExternalLink className="w-3 h-3 ml-1" />
                   </button>
@@ -952,7 +488,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                   </div>
                   <button
                     onClick={handleOwnerExplorerClick}
-                    className="text-xs text-blue-600 hover:text-blue-700 transition-colors flex items-center"
+                    className="text-xs text-primary hover:text-primary-hover transition-colors flex items-center"
                   >
                     View <ExternalLink className="w-3 h-3 ml-1" />
                   </button>
@@ -995,98 +531,27 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                 {/* Computer Vision Controls - Only for Jetson cameras */}
                 {isJetsonCamera && (
                   <div className="mb-4 pt-4 border-t border-gray-200">
-                    <div className="space-y-2">
-                      {/* Face Visualization Toggle */}
-                      <div className="flex items-center justify-between py-1">
-                        <div className="flex-1">
-                          <div className="text-sm font-medium">Face Detection Overlay</div>
-                          <div className="text-xs text-gray-500">Shows face detection boxes</div>
-                        </div>
-                        <button
-                          onClick={handleFaceVisualizationToggle}
-                          disabled={configLoading}
-                          className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                            faceVisualization 
-                              ? 'bg-blue-600 hover:bg-blue-700' 
-                              : 'bg-gray-200 hover:bg-gray-300'
-                          } ${configLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              faceVisualization ? 'translate-x-5' : 'translate-x-0.5'
-                            }`}
-                          />
-                        </button>
+                    {/* CV Overlay Toggle - consolidated face + pose */}
+                    <div className="flex items-center justify-between py-1">
+                      <div className="flex-1">
+                        <div className="text-sm font-medium">Computer Vision Overlay</div>
+                        <div className="text-xs text-gray-500">Shows user recognition, pose tracking, and activity overlays</div>
                       </div>
-
-                      {/* Gesture Visualization Toggle */}
-                      <div className="flex items-center justify-between py-1">
-                        <div className="flex-1">
-                          <div className="text-sm font-medium">Gesture Detection Overlay</div>
-                          <div className="text-xs text-gray-500">Shows hand gesture tracking</div>
-                        </div>
-                        <button
-                          onClick={handleGestureVisualizationToggle}
-                          disabled={configLoading}
-                          className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                            gestureVisualization 
-                              ? 'bg-blue-600 hover:bg-blue-700' 
-                              : 'bg-gray-200 hover:bg-gray-300'
-                          } ${configLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              gestureVisualization ? 'translate-x-5' : 'translate-x-0.5'
-                            }`}
-                          />
-                        </button>
-                      </div>
-
-                      {/* Gesture Controls Toggle */}
-                      <div className="flex items-center justify-between py-1">
-                        <div className="flex-1">
-                          <div className="text-sm font-medium">Gesture Photo/Video Capture</div>
-                          <div className="text-xs text-gray-500">Peace sign = photo, thumbs up = video</div>
-                        </div>
-                        <button
-                          onClick={handleGestureControlsToggle}
-                          disabled={configLoading}
-                          className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
-                            gestureControls 
-                              ? 'bg-green-600 hover:bg-green-700' 
-                              : 'bg-gray-200 hover:bg-gray-300'
-                          } ${configLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              gestureControls ? 'translate-x-5' : 'translate-x-0.5'
-                            }`}
-                          />
-                        </button>
-                      </div>
-
-                      {/* Current Gesture Status - Only when gesture features are enabled */}
-                      {(gestureVisualization || gestureControls) && (
-                        <div className="mt-3 pt-3 border-t border-gray-100">
-                          <div className="text-xs text-gray-500 mb-1">Current Gesture Detected</div>
-                          <div className="flex items-center justify-between">
-                            <div className="text-sm font-medium">
-                              {currentGesture ? (
-                                <span className="capitalize">
-                                  {currentGesture.gesture === 'none' ? 'No gesture detected' : currentGesture.gesture.replace('_', ' ')}
-                                </span>
-                              ) : (
-                                <span className="text-gray-400">Loading...</span>
-                              )}
-                            </div>
-                            {currentGesture && currentGesture.gesture !== 'none' && (
-                              <div className="text-xs text-gray-500">
-                                {Math.round(currentGesture.confidence * 100)}% confidence
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
+                      <button
+                        onClick={handleCvOverlayToggle}
+                        disabled={configLoading}
+                        className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${
+                          cvOverlayEnabled
+                            ? 'bg-primary hover:bg-primary-hover'
+                            : 'bg-gray-200 hover:bg-gray-300'
+                        } ${configLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        <span
+                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                            cvOverlayEnabled ? 'translate-x-5' : 'translate-x-0.5'
+                          }`}
+                        />
+                      </button>
                     </div>
                   </div>
                 )}
@@ -1099,22 +564,73 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                   </div>
                 )}
 
-                {/* Check In/Out Button */}
+                {/* Check In/Out Button or Session Keychain Setup */}
                 {isCheckedIn ? (
+                  // User is checked in - show check out button
                   <button
                     onClick={handleCheckOut}
-                    disabled={loading}
+                    disabled={isCheckingIn}
                     className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
                   >
-                    {loading ? 'Processing...' : 'Check Out'}
+                    {isCheckingIn ? 'Processing...' : 'Check Out'}
+                  </button>
+                ) : !hasSessionChain && !sessionChainLoading ? (
+                  // User needs to create session keychain first (one-time setup)
+                  <div className="space-y-3">
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <KeyRound className="w-5 h-5 text-amber-600" />
+                        <h3 className="font-medium text-amber-900">One-Time Setup Required</h3>
+                      </div>
+                      <p className="text-sm text-amber-800 mb-1">
+                        Create your Session Keychain to ensure your camera history is permanently stored on-chain.
+                      </p>
+                      <p className="text-xs text-amber-700">
+                        This is a one-time action (~0.003 SOL) that enables decentralized access to your session history.
+                      </p>
+                    </div>
+
+                    {sessionChainError && (
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                        <p className="text-sm text-red-700">{sessionChainError}</p>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={handleCreateSessionChain}
+                      disabled={isCreatingSessionChain}
+                      className="w-full flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-700 text-white px-4 py-3 rounded-lg transition-colors font-medium disabled:opacity-50"
+                    >
+                      {isCreatingSessionChain ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Creating Keychain...
+                        </>
+                      ) : (
+                        <>
+                          <KeyRound className="w-4 h-4" />
+                          Create Session Keychain
+                        </>
+                      )}
+                    </button>
+                  </div>
+                ) : sessionChainLoading ? (
+                  // Loading session chain status
+                  <button
+                    disabled
+                    className="w-full flex items-center justify-center gap-2 bg-gray-300 text-gray-600 px-4 py-2 rounded-lg"
+                  >
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Loading...
                   </button>
                 ) : (
+                  // User has session keychain - show normal check in button
                   <button
                     onClick={handleCheckIn}
-                    disabled={loading}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+                    disabled={isCheckingIn}
+                    className="w-full bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg transition-colors"
                   >
-                    {loading ? 'Processing...' : 'Check In'}
+                    {isCheckingIn ? 'Processing...' : 'Check In'}
                   </button>
                 )}
               </>

@@ -195,6 +195,10 @@ class BiometricEncryptionService:
                 # Dequantize from int8 back to float32 if needed
                 if metadata['dtype'] == 'int8':
                     embedding = embedding.astype(np.float32) / 127.0
+                    # Re-normalize after dequantization (quantization introduces rounding errors)
+                    norm = np.linalg.norm(embedding)
+                    if norm > 0:
+                        embedding = embedding / norm
 
             else:
                 # On-chain recognition token (minimal format - just encrypted embedding)
@@ -222,7 +226,11 @@ class BiometricEncryptionService:
 
                     # Dequantize from int8 back to float32
                     embedding = embedding.astype(np.float32) / 127.0
-                    logger.info(f"Dequantized embedding to float32, range: [{embedding.min():.3f}, {embedding.max():.3f}]")
+                    # Re-normalize after dequantization (quantization introduces rounding errors)
+                    norm = np.linalg.norm(embedding)
+                    if norm > 0:
+                        embedding = embedding / norm
+                    logger.info(f"Dequantized embedding to float32, range: [{embedding.min():.3f}, {embedding.max():.3f}], norm: {np.linalg.norm(embedding):.4f}")
 
                 except Exception as decrypt_error:
                     logger.error(f"Failed to decrypt on-chain token: {type(decrypt_error).__name__}: {str(decrypt_error)}")

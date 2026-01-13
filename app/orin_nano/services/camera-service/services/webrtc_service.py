@@ -19,10 +19,11 @@ from aiortc.contrib.media import MediaPlayer
 import asyncio
 import queue
 
-# Enable detailed WebRTC/ICE debugging
-logging.getLogger('aiortc').setLevel(logging.DEBUG)
-logging.getLogger('aiortc.rtcicetransport').setLevel(logging.DEBUG)
-logging.getLogger('aioice').setLevel(logging.DEBUG)
+# Reduce WebRTC/ICE logging noise (set to DEBUG for troubleshooting)
+logging.getLogger('aiortc').setLevel(logging.WARNING)
+logging.getLogger('aiortc.rtcicetransport').setLevel(logging.WARNING)
+logging.getLogger('aiortc.rtcrtpsender').setLevel(logging.WARNING)
+logging.getLogger('aioice').setLevel(logging.WARNING)
 
 # SMART RELAY FALLBACK: Keep relay-only patch ready but don't force it by default
 import aioice
@@ -87,44 +88,47 @@ from av import VideoFrame
 
 logger = logging.getLogger("WebRTCService")
 
-class BufferVideoTrack(VideoStreamTrack):
+class BaseBufferVideoTrack(VideoStreamTrack):
     """
-    A video track that streams frames from the buffer service
+    Base video track class for WebRTC streaming from buffer service.
+    Subclasses override _get_frame_data() to get clean or annotated frames.
     """
     kind = "video"
-    
-    def __init__(self, buffer_service, fps=30):
+
+    def __init__(self, buffer_service, fps=30, track_type="base"):
         super().__init__()
         self.buffer_service = buffer_service
         self.fps = fps
         self.frame_interval = 1.0 / fps
         self.last_frame_time = 0
-        
+        self.track_type = track_type
+        self._frame_count = 0
+
         # Initialize time_base properly for aiortc
         from fractions import Fraction
         self.time_base = Fraction(1, 90000)  # Standard 90kHz clock
-        
+
+    def _get_frame_data(self):
+        """Override in subclass to get appropriate frame type"""
+        raise NotImplementedError
+
     async def recv(self):
         """
         Receive the next video frame
         """
-        # Only log every 30th frame to avoid spam
-        if hasattr(self, '_frame_count'):
-            self._frame_count += 1
-        else:
-            self._frame_count = 1
-            
-        if self._frame_count % 30 == 0:
-            logger.info(f"🎥 WebRTC video track generating frame #{self._frame_count}")
+        self._frame_count += 1
+
+        if self._frame_count % 300 == 0:  # Log every 10 seconds at 30fps
+            logger.info(f"🎥 WebRTC [{self.track_type}] frame #{self._frame_count}")
         current_time = time.time()
-        
+
         # Maintain frame rate
         if current_time - self.last_frame_time < self.frame_interval:
             await asyncio.sleep(self.frame_interval - (current_time - self.last_frame_time))
-        
+
         try:
-            # Get processed frame from buffer service (includes face detection boxes)
-            frame_data = self.buffer_service.get_processed_frame()
+            # Get frame from buffer service (method determined by subclass)
+            frame_data = self._get_frame_data()
             
             # Handle different return formats from buffer service
             if isinstance(frame_data, tuple) and len(frame_data) > 0:
@@ -189,6 +193,47 @@ class BufferVideoTrack(VideoStreamTrack):
             
             self.last_frame_time = time.time()
             return av_frame
+
+
+class CleanBufferVideoTrack(BaseBufferVideoTrack):
+    """
+    Video track that streams CLEAN frames (no CV annotations).
+    Used for the default P2P WebRTC stream without overlays.
+    """
+    def __init__(self, buffer_service, fps=30):
+        super().__init__(buffer_service, fps, track_type="clean")
+
+    def _get_frame_data(self):
+        """Get clean frame without annotations"""
+        return self.buffer_service.get_clean_frame()
+
+
+class AnnotatedBufferVideoTrack(BaseBufferVideoTrack):
+    """
+    Video track that streams ANNOTATED frames (with CV overlays always on).
+    Used for the annotated P2P WebRTC stream with face boxes, skeletons, etc.
+    """
+    def __init__(self, buffer_service, fps=30):
+        super().__init__(buffer_service, fps, track_type="annotated")
+
+    def _get_frame_data(self):
+        """Get annotated frame with CV overlays"""
+        return self.buffer_service.get_annotated_frame()
+
+
+# Legacy alias for backwards compatibility
+class BufferVideoTrack(BaseBufferVideoTrack):
+    """
+    Legacy video track - uses toggle-based processing for backwards compatibility.
+    Use CleanBufferVideoTrack or AnnotatedBufferVideoTrack directly instead.
+    """
+    def __init__(self, buffer_service, fps=30):
+        super().__init__(buffer_service, fps, track_type="legacy")
+
+    def _get_frame_data(self):
+        """Get processed frame (toggle-based, for backwards compatibility)"""
+        return self.buffer_service.get_processed_frame()
+
 
 class WebRTCService:
     """
@@ -416,18 +461,21 @@ class WebRTCService:
         async def handle_viewer_wants_connection(data):
             print(f"HANDLER CALLED: viewer-wants-connection with data: {data}")
             logger.info(f"Handler called: viewer-wants-connection with data: {data}")
-            
+
             if isinstance(data, dict):
                 viewer_id = data.get('viewerId')
                 cellular_mode = data.get('cellularMode', False)
+                # Stream type: 'clean' (default) or 'annotated'
+                stream_type = data.get('streamType', 'clean')
             else:
                 viewer_id = str(data)
                 cellular_mode = False
-                
-            logger.info(f"Processing viewer {viewer_id}, cellular mode: {cellular_mode}")
-            
-            # Create WebRTC peer connection and offer with cellular mode support
-            await self._create_peer_connection_and_offer(viewer_id, cellular_mode=cellular_mode)
+                stream_type = 'clean'
+
+            logger.info(f"Processing viewer {viewer_id}, cellular mode: {cellular_mode}, stream type: {stream_type}")
+
+            # Create WebRTC peer connection and offer with cellular mode and stream type support
+            await self._create_peer_connection_and_offer(viewer_id, cellular_mode=cellular_mode, stream_type=stream_type)
         
         @self.sio.on('webrtc-answer')
         async def handle_webrtc_answer(data):
@@ -540,26 +588,39 @@ class WebRTCService:
         except Exception as e:
             logger.error(f"Failed to send test webrtc-offer: {e}")
     
-    async def _create_peer_connection_and_offer(self, viewer_id: str, cellular_mode: bool = False):
-        """Create a new WebRTC peer connection and send offer"""
-        logger.info(f"CRITICAL: Starting _create_peer_connection_and_offer for viewer {viewer_id}")
-        
+    async def _create_peer_connection_and_offer(self, viewer_id: str, cellular_mode: bool = False, stream_type: str = 'clean'):
+        """Create a new WebRTC peer connection and send offer
+
+        Args:
+            viewer_id: Unique identifier for the viewer
+            cellular_mode: If True, optimize for cellular connectivity via TURN relay
+            stream_type: 'clean' for raw frames, 'annotated' for CV overlay frames
+        """
+        logger.info(f"CRITICAL: Starting _create_peer_connection_and_offer for viewer {viewer_id}, stream_type={stream_type}")
+
         try:
             # Create peer connection with standard configuration
             pc = RTCPeerConnection(configuration=self.rtc_config)
             logger.info(f"🔍 Created peer connection with standard configuration")
-            
+
             self.connections[viewer_id] = pc
             logger.info(f"CRITICAL: Created RTCPeerConnection for viewer {viewer_id} with external IP {self.external_ip}")
-            
+
             # Add video track from buffer service
             if not self.buffer_service:
                 logger.error(f"CRITICAL: Buffer service is None!")
                 return
-                
-            video_track = BufferVideoTrack(self.buffer_service)
+
+            # Select video track based on stream type
+            if stream_type == 'annotated':
+                video_track = AnnotatedBufferVideoTrack(self.buffer_service)
+                logger.info(f"📺 Using ANNOTATED video track (with CV overlays) for viewer {viewer_id}")
+            else:
+                video_track = CleanBufferVideoTrack(self.buffer_service)
+                logger.info(f"📺 Using CLEAN video track (no overlays) for viewer {viewer_id}")
+
             pc.addTrack(video_track)
-            logger.info(f"CRITICAL: Added video track to peer connection for viewer {viewer_id}")
+            logger.info(f"CRITICAL: Added {stream_type} video track to peer connection for viewer {viewer_id}")
             
             # MINIMAL APPROACH: No port redirection - let aiortc handle ports naturally
             logger.info(f"🧊 MINIMAL WebRTC: Using aiortc's natural port binding for viewer {viewer_id}")

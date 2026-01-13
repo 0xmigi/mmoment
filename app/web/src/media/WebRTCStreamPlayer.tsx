@@ -7,7 +7,19 @@ import { io, Socket } from "socket.io-client";
 interface WebRTCStreamPlayerProps {
   fallback?: React.ReactNode;
   onError?: (error: string) => void;
+  streamType?: 'clean' | 'annotated';  // Stream type: clean (default) or annotated (with CV overlays)
 }
+
+// WHEP fallback configuration
+const WHEP_CONFIG = {
+  // MediaMTX server URL - the camera publishes here via WHIP
+  MEDIAMTX_URL: "http://129.80.99.75:8889",
+  // Get WHEP URL for a specific camera and stream type
+  getWhepUrl(cameraId: string, streamType: 'clean' | 'annotated' = 'clean') {
+    const streamName = streamType === 'annotated' ? `${cameraId}-annotated` : cameraId;
+    return `${this.MEDIAMTX_URL}/${streamName}/whep`;
+  }
+};
 
 // Cellular connection detection helper
 const detectCellularConnection = (): boolean => {
@@ -57,16 +69,18 @@ const detectCellularConnection = (): boolean => {
   return false;
 };
 
-const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
+const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError, streamType = 'clean' }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const socketRef = useRef<Socket | null>(null);
+  const cameraSocketIdRef = useRef<string | null>(null); // Store camera's socket ID for ICE candidates
   const [connectionState, setConnectionState] = useState<
     "connecting" | "connected" | "failed" | "disconnected"
   >("disconnected");
   const [error, setError] = useState<string | null>(null);
   const [pendingStream, setPendingStream] = useState<MediaStream | null>(null);
   const connectionAttemptsRef = useRef<number>(0);
+  const whepAttemptedRef = useRef<boolean>(false);
   const { selectedCamera } = useCamera();
   const { cameraId } = useParams<{ cameraId: string }>();
 
@@ -84,6 +98,9 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
+
+    // Clear camera socket ID (will be set again on next offer)
+    cameraSocketIdRef.current = null;
 
     // NOTE: Keep socket connection alive for recovery
     // Socket.IO signaling should persist through WebRTC failures
@@ -107,6 +124,9 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
+
+    // Clear camera socket ID
+    cameraSocketIdRef.current = null;
 
     // Disconnect socket on component unmount
     if (socketRef.current) {
@@ -135,6 +155,103 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
     [cleanup, onError]
   );
 
+  // WHEP fallback connection - connects directly to MediaMTX server
+  const connectViaWhep = useCallback(async () => {
+    const whepUrl = currentCameraId
+      ? WHEP_CONFIG.getWhepUrl(currentCameraId, streamType)
+      : WHEP_CONFIG.getWhepUrl('jetson-camera', streamType);  // Fallback stream name
+
+    console.log("[WHEP] 🔄 Falling back to WHEP via MediaMTX...");
+    console.log("[WHEP] URL:", whepUrl);
+    console.log("[WHEP] Stream type:", streamType);
+
+    setConnectionState("connecting");
+    setError(null);
+    whepAttemptedRef.current = true;
+
+    try {
+      // Create peer connection with minimal config (no TURN needed - MediaMTX has public IP)
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+
+      peerConnectionRef.current = pc;
+
+      // Handle incoming video track
+      pc.ontrack = (event) => {
+        console.log("[WHEP] 📺 Received video track from MediaMTX");
+        const stream = event.streams[0];
+        if (stream && videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch((e) => console.warn("[WHEP] Play failed:", e));
+          setConnectionState("connected");
+          setError(null);
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        console.log("[WHEP] Connection state:", pc.connectionState);
+        if (pc.connectionState === "connected") {
+          console.log("[WHEP] ✅ Connected to MediaMTX stream!");
+          setConnectionState("connected");
+        } else if (pc.connectionState === "failed") {
+          console.error("[WHEP] ❌ WHEP connection failed");
+          setError("WHEP connection to MediaMTX failed");
+          setConnectionState("failed");
+        }
+      };
+
+      // Add transceiver for receiving video
+      pc.addTransceiver("video", { direction: "recvonly" });
+
+      // Create offer
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      // Wait for ICE gathering to complete
+      await new Promise<void>((resolve) => {
+        if (pc.iceGatheringState === "complete") {
+          resolve();
+        } else {
+          pc.onicegatheringstatechange = () => {
+            if (pc.iceGatheringState === "complete") {
+              resolve();
+            }
+          };
+          // Timeout after 3 seconds
+          setTimeout(resolve, 3000);
+        }
+      });
+
+      console.log("[WHEP] 📤 Sending offer to MediaMTX...");
+
+      // Send offer to MediaMTX WHEP endpoint
+      const response = await fetch(whepUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: pc.localDescription?.sdp,
+      });
+
+      if (response.status !== 201) {
+        throw new Error(`WHEP handshake failed: ${response.status}`);
+      }
+
+      const answerSdp = await response.text();
+      console.log("[WHEP] 📥 Received answer from MediaMTX");
+
+      await pc.setRemoteDescription({
+        type: "answer",
+        sdp: answerSdp,
+      });
+
+      console.log("[WHEP] ✅ WHEP handshake complete!");
+
+    } catch (error) {
+      console.error("[WHEP] ❌ WHEP connection failed:", error);
+      setError(`WHEP fallback failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+      setConnectionState("failed");
+    }
+  }, [currentCameraId, streamType]);
 
   const createPeerConnection = useCallback(async () => {
     // Generate time-based TURN credentials
@@ -206,7 +323,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
     const peerConnection = new RTCPeerConnection(config);
 
     peerConnection.onicecandidate = (event) => {
-      if (event.candidate && socketRef.current && currentCameraId) {
+      if (event.candidate && socketRef.current && currentCameraId && cameraSocketIdRef.current) {
         console.log("[WebRTC] 🧊 BROWSER SENDING ICE candidate:", {
           type: event.candidate.type,
           protocol: event.candidate.protocol,
@@ -215,15 +332,18 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
           priority: event.candidate.priority,
           foundation: event.candidate.foundation,
           component: event.candidate.component,
-          candidate_string: event.candidate.candidate
+          candidate_string: event.candidate.candidate,
+          targetSocketId: cameraSocketIdRef.current
         });
         socketRef.current.emit("webrtc-ice-candidate", {
           candidate: event.candidate,
-          targetId: "camera",
+          targetId: cameraSocketIdRef.current, // Use actual camera socket ID, not "camera"
           cameraId: currentCameraId,
         });
       } else if (event.candidate === null) {
         console.log("[WebRTC] 🧊 BROWSER ICE gathering completed");
+      } else if (event.candidate && !cameraSocketIdRef.current) {
+        console.warn("[WebRTC] ⚠️ ICE candidate generated but camera socket ID not yet known - candidate will be lost");
       }
     };
 
@@ -294,9 +414,14 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
               initializeWebRTC();
             }
           }, 2000);
+        } else if (!whepAttemptedRef.current) {
+          // P2P and relay both failed - try WHEP fallback
+          console.log("[WebRTC] ❌ Relay-only connection also failed - trying WHEP fallback...");
+          cleanup();
+          connectViaWhep();
         } else {
-          console.log("[WebRTC] ❌ Relay-only connection also failed");
-          handleError("Connection failed - both direct and relay modes failed");
+          console.log("[WebRTC] ❌ All connection methods failed (P2P, relay, WHEP)");
+          handleError("Connection failed - all methods exhausted");
         }
       } else if (state === "disconnected") {
         console.warn("[WebRTC] ⚠️ Connection disconnected");
@@ -632,15 +757,17 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         // Detect if we're on cellular by checking connection type and network info
         const isCellular = detectCellularConnection();
         
-        // Register as viewer with cellular mode flag
+        // Register as viewer with cellular mode flag and stream type
         console.log(
           "[WebRTC] Registering as viewer for camera:",
           currentCameraId,
-          "Cellular mode:", isCellular
+          "Cellular mode:", isCellular,
+          "Stream type:", streamType
         );
-        socket.emit("register-viewer", { 
+        socket.emit("register-viewer", {
           cameraId: currentCameraId,
-          cellularMode: isCellular 
+          cellularMode: isCellular,
+          streamType: streamType  // 'clean' (default) or 'annotated'
         });
       });
 
@@ -666,6 +793,10 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         }) => {
           console.log("[WebRTC] Received offer from camera:", data.offer);
           console.log("[WebRTC] Offer SDP:", data.offer.sdp);
+          console.log("[WebRTC] Camera socket ID:", data.senderId);
+
+          // Store camera's socket ID for ICE candidate routing
+          cameraSocketIdRef.current = data.senderId;
 
           try {
             console.log('[WebRTC] About to create peer connection...');
@@ -778,7 +909,7 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError }) => {
         }`
       );
     }
-  }, [currentCameraId, createPeerConnection, handleError]);
+  }, [currentCameraId, createPeerConnection, handleError, streamType]);
 
   // Handle pending stream when video element becomes available
   useEffect(() => {

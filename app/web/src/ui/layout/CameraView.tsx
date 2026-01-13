@@ -1,19 +1,24 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 
-import { IDL } from "../../anchor/idl";
 import { useProgram, CAMERA_ACTIVATION_PROGRAM_ID } from "../../anchor/setup";
 import { TransactionModal } from "../../auth/components/TransactionModal";
 import { CameraModal } from "../../camera/CameraModal";
 import { useCamera, CameraData } from "../../camera/CameraProvider";
 import { IRLAppsButton } from "../../camera/IRLAppsButton";
+import { CompetitionScoreboard } from "../../camera/CompetitionScoreboard";
+import { CompetitionControls, useCompetitionExit, type EscrowInfo } from "../../camera/CompetitionControls";
+import { CVDevPanel } from "../../camera/CVDevPanel";
 import { cameraStatus } from "../../camera/camera-status";
+import { CameraRegistry } from "../../camera/camera-registry";
 import { unifiedCameraService } from "../../camera/unified-camera-service";
 import { useCameraStatus } from "../../camera/useCameraStatus";
+import { unifiedCameraPolling, CameraStatusData } from "../../camera/unified-camera-polling";
 import { CONFIG } from "../../core/config";
 import { ToastMessage } from "../../core/types/toast";
 import MediaGallery from "../../media/Gallery";
+import { walrusGalleryService } from "../../storage/walrus/walrus-gallery-service";
+import { getCVDevModeEnabled } from "../../storage/DeveloperSettings";
 import { StreamPlayer } from "../../media/StreamPlayer";
-import { unifiedIpfsService } from "../../storage/ipfs/unified-ipfs-service";
 import { Timeline } from "../../timeline/Timeline";
 import { timelineService } from "../../timeline/timeline-service";
 import {
@@ -22,31 +27,28 @@ import {
 } from "../../timeline/timeline-types";
 import { ToastContainer } from "../feedback/ToastContainer";
 import { CameraControls } from "./MobileControls";
-import { Program, AnchorProvider } from "@coral-xyz/anchor";
 import {
   useDynamicContext,
   useEmbeddedWallet,
 } from "@dynamic-labs/sdk-react-core";
 import { useConnection } from "@solana/wallet-adapter-react";
 import {
-  PublicKey,
   Connection,
+  PublicKey,
   Transaction,
   TransactionInstruction,
 } from "@solana/web3.js";
 import {
-  StopCircle,
-  Play,
   Camera,
   Video,
   Loader,
   Link2,
   CheckCircle,
 } from "lucide-react";
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef, useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 
-// Update the CameraIdDisplay component to add a forced refresh when the modal is closed
+// CameraIdDisplay component - uses unified check-in state from CameraProvider
 const CameraIdDisplay = ({
   cameraId,
   selectedCamera,
@@ -65,9 +67,9 @@ const CameraIdDisplay = ({
   const cameraStatus = useCameraStatus(
     selectedCamera?.publicKey || cameraAccount || cameraId || ""
   );
-  const { primaryWallet } = useDynamicContext();
-  const { connection } = useConnection();
-  const [isCheckedIn, setIsCheckedIn] = useState(false);
+
+  // Use unified check-in state from CameraProvider (Phase 3 Privacy Architecture)
+  const { isCheckedIn, refreshCheckInStatus } = useCamera();
 
   // Get the direct ID from localStorage if available (most reliable source)
   const directId = localStorage.getItem("directCameraId");
@@ -76,78 +78,22 @@ const CameraIdDisplay = ({
   const displayId =
     selectedCamera?.publicKey || cameraAccount || directId || cameraId;
 
-  // Simple blockchain check
-  const checkBlockchainStatus = async () => {
-    if (!displayId || !primaryWallet?.address || !connection) return;
-
-    try {
-      console.log(
-        `[BLOCKCHAIN CHECK] Checking status for ${displayId.slice(0, 8)}...`
-      );
-
-      const provider = new AnchorProvider(
-        connection,
-        {
-          publicKey: new PublicKey(primaryWallet.address),
-          signTransaction: async (tx: Transaction) => tx,
-          signAllTransactions: async (txs: Transaction[]) => txs,
-        } as any,
-        { commitment: "confirmed" }
-      );
-
-      const program = new Program(
-        IDL as any,
-        CAMERA_ACTIVATION_PROGRAM_ID,
-        provider
-      );
-
-      const [sessionPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("session"),
-          new PublicKey(primaryWallet.address).toBuffer(),
-          new PublicKey(displayId).toBuffer(),
-        ],
-        CAMERA_ACTIVATION_PROGRAM_ID
-      );
-
-      try {
-        const session = await (program.account as any).userSession.fetch(sessionPda);
-        console.log(`[BLOCKCHAIN CHECK] ✅ SESSION FOUND:`, session);
-        setIsCheckedIn(true);
-      } catch (err) {
-        console.log(`[BLOCKCHAIN CHECK] ❌ NO SESSION FOUND`);
-        setIsCheckedIn(false);
-      }
-    } catch (err) {
-      console.error("[BLOCKCHAIN CHECK] ERROR:", err);
-    }
-  };
-
-  // Check blockchain status immediately when component loads or camera changes
-  useEffect(() => {
-    if (displayId && primaryWallet?.address && connection) {
-      console.log(
-        `[CAMERA ID DISPLAY] Component loaded/changed - checking blockchain status`
-      );
-      checkBlockchainStatus();
-    }
-  }, [displayId, primaryWallet?.address, connection]);
-
-  // Add a function to handle status change from modal
+  // Handle status change from modal - refresh from context
   const handleCheckStatusChange = (newStatus: boolean) => {
-    console.log("Status change from modal:", newStatus);
-    setIsCheckedIn(newStatus);
+    console.log("[CameraIdDisplay] Status change from modal:", newStatus);
+    // Refresh check-in status from context (which queries Jetson)
+    refreshCheckInStatus();
     // If timelineRef exists, refresh it
     if (timelineRef?.current?.refreshTimeline) {
       timelineRef.current?.refreshTimeline();
     }
   };
 
-  // Add a function to handle modal close with a forced refresh
+  // Handle modal close - refresh status
   const handleModalClose = () => {
     setIsModalOpen(false);
-    // Check blockchain status when modal closes
-    checkBlockchainStatus();
+    // Refresh check-in status from Jetson when modal closes
+    refreshCheckInStatus();
   };
 
   // Handle case where ID might not be valid
@@ -176,14 +122,14 @@ const CameraIdDisplay = ({
       ) : (
         <div
           onClick={() => setIsModalOpen(true)}
-          className="text-sm text-gray-600 hover:text-blue-600 transition-colors cursor-pointer flex items-center"
+          className="text-sm text-gray-600 hover:text-primary transition-colors cursor-pointer flex items-center"
         >
           <span>id: {formatId(displayId)}</span>
           <span id="check-in-status-icon">
             {isCheckedIn ? (
               <CheckCircle className="w-3.5 h-3.5 ml-1.5 text-green-500" />
             ) : (
-              <Link2 className="w-3.5 h-3.5 ml-1.5 text-blue-500" />
+              <Link2 className="w-3.5 h-3.5 ml-1.5 text-primary" />
             )}
           </span>
         </div>
@@ -216,7 +162,8 @@ export function CameraView() {
   const { primaryWallet, user } = useDynamicContext();
   const { cameraId } = useParams<{ cameraId: string }>();
   useEmbeddedWallet();
-  const { selectedCamera, setSelectedCamera, fetchCameraById } = useCamera();
+  // Use unified check-in state from CameraProvider (Phase 3 Privacy Architecture)
+  const { selectedCamera, setSelectedCamera, fetchCameraById, isCheckedIn, refreshCheckInStatus } = useCamera();
   const { program } = useProgram();
   const { connection } = useConnection();
   const timelineRef = useRef<{
@@ -234,7 +181,7 @@ export function CameraView() {
   const [currentToast, setCurrentToast] = useState<ToastMessage | null>(null);
   const [loading] = useState(false);
   const [, setIsMobileView] = useState(window.innerWidth <= 768);
-  const [isCheckedIn, setIsCheckedIn] = useState(false);
+  // Removed local isCheckedIn state - now using unified state from CameraProvider
 
   // Add state to store video recording transaction signature
   const [_recordingTransactionSignature] = useState<string | null>(null);
@@ -243,11 +190,21 @@ export function CameraView() {
   const [gestureMonitoring, setGestureMonitoring] = useState(false);
   const gestureCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Track if we've auto-started the WebRTC stream for this check-in session
+  const hasAutoStartedStreamRef = useRef<boolean>(false);
+
   // Add state to track gesture controls status changes
   const [gestureControlsEnabled, setGestureControlsEnabled] = useState(false);
 
   // Add state for mobile camera modal
   const [isMobileCameraModalOpen, setIsMobileCameraModalOpen] = useState(false);
+
+  // CV Dev Mode state
+  const [cvDevModeEnabled, setCvDevModeEnabled] = useState(() => getCVDevModeEnabled());
+
+  // Competition state
+  const [competitionEscrowInfo, setCompetitionEscrowInfo] = useState<EscrowInfo | null>(null);
+  const [hasCompetitionApp, setHasCompetitionApp] = useState(false);
 
   // Helper function to detect if we're using the Jetson camera
   // const isJetsonCamera = (cameraId: string | null): boolean => {
@@ -256,7 +213,7 @@ export function CameraView() {
 
   // Update the states for TransactionModal
   const [showTransactionModal, setShowTransactionModal] = useState(false);
-  const [transactionData, setTransactionData] = useState<{
+  const [transactionData, _setTransactionData] = useState<{
     type: "photo" | "video" | "stream" | "initialize";
     cameraAccount: string;
   } | null>(null);
@@ -272,13 +229,15 @@ export function CameraView() {
     lastUpdated: 0,
   });
 
-  // Polling interval for hardware state
-  const hardwareStateInterval = useRef<NodeJS.Timeout>();
+  // Removed: Hardware state is now polled via unified service
 
   // Add camera-specific status hook to the main CameraView function
   const currentCameraId =
     cameraAccount || selectedCamera?.publicKey || cameraId || "";
   const currentCameraStatus = useCameraStatus(currentCameraId);
+
+  // Competition exit handler
+  const { handleExit: handleCompetitionExit } = useCompetitionExit(currentCameraId);
 
   // Add a function to create timeline events with Farcaster profile info
   const addTimelineEvent = (
@@ -329,20 +288,28 @@ export function CameraView() {
         console.warn("Error checking for duplicate events:", e);
       }
 
-      // Get the user's Farcaster profile info if available
-      const farcasterCred = user.verifiedCredentials?.find(
+      // Get the user's social credentials - prioritize Farcaster over Twitter
+      const farcasterCred = user?.verifiedCredentials?.find(
         (cred) => cred.oauthProvider === "farcaster"
       );
+      const twitterCred = user?.verifiedCredentials?.find(
+        (cred) => cred.oauthProvider === "twitter"
+      );
+
+      // Use Farcaster if available, otherwise Twitter
+      const socialCred = farcasterCred || twitterCred;
 
       // Create the timeline event with enriched user info
+      // Try social accounts first, then fallback to Dynamic user profile
       const event: Omit<TimelineEvent, "id"> = {
         type: eventType,
         user: {
           address: primaryWallet.address,
-          // Include Farcaster profile info if available
-          displayName: farcasterCred?.oauthDisplayName || undefined,
-          username: farcasterCred?.oauthUsername || undefined,
-          pfpUrl: farcasterCred?.oauthAccountPhotos?.[0] || undefined,
+          // Include profile info - prioritize social accounts, fallback to Dynamic user (NEVER use email)
+          displayName: socialCred?.oauthDisplayName || user?.alias || undefined,
+          username: socialCred?.oauthUsername || user?.username || undefined,
+          pfpUrl: socialCred?.oauthAccountPhotos?.[0] || undefined,
+          provider: socialCred?.oauthProvider,
         },
         timestamp: Date.now(),
         transactionId,
@@ -385,6 +352,9 @@ export function CameraView() {
       // Set camera account state
       setCameraAccount(decodedCameraId);
 
+      // NOTE: Session status is now automatically checked by CameraProvider
+      // when selectedCamera changes. No need for manual initial check here.
+
       // Attempt to fetch camera data if possible (but don't show errors if it fails)
       if (fetchCameraById) {
         fetchCameraById(decodedCameraId)
@@ -405,7 +375,7 @@ export function CameraView() {
     } catch (error) {
       console.error("[CameraView] Error processing camera ID:", error);
     }
-  }, [cameraId, fetchCameraById, setSelectedCamera]);
+  }, [cameraId, fetchCameraById, setSelectedCamera, primaryWallet?.address]);
 
   // Clear camera account when navigating to the default /app route
   useEffect(() => {
@@ -447,45 +417,36 @@ export function CameraView() {
     }
   }, [primaryWallet]);
 
+  // Set wallet on CameraRegistry for request signing (ed25519 authentication)
+  useEffect(() => {
+    if (primaryWallet) {
+      CameraRegistry.getInstance().setWallet(primaryWallet);
+      console.log("[CameraView] Wallet set for request signing");
+    }
+  }, [primaryWallet]);
+
   // Sync UI state with actual camera state when component loads or camera changes
+  // Uses unified polling service to avoid duplicate API calls
   useEffect(() => {
     if (!cameraAccount) return;
 
-    const syncCameraState = async () => {
-      try {
-        console.log(`[CameraView] Syncing state for camera: ${cameraAccount}`);
+    console.log(`[CameraView] Syncing state for camera: ${cameraAccount}`);
 
-        // Check if camera exists in registry
-        if (!unifiedCameraService.hasCamera(cameraAccount)) {
-          console.log(
-            `[CameraView] Camera not in registry, skipping state sync`
-          );
-          return;
-        }
+    // Check if camera exists in registry
+    if (!unifiedCameraService.hasCamera(cameraAccount)) {
+      console.log(
+        `[CameraView] Camera not in registry, skipping state sync`
+      );
+      return;
+    }
 
-        // Get actual camera status
-        const statusResponse = await unifiedCameraService.getStatus(
-          cameraAccount
-        );
-        if (statusResponse.success && statusResponse.data) {
-          console.log(`[CameraView] Camera status:`, statusResponse.data);
-          setIsRecording(statusResponse.data.isRecording);
-        }
-
-        // Get actual stream status
-        const streamResponse = await unifiedCameraService.getStreamInfo(
-          cameraAccount
-        );
-        if (streamResponse.success && streamResponse.data) {
-          console.log(`[CameraView] Stream status:`, streamResponse.data);
-        }
-      } catch (error) {
-        console.error(`[CameraView] Error syncing camera state:`, error);
-      }
-    };
-
-    // Sync state immediately when camera changes
-    syncCameraState();
+    // Force a fresh check from unified polling (will reuse pending request if one exists)
+    unifiedCameraPolling.forceCheck(cameraAccount).then((status) => {
+      console.log(`[CameraView] Camera status from unified polling:`, status);
+      // Recording state is managed by hardware state subscription
+    }).catch((error) => {
+      console.error(`[CameraView] Error syncing camera state:`, error);
+    });
   }, [cameraAccount]);
 
   // Handle camera update from ActivateCamera component
@@ -533,40 +494,26 @@ export function CameraView() {
     }
   };
 
-  // Polling function to get hardware state directly from the camera
-  const pollHardwareState = useCallback(async () => {
+  // Subscribe to unified polling service for hardware state (no separate polling needed)
+  useEffect(() => {
     if (!cameraAccount) return;
 
-    try {
-      const response = await unifiedCameraService.getComprehensiveState(
-        cameraAccount
-      );
-      if (response.status.success && response.status.data) {
-        setHardwareState({
-          isStreaming: response.streamInfo.data?.isActive || false,
-          isRecording: response.status.data.isRecording || false,
-          lastUpdated: Date.now(),
-        });
-      }
-    } catch (error) {
-      console.error("[CameraView] Error polling hardware state:", error);
-    }
-  }, [cameraAccount]);
+    console.log('[CameraView] Subscribing to unified polling for hardware state');
 
-  // Set up hardware state polling
-  useEffect(() => {
-    // Poll immediately
-    pollHardwareState();
+    const unsubscribe = unifiedCameraPolling.subscribe(cameraAccount, (status: CameraStatusData) => {
+      setHardwareState({
+        isStreaming: status.isStreaming,
+        isRecording: false, // TODO: Add isRecording to unified polling status
+        lastUpdated: Date.now(),
+      });
+    });
 
-    // Then poll every 3 seconds for responsive UI
-    hardwareStateInterval.current = setInterval(pollHardwareState, 3000);
-
+    // Cleanup
     return () => {
-      if (hardwareStateInterval.current) {
-        clearInterval(hardwareStateInterval.current);
-      }
+      console.log('[CameraView] Unsubscribing from unified polling');
+      unsubscribe();
     };
-  }, [pollHardwareState]);
+  }, [cameraAccount]);
 
   // Button handlers
 
@@ -639,9 +586,8 @@ export function CameraView() {
           return undefined;
         }
 
-        // First, verify user is checked in
-        const isCheckedInNow = await checkUserSession();
-        if (!isCheckedInNow) {
+        // First, verify user is checked in (using unified state from CameraProvider)
+        if (!isCheckedIn) {
           updateToast(
             "error",
             "You need to check in before performing camera actions"
@@ -796,113 +742,29 @@ export function CameraView() {
     };
   }, [sendSimpleTransaction]);
 
-  // Replace the promptForCheckIn function with one that shows the modal
+  // PHASE 3: Prompt user to check in via CameraModal (not TransactionModal)
+  // Camera actions after check-in are free and direct to the Jetson
   const promptForCheckIn = (actionType: "photo" | "video" | "stream") => {
     if (!cameraAccount) {
       updateToast("error", "No camera connected");
       return false;
     }
 
-    // Set transaction data and show modal
-    setTransactionData({
-      type: actionType,
-      cameraAccount: cameraAccount,
-    });
-    setShowTransactionModal(true);
+    // Show toast and open the CameraModal for check-in
+    updateToast("info", "Please check in to use camera controls");
+    setIsMobileCameraModalOpen(true);
 
     // Track this as an "attempt"
     console.log(
-      `User attempted to use camera for ${actionType} without checking in first`
+      `[Phase3] User attempted ${actionType} without checking in - prompting check-in via CameraModal`
     );
 
     return false;
   };
 
-  // Update the checkUserSession function with similar throttling
-  const checkUserSession = async (): Promise<boolean> => {
-    if (!primaryWallet?.address || !cameraAccount || !program || !connection) {
-      console.error("Missing required components for check-in status");
-      return false;
-    }
-
-    try {
-      const userPublicKey = new PublicKey(primaryWallet.address);
-      const cameraPublicKey = new PublicKey(cameraAccount);
-
-      // Find the session PDA
-      const [sessionPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("session"),
-          userPublicKey.toBuffer(),
-          cameraPublicKey.toBuffer(),
-        ],
-        CAMERA_ACTIVATION_PROGRAM_ID
-      );
-
-      try {
-        // Try to fetch the session account
-        const sessionAccount = await (program.account as any).userSession.fetch(
-          sessionPda
-        );
-        if (sessionAccount) {
-          if (!isCheckedIn) {
-            console.log("[CameraView] Setting checked-in status to TRUE");
-            setIsCheckedIn(true);
-            // Refresh timeline if status changed
-            if (timelineRef.current?.refreshTimeline) {
-              timelineRef.current?.refreshTimeline();
-            }
-          }
-          return true;
-        }
-      } catch (_) {
-        console.log(
-          "[CameraView] Session account not found, user is not checked in"
-        );
-        if (isCheckedIn) {
-          console.log("[CameraView] Setting checked-in status to FALSE");
-          setIsCheckedIn(false);
-          // Refresh timeline if status changed
-          if (timelineRef.current?.refreshTimeline) {
-            timelineRef.current?.refreshTimeline();
-          }
-        }
-        return false;
-      }
-    } catch (err) {
-      console.error("[CameraView] Error checking session status:", err);
-      // Don't update state on error to prevent UI flashing
-      return isCheckedIn; // Return current state on error
-    }
-
-    return isCheckedIn;
-  };
-
-  // Update the periodic check-in status check to use a longer interval
-  useEffect(() => {
-    if (!primaryWallet?.address || !cameraAccount) return;
-
-    console.log("[CameraView] Setting up check-in status monitoring");
-
-    // Check status immediately
-    checkUserSession();
-
-    // Set up periodic check every 10 seconds (instead of 3)
-    const intervalId = setInterval(() => {
-      checkUserSession().then((isCheckedIn) => {
-        console.log(
-          "[CameraView] Periodic check result:",
-          isCheckedIn ? "CHECKED IN" : "NOT CHECKED IN"
-        );
-      });
-    }, 10000);
-
-    // Clean up on unmount
-    return () => {
-      console.log("[CameraView] Cleaning up check-in status monitor");
-      clearInterval(intervalId);
-    };
-  }, [primaryWallet, cameraAccount, program, connection]);
+  // NOTE: Check-in status is now managed by CameraProvider (Phase 3 Privacy Architecture)
+  // The provider auto-refreshes status when camera/wallet changes and provides unified state
+  // See: CameraProvider.refreshCheckInStatus() for manual refresh
 
   // Sync gesture controls state with localStorage
   useEffect(() => {
@@ -1054,6 +916,64 @@ export function CameraView() {
     };
   }, [isCheckedIn, cameraAccount, gestureControlsEnabled]);
 
+  // Auto-start WebRTC streaming when user checks in
+  // WebRTC is now always-on infrastructure for checked-in users, not a "broadcast" feature
+  useEffect(() => {
+    const autoStartStream = async () => {
+      const targetCameraId = cameraAccount || selectedCamera?.publicKey;
+
+      // Conditions for auto-start:
+      // 1. User is checked in
+      // 2. Camera is available (isLive)
+      // 3. Not already streaming
+      // 4. Haven't already auto-started for this check-in session
+      if (
+        isCheckedIn &&
+        targetCameraId &&
+        currentCameraStatus.isLive &&
+        !currentCameraStatus.isStreaming &&
+        !hasAutoStartedStreamRef.current
+      ) {
+        console.log('[CameraView] 🚀 Auto-starting WebRTC stream for checked-in user');
+        hasAutoStartedStreamRef.current = true;
+
+        try {
+          // Ensure camera has a local session set
+          const isConnected = await unifiedCameraService.isConnected(targetCameraId);
+          if (!isConnected && primaryWallet?.address) {
+            const sessionKey = `mmoment_session_${primaryWallet.address}_${targetCameraId}`;
+            const storedSession = localStorage.getItem(sessionKey);
+            if (storedSession) {
+              const { sessionId } = JSON.parse(storedSession);
+              await unifiedCameraService.setSession(targetCameraId, sessionId);
+            }
+          }
+
+          const response = await unifiedCameraService.startStream(targetCameraId);
+          if (response.success) {
+            console.log('[CameraView] ✅ WebRTC stream auto-started successfully');
+            // Force status refresh
+            setTimeout(() => {
+              unifiedCameraPolling.forceCheck(targetCameraId);
+            }, 1000);
+          } else {
+            console.warn('[CameraView] ⚠️ Failed to auto-start stream:', response.error);
+          }
+        } catch (error) {
+          console.error('[CameraView] ❌ Error auto-starting stream:', error);
+        }
+      }
+
+      // Reset the auto-start flag when user checks out
+      if (!isCheckedIn && hasAutoStartedStreamRef.current) {
+        console.log('[CameraView] 🔄 Resetting auto-start flag (user checked out)');
+        hasAutoStartedStreamRef.current = false;
+      }
+    };
+
+    autoStartStream();
+  }, [isCheckedIn, currentCameraStatus.isLive, currentCameraStatus.isStreaming, cameraAccount, selectedCamera?.publicKey, primaryWallet?.address]);
+
   // Update the button handlers to check for check-in status
   const handleDirectPhoto = async () => {
     if (!cameraAccount && !selectedCamera) {
@@ -1075,71 +995,58 @@ export function CameraView() {
       return;
     }
 
-    const isCheckedIn = await checkUserSession();
+    // PHASE 3: Use unified state from CameraProvider (auto-refreshed on camera/wallet changes)
     if (!isCheckedIn) {
       return promptForCheckIn("photo");
     }
 
     try {
+      // Note: Session is already set during check-in (Phase 3)
+      // Take photo immediately for instant feedback
+      const photoPromise = unifiedCameraService.takePhoto(currentCameraId);
+
+      // Show toast in parallel - don't block the capture
       updateToast("info", "Taking photo...");
 
-      const signature = await sendSimpleTransaction("photo");
-      if (!signature) {
-        updateToast("error", "Failed to create blockchain transaction");
-        return;
-      }
+      const response = await photoPromise;
 
-      const isConnected = await unifiedCameraService.isConnected(
-        currentCameraId
-      );
-      if (!isConnected && primaryWallet?.address) {
-        await unifiedCameraService.connect(
-          currentCameraId,
-          primaryWallet.address
-        );
-      }
+      if (response.success && response.data) {
+        updateToast("success", "Photo captured!");
+        cameraStatus.setOnline(false);
 
-      const response = await unifiedCameraService.takePhoto(currentCameraId);
-
-      if (response.success && response.data?.blob) {
-        updateToast("info", "Photo captured, uploading to IPFS...");
-
-        try {
-          const results = await unifiedIpfsService.uploadFile(
-            response.data.blob,
-            primaryWallet?.address || "",
-            "image",
-            {
-              transactionId: signature,
-              cameraId: currentCameraId,
-            }
-          );
-
-          if (results.length > 0) {
-            updateToast("success", "Photo captured and uploaded to IPFS");
-            addTimelineEvent("photo_captured", signature);
-            cameraStatus.setOnline(false);
-          } else {
-            updateToast("success", "Photo captured (upload to IPFS failed)");
-            addTimelineEvent("photo_captured", signature);
-          }
-        } catch (uploadError) {
-          updateToast("success", "Photo captured (upload to IPFS failed)");
-          addTimelineEvent("photo_captured", signature);
+        // Add photo to gallery immediately (local-first)
+        // This shows the photo instantly while Walrus upload happens in background
+        // The jobId from Jetson's upload queue tracks upload status
+        const cameraApiUrl = unifiedCameraService.getCameraApiUrl(currentCameraId);
+        const jobId = response.data.storage_upload?.job_id || response.data.pipe_upload?.job_id;
+        if (cameraApiUrl && response.data.filename && primaryWallet?.address && jobId) {
+          const localUrl = `${cameraApiUrl}/api/photos/${response.data.filename}`;
+          walrusGalleryService.addPendingPhoto({
+            filename: response.data.filename,
+            localUrl: localUrl,
+            blob: response.data.blob,
+            jobId: jobId,
+            walletAddress: primaryWallet.address,
+            cameraId: currentCameraId,
+            timestamp: response.data.timestamp || Date.now(),
+            type: 'image',
+          });
+          console.log(`[CameraView] Added pending photo to gallery: ${response.data.filename} (job #${jobId})`);
+        } else if (cameraApiUrl && response.data.filename && primaryWallet?.address) {
+          // Fallback if no jobId (shouldn't happen but handle gracefully)
+          console.warn(`[CameraView] No jobId in capture response - photo won't track upload status`);
         }
 
         if (timelineRef.current?.refreshEvents) {
           timelineRef.current?.refreshEvents();
         }
-      } else {
+      } else if (!response.success) {
         updateToast(
           "error",
           `Failed to capture photo: ${response.error || "Unknown error"}`
         );
-        addTimelineEvent("photo_captured", signature);
-        if (timelineRef.current?.refreshEvents) {
-          timelineRef.current?.refreshEvents();
-        }
+        // Note: Don't emit "photo_captured" when capture FAILED - the photo wasn't captured!
+        // Jetson only buffers activities for successful captures
       }
     } catch (error) {
       updateToast(
@@ -1150,10 +1057,6 @@ export function CameraView() {
   };
 
   const handleDirectVideo = async () => {
-    if (isRecording) {
-      return;
-    }
-
     if (!cameraAccount && !selectedCamera) {
       updateToast(
         "error",
@@ -1168,7 +1071,7 @@ export function CameraView() {
       return;
     }
 
-    const isCheckedIn = await checkUserSession();
+    // PHASE 3: Use local state for check-in status (don't re-query Jetson on every action)
     if (!isCheckedIn) {
       return promptForCheckIn("video");
     }
@@ -1178,263 +1081,106 @@ export function CameraView() {
       return;
     }
 
-    let signature: string | undefined;
+    // ===== TOGGLE BEHAVIOR: Stop if recording, Start if not =====
+    if (isRecording) {
+      // STOP RECORDING - explicitly call stopVideoRecording to get job_id
+      try {
+        updateToast("info", "Stopping video recording...");
 
+        const stopResponse = await unifiedCameraService.stopVideoRecording(currentCameraId);
+
+        if (!stopResponse.success) {
+          throw new Error(stopResponse.error || "Failed to stop recording");
+        }
+
+        const videoBlob = stopResponse.data?.blob;
+        const filename = stopResponse.data?.filename;
+        const storageUpload = stopResponse.data?.storage_upload;
+
+        if (!videoBlob || !filename) {
+          updateToast("error", "Recording stopped but no video was returned");
+          setIsRecording(false);
+          return;
+        }
+
+        if (videoBlob.size < 100000) {
+          updateToast("error", "Video file appears to be corrupted. Try recording again.");
+          setIsRecording(false);
+          return;
+        }
+
+        updateToast("success", "Video recorded!");
+
+        // Add video to gallery immediately (local-first) using job_id from response
+        const cameraApiUrl = unifiedCameraService.getCameraApiUrl(currentCameraId);
+        if (cameraApiUrl && primaryWallet?.address) {
+          try {
+            // Get job_id directly from the stop response (no need to query uploads)
+            const jobId = storageUpload?.job_id;
+            const localUrl = storageUpload?.local_url
+              ? `${cameraApiUrl}${storageUpload.local_url}`
+              : `${cameraApiUrl}/videos/${filename}`;
+
+            if (jobId) {
+              walrusGalleryService.addLocalPhoto({
+                filename: filename,
+                localUrl: localUrl,
+                blob: videoBlob,
+                jobId: jobId,
+                walletAddress: primaryWallet.address,
+                cameraId: currentCameraId,
+                timestamp: stopResponse.data?.timestamp || Date.now(),
+                type: 'video',
+              });
+              console.log(`[CameraView] Added video to gallery: ${filename} (job #${jobId})`);
+            } else {
+              // Fallback: Add to gallery without jobId (won't track upload status)
+              walrusGalleryService.addLocalPhoto({
+                filename: filename,
+                localUrl: localUrl,
+                blob: videoBlob,
+                walletAddress: primaryWallet.address,
+                cameraId: currentCameraId,
+                timestamp: stopResponse.data?.timestamp || Date.now(),
+                type: 'video',
+              });
+              console.warn(`[CameraView] Added video without jobId - upload status won't be tracked`);
+            }
+          } catch (err) {
+            console.error('[CameraView] Error adding video to gallery:', err);
+          }
+        }
+
+        setIsRecording(false);
+      } catch (error) {
+        updateToast(
+          "error",
+          `Failed to stop recording: ${error instanceof Error ? error.message : "Unknown error"}`
+        );
+        setIsRecording(false);
+      }
+      return;
+    }
+
+    // START RECORDING - record indefinitely until user clicks stop
     try {
       setIsRecording(true);
       updateToast("info", "Starting video recording...");
 
-      signature = await sendSimpleTransaction("video");
-      if (!signature) {
-        updateToast("error", "Failed to create blockchain transaction");
-        setIsRecording(false);
-        return;
-      }
-
-      const isConnected = await unifiedCameraService.isConnected(
-        currentCameraId
-      );
-      if (!isConnected && primaryWallet?.address) {
-        await unifiedCameraService.connect(
-          currentCameraId,
-          primaryWallet.address
-        );
-      }
-
-      const recordResponse = await unifiedCameraService.startVideoRecording(
-        currentCameraId
-      );
+      // Start recording with duration=0 for indefinite recording (until stopped)
+      const recordResponse = await unifiedCameraService.startVideoRecording(currentCameraId);
 
       if (!recordResponse.success) {
         throw new Error(`Failed to start recording: ${recordResponse.error}`);
       }
 
-      updateToast("success", "Video recording started");
-
-      // Wait for recording to complete - give it much more time
-      let attempts = 0;
-      const maxAttempts = 40; // 2 minutes max with 3 second intervals
-
-      const checkRecordingStatus = async (): Promise<void> => {
-        attempts++;
-
-        if (attempts >= maxAttempts) {
-          updateToast("error", "Recording timeout - stopping manually");
-          setIsRecording(false);
-          return;
-        }
-
-        const statusResponse = await unifiedCameraService.getStatus(
-          currentCameraId
-        );
-        if (
-          statusResponse.success &&
-          statusResponse.data &&
-          !statusResponse.data.isRecording
-        ) {
-          updateToast(
-            "info",
-            "Recording completed, waiting for video processing..."
-          );
-
-          // Wait additional time for video processing before trying to fetch
-          await new Promise((resolve) => setTimeout(resolve, 8000));
-
-          // Recording has naturally stopped, so try to get the most recent video instead
-          const stopResponse = await unifiedCameraService.getMostRecentVideo(
-            currentCameraId
-          );
-
-          if (stopResponse.success && stopResponse.data?.blob) {
-            const videoBlob = stopResponse.data.blob;
-
-            if (videoBlob.size < 100000) {
-              updateToast(
-                "error",
-                "Video file appears to be corrupted. Try recording again."
-              );
-              setIsRecording(false);
-              return;
-            }
-
-            updateToast("info", "Video processed, uploading to IPFS...");
-
-            try {
-              const ipfsResult = await unifiedIpfsService.uploadFile(
-                videoBlob,
-                primaryWallet.address,
-                "video",
-                {
-                  transactionId: signature,
-                  cameraId: currentCameraId,
-                }
-              );
-
-              if (ipfsResult && ipfsResult.length > 0) {
-                updateToast("success", "Video uploaded to IPFS successfully!");
-              } else {
-                updateToast("error", "Video recorded but IPFS upload failed");
-              }
-            } catch (ipfsError) {
-              updateToast("error", "Video recorded but IPFS upload failed");
-            }
-          } else {
-            updateToast(
-              "error",
-              "Recording completed but no video file was created"
-            );
-          }
-          setIsRecording(false);
-        } else {
-          setTimeout(checkRecordingStatus, 3000);
-        }
-      };
-
-      // Wait longer before first check to give camera time to actually start recording
-      setTimeout(checkRecordingStatus, 10000);
+      updateToast("success", "Recording... Click again to stop");
     } catch (error) {
       updateToast(
         "error",
-        `Recording failed: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
+        `Recording failed: ${error instanceof Error ? error.message : "Unknown error"}`
       );
       setIsRecording(false);
-    }
-  };
-
-  const handleDirectStream = async () => {
-    const currentCameraId =
-      cameraAccount || selectedCamera?.publicKey || CONFIG.JETSON_CAMERA_PDA;
-    if (!currentCameraId) {
-      updateToast("error", "No camera selected");
-      return;
-    }
-
-    // Check if user is checked in first
-    const isCheckedIn = await checkUserSession();
-    if (!isCheckedIn) {
-      return promptForCheckIn("stream");
-    }
-
-    try {
-      // Get fresh hardware state before making decisions
-      await pollHardwareState();
-
-      // Use the camera status hook for more reliable state
-      const isCurrentlyStreaming = currentCameraStatus.isStreaming;
-      console.log(
-        `🔄 [STREAM DEBUG] Current streaming state:`,
-        isCurrentlyStreaming
-      );
-
-      if (isCurrentlyStreaming) {
-        // Stop streaming
-        updateToast("info", "Stopping stream...");
-        console.log(`🛑 [STREAM DEBUG] Attempting to stop stream...`);
-
-        // First create the blockchain transaction
-        const signature = await sendSimpleTransaction("stream_stop");
-        if (!signature) {
-          updateToast("error", "Failed to create blockchain transaction");
-          return;
-        }
-
-        const response = await unifiedCameraService.stopStream(currentCameraId);
-        console.log(`🛑 [STREAM DEBUG] Stop stream response:`, response);
-
-        if (response.success) {
-          // Clear the "stopping" toast immediately
-          dismissToast();
-
-          // Wait a bit longer for hardware to update, then check status
-          setTimeout(async () => {
-            await pollHardwareState();
-            // Only show success if we can confirm the stream actually stopped
-            const updatedState =
-              await unifiedCameraService.getComprehensiveState(currentCameraId);
-            if (
-              updatedState.streamInfo.success &&
-              !updatedState.streamInfo.data?.isActive
-            ) {
-              updateToast("success", "Stream stopped");
-            }
-          }, 2000);
-        } else {
-          updateToast(
-            "error",
-            `Failed to stop stream: ${response.error || "Unknown error"}`
-          );
-        }
-      } else {
-        // Start streaming
-        updateToast("info", "Starting stream...");
-        console.log(`▶️ [STREAM DEBUG] Attempting to start stream...`);
-
-        // First create the blockchain transaction
-        const signature = await sendSimpleTransaction("stream_start");
-        if (!signature) {
-          updateToast("error", "Failed to create blockchain transaction");
-          return;
-        }
-
-        // Connect to camera if not already connected
-        const isConnected = await unifiedCameraService.isConnected(
-          currentCameraId
-        );
-        if (!isConnected && primaryWallet?.address) {
-          await unifiedCameraService.connect(
-            currentCameraId,
-            primaryWallet.address
-          );
-        }
-
-        const response = await unifiedCameraService.startStream(
-          currentCameraId
-        );
-        console.log(`▶️ [STREAM DEBUG] Start stream response:`, response);
-
-        if (response.success) {
-          // Clear the "starting" toast immediately
-          dismissToast();
-
-          // Wait a bit longer for hardware to update, then check status
-          setTimeout(async () => {
-            await pollHardwareState();
-            // Only show success if we can confirm the stream actually started
-            const updatedState =
-              await unifiedCameraService.getComprehensiveState(currentCameraId);
-            if (
-              updatedState.streamInfo.success &&
-              updatedState.streamInfo.data?.isActive
-            ) {
-              updateToast("success", "Stream started");
-            }
-          }, 2000);
-        } else {
-          updateToast(
-            "error",
-            `Failed to start stream: ${response.error || "Unknown error"}`
-          );
-        }
-      }
-
-      // Force additional polls at 2s and 5s intervals to catch delayed state changes
-      setTimeout(() => pollHardwareState(), 2000);
-      setTimeout(() => pollHardwareState(), 5000);
-
-      // Refresh the timeline
-      if (timelineRef.current?.refreshEvents) {
-        timelineRef.current?.refreshEvents();
-      }
-    } catch (error) {
-      console.error("🚨 [STREAM DEBUG] Error handling stream:", error);
-      updateToast(
-        "error",
-        `Error handling stream: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
-      );
     }
   };
 
@@ -1488,6 +1234,18 @@ export function CameraView() {
     };
   }, []);
 
+  // Listen for CV Dev Mode changes
+  useEffect(() => {
+    const handleCvDevModeChange = (event: CustomEvent<{ enabled: boolean }>) => {
+      setCvDevModeEnabled(event.detail.enabled);
+    };
+
+    window.addEventListener('cvDevModeChanged', handleCvDevModeChange as EventListener);
+    return () => {
+      window.removeEventListener('cvDevModeChanged', handleCvDevModeChange as EventListener);
+    };
+  }, []);
+
   return (
     <>
       <div className="pb-40">
@@ -1502,8 +1260,8 @@ export function CameraView() {
             onSuccess={({ transactionId }) => {
               setShowTransactionModal(false);
 
-              // After successful check-in and action, refresh check-in status
-              checkUserSession().then(() => {
+              // After successful check-in and action, refresh check-in status from context
+              refreshCheckInStatus().then(() => {
                 // Create a timeline event with the transaction ID
                 if (transactionData) {
                   const eventType = getEventType(transactionData.type);
@@ -1544,13 +1302,14 @@ export function CameraView() {
           <div className="px-0 pt-0 sm:px-2">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="md:col-span-3 relative">
-                {/* IRL Apps Button - positioned next to stream */}
+                {/* IRL Apps Button - positioned next to stream (hidden on mobile when competition active) */}
                 {currentCameraId &&
                   unifiedCameraService.hasCamera(currentCameraId) && (
                     <div className="absolute top-2 right-4 z-50">
                       <IRLAppsButton
                         cameraId={currentCameraId}
                         walletAddress={primaryWallet?.address}
+                        devMode={cvDevModeEnabled}
                         onEnrollmentComplete={() => {
                           updateToast("success", "Recognition token created! IRL apps are now unlocked.");
 
@@ -1563,7 +1322,7 @@ export function CameraView() {
                     </div>
                   )}
 
-                {/* Unified TikTok-style status bar - aligned with timeline - MOBILE ONLY */}
+                {/* Unified TikTok-style status bar - aligned with timeline - MOBILE ONLY (hidden when competition active) */}
                 <div
                   className="absolute top-2 left-4 z-40 flex items-center cursor-pointer md:hidden"
                   onClick={() => setIsMobileCameraModalOpen(true)}
@@ -1578,12 +1337,9 @@ export function CameraView() {
                       <div className="bg-gray-500 text-white text-xs font-bold px-1.5 py-0.5">
                         OFFLINE
                       </div>
-                    ) : currentCameraStatus.isStreaming ? (
-                      <div className="bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 flex items-center gap-1">
-                        <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
-                        LIVE
-                      </div>
                     ) : (
+                      // WebRTC is now always-on infrastructure for checked-in users
+                      // No longer showing "LIVE" broadcast status - just ONLINE when camera is available
                       <div className="bg-green-500 text-white text-xs font-bold px-1.5 py-0.5">
                         ONLINE
                       </div>
@@ -1615,7 +1371,7 @@ export function CameraView() {
                     {isCheckedIn ? (
                       <CheckCircle className="w-3 h-3 text-green-400" />
                     ) : (
-                      <Link2 className="w-3 h-3 text-blue-400" />
+                      <Link2 className="w-3 h-3 text-primary" />
                     )}
                   </div>
                 </div>
@@ -1630,43 +1386,37 @@ export function CameraView() {
                   />
                 </div>
 
-                <StreamPlayer />
+                {/* Stream container with competition scoreboard overlay */}
+                <div className="relative">
+                  <StreamPlayer />
+
+                  {/* Competition Scoreboard - overlays the stream when competition active */}
+                  {currentCameraId && hasCompetitionApp && (
+                    <CompetitionScoreboard
+                      cameraId={currentCameraId}
+                      walletAddress={primaryWallet?.address}
+                      onClose={handleCompetitionExit}
+                      escrowInfo={competitionEscrowInfo}
+                    />
+                  )}
+                </div>
+
+                {/* CV Dev Panel - shown when dev mode is enabled */}
+                {cvDevModeEnabled && currentCameraId && (
+                  <div className="mt-2">
+                    <CVDevPanel cameraId={currentCameraId} />
+                  </div>
+                )}
 
                 <div className="hidden sm:flex absolute -right-14 top-0 flex-col h-full z-[45]">
                   {/* Direct buttons for desktop */}
-                  <div className="group h-1/2 relative">
-                    <button
-                      onClick={handleDirectStream}
-                      disabled={loading}
-                      className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-black transition-colors rounded-xl"
-                      aria-label={
-                        currentCameraStatus.isStreaming
-                          ? "Stop Stream"
-                          : "Start Stream"
-                      }
-                    >
-                      {loading ? (
-                        <Loader className="w-5 h-5 animate-spin" />
-                      ) : currentCameraStatus.isStreaming ? (
-                        <StopCircle className="w-5 h-5" />
-                      ) : (
-                        <Play className="w-5 h-5" />
-                      )}
-                    </button>
-                    <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-2 bg-black/75 text-white text-sm rounded opacity-0 group-hover:opacity-100 whitespace-nowrap transition-opacity">
-                      {loading
-                        ? "Processing..."
-                        : currentCameraStatus.isStreaming
-                        ? "Stop Stream"
-                        : "Start Stream"}
-                    </span>
-                  </div>
+                  {/* Stream toggle button removed - WebRTC is now always-on infrastructure for checked-in users */}
 
                   <div className="group h-1/2 relative">
                     <button
                       onClick={handleDirectPhoto}
                       disabled={loading}
-                      className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-gray-800 transition-colors rounded-xl"
+                      className="w-16 h-full flex items-center justify-center hover:text-primary text-gray-800 transition-colors rounded-xl"
                     >
                       {loading ? (
                         <Loader className="w-5 h-5 animate-spin" />
@@ -1683,7 +1433,7 @@ export function CameraView() {
                     <button
                       onClick={handleDirectVideo}
                       disabled={loading}
-                      className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-gray-800 transition-colors rounded-xl"
+                      className="w-16 h-full flex items-center justify-center hover:text-primary text-gray-800 transition-colors rounded-xl"
                     >
                       {loading ? (
                         <Loader className="w-5 h-5 animate-spin" />
@@ -1703,9 +1453,8 @@ export function CameraView() {
             <CameraControls
               onTakePicture={handleDirectPhoto}
               onRecordVideo={handleDirectVideo}
-              onToggleStream={handleDirectStream}
               isLoading={loading}
-              isStreaming={currentCameraStatus.isStreaming}
+              // Stream toggle removed - WebRTC is always-on infrastructure for checked-in users
             />
           </div>
           <div className="max-w-3xl mt-6 md:mt-6 mx-auto flex flex-col justify-top relative">
@@ -1732,15 +1481,9 @@ export function CameraView() {
                     </span>
                     <span className="text-gray-500 font-medium">Offline</span>
                   </div>
-                ) : currentCameraStatus.isStreaming ? (
-                  <div className="flex items-center gap-2">
-                    <span className="relative flex h-3 w-3 -ml-1">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-                    </span>
-                    <span className="text-red-500 font-medium">LIVE</span>
-                  </div>
                 ) : (
+                  // WebRTC is now always-on infrastructure for checked-in users
+                  // No longer showing "LIVE" broadcast status - just Online when camera is available
                   <div className="flex items-center gap-2">
                     <span className="relative flex h-3 w-3 -ml-1">
                       <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
@@ -1751,18 +1494,11 @@ export function CameraView() {
               </div>
             </div>
 
-            <div className="absolute mt-12 pb-20 pl-5 left-0 w-full hidden md:block">
+            <div className="absolute mt-12 pl-5 left-0 hidden md:block">
               <Timeline
                 ref={timelineRef}
                 variant="camera"
                 cameraId={cameraAccount || undefined}
-              />
-              <div
-                className="top-0 left-0 right-0 pointer-events-none"
-                style={{
-                  background:
-                    "linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 100%)",
-                }}
               />
             </div>
 
@@ -1782,10 +1518,15 @@ export function CameraView() {
       {/* Mobile Camera Modal */}
       <CameraModal
         isOpen={isMobileCameraModalOpen}
-        onClose={() => setIsMobileCameraModalOpen(false)}
+        onClose={() => {
+          setIsMobileCameraModalOpen(false);
+          // Refresh check-in status from context (queries Jetson)
+          refreshCheckInStatus();
+        }}
         onCheckStatusChange={(newStatus: boolean) => {
           console.log("Mobile modal status change:", newStatus);
-          setIsCheckedIn(newStatus);
+          // Refresh from context instead of local state
+          refreshCheckInStatus();
           // Refresh timeline if needed
           if (timelineRef.current?.refreshTimeline) {
             timelineRef.current?.refreshTimeline();
@@ -1805,6 +1546,16 @@ export function CameraView() {
           defaultDevCamera: "EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA",
         }}
       />
+
+      {/* Competition Start/Stop Controls - Floating at bottom right */}
+      {currentCameraId && (
+        <CompetitionControls
+          cameraId={currentCameraId}
+          onEscrowChange={setCompetitionEscrowInfo}
+          onHasLoadedAppChange={setHasCompetitionApp}
+        />
+      )}
+
     </>
   );
 }

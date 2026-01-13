@@ -45,13 +45,13 @@ const Toast = ({ message, onDismiss }: { message: ToastMessage; onDismiss: () =>
   const icons = {
     success: <CheckCircle2 className="w-4 h-4 text-green-500" />,
     error: <XCircle className="w-4 h-4 text-red-500" />,
-    info: <AlertCircle className="w-4 h-4 text-blue-500" />
+    info: <AlertCircle className="w-4 h-4 text-primary" />
   };
 
   const bgColors = {
     success: 'bg-green-50',
     error: 'bg-red-50',
-    info: 'bg-blue-50'
+    info: 'bg-primary-light'
   };
 
   return (

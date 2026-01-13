@@ -159,7 +159,7 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
                 : 'bg-orange-50'
             }`}>
               {status.isLoading ? (
-                <Loader2 className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-3" />
+                <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-3" />
               ) : status.hasEmbedding ? (
                 <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-3" />
               ) : (
@@ -191,8 +191,8 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
               <div className="space-y-3 mb-4">
                 <div className="flex items-center justify-between py-2">
                   <div className="flex items-center">
-                    <div className="w-6 h-6 bg-blue-100 rounded p-1 mr-3">
-                      <div className="w-full h-full bg-blue-500 rounded-sm"></div>
+                    <div className="w-6 h-6 bg-primary-light rounded p-1 mr-3">
+                      <div className="w-full h-full bg-primary rounded-sm"></div>
                     </div>
                     <div>
                       <div className="font-medium text-sm">Security Level</div>
@@ -314,17 +314,17 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="bg-primary-light border border-primary-light rounded-lg p-4">
                   <div className="flex items-center space-x-3 mb-3">
-                    <div className="w-6 h-6 bg-blue-500 rounded p-1">
+                    <div className="w-6 h-6 bg-primary rounded p-1">
                       <div className="w-full h-full bg-white rounded-sm"></div>
                     </div>
-                    <h4 className="text-base font-semibold text-blue-800">How to Create Recognition Token</h4>
+                    <h4 className="text-base font-semibold text-primary">How to Create Recognition Token</h4>
                   </div>
-                  <p className="text-sm text-blue-700 mb-2">
+                  <p className="text-sm text-primary mb-2">
                     To create a Recognition Token, you need to check in to a camera and visit the Apps drawer.
                   </p>
-                  <p className="text-sm text-blue-600">
+                  <p className="text-sm text-primary">
                     Recognition Tokens enable CV apps to recognize you across the mmoment camera network.
                   </p>
                 </div>

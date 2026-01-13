@@ -158,133 +158,6 @@ export type CameraNetwork = {
       ]
     },
     {
-      "name": "checkIn",
-      "docs": [
-        "Check in user to a camera"
-      ],
-      "accounts": [
-        {
-          "name": "user",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "payer",
-          "isMut": true,
-          "isSigner": true,
-          "docs": [
-            "The payer for the session account - usually the user, but can be a sponsor",
-            "This allows gas sponsorship where a third party pays for account rent"
-          ]
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "recognitionToken",
-          "isMut": false,
-          "isSigner": false,
-          "isOptional": true,
-          "docs": [
-            "Optional recognition token - required if use_face_recognition is true"
-          ]
-        },
-        {
-          "name": "session",
-          "isMut": true,
-          "isSigner": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "type": "string",
-                "value": "session"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "path": "user"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "account": "CameraAccount",
-                "path": "camera"
-              }
-            ]
-          }
-        },
-        {
-          "name": "systemProgram",
-          "isMut": false,
-          "isSigner": false
-        }
-      ],
-      "args": [
-        {
-          "name": "useFaceRecognition",
-          "type": "bool"
-        }
-      ]
-    },
-    {
-      "name": "checkOut",
-      "docs": [
-        "Check out user from a camera"
-      ],
-      "accounts": [
-        {
-          "name": "closer",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "session",
-          "isMut": true,
-          "isSigner": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "type": "string",
-                "value": "session"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "account": "UserSession",
-                "path": "session.user"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "account": "CameraAccount",
-                "path": "camera"
-              }
-            ]
-          }
-        },
-        {
-          "name": "sessionUser",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "rentDestination",
-          "isMut": true,
-          "isSigner": false
-        }
-      ],
-      "args": []
-    },
-    {
       "name": "upsertRecognitionToken",
       "docs": [
         "Create or regenerate a recognition token (stores encrypted facial embedding)"
@@ -371,9 +244,10 @@ export type CameraNetwork = {
       "args": []
     },
     {
-      "name": "recordActivity",
+      "name": "createUserSessionChain",
       "docs": [
-        "Record a camera activity (photo, video, stream)"
+        "Create a user's session chain for storing encrypted access keys",
+        "This is the user's \"keychain\" for accessing their session history"
       ],
       "accounts": [
         {
@@ -382,21 +256,155 @@ export type CameraNetwork = {
           "isSigner": true
         },
         {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
+          "name": "authority",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "The mmoment authority (cron bot) that can also write to this chain"
+          ]
         },
         {
-          "name": "session",
+          "name": "userSessionChain",
+          "isMut": true,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "user-session-chain"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "storeSessionAccessKeys",
+      "docs": [
+        "Store encrypted session access keys in a user's chain",
+        "Can be called by the user OR the mmoment authority (cron bot fallback)"
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "isMut": true,
+          "isSigner": true,
+          "docs": [
+            "The signer - must be either the user or the authority"
+          ]
+        },
+        {
+          "name": "user",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "The user whose session chain is being updated"
+          ]
+        },
+        {
+          "name": "userSessionChain",
+          "isMut": true,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "user-session-chain"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
           "isMut": false,
           "isSigner": false
         }
       ],
       "args": [
         {
-          "name": "args",
+          "name": "keys",
           "type": {
-            "defined": "RecordActivityArgs"
+            "vec": {
+              "defined": "EncryptedSessionKey"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "writeToCameraTimeline",
+      "docs": [
+        "Write encrypted activities to a camera's timeline",
+        "Called by Jetson (device key) or camera owner - NO user account involved"
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "isMut": true,
+          "isSigner": true,
+          "docs": [
+            "The signer - must be the camera's device key or owner"
+          ]
+        },
+        {
+          "name": "camera",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "cameraTimeline",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Camera timeline - created lazily on first write"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "camera-timeline"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "account": "CameraAccount",
+                "path": "camera"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "activities",
+          "type": {
+            "vec": {
+              "defined": "ActivityData"
+            }
           }
         }
       ]
@@ -404,7 +412,7 @@ export type CameraNetwork = {
   ],
   "accounts": [
     {
-      "name": "cameraRegistry",
+      "name": "CameraRegistry",
       "type": {
         "kind": "struct",
         "fields": [
@@ -428,7 +436,7 @@ export type CameraNetwork = {
       }
     },
     {
-      "name": "cameraAccount",
+      "name": "CameraAccount",
       "type": {
         "kind": "struct",
         "fields": [
@@ -482,45 +490,7 @@ export type CameraNetwork = {
       }
     },
     {
-      "name": "userSession",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "user",
-            "type": "publicKey"
-          },
-          {
-            "name": "camera",
-            "type": "publicKey"
-          },
-          {
-            "name": "checkInTime",
-            "type": "i64"
-          },
-          {
-            "name": "lastActivity",
-            "type": "i64"
-          },
-          {
-            "name": "autoCheckoutAt",
-            "type": "i64"
-          },
-          {
-            "name": "enabledFeatures",
-            "type": {
-              "defined": "SessionFeatures"
-            }
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "recognitionToken",
+      "name": "RecognitionToken",
       "type": {
         "kind": "struct",
         "fields": [
@@ -558,7 +528,7 @@ export type CameraNetwork = {
       }
     },
     {
-      "name": "gestureConfig",
+      "name": "GestureConfig",
       "type": {
         "kind": "struct",
         "fields": [
@@ -591,7 +561,7 @@ export type CameraNetwork = {
       }
     },
     {
-      "name": "cameraMessage",
+      "name": "CameraMessage",
       "type": {
         "kind": "struct",
         "fields": [
@@ -619,7 +589,7 @@ export type CameraNetwork = {
       }
     },
     {
-      "name": "accessGrant",
+      "name": "AccessGrant",
       "type": {
         "kind": "struct",
         "fields": [
@@ -645,27 +615,69 @@ export type CameraNetwork = {
           }
         ]
       }
-    }
-  ],
-  "types": [
+    },
     {
-      "name": "RecordActivityArgs",
+      "name": "CameraTimeline",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "actionType",
+            "name": "camera",
+            "type": "publicKey"
+          },
+          {
+            "name": "encryptedActivities",
             "type": {
-              "defined": "CameraActionType"
+              "vec": {
+                "defined": "EncryptedActivity"
+              }
             }
           },
           {
-            "name": "metadata",
-            "type": "string"
+            "name": "activityCount",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }
     },
+    {
+      "name": "UserSessionChain",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "publicKey"
+          },
+          {
+            "name": "authority",
+            "type": "publicKey"
+          },
+          {
+            "name": "encryptedKeys",
+            "type": {
+              "vec": {
+                "defined": "EncryptedSessionKey"
+              }
+            }
+          },
+          {
+            "name": "sessionCount",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ],
+  "types": [
     {
       "name": "CameraMetadata",
       "type": {
@@ -730,29 +742,61 @@ export type CameraNetwork = {
       }
     },
     {
-      "name": "SessionFeatures",
+      "name": "EncryptedActivity",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "faceRecognition",
-            "type": "bool"
+            "name": "timestamp",
+            "type": "i64"
           },
           {
-            "name": "gestureControl",
-            "type": "bool"
+            "name": "activityType",
+            "type": "u8"
           },
           {
-            "name": "videoRecording",
-            "type": "bool"
+            "name": "encryptedContent",
+            "type": "bytes"
           },
           {
-            "name": "liveStreaming",
-            "type": "bool"
+            "name": "nonce",
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
           },
           {
-            "name": "messaging",
-            "type": "bool"
+            "name": "accessGrants",
+            "type": {
+              "vec": "bytes"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "EncryptedSessionKey",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "keyCiphertext",
+            "type": "bytes"
+          },
+          {
+            "name": "nonce",
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
           }
         ]
       }
@@ -840,40 +884,36 @@ export type CameraNetwork = {
       }
     },
     {
-      "name": "ActivityArgs",
+      "name": "ActivityData",
       "type": {
         "kind": "struct",
         "fields": [
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
           {
             "name": "activityType",
             "type": "u8"
           },
           {
-            "name": "metadata",
-            "type": "string"
-          }
-        ]
-      }
-    },
-    {
-      "name": "CameraActionType",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "PhotoCapture"
+            "name": "encryptedContent",
+            "type": "bytes"
           },
           {
-            "name": "VideoRecord"
+            "name": "nonce",
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
           },
           {
-            "name": "StreamStart"
-          },
-          {
-            "name": "StreamStop"
-          },
-          {
-            "name": "Custom"
+            "name": "accessGrants",
+            "type": {
+              "vec": "bytes"
+            }
           }
         ]
       }
@@ -902,6 +942,9 @@ export type CameraNetwork = {
             "name": "FaceRecognition"
           },
           {
+            "name": "CVAppActivity"
+          },
+          {
             "name": "Other"
           }
         ]
@@ -909,6 +952,31 @@ export type CameraNetwork = {
     }
   ],
   "events": [
+    {
+      "name": "TimelineUpdated",
+      "fields": [
+        {
+          "name": "camera",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "activitiesAdded",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "totalActivities",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
+    },
     {
       "name": "CameraRegistered",
       "fields": [
@@ -930,86 +998,6 @@ export type CameraNetwork = {
         {
           "name": "model",
           "type": "string",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "UserCheckedIn",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "session",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "UserCheckedOut",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "session",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "duration",
-          "type": "i64",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "ActivityRecorded",
-      "fields": [
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "activityType",
-          "type": "u8",
           "index": false
         },
         {
@@ -1067,36 +1055,6 @@ export type CameraNetwork = {
         {
           "name": "token",
           "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "SessionAutoCheckout",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "session",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "reason",
-          "type": "string",
           "index": false
         },
         {
@@ -1361,133 +1319,6 @@ export const IDL: CameraNetwork = {
       ]
     },
     {
-      "name": "checkIn",
-      "docs": [
-        "Check in user to a camera"
-      ],
-      "accounts": [
-        {
-          "name": "user",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "payer",
-          "isMut": true,
-          "isSigner": true,
-          "docs": [
-            "The payer for the session account - usually the user, but can be a sponsor",
-            "This allows gas sponsorship where a third party pays for account rent"
-          ]
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "recognitionToken",
-          "isMut": false,
-          "isSigner": false,
-          "isOptional": true,
-          "docs": [
-            "Optional recognition token - required if use_face_recognition is true"
-          ]
-        },
-        {
-          "name": "session",
-          "isMut": true,
-          "isSigner": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "type": "string",
-                "value": "session"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "path": "user"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "account": "CameraAccount",
-                "path": "camera"
-              }
-            ]
-          }
-        },
-        {
-          "name": "systemProgram",
-          "isMut": false,
-          "isSigner": false
-        }
-      ],
-      "args": [
-        {
-          "name": "useFaceRecognition",
-          "type": "bool"
-        }
-      ]
-    },
-    {
-      "name": "checkOut",
-      "docs": [
-        "Check out user from a camera"
-      ],
-      "accounts": [
-        {
-          "name": "closer",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "session",
-          "isMut": true,
-          "isSigner": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "type": "string",
-                "value": "session"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "account": "UserSession",
-                "path": "session.user"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "account": "CameraAccount",
-                "path": "camera"
-              }
-            ]
-          }
-        },
-        {
-          "name": "sessionUser",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "rentDestination",
-          "isMut": true,
-          "isSigner": false
-        }
-      ],
-      "args": []
-    },
-    {
       "name": "upsertRecognitionToken",
       "docs": [
         "Create or regenerate a recognition token (stores encrypted facial embedding)"
@@ -1574,9 +1405,10 @@ export const IDL: CameraNetwork = {
       "args": []
     },
     {
-      "name": "recordActivity",
+      "name": "createUserSessionChain",
       "docs": [
-        "Record a camera activity (photo, video, stream)"
+        "Create a user's session chain for storing encrypted access keys",
+        "This is the user's \"keychain\" for accessing their session history"
       ],
       "accounts": [
         {
@@ -1585,21 +1417,155 @@ export const IDL: CameraNetwork = {
           "isSigner": true
         },
         {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
+          "name": "authority",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "The mmoment authority (cron bot) that can also write to this chain"
+          ]
         },
         {
-          "name": "session",
+          "name": "userSessionChain",
+          "isMut": true,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "user-session-chain"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "storeSessionAccessKeys",
+      "docs": [
+        "Store encrypted session access keys in a user's chain",
+        "Can be called by the user OR the mmoment authority (cron bot fallback)"
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "isMut": true,
+          "isSigner": true,
+          "docs": [
+            "The signer - must be either the user or the authority"
+          ]
+        },
+        {
+          "name": "user",
+          "isMut": false,
+          "isSigner": false,
+          "docs": [
+            "The user whose session chain is being updated"
+          ]
+        },
+        {
+          "name": "userSessionChain",
+          "isMut": true,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "user-session-chain"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
           "isMut": false,
           "isSigner": false
         }
       ],
       "args": [
         {
-          "name": "args",
+          "name": "keys",
           "type": {
-            "defined": "RecordActivityArgs"
+            "vec": {
+              "defined": "EncryptedSessionKey"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "writeToCameraTimeline",
+      "docs": [
+        "Write encrypted activities to a camera's timeline",
+        "Called by Jetson (device key) or camera owner - NO user account involved"
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "isMut": true,
+          "isSigner": true,
+          "docs": [
+            "The signer - must be the camera's device key or owner"
+          ]
+        },
+        {
+          "name": "camera",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "cameraTimeline",
+          "isMut": true,
+          "isSigner": false,
+          "docs": [
+            "Camera timeline - created lazily on first write"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "camera-timeline"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "account": "CameraAccount",
+                "path": "camera"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "activities",
+          "type": {
+            "vec": {
+              "defined": "ActivityData"
+            }
           }
         }
       ]
@@ -1607,7 +1573,7 @@ export const IDL: CameraNetwork = {
   ],
   "accounts": [
     {
-      "name": "cameraRegistry",
+      "name": "CameraRegistry",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1631,7 +1597,7 @@ export const IDL: CameraNetwork = {
       }
     },
     {
-      "name": "cameraAccount",
+      "name": "CameraAccount",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1685,45 +1651,7 @@ export const IDL: CameraNetwork = {
       }
     },
     {
-      "name": "userSession",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "user",
-            "type": "publicKey"
-          },
-          {
-            "name": "camera",
-            "type": "publicKey"
-          },
-          {
-            "name": "checkInTime",
-            "type": "i64"
-          },
-          {
-            "name": "lastActivity",
-            "type": "i64"
-          },
-          {
-            "name": "autoCheckoutAt",
-            "type": "i64"
-          },
-          {
-            "name": "enabledFeatures",
-            "type": {
-              "defined": "SessionFeatures"
-            }
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "recognitionToken",
+      "name": "RecognitionToken",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1761,7 +1689,7 @@ export const IDL: CameraNetwork = {
       }
     },
     {
-      "name": "gestureConfig",
+      "name": "GestureConfig",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1794,7 +1722,7 @@ export const IDL: CameraNetwork = {
       }
     },
     {
-      "name": "cameraMessage",
+      "name": "CameraMessage",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1822,7 +1750,7 @@ export const IDL: CameraNetwork = {
       }
     },
     {
-      "name": "accessGrant",
+      "name": "AccessGrant",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1848,27 +1776,69 @@ export const IDL: CameraNetwork = {
           }
         ]
       }
-    }
-  ],
-  "types": [
+    },
     {
-      "name": "RecordActivityArgs",
+      "name": "CameraTimeline",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "actionType",
+            "name": "camera",
+            "type": "publicKey"
+          },
+          {
+            "name": "encryptedActivities",
             "type": {
-              "defined": "CameraActionType"
+              "vec": {
+                "defined": "EncryptedActivity"
+              }
             }
           },
           {
-            "name": "metadata",
-            "type": "string"
+            "name": "activityCount",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }
     },
+    {
+      "name": "UserSessionChain",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "publicKey"
+          },
+          {
+            "name": "authority",
+            "type": "publicKey"
+          },
+          {
+            "name": "encryptedKeys",
+            "type": {
+              "vec": {
+                "defined": "EncryptedSessionKey"
+              }
+            }
+          },
+          {
+            "name": "sessionCount",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ],
+  "types": [
     {
       "name": "CameraMetadata",
       "type": {
@@ -1933,29 +1903,61 @@ export const IDL: CameraNetwork = {
       }
     },
     {
-      "name": "SessionFeatures",
+      "name": "EncryptedActivity",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "faceRecognition",
-            "type": "bool"
+            "name": "timestamp",
+            "type": "i64"
           },
           {
-            "name": "gestureControl",
-            "type": "bool"
+            "name": "activityType",
+            "type": "u8"
           },
           {
-            "name": "videoRecording",
-            "type": "bool"
+            "name": "encryptedContent",
+            "type": "bytes"
           },
           {
-            "name": "liveStreaming",
-            "type": "bool"
+            "name": "nonce",
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
           },
           {
-            "name": "messaging",
-            "type": "bool"
+            "name": "accessGrants",
+            "type": {
+              "vec": "bytes"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "EncryptedSessionKey",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "keyCiphertext",
+            "type": "bytes"
+          },
+          {
+            "name": "nonce",
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
           }
         ]
       }
@@ -2043,40 +2045,36 @@ export const IDL: CameraNetwork = {
       }
     },
     {
-      "name": "ActivityArgs",
+      "name": "ActivityData",
       "type": {
         "kind": "struct",
         "fields": [
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
           {
             "name": "activityType",
             "type": "u8"
           },
           {
-            "name": "metadata",
-            "type": "string"
-          }
-        ]
-      }
-    },
-    {
-      "name": "CameraActionType",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "PhotoCapture"
+            "name": "encryptedContent",
+            "type": "bytes"
           },
           {
-            "name": "VideoRecord"
+            "name": "nonce",
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
           },
           {
-            "name": "StreamStart"
-          },
-          {
-            "name": "StreamStop"
-          },
-          {
-            "name": "Custom"
+            "name": "accessGrants",
+            "type": {
+              "vec": "bytes"
+            }
           }
         ]
       }
@@ -2105,6 +2103,9 @@ export const IDL: CameraNetwork = {
             "name": "FaceRecognition"
           },
           {
+            "name": "CVAppActivity"
+          },
+          {
             "name": "Other"
           }
         ]
@@ -2112,6 +2113,31 @@ export const IDL: CameraNetwork = {
     }
   ],
   "events": [
+    {
+      "name": "TimelineUpdated",
+      "fields": [
+        {
+          "name": "camera",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "activitiesAdded",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "totalActivities",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
+    },
     {
       "name": "CameraRegistered",
       "fields": [
@@ -2133,86 +2159,6 @@ export const IDL: CameraNetwork = {
         {
           "name": "model",
           "type": "string",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "UserCheckedIn",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "session",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "UserCheckedOut",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "session",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "duration",
-          "type": "i64",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "ActivityRecorded",
-      "fields": [
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "activityType",
-          "type": "u8",
           "index": false
         },
         {
@@ -2270,36 +2216,6 @@ export const IDL: CameraNetwork = {
         {
           "name": "token",
           "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "SessionAutoCheckout",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "session",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "reason",
-          "type": "string",
           "index": false
         },
         {

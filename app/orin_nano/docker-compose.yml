@@ -16,24 +16,48 @@ services:
       - "biometric-security:172.20.0.3"
       - "solana-middleware:172.20.0.2"
     volumes:
-      - ./data/images:/app/photos
-      - /mnt/nvme/mmoment-videos:/app/videos  # Using NVMe SSD for video storage  
+      - /mnt/nvme/mmoment-photos:/app/photos  # NVMe SSD for photo storage
+      - /mnt/nvme/mmoment-videos:/app/videos  # NVMe SSD for video storage
       - ./data/face_embeddings:/app/face_embeddings
       - ./data/faces:/app/faces
       - ./data/recordings:/app/recordings
       - ./data/config:/app/config
-      - ./data/device:/opt/mmoment  # Persistent device keypair storage
-      # Development: Mount code for live changes (comment out for production)
+      - ./data/device:/opt/mmoment/device  # Persistent device keypair storage
+      # Development mount - Python code changes work without rebuild
       - ./services/camera-service:/app
+      - ./apps:/opt/mmoment/apps  # CV apps directory
+      - ./cv_dev:/app/cv_dev  # CV dev environment
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - /dev:/dev
+      - /tmp/argus_socket:/tmp/argus_socket  # nvargus-daemon socket for CSI camera
+      - ~/.Xauthority:/root/.Xauthority:ro
+      # Host TensorRT libraries (nvidia runtime doesn't include these)
+      - /lib/aarch64-linux-gnu/libnvinfer.so.10.7.0:/lib/aarch64-linux-gnu/libnvinfer.so.10.7.0:ro
+      - /lib/aarch64-linux-gnu/libnvinfer_plugin.so.10.7.0:/lib/aarch64-linux-gnu/libnvinfer_plugin.so.10.7.0:ro
+      - /lib/aarch64-linux-gnu/libnvonnxparser.so.10.7.0:/lib/aarch64-linux-gnu/libnvonnxparser.so.10.7.0:ro
+      # Tegra EGL libraries for headless GPU buffer operations (NvBufSurface)
+      - /usr/lib/aarch64-linux-gnu/tegra-egl:/usr/lib/aarch64-linux-gnu/tegra-egl:ro
+      - /usr/share/glvnd/egl_vendor.d:/usr/share/glvnd/egl_vendor.d:ro
+      # Mount host's native directory with binary and TensorRT engines
+      - ./native/build:/app/native/build:ro
+      - ./native/yolov8n-pose-native.engine:/app/native/yolov8n-pose-native.engine:ro
+      - ./native/retinaface.engine:/app/native/retinaface.engine:ro
+      - ./native/arcface_r50.engine:/app/native/arcface_r50.engine:ro
+      - ./native/osnet_x0_25.engine:/app/native/osnet_x0_25.engine:ro
+    # Camera devices - native server now runs inside container
+    # DRI devices required for headless EGL on Jetson
     devices:
       - /dev/video0:/dev/video0
       - /dev/video1:/dev/video1
+      - /dev/dri:/dev/dri
     environment:
       - DISPLAY=${DISPLAY}
+      - XAUTHORITY=/root/.Xauthority
       - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,display
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,display,video
+      # Force nvidia EGL vendor for headless operation
+      - __EGL_VENDOR_LIBRARY_FILENAMES=/usr/lib/aarch64-linux-gnu/tegra-egl/nvidia.json
+      # Library paths for native binary (tegra-egl first for NvBufSurface EGL)
+      - LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu/tegra-egl:/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu/nvidia:/app/native:/app/native/build
       - BIOMETRIC_SECURITY_URL=http://biometric-security:5003
       - SOLANA_MIDDLEWARE_URL=http://solana-middleware:5001
       # Backend connection for WebRTC signaling and device registration
@@ -52,20 +76,30 @@ services:
       - CAMERA_PROGRAM_ID=E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL
       # CAMERA_PDA will be set dynamically after device registration
       - SOLANA_RPC_URL=https://api.devnet.solana.com
+      # Competition Escrow Program ID
+      - COMPETITION_PROGRAM_ID=32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ
+      # Camera owner wallet - receives failed prize funds in ThresholdSplit mode
+      - CAMERA_OWNER_WALLET=${CAMERA_OWNER_WALLET}
       # Cloudflare Configuration for DNS automation
       - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
       - CLOUDFLARE_ZONE_ID=${CLOUDFLARE_ZONE_ID}
       - CLOUDFLARE_TUNNEL_ID=${CLOUDFLARE_TUNNEL_ID}
-      # Livepeer Configuration (Current Active Account)
-      - LIVEPEER_API_KEY=${LIVEPEER_API_KEY}
-      - LIVEPEER_STREAM_KEY=${LIVEPEER_STREAM_KEY}
-      - LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
-      - LIVEPEER_PLAYBACK_ID=${LIVEPEER_PLAYBACK_ID}
-      # Previous Account (Commented Out)
-      # - LIVEPEER_API_KEY=${LIVEPEER_API_KEY_OLD}
-      # - LIVEPEER_STREAM_KEY=${LIVEPEER_STREAM_KEY_OLD}
+      # Walrus Storage Configuration (decentralized blob storage)
+      - STORAGE_PROVIDER=walrus
+      - WALRUS_PUBLISHER_URL=https://walrus-mainnet-publisher-1.staketab.org
+      - WALRUS_AGGREGATOR_URL=https://aggregator.walrus-mainnet.walrus.space
+      # Testing: Skip video uploads to Walrus (set to "true" to disable)
+      - SKIP_VIDEO_UPLOAD=true
+      # CV Dev Mode: Use video file instead of camera (no camera required)
+      - CV_DEV_MODE=false
+      # Native Mode: C++ TensorRT inference server runs inside this container
+      - NATIVE_MODE=true
+      # CV_DEV_VIDEO is optional - use /api/dev/load to select videos dynamically
+      # Livepeer Configuration REMOVED - using WebRTC/WHIP for all streaming
+      # - LIVEPEER_API_KEY=${LIVEPEER_API_KEY}
+      # - LIVEPEER_STREAM_KEY=${LIVEPEER_STREAM_KEY}
       # - LIVEPEER_INGEST_URL=rtmp://rtmp.livepeer.com/live
-      # - LIVEPEER_PLAYBACK_ID=${LIVEPEER_PLAYBACK_ID_OLD}
+      # - LIVEPEER_PLAYBACK_ID=${LIVEPEER_PLAYBACK_ID}
     runtime: nvidia
     privileged: true
     cap_add:
@@ -112,6 +146,8 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./data/config:/app/config  # Share device config with camera service
+      - ./data/device:/opt/mmoment/device  # Device keypair for Phase 3 timeline signing
+      - /etc/machine-id:/etc/machine-id:ro  # Hardware ID for keypair decryption
     networks:
       mmoment-network:
         ipv4_address: 172.20.0.2

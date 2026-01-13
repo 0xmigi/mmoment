@@ -1,3 +1,5 @@
+import { CONFIG } from '../../core/config';
+
 export interface PipeFile {
   id: string;
   name: string;
@@ -30,54 +32,120 @@ export interface PipeGalleryItem {
 
 class PipeGalleryService {
   private backendUrl: string;
+  private galleryUpdateListeners: Set<() => void> = new Set();
+  private socket: any = null;
 
   constructor() {
-    // Use the same backend URL that's running on the local network
-    this.backendUrl =
-      import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
+    // Use CONFIG.BACKEND_URL which properly falls back to Railway URL in production
+    this.backendUrl = CONFIG.BACKEND_URL;
+
+    // Initialize WebSocket connection for real-time gallery updates
+    this.initializeWebSocket();
   }
 
   /**
-   * Fetch user's files from Pipe storage
+   * Initialize WebSocket connection to listen for upload completion events
+   */
+  private initializeWebSocket() {
+    // Dynamically import socket.io-client to avoid SSR issues
+    import('socket.io-client').then(({ io }) => {
+      this.socket = io(this.backendUrl, {
+        transports: ['websocket', 'polling'],
+        autoConnect: true,
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+      });
+
+      this.socket.on('connect', () => {
+        console.log('📡 Connected to backend WebSocket for gallery updates');
+      });
+
+      this.socket.on('pipe:upload:complete', (data: any) => {
+        console.log('📸 New media uploaded to Pipe:', data);
+        // Notify all listeners to refresh their galleries
+        this.notifyGalleryUpdate();
+      });
+
+      this.socket.on('disconnect', () => {
+        console.log('📡 Disconnected from backend WebSocket');
+      });
+    }).catch(error => {
+      console.warn('Failed to initialize WebSocket for gallery updates:', error);
+    });
+  }
+
+  /**
+   * Subscribe to gallery update events
+   */
+  onGalleryUpdate(callback: () => void): () => void {
+    this.galleryUpdateListeners.add(callback);
+    // Return unsubscribe function
+    return () => {
+      this.galleryUpdateListeners.delete(callback);
+    };
+  }
+
+  /**
+   * Notify all listeners that the gallery should be refreshed
+   */
+  private notifyGalleryUpdate() {
+    this.galleryUpdateListeners.forEach(listener => {
+      try {
+        listener();
+      } catch (error) {
+        console.error('Error in gallery update listener:', error);
+      }
+    });
+  }
+
+  /**
+   * Fetch user's files from Pipe storage (blockchain-based ownership)
    */
   async getUserFiles(walletAddress: string): Promise<PipeGalleryItem[]> {
     try {
+      console.log(`📸 Fetching Pipe gallery for wallet: ${walletAddress.slice(0, 8)}...`);
+
       const response = await fetch(
-        `${this.backendUrl}/api/pipe/files/${walletAddress}`
+        `${this.backendUrl}/api/pipe/gallery/${walletAddress}`
       );
 
       if (!response.ok) {
-        console.error("Failed to fetch Pipe files:", response.statusText);
+        console.error("Failed to fetch Pipe gallery:", response.statusText);
         return [];
       }
 
       const data = await response.json();
 
-      // Transform Pipe files into gallery items
-      return data.files.map((file: PipeFile) => {
-        // Determine file type from contentType or name
-        const isVideo =
-          file.contentType?.startsWith("video/") ||
-          file.name.match(/\.(mp4|webm|ogg|mov)$/i);
+      if (!data.success || !data.media) {
+        console.warn("No media found in Pipe gallery");
+        return [];
+      }
+
+      console.log(`✅ Found ${data.count} media items from Pipe`);
+
+      // Transform backend media items into gallery items
+      return data.media.map((item: any) => {
+        const isVideo = item.type === 'video';
 
         return {
-          id: file.id, // Use Pipe file ID as id for compatibility
-          cid: file.id, // Use Pipe file ID as CID equivalent
-          name: file.name,
-          url: file.url,
+          id: item.fileName, // Use fileName for delete/share operations (backend expects filename)
+          cid: item.fileId, // Keep hash as cid for content addressing
+          name: item.fileName,
+          url: `${this.backendUrl}${item.url}`, // Full URL to backend download endpoint
           type: isVideo ? "video" : ("image" as "image" | "video"),
-          mimeType: file.contentType || "application/octet-stream",
-          timestamp: new Date(file.uploadedAt).getTime(),
+          mimeType: isVideo ? "video/mp4" : "image/jpeg",
+          timestamp: new Date(item.uploadedAt).getTime(),
           backupUrls: [],
-          walletAddress: undefined,
+          walletAddress,
           provider: "pipe",
-          transactionId: undefined,
-          cameraId: file.metadata?.camera,
-          metadata: file.metadata,
+          transactionId: item.txSignature,
+          cameraId: item.cameraId,
+          metadata: {},
         };
       });
     } catch (error) {
-      console.error("Error fetching Pipe files:", error);
+      console.error("Error fetching Pipe gallery:", error);
       return [];
     }
   }
@@ -177,18 +245,21 @@ class PipeGalleryService {
   }
 
   /**
-   * Check if Pipe storage is enabled
+   * Check if Pipe storage is enabled (defaults to false - Walrus is now default)
    */
   isPipeStorageEnabled(): boolean {
     return localStorage.getItem("mmoment_storage_type") === "pipe";
   }
 
   /**
-   * Get the storage type preference
+   * Get the storage type preference (defaults to 'walrus')
    */
-  getStorageType(): "pipe" | "pinata" {
+  getStorageType(): "pipe" | "pinata" | "walrus" {
     const stored = localStorage.getItem("mmoment_storage_type");
-    return stored === "pipe" ? "pipe" : "pinata";
+    if (stored === "pipe") return "pipe";
+    if (stored === "pinata") return "pinata";
+    // Default to 'walrus' for new decentralized storage
+    return "walrus";
   }
 }
 

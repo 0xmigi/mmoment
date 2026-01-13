@@ -3,8 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { TimelineEvent } from '../timeline';
 import { CONFIG, timelineConfig } from '../core/config';
 
-// Key for local storage to persist events
-const TIMELINE_EVENTS_STORAGE_KEY = 'timeline_events';
+// Key for local storage (camera ID only - for reconnection to the same room)
 const TIMELINE_CAMERA_ID_KEY = 'timeline_camera_id';
 
 // Helper to detect Chrome on mobile
@@ -32,13 +31,21 @@ class TimelineService {
   private forceFallback: boolean = false; // Flag to use local storage only when socket consistently fails
 
   constructor() {
-    // Try to restore events from local storage
-    this.restoreFromLocalStorage();
+    // Restore camera ID from localStorage so we can rejoin the same room on refresh
+    const storedCameraId = localStorage.getItem(TIMELINE_CAMERA_ID_KEY);
+    if (storedCameraId) {
+      this.currentCameraId = storedCameraId;
+      console.log(`[Timeline] Will rejoin camera room: ${storedCameraId}`);
+    }
+
+    // Events will be fetched from Backend (source of truth) when we join the camera room
+    // No need to restore from localStorage - Backend has the authoritative data
+    console.log('[Timeline] Events will be fetched from Backend on connection');
 
     // Initialize the socket connection
     this.initializeSocket();
-    
-    // Setup heartbeat for Chrome mobile
+
+    // Setup heartbeat for Chrome mobile (for connection health only)
     if (this.isChromeOnMobile) {
       this.setupHeartbeat();
     }
@@ -49,19 +56,18 @@ class TimelineService {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
     }
-    
-    // Set up heartbeat to periodically check connection and refresh in Chrome mobile
+
+    // Set up heartbeat to check connection health in Chrome mobile
+    // Don't request recent events - they include old sessions from backend memory
     this.heartbeatInterval = setInterval(() => {
       if (document.visibilityState === 'visible' && this.currentCameraId) {
-        if (this.isConnected) {
-          // Request recent events to force synchronization in Chrome mobile
-          this.requestRecentEvents();
-        } else if (this.forceFallback) {
-          // If in fallback mode, just check if we can reconnect
+        if (!this.isConnected || this.forceFallback) {
+          // If disconnected or in fallback mode, try to reconnect
           this.tryReconnect();
         }
+        // Don't request recent events - live timeline should only show current session
       }
-    }, 10000); // Every 10 seconds
+    }, 30000); // Every 30 seconds
   }
 
   private tryReconnect() {
@@ -105,17 +111,11 @@ class TimelineService {
         this.connectionErrorCount = 0;
         this.forceFallback = false;
         console.log('[Timeline] Connected to timeline service');
-        
+
         if (this.currentCameraId) {
           this.joinCamera(this.currentCameraId);
-          
-          // Check if we have any pending local events to sync
-          const pendingEvents = this.events.filter(e => e.id.startsWith('local-'));
-          if (pendingEvents.length > 0) {
-            console.log(`[Timeline] Syncing ${pendingEvents.length} pending local events`);
-            // We'll just request recent events which should include server-generated IDs
-            this.requestRecentEvents();
-          }
+          // Don't request recent events - they include old sessions
+          // Live timeline should only show events from current session going forward
         }
       });
 
@@ -161,50 +161,60 @@ class TimelineService {
           }
           // Keep only the last 100 events
           this.events = this.events.slice(0, 100);
-          
-          // Save to localStorage
-          this.saveToLocalStorage();
-          
+
           this.notifyListeners(event);
         }
       });
 
+      // Process recent events from backend (source of truth)
+      // Filter to only show events from the current session (after most recent check_in)
       this.socket.on('recentEvents', (events: TimelineEvent[]) => {
-        console.log('Received recent events:', events);
-        if (!events || events.length === 0) return;
-        
-        // Filter for current camera and sort by timestamp (newest first)
-        const relevantEvents = this.currentCameraId
-          ? events.filter(event => event.cameraId === this.currentCameraId)
-          : events;
-        
-        if (relevantEvents.length === 0) return;
+        if (!events || events.length === 0) {
+          console.log('[Timeline] No recent events from backend');
+          return;
+        }
 
-        // For Chrome mobile, we want to be more careful with event merging
-        // to ensure we don't miss any events
-        const mergedEvents = this.mergeEvents(this.events, relevantEvents);
-        
-        // Check if we have new events
-        const hasNewEvents = mergedEvents.length !== this.events.length ||
-          mergedEvents.some(e1 => !this.events.some(e2 => e2.id === e1.id));
-          
-        // Update events if we have new ones
-        if (hasNewEvents) {
-          this.events = mergedEvents;
-          
-          // Save to localStorage
-          this.saveToLocalStorage();
-          
-          // Notify listeners of all new events
-          if (this.isChromeOnMobile) {
-            // For Chrome mobile, notify about all events to ensure consistency
-            this.events.forEach(event => this.notifyListeners(event));
-          } else {
-            // For other browsers, only notify about events that the client doesn't already have
-            relevantEvents
-              .filter(event => !this.events.some(e => e.id === event.id && e !== event))
-              .forEach(event => this.notifyListeners(event));
+        console.log(`[Timeline] Received ${events.length} events from backend (source of truth)`);
+
+        // Find the most recent check_in event for this camera to determine session start
+        const sortedEvents = [...events].sort((a, b) => b.timestamp - a.timestamp);
+        const lastCheckIn = sortedEvents.find(e => e.type === 'check_in');
+        const sessionStart = lastCheckIn?.timestamp || 0;
+
+        // Only include events from AFTER the most recent check_in
+        const sessionEvents = sortedEvents.filter(e => e.timestamp >= sessionStart);
+        console.log(`[Timeline] Filtered to ${sessionEvents.length} events from current session (started ${lastCheckIn ? new Date(sessionStart).toLocaleTimeString() : 'unknown'})`);
+
+        // Merge with existing events, avoiding duplicates
+        sessionEvents.forEach(event => {
+          const existingIndex = this.events.findIndex(e => e.id === event.id);
+          if (existingIndex === -1) {
+            // Insert in chronological order (newest first)
+            const index = this.events.findIndex(e => e.timestamp < event.timestamp);
+            if (index === -1) {
+              this.events.push(event);
+            } else {
+              this.events.splice(index, 0, event);
+            }
           }
+        });
+
+        // Keep only the last 100 events
+        this.events = this.events.slice(0, 100);
+
+        // Notify listeners of updated events
+        this.events.forEach(event => this.notifyListeners(event));
+      });
+
+      // Handle timeline event updates (e.g., transaction ID added after cron job writes to chain)
+      this.socket.on('timelineEventUpdate', (update: { id: string; transactionId?: string }) => {
+        console.log('[Timeline] Received event update:', update);
+        const existingEvent = this.events.find(e => e.id === update.id);
+        if (existingEvent && update.transactionId) {
+          existingEvent.transactionId = update.transactionId;
+          console.log(`[Timeline] Updated event ${update.id} with transaction ID: ${update.transactionId.slice(0, 8)}...`);
+          // Notify listeners of the updated event
+          this.notifyListeners(existingEvent);
         }
       });
 
@@ -242,111 +252,28 @@ class TimelineService {
     }
   }
 
-  // Method to merge events, avoiding duplicates by ID
-  private mergeEvents(existingEvents: TimelineEvent[], newEvents: TimelineEvent[]): TimelineEvent[] {
-    const eventMap = new Map<string, TimelineEvent>();
-    
-    // Add existing events to the map
-    existingEvents.forEach(event => {
-      eventMap.set(event.id, event);
-    });
-    
-    // Add or update with new events
-    newEvents.forEach(event => {
-      eventMap.set(event.id, event);
-    });
-    
-    // Convert map back to array and sort by timestamp (newest first)
-    return Array.from(eventMap.values())
-      .sort((a, b) => b.timestamp - a.timestamp);
-  }
 
-  // Method to save events to localStorage
-  private saveToLocalStorage() {
-    try {
-      if (this.currentCameraId) {
-        localStorage.setItem(TIMELINE_CAMERA_ID_KEY, this.currentCameraId);
-        localStorage.setItem(`${TIMELINE_EVENTS_STORAGE_KEY}_${this.currentCameraId}`, 
-          JSON.stringify(this.events));
-        console.log(`Saved ${this.events.length} events to localStorage for camera ${this.currentCameraId}`);
-      }
-    } catch (error) {
-      console.error('Error saving timeline events to localStorage:', error);
-    }
-  }
-
-  // Method to restore events from localStorage
-  private restoreFromLocalStorage() {
-    try {
-      // Try to restore camera ID first
-      const savedCameraId = localStorage.getItem(TIMELINE_CAMERA_ID_KEY);
-      if (savedCameraId) {
-        this.currentCameraId = savedCameraId;
-        console.log(`Restored camera ID from localStorage: ${savedCameraId}`);
-        
-        // Now try to restore events for this camera
-        const savedEventsString = localStorage.getItem(`${TIMELINE_EVENTS_STORAGE_KEY}_${savedCameraId}`);
-        if (savedEventsString) {
-          const savedEvents = JSON.parse(savedEventsString) as TimelineEvent[];
-          this.events = savedEvents;
-          console.log(`Restored ${savedEvents.length} events from localStorage for camera ${savedCameraId}`);
-        }
-      }
-    } catch (error) {
-      console.error('Error restoring timeline events from localStorage:', error);
-    }
-  }
 
   joinCamera(cameraId: string) {
-    if (this.currentCameraId === cameraId) return;
+    console.log('[Timeline] Joining camera room:', cameraId);
 
-    console.log('Joining camera room:', cameraId);
-    
-    // Leave current camera room if any
-    if (this.currentCameraId && this.isConnected) {
+    // Leave current camera room if different
+    if (this.currentCameraId && this.currentCameraId !== cameraId && this.isConnected) {
       this.socket.emit('leaveCamera', this.currentCameraId);
-    }
-
-    // Join new camera room
-    this.currentCameraId = cameraId;
-    localStorage.setItem(TIMELINE_CAMERA_ID_KEY, cameraId);
-    
-    // Try to restore events for this camera from localStorage
-    try {
-      const savedEventsString = localStorage.getItem(`${TIMELINE_EVENTS_STORAGE_KEY}_${cameraId}`);
-      if (savedEventsString) {
-        const savedEvents = JSON.parse(savedEventsString) as TimelineEvent[];
-        console.log(`Restored ${savedEvents.length} events from localStorage for camera ${cameraId}`);
-        
-        // If we have saved events, use them and notify listeners
-        if (savedEvents.length > 0) {
-          this.events = savedEvents;
-          setTimeout(() => {
-            this.events.forEach(event => this.notifyListeners(event));
-          }, 0);
-        }
-      } else {
-        // Clear events if we don't have saved events for this camera
-        this.events = [];
-      }
-    } catch (error) {
-      console.error('Error restoring events for camera:', error);
+      // Clear events when switching cameras
       this.events = [];
     }
-    
-    // If we're connected, join the room
+
+    // Update camera ID and persist for reconnection
+    this.currentCameraId = cameraId;
+    localStorage.setItem(TIMELINE_CAMERA_ID_KEY, cameraId);
+
+    // Join the room - Backend will send recentEvents which we filter by session
     if (this.isConnected) {
       this.socket.emit('joinCamera', cameraId);
-      // Request recent events for this camera
-      this.requestRecentEvents();
-    }
-  }
-
-  private requestRecentEvents() {
-    // Only request if we're connected
-    if (this.isSocketConnected() && this.currentCameraId) {
-      console.log('Requesting recent events for camera:', this.currentCameraId);
-      this.socket.emit('getRecentEvents', { cameraId: this.currentCameraId });
+      console.log('[Timeline] Joined room, waiting for recentEvents from Backend');
+    } else {
+      console.log('[Timeline] Not connected yet, will join room when connected');
     }
   }
 
@@ -369,20 +296,12 @@ class TimelineService {
 
   subscribe(callback: (event: TimelineEvent) => void) {
     this.listeners.add(callback);
-    
-    // Immediately send existing events to the new listener
-    if (this.events.length > 0) {
-      setTimeout(() => {
-        this.events.forEach(event => {
-          try {
-            callback(event);
-          } catch (error) {
-            console.error('Error sending existing events to new listener:', error);
-          }
-        });
-      }, 0);
-    }
-    
+
+    // Note: We do NOT send existing events to new listeners anymore.
+    // This was causing phantom timeline events (100+ duplicate notifications).
+    // Components should use getEvents() to fetch initial data, then
+    // subscribe() for LIVE updates only. Events arrive via Socket.IO.
+
     // Return unsubscribe function
     return () => {
       this.listeners.delete(callback);
@@ -414,25 +333,27 @@ class TimelineService {
     // If connected, emit to server
     if (this.isSocketConnected()) {
       console.log('Emitting timeline event:', eventWithCamera);
+      console.log('[Timeline] Socket state:', {
+        connected: this.socket.connected,
+        id: this.socket.id,
+        transport: this.socket.io.engine?.transport?.name
+      });
       this.socket.emit('newTimelineEvent', eventWithCamera);
+      console.log('[Timeline] Event emitted to socket');
       
       // Don't automatically request recent events after emitting
       // The server will broadcast the event back to us, which is sufficient
       // Automatic refresh was causing potential duplicates
     } else {
-      console.warn('Cannot emit event: socket not connected, storing locally');
-      
-      // Store the event locally so it's not lost
+      console.warn('Cannot emit event: socket not connected, showing locally for immediate feedback');
+
+      // Show event locally for immediate UI feedback (not persisted - Backend is source of truth)
       const tempEvent = {
         ...eventWithCamera,
         id: `local-${Date.now()}-${Math.random().toString(36).slice(2)}`
       };
-      
-      // Add to local events
+
       this.events.unshift(tempEvent);
-      this.saveToLocalStorage();
-      
-      // Notify listeners about the local event
       this.notifyListeners(tempEvent);
     }
   }
@@ -442,11 +363,8 @@ class TimelineService {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
-    
+
     if (this.currentCameraId) {
-      // Save events before disconnecting
-      this.saveToLocalStorage();
-      
       if (this.isSocketConnected()) {
         this.socket.emit('leaveCamera', this.currentCameraId);
       }
@@ -470,11 +388,25 @@ class TimelineService {
     return this.isSocketConnected();
   }
   
-  // Public method that can be called to force refresh for Chrome mobile
+  // Public method - disabled to prevent loading old session events
+  // Live timeline should only show real-time events from current session
   refreshEvents() {
-    if (this.isSocketConnected() && this.currentCameraId) {
-      this.requestRecentEvents();
-    }
+    // Don't request recent events - they include old sessions from backend memory
+    // Current session events come through real-time WebSocket subscription
+    console.log('[Timeline] refreshEvents disabled - live timeline only shows current session');
+  }
+
+  // Clear local events when starting a new session
+  // Backend is source of truth - events will be fetched fresh
+  clearForNewSession() {
+    console.log('[Timeline] Clearing local events for new session');
+    this.events = [];
+  }
+
+  // Clear local events when ending session
+  endSession() {
+    console.log('[Timeline] Ending session, clearing local events');
+    this.events = [];
   }
 
   // For debugging: create a test event
