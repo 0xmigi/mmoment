@@ -1527,9 +1527,17 @@ app.post("/api/competition/settle", async (req, res) => {
       });
     }
 
-    // Set fee payer and update blockhash
-    tx.feePayer = payer.publicKey;
-    tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+    // Verify fee payer matches our payer (camera should have set this)
+    if (!tx.feePayer?.equals(payer.publicKey)) {
+      console.log(`Fee payer mismatch: tx has ${tx.feePayer?.toString()}, expected ${payer.publicKey.toString()}`);
+      // Set fee payer if not set (shouldn't happen, but handle gracefully)
+      tx.feePayer = payer.publicKey;
+    }
+
+    // IMPORTANT: Do NOT change the blockhash - the camera already signed with it!
+    // Changing blockhash would invalidate the camera's signature.
+    // The blockhash should still be valid since this is happening in a single request cycle.
+    console.log(`Using blockhash from camera: ${tx.recentBlockhash}`);
 
     // Sign with fee payer
     tx.partialSign(payer);

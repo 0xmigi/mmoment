@@ -46,7 +46,9 @@ from dataclasses import dataclass
 import httpx
 from solana.rpc.async_api import AsyncClient
 from solana.rpc.commitment import Confirmed
-from solana.transaction import Transaction
+from solders.message import Message
+from solders.transaction import Transaction
+from solders.hash import Hash
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.instruction import Instruction, AccountMeta
@@ -320,18 +322,22 @@ async def settle_competition(
             recent_blockhash = blockhash_response.value.blockhash
             logger.info(f"[SettlementService] Got blockhash: {recent_blockhash}")
 
-            # Build transaction with backend as fee payer
-            from solders.hash import Hash
+            # Build message for transaction
             blockhash_obj = Hash.from_string(str(recent_blockhash))
-            tx = Transaction(fee_payer=BACKEND_PAYER_PUBKEY, recent_blockhash=blockhash_obj)
-            tx.add(instruction)
+            message = Message.new_with_blockhash(
+                [instruction],
+                BACKEND_PAYER_PUBKEY,  # fee payer
+                blockhash_obj
+            )
 
-            # Partial sign with camera keypair only (backend will add payer signature)
-            tx.partial_sign(camera_keypair)
+            # Create transaction and partial sign with camera keypair only
+            # Backend will add payer signature later
+            tx = Transaction.new_unsigned(message)
+            tx.partial_sign([camera_keypair], blockhash_obj)  # modifies tx in place
             logger.info(f"[SettlementService] Transaction signed by camera: {camera_pubkey}")
 
             # Serialize transaction for backend
-            tx_bytes = tx.serialize()
+            tx_bytes = bytes(tx)
             tx_base64 = base64.b64encode(tx_bytes).decode('utf-8')
 
             # POST to backend for fee payer signature and submission
