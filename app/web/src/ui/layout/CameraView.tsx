@@ -6,7 +6,7 @@ import { CameraModal } from "../../camera/CameraModal";
 import { useCamera, CameraData } from "../../camera/CameraProvider";
 import { IRLAppsButton } from "../../camera/IRLAppsButton";
 import { CompetitionScoreboard } from "../../camera/CompetitionScoreboard";
-import { CompetitionControls } from "../../camera/CompetitionControls";
+import { CompetitionControls, useCompetitionExit, type EscrowInfo } from "../../camera/CompetitionControls";
 import { CVDevPanel } from "../../camera/CVDevPanel";
 import { cameraStatus } from "../../camera/camera-status";
 import { CameraRegistry } from "../../camera/camera-registry";
@@ -202,6 +202,10 @@ export function CameraView() {
   // CV Dev Mode state
   const [cvDevModeEnabled, setCvDevModeEnabled] = useState(() => getCVDevModeEnabled());
 
+  // Competition state
+  const [competitionEscrowInfo, setCompetitionEscrowInfo] = useState<EscrowInfo | null>(null);
+  const [hasCompetitionApp, setHasCompetitionApp] = useState(false);
+
   // Helper function to detect if we're using the Jetson camera
   // const isJetsonCamera = (cameraId: string | null): boolean => {
   //   return cameraId === CONFIG.JETSON_CAMERA_PDA;
@@ -231,6 +235,9 @@ export function CameraView() {
   const currentCameraId =
     cameraAccount || selectedCamera?.publicKey || cameraId || "";
   const currentCameraStatus = useCameraStatus(currentCameraId);
+
+  // Competition exit handler
+  const { handleExit: handleCompetitionExit } = useCompetitionExit(currentCameraId);
 
   // Add a function to create timeline events with Farcaster profile info
   const addTimelineEvent = (
@@ -1295,7 +1302,7 @@ export function CameraView() {
           <div className="px-0 pt-0 sm:px-2">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="md:col-span-3 relative">
-                {/* IRL Apps Button - positioned next to stream */}
+                {/* IRL Apps Button - positioned next to stream (hidden on mobile when competition active) */}
                 {currentCameraId &&
                   unifiedCameraService.hasCamera(currentCameraId) && (
                     <div className="absolute top-2 right-4 z-50">
@@ -1315,7 +1322,7 @@ export function CameraView() {
                     </div>
                   )}
 
-                {/* Unified TikTok-style status bar - aligned with timeline - MOBILE ONLY */}
+                {/* Unified TikTok-style status bar - aligned with timeline - MOBILE ONLY (hidden when competition active) */}
                 <div
                   className="absolute top-2 left-4 z-40 flex items-center cursor-pointer md:hidden"
                   onClick={() => setIsMobileCameraModalOpen(true)}
@@ -1369,16 +1376,6 @@ export function CameraView() {
                   </div>
                 </div>
 
-                {/* Competition Scoreboard - Mobile (right below Apps button) */}
-                {currentCameraId && (
-                  <div className="absolute top-10 left-4 right-4 z-50 md:hidden">
-                    <CompetitionScoreboard
-                      cameraId={currentCameraId}
-                      walletAddress={primaryWallet?.address}
-                    />
-                  </div>
-                )}
-
                 {/* Mobile Timeline Overlay - positioned below status badge */}
                 <div className="absolute top-10 left-2 z-30 md:hidden px-2">
                   <Timeline
@@ -1389,7 +1386,20 @@ export function CameraView() {
                   />
                 </div>
 
-                <StreamPlayer />
+                {/* Stream container with competition scoreboard overlay */}
+                <div className="relative">
+                  <StreamPlayer />
+
+                  {/* Competition Scoreboard - overlays the stream when competition active */}
+                  {currentCameraId && hasCompetitionApp && (
+                    <CompetitionScoreboard
+                      cameraId={currentCameraId}
+                      walletAddress={primaryWallet?.address}
+                      onClose={handleCompetitionExit}
+                      escrowInfo={competitionEscrowInfo}
+                    />
+                  )}
+                </div>
 
                 {/* CV Dev Panel - shown when dev mode is enabled */}
                 {cvDevModeEnabled && currentCameraId && (
@@ -1484,25 +1494,11 @@ export function CameraView() {
               </div>
             </div>
 
-            {/* Competition Scoreboard - floats above timeline (Desktop) */}
-            {currentCameraId && (
-              <div className="absolute mt-12 pb-2 px-5 left-0 w-full hidden md:block z-40">
-                <CompetitionScoreboard cameraId={currentCameraId} />
-              </div>
-            )}
-
-            <div className="absolute mt-12 pb-20 pl-5 left-0 w-full hidden md:block">
+            <div className="absolute mt-12 pl-5 left-0 hidden md:block">
               <Timeline
                 ref={timelineRef}
                 variant="camera"
                 cameraId={cameraAccount || undefined}
-              />
-              <div
-                className="top-0 left-0 right-0 pointer-events-none"
-                style={{
-                  background:
-                    "linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 100%)",
-                }}
               />
             </div>
 
@@ -1551,10 +1547,15 @@ export function CameraView() {
         }}
       />
 
-      {/* Competition Start/Stop Controls - Floating at bottom */}
+      {/* Competition Start/Stop Controls - Floating at bottom right */}
       {currentCameraId && (
-        <CompetitionControls cameraId={currentCameraId} />
+        <CompetitionControls
+          cameraId={currentCameraId}
+          onEscrowChange={setCompetitionEscrowInfo}
+          onHasLoadedAppChange={setHasCompetitionApp}
+        />
       )}
+
     </>
   );
 }

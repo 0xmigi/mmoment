@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { useEffect, useState, useMemo } from 'react';
+import { X, DollarSign, Trophy } from 'lucide-react';
 import { unifiedCameraService } from './unified-camera-service';
+import { useResolveDisplayNames } from '../hooks/useResolveDisplayNames';
 
 interface CompetitorStats {
   display_name: string;
@@ -12,13 +15,40 @@ interface CompetitionState {
   competitors: CompetitorStats[];
 }
 
+interface EscrowInfo {
+  pda: string;
+  stakeSol: number;
+  totalPool?: number;
+  participants?: number;
+  status?: string;
+  winners?: string[];
+}
+
 interface CompetitionScoreboardProps {
   cameraId: string;
   walletAddress?: string;
+  onClose?: () => void;
+  escrowInfo?: EscrowInfo | null;
 }
 
-export function CompetitionScoreboard({ cameraId, walletAddress }: CompetitionScoreboardProps) {
+export function CompetitionScoreboard({
+  cameraId,
+  walletAddress,
+  onClose,
+  escrowInfo
+}: CompetitionScoreboardProps) {
   const [competitionState, setCompetitionState] = useState<CompetitionState | null>(null);
+
+  // Extract wallet addresses from competitors for display name resolution
+  const competitorWallets = useMemo(() =>
+    (competitionState?.competitors || [])
+      .map(c => c.wallet_address)
+      .filter((w): w is string => !!w),
+    [competitionState?.competitors]
+  );
+
+  // Resolve display names from backend when Jetson only provides wallet addresses
+  const { getDisplayName } = useResolveDisplayNames(competitorWallets);
 
   useEffect(() => {
     const checkAppStatus = async () => {
@@ -80,112 +110,160 @@ export function CompetitionScoreboard({ cameraId, walletAddress }: CompetitionSc
   );
 
   const metricLabel = getMetricLabel();
+  const isSettled = escrowInfo?.status === 'settled';
+  const hasWinners = (escrowInfo?.winners?.length ?? 0) > 0;
 
-  // Single competitor - centered layout
-  if (sortedCompetitors.length === 1) {
-    const competitor = sortedCompetitors[0];
-    const stats = competitor.stats || {};
-    const isCurrentUser = walletAddress && competitor.wallet_address === walletAddress;
+  // Render competitor scores - for white header background
+  const renderScores = () => {
+    // Single competitor - stacked layout
+    if (sortedCompetitors.length === 1) {
+      const competitor = sortedCompetitors[0];
+      const stats = competitor.stats || {};
+      const isCurrentUser = walletAddress && competitor.wallet_address === walletAddress;
+      const resolvedName = competitor.wallet_address
+        ? getDisplayName(competitor.wallet_address, competitor.display_name)
+        : competitor.display_name;
 
-    return (
-      <div className="w-full bg-white rounded-lg px-4 py-2">
-        <div className="flex flex-col items-center gap-1">
-          <span className="text-xs font-medium text-gray-900">
-            {competitor.display_name}
+      return (
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-gray-700">
+            {resolvedName}
             {isCurrentUser && <span className="ml-1 text-primary">(you)</span>}
           </span>
           <div className="flex items-baseline gap-1">
-            <span className="text-3xl font-bold text-gray-900 tabular-nums">
+            <span className="text-2xl font-bold text-black tabular-nums">
               {getPrimaryMetric(stats)}
             </span>
             <span className="text-sm text-gray-500">{metricLabel}</span>
           </div>
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  // Two competitors - versus layout (MMA style)
-  if (sortedCompetitors.length === 2) {
-    const [competitor1, competitor2] = sortedCompetitors;
-    const stats1 = competitor1.stats || {};
-    const stats2 = competitor2.stats || {};
-    const score1 = getPrimaryMetric(stats1);
-    const score2 = getPrimaryMetric(stats2);
-    const total = score1 + score2;
-    const percentage1 = total > 0 ? Math.round((score1 / total) * 100) : 50;
-    const percentage2 = total > 0 ? 100 - percentage1 : 50;
-    const isUser1 = walletAddress && competitor1.wallet_address === walletAddress;
-    const isUser2 = walletAddress && competitor2.wallet_address === walletAddress;
+    // Two competitors - versus layout
+    if (sortedCompetitors.length === 2) {
+      const [competitor1, competitor2] = sortedCompetitors;
+      const stats1 = competitor1.stats || {};
+      const stats2 = competitor2.stats || {};
+      const score1 = getPrimaryMetric(stats1);
+      const score2 = getPrimaryMetric(stats2);
+      const isUser1 = walletAddress && competitor1.wallet_address === walletAddress;
+      const isUser2 = walletAddress && competitor2.wallet_address === walletAddress;
+      const name1 = competitor1.wallet_address
+        ? getDisplayName(competitor1.wallet_address, competitor1.display_name)
+        : competitor1.display_name;
+      const name2 = competitor2.wallet_address
+        ? getDisplayName(competitor2.wallet_address, competitor2.display_name)
+        : competitor2.display_name;
 
-    return (
-      <div className="w-full bg-white rounded-lg px-4 py-2">
-        <div className="flex items-center justify-between gap-4">
-          {/* Competitor 1 - Left */}
-          <div className="flex flex-col items-start flex-1">
-            <span className="text-xs font-medium text-gray-900 truncate max-w-full">
-              {competitor1.display_name}
-              {isUser1 && <span className="ml-1 text-primary">(you)</span>}
+      return (
+        <div className="flex items-center gap-4">
+          {/* Competitor 1 */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-700 truncate max-w-[80px]">
+              {name1}
+              {isUser1 && <span className="text-primary">*</span>}
             </span>
-            <span className="text-2xl font-bold text-gray-900 tabular-nums">
+            <span className="text-xl font-bold text-black tabular-nums">
               {score1}
             </span>
           </div>
 
-          {/* VS divider with percentages */}
-          <div className="flex flex-col items-center gap-1 flex-shrink-0">
-            <div className="flex items-center gap-2">
-              <span className={`text-xs font-bold ${score1 > score2 ? 'text-green-600' : 'text-gray-400'}`}>
-                {percentage1}%
-              </span>
-              <span className="text-xs font-medium text-gray-400">VS</span>
-              <span className={`text-xs font-bold ${score2 > score1 ? 'text-green-600' : 'text-gray-400'}`}>
-                {percentage2}%
-              </span>
-            </div>
-            <span className="text-xs text-gray-500">{metricLabel}</span>
-          </div>
+          {/* VS divider */}
+          <span className="text-sm font-bold text-gray-400">vs</span>
 
-          {/* Competitor 2 - Right */}
-          <div className="flex flex-col items-end flex-1">
-            <span className="text-xs font-medium text-gray-900 truncate max-w-full">
-              {competitor2.display_name}
-              {isUser2 && <span className="ml-1 text-primary">(you)</span>}
-            </span>
-            <span className="text-2xl font-bold text-gray-900 tabular-nums">
+          {/* Competitor 2 */}
+          <div className="flex items-center gap-2">
+            <span className="text-xl font-bold text-black tabular-nums">
               {score2}
+            </span>
+            <span className="text-sm font-medium text-gray-700 truncate max-w-[80px]">
+              {name2}
+              {isUser2 && <span className="text-primary">*</span>}
             </span>
           </div>
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  // 3+ competitors - horizontal list
-  return (
-    <div className="w-full bg-white rounded-lg px-3 py-2">
-      <div className="flex items-center justify-between gap-3">
-        {sortedCompetitors.map((competitor, index) => {
+    // 3+ competitors - horizontal list
+    return (
+      <div className="flex items-center gap-4">
+        {sortedCompetitors.slice(0, 3).map((competitor, index) => {
           const stats = competitor.stats || {};
           const isFirst = index === 0;
           const isCurrentUser = walletAddress && competitor.wallet_address === walletAddress;
+          const resolvedName = competitor.wallet_address
+            ? getDisplayName(competitor.wallet_address, competitor.display_name)
+            : competitor.display_name;
 
           return (
-            <div key={index} className="flex items-center gap-2">
-              <span className={`text-xs font-bold ${isFirst ? 'text-green-600' : 'text-gray-500'}`}>
+            <div key={index} className="flex items-center gap-1.5">
+              <span className={`text-sm font-bold ${isFirst ? 'text-green-600' : 'text-gray-400'}`}>
                 #{index + 1}
               </span>
-              <span className="text-xs font-medium text-gray-900">
-                {competitor.display_name}
-                {isCurrentUser && <span className="ml-1 text-primary">(you)</span>}
+              <span className="text-sm text-gray-700 truncate max-w-[60px]">
+                {resolvedName}
+                {isCurrentUser && <span className="text-primary">*</span>}
               </span>
-              <span className="text-lg font-bold text-gray-900 tabular-nums">
+              <span className="text-lg font-bold text-black tabular-nums">
                 {getPrimaryMetric(stats)}
               </span>
-              <span className="text-xs text-gray-500">{metricLabel}</span>
             </div>
           );
         })}
+      </div>
+    );
+  };
+
+  return (
+    <div className="fixed top-2 left-2 right-2 z-[60] sm:left-4 sm:right-4 md:left-1/2 md:-translate-x-1/2 md:max-w-3xl md:w-full">
+      <div className="bg-white rounded-xl shadow-lg p-1">
+        <div className="border-2 border-amber-500 rounded-lg px-4 py-4 flex items-start justify-between">
+          {/* Left side - Scores */}
+          <div className="flex flex-col gap-2">
+            {renderScores()}
+
+            {/* Escrow info */}
+            {escrowInfo && (
+              <div className={`flex items-center gap-1.5 text-sm ${
+                isSettled
+                  ? hasWinners ? 'text-green-600' : 'text-gray-500'
+                  : 'text-primary'
+              }`}>
+                {isSettled ? (
+                  <>
+                    <Trophy className="w-4 h-4" />
+                    <span>
+                      {hasWinners
+                        ? `Winner: ${escrowInfo.winners![0].slice(0, 6)}...`
+                        : 'Settled'
+                      }
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <DollarSign className="w-4 h-4" />
+                    <span>
+                      {escrowInfo.totalPool?.toFixed(2) ?? escrowInfo.stakeSol.toFixed(2)} SOL
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Right side - Exit button */}
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
+              aria-label="Exit competition"
+            >
+              <X className="w-5 h-5 text-gray-700" />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

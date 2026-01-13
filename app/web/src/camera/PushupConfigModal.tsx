@@ -1,9 +1,10 @@
 import { Dialog } from '@headlessui/react';
-import { X, Users, Play, Loader2, AlertCircle, Trophy, Swords } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { X, Users, Play, Loader2, AlertCircle, Trophy, Swords, Settings2 } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
 import { unifiedCameraService } from './unified-camera-service';
 import { useCompetitionEscrow } from '../hooks/useCompetitionEscrow';
 import { useCamera } from './CameraProvider';
+import { useResolveDisplayNames } from '../hooks/useResolveDisplayNames';
 
 type CompetitionMode = 'none' | 'bet' | 'prize';
 
@@ -37,6 +38,16 @@ export function PushupConfigModal({
   const [prizeAmount, setPrizeAmount] = useState<number>(0.01);
   const [targetPushups, setTargetPushups] = useState<number>(10);
   const [error, setError] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Extract wallet addresses for display name resolution from backend
+  const userWallets = useMemo(() =>
+    recognizedUsers.map(u => u.wallet_address),
+    [recognizedUsers]
+  );
+
+  // Resolve display names from backend when Jetson only provides wallet addresses
+  const { getDisplayName } = useResolveDisplayNames(userWallets);
 
   // Competition escrow integration
   const { selectedCamera } = useCamera();
@@ -116,12 +127,12 @@ export function PushupConfigModal({
       setError(null);
       clearEscrowError();
 
-      // Get selected competitor details - store for later use
+      // Get selected competitor details with resolved display names - store for later use
       const competitors = recognizedUsers
         .filter(user => selectedCompetitors.has(user.wallet_address))
         .map(user => ({
           wallet_address: user.wallet_address,
-          display_name: user.display_name
+          display_name: getDisplayName(user.wallet_address, user.display_name)
         }));
 
       // Get invitees (competitors excluding current user)
@@ -234,16 +245,25 @@ export function PushupConfigModal({
             <Dialog.Title className="text-lg font-semibold text-gray-900">
               Pushup Competition Setup
             </Dialog.Title>
-            <button
-              onClick={onClose}
-              className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
-            >
-              <X className="w-5 h-5 text-gray-500" />
-            </button>
+            <div className="flex items-center space-x-1">
+              <button
+                onClick={() => setShowSettings(!showSettings)}
+                className={`p-1.5 rounded-lg transition-colors ${showSettings ? 'bg-gray-200' : 'hover:bg-gray-100'}`}
+                title="Settings"
+              >
+                <Settings2 className="w-5 h-5 text-gray-500" />
+              </button>
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
           </div>
 
           {/* Content */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-6">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-3">
                 <p className="text-sm text-red-800">{error}</p>
@@ -291,7 +311,7 @@ export function PushupConfigModal({
                         </div>
                         <div className="text-left">
                           <div className="text-sm font-medium text-gray-900">
-                            {user.display_name}
+                            {getDisplayName(user.wallet_address, user.display_name)}
                             {user.isCurrentUser && (
                               <span className="ml-2 text-xs text-primary">(You)</span>
                             )}
@@ -307,23 +327,25 @@ export function PushupConfigModal({
               )}
             </div>
 
-            {/* Duration Selection */}
-            <div>
-              <label className="block text-sm font-medium text-gray-900 mb-2">
-                Competition Duration
-              </label>
-              <select
-                value={duration}
-                onChange={(e) => setDuration(Number(e.target.value))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-              >
-                <option value={60}>1 minute</option>
-                <option value={180}>3 minutes</option>
-                <option value={300}>5 minutes</option>
-                <option value={600}>10 minutes</option>
-                <option value={0}>No limit</option>
-              </select>
-            </div>
+            {/* Duration Selection - Hidden by default */}
+            {showSettings && (
+              <div className="bg-gray-50 rounded-lg p-3">
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Competition Duration
+                </label>
+                <select
+                  value={duration}
+                  onChange={(e) => setDuration(Number(e.target.value))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-white"
+                >
+                  <option value={60}>1 minute</option>
+                  <option value={180}>3 minutes</option>
+                  <option value={300}>5 minutes</option>
+                  <option value={600}>10 minutes</option>
+                  <option value={0}>No limit</option>
+                </select>
+              </div>
+            )}
 
             {/* Competition Mode Selection */}
             <div>
@@ -375,7 +397,7 @@ export function PushupConfigModal({
 
             {/* Prize Mode Config */}
             {competitionMode === 'prize' && (
-              <div className="border-2 border-yellow-500 bg-yellow-50 rounded-lg p-4 space-y-4">
+              <div className="border-2 border-yellow-500 bg-yellow-50 rounded-lg p-3 space-y-3">
                 {!selectedCamera?.devicePubkey && (
                   <div className="flex items-center space-x-2 p-2 bg-orange-50 border border-orange-200 rounded-lg">
                     <AlertCircle className="w-4 h-4 text-orange-500 flex-shrink-0" />
@@ -384,44 +406,40 @@ export function PushupConfigModal({
                     </p>
                   </div>
                 )}
-                <p className="text-xs text-gray-600">
-                  Deposit a prize. Hit the target to win it back!
-                </p>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Prize Amount</label>
-                  <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-3">
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Prize</label>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        value={prizeAmount}
+                        onChange={(e) => setPrizeAmount(Number(e.target.value))}
+                        disabled={!selectedCamera?.devicePubkey}
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:opacity-50 text-sm"
+                      />
+                      <span className="text-sm font-medium text-gray-700">SOL</span>
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Target Reps</label>
                     <input
                       type="number"
-                      step="0.01"
-                      min="0.01"
-                      value={prizeAmount}
-                      onChange={(e) => setPrizeAmount(Number(e.target.value))}
+                      min="1"
+                      value={targetPushups}
+                      onChange={(e) => setTargetPushups(Number(e.target.value))}
                       disabled={!selectedCamera?.devicePubkey}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:opacity-50"
+                      className="w-full px-2 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:opacity-50 text-sm"
                     />
-                    <span className="text-sm font-medium text-gray-700">SOL</span>
                   </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Target Pushups</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={targetPushups}
-                    onChange={(e) => setTargetPushups(Number(e.target.value))}
-                    disabled={!selectedCamera?.devicePubkey}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:opacity-50"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Complete {targetPushups} pushups to win the prize
-                  </p>
                 </div>
               </div>
             )}
 
             {/* Bet Mode Config */}
             {competitionMode === 'bet' && (
-              <div className="border-2 border-primary bg-primary-light rounded-lg p-4 space-y-3">
+              <div className="border-2 border-primary bg-primary-light rounded-lg p-3 space-y-2">
                 {!selectedCamera?.devicePubkey && (
                   <div className="flex items-center space-x-2 p-2 bg-orange-50 border border-orange-200 rounded-lg">
                     <AlertCircle className="w-4 h-4 text-orange-500 flex-shrink-0" />
@@ -430,11 +448,8 @@ export function PushupConfigModal({
                     </p>
                   </div>
                 )}
-                <p className="text-xs text-gray-600">
-                  Each participant bets SOL. Winner takes all!
-                </p>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Bet Amount (per person)</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-gray-700">Stake per person</label>
                   <div className="flex items-center space-x-2">
                     <input
                       type="number"
@@ -443,14 +458,14 @@ export function PushupConfigModal({
                       value={stakeAmount}
                       onChange={(e) => setStakeAmount(Number(e.target.value))}
                       disabled={!selectedCamera?.devicePubkey}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+                      className="w-20 px-2 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 text-sm text-right"
                     />
                     <span className="text-sm font-medium text-gray-700">SOL</span>
                   </div>
                 </div>
-                {stakeAmount > 0 && selectedCompetitors.size > 0 && (
-                  <div className="text-xs text-gray-600">
-                    Total pot: <span className="font-semibold">{(stakeAmount * selectedCompetitors.size).toFixed(2)} SOL</span>
+                {stakeAmount > 0 && selectedCompetitors.size > 1 && (
+                  <div className="text-xs text-gray-600 text-right">
+                    Pot: <span className="font-semibold">{(stakeAmount * selectedCompetitors.size).toFixed(2)} SOL</span>
                   </div>
                 )}
               </div>
@@ -485,10 +500,10 @@ export function PushupConfigModal({
             </button>
             <p className="text-xs text-gray-500 text-center mt-2">
               {competitionMode === 'prize' && prizeAmount > 0
-                ? `Prize deposited. Competitors who hit ${targetPushups} pushups split the pot.`
+                ? `Hit ${targetPushups} reps to win the prize`
                 : competitionMode === 'bet' && stakeAmount > 0
-                ? 'Your bet is placed. Invites sent to other competitors.'
-                : 'Position yourself in frame, then use Start/Stop controls to begin'
+                ? 'Winner takes all. Good luck!'
+                : 'Get in frame, press Start to begin'
               }
             </p>
           </div>

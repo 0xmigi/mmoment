@@ -123,20 +123,21 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
       // Derive PDA
       const [escrowPda] = findCompetitionEscrowPDA(cameraPubkey, createdAt);
 
-      // Build payout rule (PascalCase for IDL enum variants, snake_case for fields)
-      let payout_rule: any;
+      // Build payout rule - Anchor 0.29 converts IDL variant names to camelCase internally
+      // So even though IDL says "WinnerTakesAll", the encoder expects "winnerTakesAll"
+      let payoutRule: any;
       if (config.payoutRule === 'winnerTakesAll') {
-        payout_rule = { winnerTakesAll: {} };
+        payoutRule = { winnerTakesAll: {} };
       } else {
-        payout_rule = { thresholdSplit: { minReps: config.thresholdMinReps || 10 } };
+        payoutRule = { thresholdSplit: { minReps: config.thresholdMinReps || 10 } };
       }
 
-      // Build args with snake_case field names to match IDL
+      // Build args with camelCase field names to match TypeScript IDL
       const args = {
         invitees: config.invitees.map(addr => new PublicKey(addr)),
         initiatorParticipates: config.initiatorParticipates,
         stakePerPerson: solToLamports(config.stakePerPersonSol),
-        payoutRule: payout_rule,
+        payoutRule: payoutRule,
         inviteTimeoutSecs: config.inviteTimeoutSecs || 60,
       };
 

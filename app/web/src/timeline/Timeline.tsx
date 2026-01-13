@@ -25,8 +25,8 @@ interface TimelineProps {
 
 // Get the display count based on screen width
 const getDisplayCount = () => {
-  if (typeof window === 'undefined') return 13;
-  return window.innerWidth < 768 ? 17 : 13;
+  if (typeof window === 'undefined') return 10;
+  return window.innerWidth < 768 ? 14 : 10;
 };
 
 // Get mobile timeline count based on proportional scaling with stream window
@@ -417,18 +417,18 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
 
   return (
     <div className="w-full relative" ref={timelineRef}>
-      {/* Container - desktop uses JavaScript calculation, mobile uses CSS width-based */}
-      <div 
+      {/* Container with fixed height for desktop camera variant */}
+      <div
         className="relative"
-        style={{ 
+        style={{
           height: variant === 'camera' && !mobileOverlay
-            ? `${(displayCount + 1) * 3.5}rem`
+            ? '45rem'  // Extends past the gallery on desktop
             : 'auto'
         }}
       >
-        {/* Vertical timeline line */}
-        <div className="absolute left-[4px] md:left-[6px] top-0 h-full w-px bg-gray-200" />
-        
+        {/* Vertical timeline line - stops above the profile stack curve */}
+        <div className="absolute left-[4px] md:left-[6px] top-0 bottom-14 w-px bg-gray-200" />
+
         <div className="space-y-4 md:space-y-6 w-full">
           {displayEvents.length === 0 ? (
             <p className={`text-sm pl-16 ${mobileOverlay ? 'text-white' : 'text-gray-500'}`}>No activity yet</p>
@@ -512,59 +512,59 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
             </>
           )}
         </div>
-      </div>
 
-      {/* Profile Stack with connected timeline */}
-      {(showProfileStack ?? variant === 'camera') && (
-        <div className="relative">
-          {/* Corner and horizontal line container */}
-          <div className="absolute left-0 top-0 w-full">
-            {/* L-shaped corner with rounded curve using CSS */}
-            <div className="absolute left-[4px] md:left-[6px] w-[12px] h-[12px]">
-              {/* Curved corner */}
-              <div 
-                className="absolute left-0 bottom-0 w-[12px] h-[12px] border-b border-l border-gray-200 rounded-bl-[12px]"
-                style={{ borderBottomLeftRadius: '12px' }}
-              />
-              {/* Horizontal part of the L - made longer */}
-              <div className="absolute left-[11px] bottom-0 w-[32px] h-px bg-gray-200" />
+        {/* Profile Stack at bottom of timeline with curved connector */}
+        {(showProfileStack ?? variant === 'camera') && displayEvents.filter(e => e).length > 0 && (
+          <div className="absolute bottom-2 left-0 right-0">
+            {/* Vertical connector from main line down to curve - bridges the gap */}
+            <div className="absolute left-[4px] md:left-[6px] -top-10 w-px h-10 bg-gray-200" />
+            {/* L-shaped corner with rounded curve */}
+            <div className="absolute left-[4px] md:left-[6px] top-0 w-[12px] h-[12px]">
+              <div className="w-[12px] h-[12px] border-b border-l border-gray-200 rounded-bl-[12px]" />
             </div>
-          </div>
+            {/* Horizontal line from curve to avatars */}
+            <div className="absolute left-[16px] md:left-[18px] top-[11px] w-[28px] md:w-[36px] h-px bg-gray-200" />
 
-          {/* Profile stack - adjusted padding to align with curve */}
-          <div className="pl-10 md:pl-14">
-            <div className="flex items-center">
-              <div className="flex -space-x-1.5 md:-space-x-2">
-                {Array.from(new Set(events.map(e => e.user.address)))
-                  .slice(0, 6)
-                  .map((address, i) => {
-                    const event = events.find(e => e.user.address === address);
-                    return (
-                      <div
-                        key={address}
-                        className="relative w-6 h-6 md:w-8 md:h-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center overflow-hidden"
-                        style={{ zIndex: 6 - i }}
-                      >
-                        {event?.user.pfpUrl ? (
-                          <img 
-                            src={event.user.pfpUrl} 
-                            alt={event.user.displayName || event.user.username || 'User'} 
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <User className="w-3 h-3 md:w-4 md:h-4 text-gray-600" />
-                        )}
-                      </div>
-                    );
-                  })}
+            {/* Profile stack - aligned with curve */}
+            <div className="pl-12 md:pl-14 pt-0.5">
+              <div className="flex items-center">
+                <div className="flex -space-x-1.5 md:-space-x-2">
+                  {Array.from(new Set(displayEvents.filter(e => e).map(e => e.user.address)))
+                    .slice(0, 6)
+                    .map((address, i) => {
+                      const event = displayEvents.find(e => e?.user.address === address);
+                      const profile = userProfiles[address];
+                      const pfpUrl = event?.user.pfpUrl || profile?.pfpUrl;
+                      const displayName = event?.user.displayName || profile?.displayName;
+                      const username = event?.user.username || profile?.username;
+
+                      return (
+                        <div
+                          key={address}
+                          className="relative w-6 h-6 md:w-8 md:h-8 rounded-full bg-gray-100 border-2 border-white flex items-center justify-center overflow-hidden"
+                          style={{ zIndex: 6 - i }}
+                        >
+                          {pfpUrl ? (
+                            <img
+                              src={pfpUrl}
+                              alt={displayName || username || 'User'}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <User className="w-3 h-3 md:w-4 md:h-4 text-gray-600" />
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+                <span className={`ml-3 text-xs md:text-sm font-medium ${mobileOverlay ? 'text-white' : 'text-gray-600'}`}>
+                  {new Set(displayEvents.filter(e => e).map(e => e.user.address)).size || 0} Recently active
+                </span>
               </div>
-              <span className={`ml-3 text-xs md:text-sm font-medium ${mobileOverlay ? 'text-white' : 'text-gray-600'}`}>
-                {new Set(events.map(e => e.user.address)).size || 0} Recently active
-              </span>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Profile Modal */}
       {selectedUser && selectedEvent && (
