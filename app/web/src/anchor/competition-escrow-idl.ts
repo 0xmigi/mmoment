@@ -124,8 +124,13 @@ export type CompetitionEscrow = {
       ],
       "accounts": [
         {
-          "name": "camera",
+          "name": "payer",
           "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "camera",
+          "isMut": false,
           "isSigner": true
         },
         {
@@ -551,8 +556,13 @@ export const IDL: CompetitionEscrow = {
       ],
       "accounts": [
         {
-          "name": "camera",
+          "name": "payer",
           "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "camera",
+          "isMut": false,
           "isSigner": true
         },
         {

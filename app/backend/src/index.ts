@@ -8,7 +8,7 @@ import { PipeClient, generateCredentialsFromAddress, PipeAccount, UploadResult, 
 import dgram from "dgram";
 import net from "net";
 import axios from "axios";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey, Keypair, Transaction, SystemProgram } from "@solana/web3.js";
 // Using built-in fetch in Node.js 18+
 
 // Load environment variables
