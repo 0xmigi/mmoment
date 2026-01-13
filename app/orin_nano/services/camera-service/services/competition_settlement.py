@@ -327,7 +327,7 @@ async def settle_competition(
             tx.add(instruction)
 
             # Partial sign with camera keypair only (backend will add payer signature)
-            tx.sign_partial(camera_keypair)
+            tx.partial_sign(camera_keypair)
             logger.info(f"[SettlementService] Transaction signed by camera: {camera_pubkey}")
 
             # Serialize transaction for backend
