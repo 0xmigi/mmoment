@@ -1453,6 +1453,130 @@ app.post("/api/clear-all-sponsorships", (_req, res) => {
 });
 
 // ============================================================================
+// COMPETITION SETTLEMENT ENDPOINT
+// ============================================================================
+
+const COMPETITION_ESCROW_PROGRAM_ID = '32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ';
+
+// Settle competition - receives camera-signed transaction, adds payer signature, submits
+app.post("/api/competition/settle", async (req, res) => {
+  try {
+    const { transaction, cameraPubkey, escrowPda } = req.body;
+
+    if (!transaction || !cameraPubkey) {
+      return res.status(400).json({
+        success: false,
+        error: 'transaction and cameraPubkey are required'
+      });
+    }
+
+    // Validate service is configured
+    if (!process.env.FEE_PAYER_SECRET_KEY || !process.env.SOLANA_RPC_URL) {
+      return res.status(503).json({
+        success: false,
+        error: 'Settlement service not configured'
+      });
+    }
+
+    // Parse fee payer keypair
+    const secretKeyArray = JSON.parse(process.env.FEE_PAYER_SECRET_KEY);
+    const payer = Keypair.fromSecretKey(new Uint8Array(secretKeyArray));
+    const connection = new Connection(process.env.SOLANA_RPC_URL, 'confirmed');
+
+    console.log(`🏆 Competition settlement request from camera ${cameraPubkey.slice(0, 8)}...`);
+    if (escrowPda) {
+      console.log(`   Escrow PDA: ${escrowPda.slice(0, 8)}...`);
+    }
+
+    // Deserialize the transaction
+    const txBuffer = Buffer.from(transaction, 'base64');
+    const tx = Transaction.from(txBuffer);
+
+    // Validate transaction is for competition-escrow program
+    const validProgram = tx.instructions.every(ix =>
+      ix.programId.toString() === COMPETITION_ESCROW_PROGRAM_ID ||
+      ix.programId.toString() === SystemProgram.programId.toString()
+    );
+    if (!validProgram) {
+      const programs = tx.instructions.map(ix => ix.programId.toString());
+      console.error('Invalid programs in transaction:', programs);
+      return res.status(400).json({
+        success: false,
+        error: 'Transaction contains unauthorized program'
+      });
+    }
+
+    // Validate camera is a signer in the transaction
+    const cameraKey = new PublicKey(cameraPubkey);
+    const cameraIsSigner = tx.instructions.some(ix =>
+      ix.keys.some(key => key.pubkey.equals(cameraKey) && key.isSigner)
+    );
+    if (!cameraIsSigner) {
+      return res.status(400).json({
+        success: false,
+        error: 'Camera must be a signer in the transaction'
+      });
+    }
+
+    // Check that camera has already signed
+    const cameraSig = tx.signatures.find(s => s.publicKey.equals(cameraKey));
+    if (!cameraSig || cameraSig.signature === null) {
+      return res.status(400).json({
+        success: false,
+        error: 'Transaction must be signed by camera before submission'
+      });
+    }
+
+    // Set fee payer and update blockhash
+    tx.feePayer = payer.publicKey;
+    tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+
+    // Sign with fee payer
+    tx.partialSign(payer);
+
+    console.log('✅ Fee payer signed transaction');
+    console.log('   Signatures:', tx.signatures.map(s =>
+      `${s.publicKey.toString().slice(0, 8)}... signed: ${s.signature !== null}`
+    ));
+
+    // Submit transaction
+    const signature = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed'
+    });
+
+    console.log(`📤 Transaction submitted: ${signature}`);
+
+    // Wait for confirmation
+    const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+
+    if (confirmation.value.err) {
+      console.error('Transaction failed:', confirmation.value.err);
+      return res.status(500).json({
+        success: false,
+        error: 'Transaction failed on-chain',
+        details: confirmation.value.err
+      });
+    }
+
+    console.log(`✅ Competition settled successfully: ${signature}`);
+
+    res.json({
+      success: true,
+      signature,
+      message: 'Competition settled successfully'
+    });
+
+  } catch (error) {
+    console.error('Competition settlement error:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to settle competition'
+    });
+  }
+});
+
+// ============================================================================
 // SESSION CLEANUP CRON ENDPOINTS
 // ============================================================================
 

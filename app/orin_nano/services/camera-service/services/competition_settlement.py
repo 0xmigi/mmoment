@@ -4,22 +4,28 @@ Competition Settlement Service
 Standalone module for settling competition escrows on-chain.
 Call settle_competition() when ending a CV activity that has an escrow.
 
+The settlement flow:
+1. Camera service builds the settle_competition transaction
+2. Camera signs as authority (proves results are authentic)
+3. Transaction is sent to backend
+4. Backend adds fee payer signature and submits to Solana
+
 Dependencies:
 - solana (pip install solana)
 - solders (pip install solders)
+- httpx (pip install httpx)
 
 Usage:
     from services.competition_settlement import settle_competition
 
     result = await settle_competition(
         escrow_pda="...",
-        camera_keypair_path="/path/to/camera-keypair.json",
+        camera_keypair=device_signer.get_keypair(),
         camera_owner_pubkey="...",
         participant_results=[
             {"wallet_address": "...", "score": 25},
             {"wallet_address": "...", "score": 18},
         ],
-        rpc_url="https://api.devnet.solana.com"
     )
 
     if result["success"]:
@@ -28,13 +34,16 @@ Usage:
         payout_per_winner = result["payout_per_winner_sol"]
 """
 
+import os
 import json
 import struct
 import asyncio
 import logging
+import base64
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
+import httpx
 from solana.rpc.async_api import AsyncClient
 from solana.rpc.commitment import Confirmed
 from solana.transaction import Transaction
@@ -48,9 +57,12 @@ logger = logging.getLogger(__name__)
 # Competition Escrow Program ID (devnet)
 PROGRAM_ID = Pubkey.from_string("32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ")
 
+# Backend fee payer public key (the backend wallet that pays for settlement transactions)
+BACKEND_PAYER_PUBKEY = Pubkey.from_string("9k5MGiM9Xqx8f2362M1B2rH5uMKFFVNuXaCDKyTsFXep")
+
 # Anchor instruction discriminator for settle_competition
 # Generated from: sha256("global:settle_competition")[0:8]
-SETTLE_COMPETITION_DISCRIMINATOR = bytes([233, 202, 62, 111, 78, 98, 218, 208])
+SETTLE_COMPETITION_DISCRIMINATOR = bytes([83, 121, 9, 141, 170, 133, 230, 151])
 
 
 @dataclass
@@ -141,20 +153,20 @@ async def fetch_escrow_account(
         stake_per_person = struct.unpack('<Q', data[offset:offset+8])[0]
         offset += 8
 
-        # Parse participants vec
+        # Parse participants vec (variable-length, NOT fixed 10 slots)
         participants_len = struct.unpack('<I', data[offset:offset+4])[0]
         offset += 4
         participants = []
         for _ in range(participants_len):
             participants.append(Pubkey.from_bytes(data[offset:offset+32]))
             offset += 32
-        # Skip remaining space for max participants
-        offset += 32 * (10 - participants_len)
+        # NOTE: Anchor Vec is variable-length, no padding to skip
 
-        # Parse pending_invites vec
+        # Parse pending_invites vec (variable-length, NOT fixed 10 slots)
         pending_len = struct.unpack('<I', data[offset:offset+4])[0]
         offset += 4
-        offset += 32 * 10  # Skip all pending invites space
+        # Skip only the actual pending invites, not fixed 10 slots
+        offset += 32 * pending_len
 
         # Parse total_pool
         total_pool = struct.unpack('<Q', data[offset:offset+8])[0]
@@ -287,9 +299,10 @@ async def settle_competition(
             # Build instruction data
             instruction_data = SETTLE_COMPETITION_DISCRIMINATOR + serialize_participant_results(results)
 
-            # Build accounts list
+            # Build accounts list (payer first, then camera, then rest)
             accounts = [
-                AccountMeta(pubkey=camera_pubkey, is_signer=True, is_writable=True),  # camera
+                AccountMeta(pubkey=BACKEND_PAYER_PUBKEY, is_signer=True, is_writable=True),  # payer (backend)
+                AccountMeta(pubkey=camera_pubkey, is_signer=True, is_writable=False),  # camera (authority)
                 AccountMeta(pubkey=escrow_pubkey, is_signer=False, is_writable=True),  # escrow
                 AccountMeta(pubkey=owner_pubkey, is_signer=False, is_writable=True),  # camera_owner
                 AccountMeta(pubkey=SYSTEM_PROGRAM_ID, is_signer=False, is_writable=False),  # system_program
@@ -305,25 +318,53 @@ async def settle_competition(
             # Get recent blockhash
             blockhash_response = await client.get_latest_blockhash(commitment=Confirmed)
             recent_blockhash = blockhash_response.value.blockhash
+            logger.info(f"[SettlementService] Got blockhash: {recent_blockhash}")
 
-            # Build and sign transaction
-            tx = Transaction.new_signed_with_payer(
-                [instruction],
-                camera_pubkey,
-                [camera_keypair],
-                recent_blockhash,
-            )
+            # Build transaction with backend as fee payer
+            from solders.hash import Hash
+            blockhash_obj = Hash.from_string(str(recent_blockhash))
+            tx = Transaction(fee_payer=BACKEND_PAYER_PUBKEY, recent_blockhash=blockhash_obj)
+            tx.add(instruction)
 
-            # Send transaction
-            logger.info(f"[SettlementService] Sending settle transaction...")
-            response = await client.send_transaction(tx, camera_keypair)
+            # Partial sign with camera keypair only (backend will add payer signature)
+            tx.sign_partial(camera_keypair)
+            logger.info(f"[SettlementService] Transaction signed by camera: {camera_pubkey}")
 
-            signature = str(response.value)
-            logger.info(f"[SettlementService] Transaction sent: {signature}")
+            # Serialize transaction for backend
+            tx_bytes = tx.serialize()
+            tx_base64 = base64.b64encode(tx_bytes).decode('utf-8')
 
-            # Wait for confirmation
-            await client.confirm_transaction(signature, commitment=Confirmed)
-            logger.info(f"[SettlementService] Transaction confirmed: {signature}")
+            # POST to backend for fee payer signature and submission
+            backend_url = os.environ.get("BACKEND_URL", "https://mmoment-production.up.railway.app")
+            logger.info(f"[SettlementService] Sending to backend: {backend_url}/api/competition/settle")
+
+            async with httpx.AsyncClient(timeout=30.0) as http_client:
+                response = await http_client.post(
+                    f"{backend_url}/api/competition/settle",
+                    json={
+                        "transaction": tx_base64,
+                        "cameraPubkey": str(camera_pubkey),
+                        "escrowPda": str(escrow_pubkey),
+                    }
+                )
+
+                if response.status_code != 200:
+                    error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {"error": response.text}
+                    logger.error(f"[SettlementService] Backend error: {error_data}")
+                    return SettlementResult(
+                        success=False,
+                        error=f"Backend settlement failed: {error_data.get('error', 'Unknown error')}"
+                    ).to_dict()
+
+                result_data = response.json()
+                if not result_data.get("success"):
+                    return SettlementResult(
+                        success=False,
+                        error=result_data.get("error", "Backend settlement failed")
+                    ).to_dict()
+
+                signature = result_data.get("signature")
+                logger.info(f"[SettlementService] Settlement confirmed: {signature}")
 
             # Calculate payouts (approximate - on-chain calculation is authoritative)
             total_pool = escrow_data["total_pool"]
@@ -356,7 +397,7 @@ async def settle_competition(
 # Convenience function for sync contexts
 def settle_competition_sync(
     escrow_pda: str,
-    camera_keypair_path: str,
+    camera_keypair,  # Keypair object or path string
     camera_owner_pubkey: str,
     participant_results: List[Dict[str, Any]],
     rpc_url: str = "https://api.devnet.solana.com",
@@ -364,7 +405,7 @@ def settle_competition_sync(
     """Synchronous wrapper for settle_competition"""
     return asyncio.run(settle_competition(
         escrow_pda=escrow_pda,
-        camera_keypair_path=camera_keypair_path,
+        camera_keypair=camera_keypair,
         camera_owner_pubkey=camera_owner_pubkey,
         participant_results=participant_results,
         rpc_url=rpc_url,
@@ -376,8 +417,9 @@ def settle_competition_sync(
 # In your end_competition route handler, after getting CV results:
 
 from services.competition_settlement import settle_competition
+from services.device_signer import get_device_signer
 
-# If competition metadata present, settle on-chain
+# If competition metadata present, settle on-chain via backend
 if competition_meta and competition_meta.get("escrow_pda"):
     # Build participant results from CV tracking
     participant_results = [
@@ -385,12 +427,15 @@ if competition_meta and competition_meta.get("escrow_pda"):
         for p in cv_results["participants"]
     ]
 
+    # Get device keypair for signing
+    device_signer = get_device_signer()
+
+    # Settle competition - camera signs, backend pays and submits
     settlement = await settle_competition(
         escrow_pda=competition_meta["escrow_pda"],
-        camera_keypair_path="/path/to/camera-keypair.json",
+        camera_keypair=device_signer.get_keypair(),
         camera_owner_pubkey=CAMERA_OWNER_WALLET,  # From config
         participant_results=participant_results,
-        rpc_url=RPC_URL,
     )
 
     # Include settlement in timeline entry metadata

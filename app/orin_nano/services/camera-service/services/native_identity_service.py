@@ -125,6 +125,12 @@ class NativeIdentityService:
         self._track_last_good_face_time: Dict[int, float] = {}  # track_id -> timestamp of last good face match
         self._good_match_grace_period = 3.0  # Don't revoke if good match within 3 seconds
 
+        # Track continuity protection - trust body tracking when face is unreliable at distance
+        # track_id -> timestamp when track was FIRST assigned via face (not recovered)
+        self._track_original_assignment_time: Dict[int, float] = {}
+        # track_id -> True if track was recovered (less trustworthy than original assignment)
+        self._track_was_recovered: Dict[int, bool] = {}
+
         # Similarity tracking for display
         # track_id -> latest similarity score (for showing on annotated stream)
         self._track_face_similarity: Dict[int, float] = {}  # Face embedding similarity
@@ -444,6 +450,12 @@ class NativeIdentityService:
                     self._wallet_to_track[wallet_address] = track_id
                     self._track_identity_source[track_id] = 'face'
 
+                    # Track when this assignment was made (for track continuity protection)
+                    # Only set if this is a NEW assignment (not updating existing)
+                    if track_id not in self._track_original_assignment_time:
+                        self._track_original_assignment_time[track_id] = current_time
+                        self._track_was_recovered[track_id] = False
+
                 self.identity_store.assign_track(wallet_address, track_id, confidence, 'face')
                 logger.info(f"[ASSOCIATE] Track {track_id} → {wallet_address[:8]}... (face in person bbox)")
 
@@ -559,8 +571,48 @@ class NativeIdentityService:
                         time_since_good = current_time - last_good_time
 
                         if time_since_good > self._good_match_grace_period:
-                            # No recent good match - safe to revoke
-                            tracks_to_revoke.append((track_id, associated_wallet, similarity, bad_count))
+                            # No recent good match - but check TRACK CONTINUITY PROTECTION
+                            # If ByteTracker has maintained this track continuously AND
+                            # ReID shows body looks the same AND face isn't EXTREMELY different,
+                            # trust the body tracking over the unreliable face at distance
+                            should_revoke = True
+
+                            # Only apply track continuity protection if:
+                            # 1. Track was originally assigned via face (not recovered)
+                            # 2. Face similarity is not EXTREMELY low (> 0.15 = not clearly different person)
+                            # 3. We have ReID features stored for verification
+                            was_recovered = self._track_was_recovered.get(track_id, True)
+                            reid_features = self._wallet_reid_features.get(associated_wallet)
+
+                            if not was_recovered and similarity > 0.15 and reid_features:
+                                # Check if current ReID embedding matches stored one
+                                # This verifies the BODY is still the same person
+                                stored_reid = reid_features.get('embedding')
+                                current_person = None
+                                for p in persons:
+                                    if p.get('track_id') == track_id:
+                                        current_person = p
+                                        break
+
+                                if current_person and stored_reid is not None:
+                                    current_reid = current_person.get('reid_embedding')
+                                    if current_reid is not None:
+                                        try:
+                                            current_reid_arr = np.array(current_reid, dtype=np.float32)
+                                            reid_sim = self.cosine_similarity(current_reid_arr, stored_reid)
+
+                                            # If body looks the same (ReID > 0.85), trust track continuity
+                                            if reid_sim > 0.85:
+                                                should_revoke = False
+                                                if bad_count == self._revoke_after_bad_frames:
+                                                    logger.info(f"🛡️ [TRACK-CONTINUITY] Track {track_id} protected: "
+                                                               f"face_sim={similarity:.3f} (low) but reid_sim={reid_sim:.3f} (high) - "
+                                                               f"trusting body tracking over unreliable face")
+                                        except Exception:
+                                            pass  # If ReID check fails, proceed with normal revocation
+
+                            if should_revoke:
+                                tracks_to_revoke.append((track_id, associated_wallet, similarity, bad_count))
                         else:
                             # Had a good match recently - probably just fast movement, don't revoke
                             if bad_count == self._revoke_after_bad_frames:
@@ -584,6 +636,8 @@ class NativeIdentityService:
                 self._track_face_similarity.pop(track_id, None)  # Clear similarity display
                 self._track_reid_similarity.pop(track_id, None)  # Clear reid similarity
                 self._track_identity_source.pop(track_id, None)  # Clear identity source
+                self._track_original_assignment_time.pop(track_id, None)  # Clear assignment time
+                self._track_was_recovered.pop(track_id, None)  # Clear recovery flag
                 self.total_mismatches_revoked += 1
 
                 logger.warning(
@@ -604,6 +658,13 @@ class NativeIdentityService:
                 current_track_ids.add(track_id)
 
         with self._track_lock:
+            # DIAGNOSTIC: Log every frame when we have wallet mappings
+            if self._track_to_wallet:
+                wallet_tracks = list(self._track_to_wallet.keys())
+                missing = [t for t in wallet_tracks if t not in current_track_ids]
+                if missing:
+                    logger.warning(f"⚠️ [DIAG] Wallet tracks {wallet_tracks} but persons only has {list(current_track_ids)} - MISSING: {missing}")
+
             # Find tracks that are no longer visible
             stale_tracks = []
             for track_id in list(self._track_to_wallet.keys()):
@@ -625,11 +686,11 @@ class NativeIdentityService:
                             'reid_embedding': reid_features.get('embedding'),
                             'lost_time': current_time,
                         }
-                        if self._debug_mode:
-                            logger.info(f"🔄 [RECOVERY] Track {track_id} lost, stored for recovery ({wallet[:8]}...)")
+                        # ALWAYS log recovery storage (diagnostic)
+                        logger.warning(f"🔄 [TRACK-LOST] Track {track_id} disappeared from persons! Stored for recovery ({wallet[:8]}...)")
                     else:
-                        if self._debug_mode:
-                            logger.info(f"🗑️ [CLEANUP] Track {track_id} left frame (was {wallet[:8]}...)")
+                        # ALWAYS log cleanup (diagnostic)
+                        logger.warning(f"🗑️ [TRACK-LOST] Track {track_id} disappeared, NO ReID data for recovery ({wallet[:8]}...)")
 
                 # Clear per-track state
                 self._track_bad_face_count.pop(track_id, None)
@@ -637,6 +698,8 @@ class NativeIdentityService:
                 self._track_face_similarity.pop(track_id, None)
                 self._track_reid_similarity.pop(track_id, None)
                 self._track_identity_source.pop(track_id, None)
+                self._track_original_assignment_time.pop(track_id, None)
+                self._track_was_recovered.pop(track_id, None)
 
     def _get_tracks_with_visible_face(self, persons: List[Dict], faces: List[Dict]) -> Set[int]:
         """
@@ -875,6 +938,11 @@ class NativeIdentityService:
                 self._track_identity_source[track_id] = 'reid_recovery'
                 self._track_reid_similarity[track_id] = best_similarity
 
+                # Mark this track as RECOVERED (less trustworthy than original face assignment)
+                # This means we should be more careful about trusting body-only tracking
+                self._track_original_assignment_time[track_id] = current_time
+                self._track_was_recovered[track_id] = True
+
             del self._pending_recovery[best_wallet]
 
             logger.info(
@@ -1010,6 +1078,13 @@ class NativeIdentityService:
             self._wallet_face_last_seen.clear()
             self._wallet_reid_features.clear()
             self._pending_recovery.clear()
+            self._track_bad_face_count.clear()
+            self._track_last_good_face_time.clear()
+            self._track_face_similarity.clear()
+            self._track_reid_similarity.clear()
+            self._track_identity_source.clear()
+            self._track_original_assignment_time.clear()
+            self._track_was_recovered.clear()
         logger.info("Cleared all track associations and ReID features")
 
     def add_identity(self, wallet_address: str, embedding: np.ndarray,

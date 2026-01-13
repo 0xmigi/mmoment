@@ -581,6 +581,10 @@ class TimelineActivityService:
                 "user_stats": user_stats,
             }
 
+            # Merge competition/prize metadata if present
+            if metadata:
+                cv_activity_meta.update(metadata)
+
             success = self._buffer_activity(
                 wallet_address,
                 activity_content,
