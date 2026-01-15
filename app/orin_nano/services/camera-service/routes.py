@@ -32,8 +32,11 @@ from services.device_signer import DeviceSigner
 # Import native identity service for lightweight identity matching
 from services.native_identity_service import get_native_identity_service
 
-# Import competition settlement service for on-chain escrow settlement
-from services.competition_settlement import settle_competition
+# Import competition settlement service for on-chain escrow settlement (optional)
+try:
+    from services.competition_settlement import settle_competition
+except ImportError:
+    settle_competition = None  # Competition settlement disabled - missing dependencies
 
 # Set up logging
 logger = logging.getLogger("CameraRoutes")

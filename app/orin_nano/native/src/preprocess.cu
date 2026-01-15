@@ -399,9 +399,9 @@ extern "C" void launchCropBGRxToRGBFloat(
  */
 
 /**
- * Warp face region using affine transform for ArcFace input
- * Input: BGR face crop, 5 landmarks
- * Output: 112x112 RGB float CHW normalized to [-1, 1] for ArcFace
+ * Warp face region using affine transform for face recognition input
+ * Input: BGRx face region, 5 landmarks
+ * Output: 112x112 BGR float CHW normalized to [-1, 1] for InsightFace/AdaFace
  */
 __global__ void warpFaceToArcFace(
     const unsigned char* __restrict__ src,
@@ -459,16 +459,17 @@ __global__ void warpFaceToArcFace(
         r = g = b = 127.5f;  // Gray for out of bounds
     }
 
-    // Normalize to [-1, 1] for ArcFace (standard InsightFace normalization)
+    // Normalize to [-1, 1] for face recognition (InsightFace/AdaFace normalization)
     r = (r - 127.5f) / 127.5f;
     g = (g - 127.5f) / 127.5f;
     b = (b - 127.5f) / 127.5f;
 
-    // Write CHW format
+    // Write BGR CHW format for AdaFace (official preprocessing expects BGR)
+    // See: https://github.com/mk-minchul/AdaFace inference.py to_input()
     int pixelIdx = y * DST_SIZE + x;
-    dst[0 * DST_SIZE * DST_SIZE + pixelIdx] = r;
-    dst[1 * DST_SIZE * DST_SIZE + pixelIdx] = g;
-    dst[2 * DST_SIZE * DST_SIZE + pixelIdx] = b;
+    dst[0 * DST_SIZE * DST_SIZE + pixelIdx] = b;  // Blue
+    dst[1 * DST_SIZE * DST_SIZE + pixelIdx] = g;  // Green
+    dst[2 * DST_SIZE * DST_SIZE + pixelIdx] = r;  // Red
 }
 
 /**
@@ -570,13 +571,15 @@ extern "C" void launchWarpFaceToArcFace(
     const float landmarks[5][2],  // 5 landmarks in source image coordinates
     cudaStream_t stream
 ) {
-    // Reference landmarks for 112x112 (standard ArcFace alignment targets)
+    // Reference landmarks for 112x112 - MTCNN alignment (used by AdaFace training)
+    // These differ from InsightFace/ArcFace landmarks by ~3px horizontally for eyes
+    // Using MTCNN landmarks since AdaFace was trained with this alignment
     const float dstPts[5][2] = {
-        {38.2946f, 51.6963f},   // Left eye
-        {73.5318f, 51.5014f},   // Right eye
-        {56.0252f, 71.7366f},   // Nose
-        {41.5493f, 92.3655f},   // Left mouth
-        {70.7299f, 92.2041f}    // Right mouth
+        {35.3437f, 51.6963f},   // Left eye  (MTCNN: closer to center than ArcFace)
+        {76.4538f, 51.5014f},   // Right eye (MTCNN: closer to center than ArcFace)
+        {56.0294f, 71.7366f},   // Nose
+        {39.1409f, 92.3655f},   // Left mouth
+        {73.1849f, 92.2041f}    // Right mouth
     };
 
     // Compute similarity transform using closed-form Procrustes solution (5-point)

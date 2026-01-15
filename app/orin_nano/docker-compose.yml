@@ -41,11 +41,14 @@ services:
       - ./native/build:/app/native/build:ro
       - ./native/yolov8n-pose-native.engine:/app/native/yolov8n-pose-native.engine:ro
       - ./native/retinaface.engine:/app/native/retinaface.engine:ro
+      - ./native/scrfd_10g.engine:/app/native/scrfd_10g.engine:ro
       - ./native/arcface_r50.engine:/app/native/arcface_r50.engine:ro
+      - ./native/adaface_ir50.engine:/app/native/adaface_ir50.engine:ro
       - ./native/osnet_x0_25.engine:/app/native/osnet_x0_25.engine:ro
     # Camera devices - native server now runs inside container
     # DRI devices required for headless EGL on Jetson
     devices:
+      # Logitech StreamCam on video0/video1
       - /dev/video0:/dev/video0
       - /dev/video1:/dev/video1
       - /dev/dri:/dev/dri

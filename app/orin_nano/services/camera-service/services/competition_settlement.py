@@ -43,7 +43,10 @@ import base64
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
-import httpx
+try:
+    import httpx
+except ImportError:
+    httpx = None  # Competition settlement will be disabled
 from solana.rpc.async_api import AsyncClient
 from solana.rpc.commitment import Confirmed
 from solders.message import Message

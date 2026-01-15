@@ -37,6 +37,76 @@ struct FaceRecognition {
 class TRTLogger;
 
 /**
+ * SCRFD detector - InsightFace's improved face detector for small faces
+ * Output: 9 tensors (score, bbox, kps at 3 FPN levels: stride 8, 16, 32)
+ */
+class SCRFDEngine {
+public:
+    SCRFDEngine();
+    ~SCRFDEngine();
+
+    bool loadEngine(const std::string& enginePath);
+
+    // Run face detection on preprocessed input (GPU buffer, RGB float CHW, 640x640)
+    // Returns detected faces with landmarks in the original crop coordinates
+    std::vector<FaceDetection> detect(void* gpuInput, int cropW, int cropH,
+                                       float scaleRatio, float confThreshold = 0.5f,
+                                       float nmsThreshold = 0.4f);
+
+private:
+    bool allocateBuffers();
+    void freeBuffers();
+
+    // Anchor generation for SCRFD
+    void initAnchors();
+
+    // Generate proposals from a single FPN level
+    void generateProposals(int stride, int featW, int featH, int numAnchors,
+                          const float* scoreData, const float* bboxData, const float* kpsData,
+                          float confThreshold, float scaleRatio, int wpad, int hpad,
+                          int origW, int origH,
+                          std::vector<FaceDetection>& proposals);
+
+    std::unique_ptr<nvinfer1::IRuntime> m_runtime;
+    std::unique_ptr<nvinfer1::ICudaEngine> m_engine;
+    std::unique_ptr<nvinfer1::IExecutionContext> m_context;
+
+    // Pre-allocated GPU buffers
+    void* m_inputBuffer = nullptr;
+    void* m_score8Buffer = nullptr;
+    void* m_bbox8Buffer = nullptr;
+    void* m_kps8Buffer = nullptr;
+    void* m_score16Buffer = nullptr;
+    void* m_bbox16Buffer = nullptr;
+    void* m_kps16Buffer = nullptr;
+    void* m_score32Buffer = nullptr;
+    void* m_bbox32Buffer = nullptr;
+    void* m_kps32Buffer = nullptr;
+
+    // Host buffers for output data
+    std::vector<float> m_score8Host, m_bbox8Host, m_kps8Host;
+    std::vector<float> m_score16Host, m_bbox16Host, m_kps16Host;
+    std::vector<float> m_score32Host, m_bbox32Host, m_kps32Host;
+
+    // Anchor configuration (2 anchors per position, 3 strides)
+    float m_anchorSizes[3][2];  // [stride_idx][anchor_idx]
+
+    cudaStream_t m_stream = nullptr;
+    std::unique_ptr<TRTLogger> m_logger;
+
+    // Constants
+    static constexpr int INPUT_W = 640;
+    static constexpr int INPUT_H = 640;
+    static constexpr int FEAT_W_8 = 80;
+    static constexpr int FEAT_H_8 = 80;
+    static constexpr int FEAT_W_16 = 40;
+    static constexpr int FEAT_H_16 = 40;
+    static constexpr int FEAT_W_32 = 20;
+    static constexpr int FEAT_H_32 = 20;
+    static constexpr int NUM_ANCHORS = 2;
+};
+
+/**
  * RetinaFace detector - detects faces and landmarks in an image
  */
 class RetinaFaceEngine {
@@ -113,14 +183,15 @@ private:
 /**
  * Combined InsightFace pipeline
  * Handles full flow: person crop -> face detection -> alignment -> embedding
+ * Now uses SCRFD for better small face detection
  */
 class InsightFacePipeline {
 public:
     InsightFacePipeline();
     ~InsightFacePipeline();
 
-    // Load both engines
-    bool initialize(const std::string& retinaFacePath, const std::string& arcFacePath);
+    // Load both engines (detector path can be SCRFD or RetinaFace)
+    bool initialize(const std::string& detectorPath, const std::string& arcFacePath);
 
     // Process a person crop and return face recognitions
     // Input: Full frame (BGRx GPU buffer) + person bbox
@@ -140,8 +211,10 @@ public:
     bool getEmbeddingFromAligned(void* alignedFaceGpu, float* embedding);
 
 private:
-    RetinaFaceEngine m_detector;
+    SCRFDEngine m_scrfdDetector;       // SCRFD for better small face detection
+    RetinaFaceEngine m_retinaDetector; // RetinaFace fallback (not used currently)
     ArcFaceEngine m_recognizer;
+    bool m_useSCRFD = true;            // Use SCRFD by default
 
     // GPU buffers for intermediate results
     void* m_cropBuffer = nullptr;      // Person crop resized for RetinaFace (640x640)
