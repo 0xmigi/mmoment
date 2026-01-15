@@ -77,18 +77,25 @@ export function PushupConfigModal({
       setIsLoading(true);
       setError(null);
 
-      // Get currently recognized faces from the camera
+      // Get users with recognition tokens from the camera
+      // NOTE: This only returns users currently visible in frame
+      // TODO: Jetson needs an endpoint to list all checked-in users with recognition tokens
+      console.log('[PushupConfigModal] Fetching recognized users from camera:', cameraId);
       const result = await unifiedCameraService.recognizeFaces(cameraId);
+      console.log('[PushupConfigModal] recognizeFaces result:', result);
 
       if (result.success && result.data?.recognized_data) {
+        console.log('[PushupConfigModal] recognized_data:', result.data.recognized_data);
         const users: Competitor[] = Object.entries(result.data.recognized_data).map(([wallet, data]: [string, any]) => ({
           wallet_address: wallet,
           display_name: data.display_name || `${wallet.substring(0, 8)}...${wallet.substring(wallet.length - 4)}`,
           isCurrentUser: wallet === walletAddress
         }));
+        console.log('[PushupConfigModal] Parsed users:', users);
 
         setRecognizedUsers(users);
       } else {
+        console.log('[PushupConfigModal] No recognized users, using fallback with current user');
         // If no recognized users, at least add the current user
         if (walletAddress) {
           setRecognizedUsers([{
@@ -99,7 +106,7 @@ export function PushupConfigModal({
         }
       }
     } catch (err) {
-      console.error('Error fetching recognized users:', err);
+      console.error('[PushupConfigModal] Error fetching recognized users:', err);
       setError('Failed to fetch recognized users');
     } finally {
       setIsLoading(false);
@@ -145,7 +152,11 @@ export function PushupConfigModal({
       let createdAt: number | null = null;
 
       if (competitionMode !== 'none' && selectedCamera?.devicePubkey) {
-        console.log('[PushupConfigModal] Creating on-chain competition escrow...', { mode: competitionMode });
+        console.log('[PushupConfigModal] Creating on-chain competition escrow...', {
+          mode: competitionMode,
+          cameraPublicKey: selectedCamera.publicKey,
+          cameraDevicePubkey: selectedCamera.devicePubkey,
+        });
 
         if (competitionMode === 'bet') {
           // Bet mode: everyone stakes, winner takes all
@@ -192,6 +203,9 @@ export function PushupConfigModal({
       sessionStorage.setItem('competition_duration', duration.toString());
       sessionStorage.setItem('competition_app', 'pushup');
       sessionStorage.setItem('competition_mode', competitionMode);
+      if (walletAddress) {
+        sessionStorage.setItem('competition_user_wallet', walletAddress);
+      }
 
       // Store escrow info if created
       if (escrowPda) {

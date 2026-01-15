@@ -235,6 +235,7 @@ export function CompetitionControls({
 
   const handleStop = async () => {
     setIsLoading(true);
+
     try {
       // Build competition metadata from sessionStorage
       const competitionMode = sessionStorage.getItem('competition_mode') || 'none';
@@ -252,19 +253,26 @@ export function CompetitionControls({
       console.log('[CompetitionControls] Ending competition with meta:', competitionMeta);
 
       // End the CV competition on Jetson with competition metadata
-      // Note: The Jetson will handle calling settle_competition on-chain
-      // since it has the camera's device key required to sign the settlement
+      // The Jetson handles settlement and includes result in cv_activity_meta for timeline
       const result = await unifiedCameraService.endCompetition(cameraId, competitionMeta);
+
       if (result.success) {
         setIsActive(false);
+
+        // Log settlement result (will appear in timeline via cv_activity_meta)
+        const jetsonResult = result.data?.result;
+        const settlement = jetsonResult?.settlement;
+        const settlementError = jetsonResult?.settlement_error;
+
+        if (settlement?.success) {
+          console.log('[CompetitionControls] Settlement succeeded:', settlement);
+        } else if (settlementError) {
+          console.error('[CompetitionControls] Settlement failed:', settlementError);
+        }
+
         // Deactivate the app
         await unifiedCameraService.deactivateApp(cameraId);
         setHasLoadedApp(false);
-
-        // Refresh escrow status to see settlement results
-        if (escrowInfo?.pda) {
-          await refreshEscrowStatus();
-        }
 
         // Clear session storage
         clearSessionStorage();
@@ -283,6 +291,9 @@ export function CompetitionControls({
     sessionStorage.removeItem('competition_escrow_pda');
     sessionStorage.removeItem('competition_escrow_created_at');
     sessionStorage.removeItem('competition_stake_sol');
+    sessionStorage.removeItem('competition_user_wallet');
+    sessionStorage.removeItem('competition_mode');
+    sessionStorage.removeItem('competition_target_pushups');
     setEscrowInfo(null);
     setEscrowCompetition(null);
   };

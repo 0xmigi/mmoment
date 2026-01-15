@@ -167,7 +167,7 @@ class TimelineService {
       });
 
       // Process recent events from backend (source of truth)
-      // Filter to only show events from the current session (after most recent check_in)
+      // Show ALL events at this camera (not filtered by session - camera timeline shows all activity)
       this.socket.on('recentEvents', (events: TimelineEvent[]) => {
         if (!events || events.length === 0) {
           console.log('[Timeline] No recent events from backend');
@@ -176,17 +176,12 @@ class TimelineService {
 
         console.log(`[Timeline] Received ${events.length} events from backend (source of truth)`);
 
-        // Find the most recent check_in event for this camera to determine session start
+        // Sort by timestamp (newest first) - no session filtering for camera timeline
         const sortedEvents = [...events].sort((a, b) => b.timestamp - a.timestamp);
-        const lastCheckIn = sortedEvents.find(e => e.type === 'check_in');
-        const sessionStart = lastCheckIn?.timestamp || 0;
-
-        // Only include events from AFTER the most recent check_in
-        const sessionEvents = sortedEvents.filter(e => e.timestamp >= sessionStart);
-        console.log(`[Timeline] Filtered to ${sessionEvents.length} events from current session (started ${lastCheckIn ? new Date(sessionStart).toLocaleTimeString() : 'unknown'})`);
+        console.log(`[Timeline] Processing ${sortedEvents.length} events for camera timeline`);
 
         // Merge with existing events, avoiding duplicates
-        sessionEvents.forEach(event => {
+        sortedEvents.forEach(event => {
           const existingIndex = this.events.findIndex(e => e.id === event.id);
           if (existingIndex === -1) {
             // Insert in chronological order (newest first)

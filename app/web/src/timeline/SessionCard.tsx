@@ -46,6 +46,18 @@ interface SessionTimelineEventFromAPI {
       stats: { reps?: number; [key: string]: unknown };
     }>;
     user_stats: { reps?: number; [key: string]: unknown };
+    // Competition/prize metadata (if financialized)
+    competition?: {
+      mode: 'none' | 'bet' | 'prize';
+      escrowPda?: string;
+      stakeAmountSol: number;
+      targetReps?: number;
+      won: boolean;
+      amountWonSol: number;
+      amountLostSol: number;
+      lostTo?: string;
+      settlementTxId?: string;
+    };
   };
 }
 
@@ -184,6 +196,15 @@ export function SessionCard({ session, defaultExpanded = false }: SessionCardPro
       const events: TimelineEvent[] = (data.events || []).map(apiEventToTimelineEvent);
 
       console.log(`[SessionCard] Loaded ${events.length} timeline events for session ${session.sessionId.slice(0, 8)}...`);
+
+      // Debug: Log cv_activity events with their competition data
+      events.forEach((event, i) => {
+        if (event.type === 'cv_activity') {
+          console.log(`[SessionCard] CV Activity ${i}:`, event);
+          console.log(`[SessionCard] CV Activity ${i} cvActivity:`, event.cvActivity);
+          console.log(`[SessionCard] CV Activity ${i} competition:`, event.cvActivity?.competition);
+        }
+      });
 
       setTimelineEvents(events);
     } catch (err) {

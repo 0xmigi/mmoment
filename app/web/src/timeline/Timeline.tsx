@@ -288,7 +288,11 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
 
     // Subscribe to timeline events
     const unsubscribe = timelineService.subscribe((event) => {
-      console.log('Timeline event received:', event);
+      console.log('[Timeline] Event received:', event);
+      if (event.type === 'cv_activity') {
+        console.log('[Timeline] CV Activity cvActivity:', event.cvActivity);
+        console.log('[Timeline] CV Activity competition:', event.cvActivity?.competition);
+      }
       setEvents(prev => {
         // Find the correct position to insert the event (newest first)
         const index = prev.findIndex(e => e.timestamp < event.timestamp);
@@ -330,17 +334,66 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraId, initialEvents]);
 
-  // Filter events based on selected filter
+  // Get current user's wallet address
+  const currentUserWallet = useMemo(() => {
+    if (userAddress) return userAddress;
+    // Try to get from Dynamic user's verified credentials
+    const walletCred = user?.verifiedCredentials?.find(cred => cred.address);
+    return walletCred?.address;
+  }, [userAddress, user?.verifiedCredentials]);
+
+  // Filter events based on selected filter AND current user's session
+  // Camera timeline shows events since the current user's most recent check-in
+  // When user checks out, their session ends and timeline clears
   const filteredEvents = useMemo(() => {
-    // Sort events by timestamp (newest first) before filtering
-    const sortedEvents = [...events].sort((a, b) => b.timestamp - a.timestamp);
-    return sortedEvents.filter(event => {
-      if (filter === 'my' && userAddress) {
-        return event.user.address === userAddress;
+    // Sort events by timestamp (oldest first) to process session state
+    const sortedByTime = [...events].sort((a, b) => a.timestamp - b.timestamp);
+
+    // Find current user's session state
+    let userSessionStart: number | null = null;
+    let userHasCheckedOut = false;
+
+    if (currentUserWallet && variant === 'camera') {
+      for (const event of sortedByTime) {
+        if (event.user?.address === currentUserWallet) {
+          if (event.type === 'check_in') {
+            userSessionStart = event.timestamp;
+            userHasCheckedOut = false; // New check-in resets checkout state
+          } else if (event.type === 'check_out' || event.type === 'auto_check_out') {
+            userHasCheckedOut = true;
+          }
+        }
       }
+    }
+
+    // Sort newest first for display
+    const sortedEvents = [...events].sort((a, b) => b.timestamp - a.timestamp);
+
+    return sortedEvents.filter(event => {
+      // Apply 'my' filter if specified
+      if (filter === 'my' && userAddress) {
+        if (event.user.address !== userAddress) return false;
+      }
+
+      // For camera variant: only show events from current user's active session
+      if (variant === 'camera' && currentUserWallet) {
+        // If user has checked out, show nothing (session ended)
+        if (userHasCheckedOut) {
+          return false;
+        }
+        // If user hasn't checked in yet, show nothing
+        if (!userSessionStart) {
+          return false;
+        }
+        // Only show events from after the user's check-in
+        if (event.timestamp < userSessionStart) {
+          return false;
+        }
+      }
+
       return true;
     });
-  }, [events, filter, userAddress]);
+  }, [events, filter, userAddress, currentUserWallet, variant]);
 
   // Get display events based on variant and display count
   const displayEvents = useMemo(() => {

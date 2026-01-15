@@ -13,6 +13,7 @@ import { createSignedRequest } from './request-signer';
 import { timelineService } from '../timeline/timeline-service';
 import { useSocialProfile } from '../auth/social/useSocialProfile';
 import { checkUserHasSessionChain, createUserSessionChain } from '../hooks/useUserSessionChain';
+import { CONFIG } from '../core/config';
 
 // Define types for specific structures
 interface CameraAccountData {
@@ -81,12 +82,33 @@ export const fetchCameraByPublicKey = async (publicKey: string, connection: Conn
       
       if (cameraAccount) {
         console.log('[CameraProvider] Camera account found:', cameraAccount);
+
+        // Always fetch device pubkey from Jetson API (on-chain value may be stale/wrong)
+        let devicePubkey: string | undefined;
+        try {
+          const jetsonUrl = CONFIG.getCameraApiUrlByPda(publicKey);
+          console.log('[CameraProvider] Fetching device pubkey from Jetson API:', jetsonUrl);
+          const response = await fetch(`${jetsonUrl}/api/status`);
+          if (response.ok) {
+            const statusData = await response.json();
+            if (statusData.device_signature?.device_pubkey) {
+              devicePubkey = statusData.device_signature.device_pubkey;
+              console.log('[CameraProvider] Got device pubkey from Jetson:', devicePubkey);
+            }
+          }
+        } catch (err) {
+          console.warn('[CameraProvider] Failed to fetch device pubkey from Jetson:', err);
+          // Fall back to on-chain value if Jetson API fails
+          devicePubkey = cameraAccount.devicePubkey?.toString() || undefined;
+          console.log('[CameraProvider] Using on-chain devicePubkey as fallback:', devicePubkey);
+        }
+
         const cameraData: CameraData = {
           publicKey,
           owner: cameraAccount.owner.toString(),
           isActive: cameraAccount.isActive,
           activityCounter: cameraAccount.activityCounter?.toNumber() || 0,
-          devicePubkey: cameraAccount.devicePubkey?.toString() || undefined,
+          devicePubkey,
           metadata: {
             name: cameraAccount.metadata?.name || 'Unnamed Camera',
             model: cameraAccount.metadata?.model || 'Unknown Model',
@@ -94,10 +116,10 @@ export const fetchCameraByPublicKey = async (publicKey: string, connection: Conn
             location: null
           }
         };
-        
+
         // Cache the result
         accountInfoCache.set(`camera_account_${key}`, { data: cameraData, timestamp: now });
-        
+
         return cameraData;
       }
     } catch (error) {
