@@ -167,26 +167,6 @@ const getCameraHardwareUrl = () => {
   return centralCameraUrl;
 };
 
-// Function to get the Jetson Orin Nano camera URL (legacy - now uses PDA-based URLs)
-const getJetsonCameraUrl = () => {
-  // Override Jetson URL if specified in environment
-  const overrideUrl = import.meta.env.VITE_JETSON_CAMERA_URL;
-  if (overrideUrl) {
-    return overrideUrl;
-  }
-
-  // For local development, check if we should use localhost
-  const forceLocal = import.meta.env.VITE_FORCE_LOCAL === 'true';
-  if (forceLocal && window.location.hostname === 'localhost') {
-    console.log('Using local Jetson camera API (forced by VITE_FORCE_LOCAL)');
-    return "http://localhost:5002";
-  }
-
-  // Default to the Jetson camera service URL (legacy)
-  // This maintains backward compatibility
-  return "https://jetson.mmoment.xyz";
-};
-
 // Get WebSocket URL for timeline updates from Railway backend
 const getTimelineWebSocketUrl = () => {
   // Check for environment variable override first
@@ -222,9 +202,7 @@ export const CONFIG = {
   // Camera API is your Pi5 device with the Python/Flask server
   CAMERA_API_URL: getCameraApiUrl(),
   CAMERA_HARDWARE_URL: getCameraHardwareUrl(),
-  // Jetson Orin Nano camera service (legacy)
-  JETSON_CAMERA_URL: getJetsonCameraUrl(),
-  // New PDA-based URL generation functions
+  // PDA-based URL generation functions (all cameras use PDA-based URLs)
   getCameraApiUrlByPda,
   pdaToSubdomain,
   getCameraUrlWithFallback,
@@ -242,21 +220,19 @@ export const CONFIG = {
   JETSON_CAMERA_PDA: 'ArQxL9kzhZ8QhJtNodnuMvkd3HGdkwSsTzbD4qD9QqKv',
   isUsingDifferentLocalPorts: isUsingDifferentLocalPorts(),
   
-  // Known camera configurations with PDA-based URLs
+  // Known camera configurations (URLs are generated from PDA)
   KNOWN_CAMERAS: {
     // Jetson Orin Nano
     'ArQxL9kzhZ8QhJtNodnuMvkd3HGdkwSsTzbD4qD9QqKv': {
       type: 'jetson',
       name: 'Jetson Orin Nano Camera',
-      description: 'NVIDIA Jetson Orin Nano with advanced computer vision',
-      legacyUrl: 'https://jetson.mmoment.xyz'
+      description: 'NVIDIA Jetson Orin Nano with advanced computer vision'
     },
     // Pi5 Camera
     'EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA': {
       type: 'pi5',
       name: 'Raspberry Pi 5 Camera',
-      description: 'Raspberry Pi 5 with camera module',
-      legacyUrl: 'https://pi5-middleware.mmoment.xyz'
+      description: 'Raspberry Pi 5 with camera module'
     }
   }
 };

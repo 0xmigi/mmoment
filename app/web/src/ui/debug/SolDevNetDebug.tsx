@@ -414,29 +414,10 @@ export function SolDevNetDebug() {
           throw new Error(`HTTP error: ${deviceInfoResponse.status}`);
         }
       } catch (pdaError) {
-        console.warn('PDA-based URL failed, trying legacy URL:', pdaError);
-        
-        // Fallback: Try legacy URL for existing demo device
-        try {
-          const LEGACY_JETSON_URL = 'https://jetson.mmoment.xyz';
-          const deviceInfoResponse = await fetch(`${LEGACY_JETSON_URL}/api/device-info`);
-          if (deviceInfoResponse.ok) {
-            const deviceInfo = await deviceInfoResponse.json();
-            if (deviceInfo.device_pubkey) {
-              devicePubkey = new PublicKey(deviceInfo.device_pubkey);
-              console.log('✅ Fetched device pubkey via legacy URL:', devicePubkey.toString());
-            } else {
-              throw new Error('No device_pubkey in legacy response');
-            }
-          } else {
-            throw new Error(`Legacy HTTP error: ${deviceInfoResponse.status}`);
-          }
-        } catch (legacyError) {
-          console.warn('All HTTP attempts failed, using demo device key:', legacyError);
-          // Final fallback for demo
-          devicePubkey = new PublicKey('BXqMyo3Uh6SiLr3xh9iEBCY9AgV1aUciymK37SpNgbNE');
-          setStatusMessage('Using demo device key (device unavailable)');
-        }
+        console.warn('PDA-based URL failed, using demo device key:', pdaError);
+        // Fallback for demo when camera is unavailable
+        devicePubkey = new PublicKey('BXqMyo3Uh6SiLr3xh9iEBCY9AgV1aUciymK37SpNgbNE');
+        setStatusMessage('Using demo device key (device unavailable)');
       }
 
       // Use `any` for args type for simplicity

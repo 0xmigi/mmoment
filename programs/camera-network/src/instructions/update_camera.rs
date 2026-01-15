@@ -40,7 +40,7 @@ pub fn handler(ctx: Context<UpdateCamera>, args: UpdateCameraArgs) -> Result<()>
     if let Some(features) = args.features {
         camera.features = features;
     }
-    
+
     // Update timestamp
     camera.last_activity_at = Clock::get()?.unix_timestamp;
     
