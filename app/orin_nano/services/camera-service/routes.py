@@ -1885,8 +1885,75 @@ def register_routes(app):
 
     @app.route("/api/face/recognize", methods=["POST"])
     def api_face_recognize():
-        """Standardized face recognition endpoint"""
-        return recognize_face()
+        """
+        Get all checked-in users at this camera.
+
+        This endpoint does NOT require session validation because:
+        - It's used for competition setup to list who can participate
+        - It returns public info (who's checked in at a public camera)
+        - The actual competition/app actions DO require session validation
+        """
+        try:
+            from services.identity_store import get_identity_store
+            identity_store = get_identity_store()
+            identity_service = get_native_identity_service()
+            session_service = get_services()["session"]
+
+            # Get current recognition state
+            status = identity_service.get_status()
+
+            # Get ALL checked-in users from session service (not just those with loaded tokens)
+            all_sessions = session_service.get_all_sessions()
+            session_wallets = set(s.wallet_address for s in all_sessions if hasattr(s, 'wallet_address'))
+
+            # Also include anyone in identity store
+            identity_wallets = set(identity_store.get_checked_in_wallets())
+
+            # Union of both
+            all_checked_in_wallets = session_wallets | identity_wallets
+
+            logger.info(f"[RECOGNIZE] Sessions: {len(session_wallets)}, Identity store: {len(identity_wallets)}, Total: {len(all_checked_in_wallets)}")
+
+            # Build recognized_data with display names for each wallet
+            recognized_data = {}
+            for w in all_checked_in_wallets:
+                identity = identity_store.get_identity(w)
+                if identity:
+                    recognized_data[w] = {
+                        "confidence": 1.0,
+                        "display_name": identity.get_display_name(),
+                        "username": identity.username,
+                        "is_checked_in": True,
+                        "has_recognition_token": True,
+                    }
+                else:
+                    # Try to get display_name from session
+                    session = session_service.get_session_by_wallet(w)
+                    display_name = f"{w[:8]}..."
+                    username = None
+                    if session and hasattr(session, 'user_profile') and session.user_profile:
+                        display_name = session.user_profile.get('display_name') or session.user_profile.get('displayName') or display_name
+                        username = session.user_profile.get('username')
+                    recognized_data[w] = {
+                        "confidence": 0.0,
+                        "display_name": display_name,
+                        "username": username,
+                        "is_checked_in": True,
+                        "has_recognition_token": False,
+                    }
+
+            return jsonify({
+                "success": True,
+                "mode": "native",
+                "detected_faces": status.get("total_faces_processed", 0),
+                "recognized_faces": status.get("currently_tracked", 0),
+                "recognized_data": recognized_data,
+            })
+        except Exception as e:
+            logger.error(f"[RECOGNIZE] Error: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return jsonify({"success": False, "error": str(e)}), 500
 
     @app.route("/api/gesture/current", methods=["GET"])
     def api_gesture_current():
@@ -3413,7 +3480,19 @@ def register_routes(app):
 
             # Get current recognition state
             status = identity_service.get_status()
-            checked_in_wallets = identity_store.get_checked_in_wallets()
+
+            # Get ALL checked-in users from session service (not just those with loaded tokens)
+            # This ensures competition selection shows everyone who is checked in
+            all_sessions = session_service.get_all_sessions()
+            session_wallets = set(s.wallet_address for s in all_sessions if hasattr(s, 'wallet_address'))
+
+            # Also include anyone in identity store (in case session expired but token still loaded)
+            identity_wallets = set(identity_store.get_checked_in_wallets())
+
+            # Union of both - all checked-in users
+            all_checked_in_wallets = session_wallets | identity_wallets
+
+            logger.info(f"[RECOGNIZE] Sessions: {len(session_wallets)}, Identity store: {len(identity_wallets)}, Total: {len(all_checked_in_wallets)}")
 
             # Check if requested wallet is being tracked
             wallet_recognized = False
@@ -3434,13 +3513,44 @@ def register_routes(app):
                 _, jpeg_data = cv2.imencode(".jpg", frame)
                 image_base64 = base64.b64encode(jpeg_data).decode("utf-8")
 
+            # Build recognized_data with display names for each wallet
+            # Include ALL checked-in users, not just those with loaded recognition tokens
+            recognized_data = {}
+            for w in all_checked_in_wallets:
+                identity = identity_store.get_identity(w)
+                if identity:
+                    # User has recognition token loaded - full data available
+                    recognized_data[w] = {
+                        "confidence": 1.0,
+                        "display_name": identity.get_display_name(),
+                        "username": identity.username,
+                        "is_checked_in": True,
+                        "has_recognition_token": True,
+                    }
+                else:
+                    # User checked in but no recognition token loaded yet
+                    # Try to get display_name from session
+                    session = session_service.get_session_by_wallet(w)
+                    display_name = f"{w[:8]}..."
+                    username = None
+                    if session and hasattr(session, 'user_profile') and session.user_profile:
+                        display_name = session.user_profile.get('display_name') or session.user_profile.get('displayName') or display_name
+                        username = session.user_profile.get('username')
+                    recognized_data[w] = {
+                        "confidence": 0.0,  # No face recognition confidence yet
+                        "display_name": display_name,
+                        "username": username,
+                        "is_checked_in": True,
+                        "has_recognition_token": False,
+                    }
+
             return jsonify(
                 {
                     "success": True,
                     "mode": "native",
                     "detected_faces": status.get("total_faces_processed", 0),
                     "recognized_faces": status.get("currently_tracked", 0),
-                    "recognized_data": {w: {"confidence": 1.0} for w in checked_in_wallets},
+                    "recognized_data": recognized_data,
                     "wallet_recognized": wallet_recognized,
                     "wallet_confidence": wallet_confidence,
                     "has_valid_session": has_valid_session,

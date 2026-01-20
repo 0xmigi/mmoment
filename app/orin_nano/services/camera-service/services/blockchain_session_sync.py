@@ -21,6 +21,7 @@ import os
 from typing import Dict, Set, Optional
 
 from .identity_store import get_identity_store
+from .native_identity_service import get_native_identity_service
 
 logger = logging.getLogger(__name__)
 
@@ -220,12 +221,20 @@ class BlockchainSessionSync:
             if response.status_code != 200:
                 logger.warning(f"⚠️  No recognition token found on-chain for {wallet_address} (HTTP {response.status_code})")
                 logger.info(f"ℹ️  User can still use camera without face recognition")
+                # Still store the profile so display_name is preserved for when they enroll
+                if profile and (profile.get('display_name') or profile.get('username')):
+                    self.identity_store.check_in(wallet_address, face_embedding=None, profile=profile)
+                    logger.info(f"✅ Stored profile for {wallet_address[:8]}... (display_name={profile.get('display_name')})")
                 return
 
             token_data = response.json()
             if not token_data.get('success'):
                 logger.warning(f"⚠️  No recognition token found for {wallet_address}: {token_data.get('error')}")
                 logger.info(f"ℹ️  User can still use camera without face recognition")
+                # Still store the profile so display_name is preserved for when they enroll
+                if profile and (profile.get('display_name') or profile.get('username')):
+                    self.identity_store.check_in(wallet_address, face_embedding=None, profile=profile)
+                    logger.info(f"✅ Stored profile for {wallet_address[:8]}... (display_name={profile.get('display_name')})")
                 return
 
             encrypted_token_package = token_data.get('token_package')
@@ -458,6 +467,15 @@ class BlockchainSessionSync:
                     logger.debug(f"[CHECKOUT] No identity data found for {wallet_address[:8]}...")
             except Exception as e:
                 logger.warning(f"[CHECKOUT] Error removing identity data: {e}")
+
+        # Clear track associations from NativeIdentityService
+        # This ensures the user is no longer recognized after checkout
+        try:
+            native_identity_service = get_native_identity_service()
+            native_identity_service.clear_wallet_tracks(wallet_address)
+            logger.info(f"[CHECKOUT] Cleared track associations for {wallet_address[:8]}...")
+        except Exception as e:
+            logger.warning(f"[CHECKOUT] Error clearing track associations: {e}")
 
         # Check if this was the last user - disable face boxes if so
         if self.session_service and self.face_service:

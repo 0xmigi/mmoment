@@ -1309,6 +1309,33 @@ class NativeIdentityService:
             self._track_was_recovered.clear()
         logger.info("Cleared all track associations and ReID features")
 
+    def clear_wallet_tracks(self, wallet_address: str):
+        """
+        Clear all track associations and ReID features for a specific wallet.
+        Called on checkout to ensure the user is no longer recognized.
+
+        Args:
+            wallet_address: User's wallet address to clear
+        """
+        with self._track_lock:
+            # Find and remove track_id -> wallet mapping
+            track_id = self._wallet_to_track.pop(wallet_address, None)
+            if track_id is not None:
+                self._track_to_wallet.pop(track_id, None)
+                self._track_face_similarity.pop(track_id, None)
+                self._track_reid_similarity.pop(track_id, None)
+                self._track_identity_source.pop(track_id, None)
+                self._track_original_assignment_time.pop(track_id, None)
+                self._track_was_recovered.pop(track_id, None)
+
+            # Clear wallet-specific data
+            self._wallet_face_last_seen.pop(wallet_address, None)
+            self._wallet_reid_features.pop(wallet_address, None)
+            self._pending_recovery.pop(wallet_address, None)
+            self._last_appearance_update.pop(wallet_address, None)
+
+        logger.info(f"Cleared track associations for {wallet_address[:8]}... (track_id={track_id})")
+
     def add_identity(self, wallet_address: str, embedding: np.ndarray,
                      metadata: Dict = None) -> bool:
         """
