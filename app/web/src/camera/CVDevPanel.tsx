@@ -79,7 +79,8 @@ export function CVDevPanel({ cameraId, isExpanded = true, onToggleExpand }: CVDe
 
   // Current user info
   const myWalletAddress = primaryWallet?.address;
-  const myDisplayName = user?.username || user?.email?.split('@')[0] || 'Me';
+  // NEVER use email as display name fallback - use username or generic 'Me'
+  const myDisplayName = user?.username || 'Me';
 
   // Format time as MM:SS
   const formatTime = (seconds: number): string => {

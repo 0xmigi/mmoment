@@ -193,7 +193,7 @@ const SELECTED_CAMERA_STORAGE_KEY = 'selected_camera';
 const SESSION_STORAGE_PREFIX = 'mmoment_session_';
 
 export function CameraProvider({ children }: { children: React.ReactNode }) {
-  const { primaryWallet, user } = useDynamicContext();
+  const { primaryWallet } = useDynamicContext();
   const { primaryProfile } = useSocialProfile();
   const { program, loading: programLoading } = useProgram();
   // Get connection for session chain creation
@@ -635,8 +635,10 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
       // Step 3: Call Jetson check-in endpoint
       const result = await unifiedCameraService.checkin(cameraId, {
         ...signedParams,
-        display_name: primaryProfile?.displayName || user?.alias || user?.email?.split('@')[0] || undefined,
-        username: primaryProfile?.username || user?.username || undefined
+        // NEVER use email address as display name fallback - it exposes PII
+        // Fallback chain: social displayName → social username → undefined (backend can use wallet)
+        display_name: primaryProfile?.displayName || primaryProfile?.username || undefined,
+        username: primaryProfile?.username || undefined
       });
 
       if (result.success && result.data) {
