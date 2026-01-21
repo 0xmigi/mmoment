@@ -1,14 +1,18 @@
-// Session Access Key Storage Service
+// Session Access Key Storage Service & Orphaned Session Cleanup
 // In the new privacy architecture, sessions are managed off-chain by Jetson.
-// This service stores access keys for users when sessions end (fallback for when user doesn't store their own keys).
+// This service:
+// 1. Stores access keys for users when sessions end (fallback for when user doesn't store their own keys)
+// 2. Cleans up orphaned sessions (CHECK_IN with no CHECK_OUT after timeout)
 import { Connection, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet, BN } from '@coral-xyz/anchor';
 import { IDL } from './idl';
 import { Server } from 'socket.io';
-import { updateActivityTransactionId } from './database';
+import { updateActivityTransactionId, cleanupOrphanedSessions, markAbandonedSessions } from './database';
 
 const PROGRAM_ID = new PublicKey('E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL');
 const RETRY_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes for retrying pending keys
+const ORPHAN_CLEANUP_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes before auto-closing orphaned sessions
+const ABANDONED_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours before marking as abandoned
 
 // Pending access keys to be stored (received from Jetson on session end)
 interface PendingAccessKey {
@@ -90,12 +94,27 @@ function startRetryInterval() {
     return;
   }
 
-  // Retry pending keys periodically
-  retryIntervalId = setInterval(() => {
-    processAllPendingKeys();
+  // Run cleanup tasks periodically
+  retryIntervalId = setInterval(async () => {
+    // 1. Process pending access keys
+    await processAllPendingKeys();
+
+    // 2. Clean up orphaned sessions (CHECK_IN with no CHECK_OUT after 30 min)
+    try {
+      await cleanupOrphanedSessions(ORPHAN_CLEANUP_THRESHOLD_MS);
+    } catch (error) {
+      console.error('[SessionCleanup] Error cleaning orphaned sessions:', error);
+    }
+
+    // 3. Mark very old sessions as ABANDONED (24+ hours)
+    try {
+      await markAbandonedSessions(ABANDONED_THRESHOLD_MS);
+    } catch (error) {
+      console.error('[SessionCleanup] Error marking abandoned sessions:', error);
+    }
   }, RETRY_INTERVAL_MS);
 
-  console.log('🔄 Access key retry interval started');
+  console.log('🔄 Session cleanup interval started (access keys + orphaned sessions)');
 }
 
 export function stopCleanupCron() {
