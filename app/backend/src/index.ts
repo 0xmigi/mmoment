@@ -2258,6 +2258,166 @@ app.get("/api/walrus/relay-status", async (req, res) => {
   });
 });
 
+// Jetson endpoint: Register local file (before Walrus upload)
+// This allows videos/photos to appear in gallery immediately while served from Jetson storage
+// Later, when uploaded to Walrus, the record is updated with the real blobId
+app.post("/api/walrus/register-local", async (req, res) => {
+  const {
+    walletAddress,
+    localUrl,        // e.g., https://camera-pda.mmoment.xyz/videos/filename.mp4
+    cameraId,
+    deviceSignature,
+    fileType,
+    timestamp,
+    originalSize,
+    filename,
+    accessGrants     // Users who should have access (typically checked-in users)
+  } = req.body;
+
+  if (!walletAddress || !localUrl || !cameraId || !deviceSignature) {
+    return res.status(400).json({
+      error: "walletAddress, localUrl, cameraId, and deviceSignature are required"
+    });
+  }
+
+  try {
+    // Generate synthetic blob_id for local files
+    // Format: local-{first 16 chars of deviceSignature}-{timestamp}
+    const localBlobId = `local-${deviceSignature.slice(0, 16)}-${timestamp || Date.now()}`;
+
+    console.log(`📁 Registering local file from Jetson:`);
+    console.log(`   Wallet: ${walletAddress.slice(0, 8)}...`);
+    console.log(`   Local ID: ${localBlobId}`);
+    console.log(`   File Type: ${fileType}`);
+    console.log(`   Local URL: ${localUrl}`);
+    console.log(`   Filename: ${filename || 'unknown'}`);
+
+    // Parse access grants if provided as string
+    const parsedAccessGrants = typeof accessGrants === 'string'
+      ? JSON.parse(accessGrants)
+      : (accessGrants || []);
+
+    // Save to database with local URL as downloadUrl
+    await saveWalrusFile({
+      blobId: localBlobId,
+      walletAddress,
+      downloadUrl: localUrl,  // Jetson's local URL
+      cameraId,
+      deviceSignature,
+      fileType: fileType || 'video',
+      timestamp: timestamp || Date.now(),
+      originalSize: originalSize || 0,
+      encryptedSize: 0,  // Not encrypted yet (local file)
+      nonce: undefined,
+      suiOwner: undefined,
+      accessGrants: JSON.stringify(parsedAccessGrants),
+      createdAt: new Date()
+    });
+
+    console.log(`💾 Saved local file reference to database`);
+
+    // Notify connected clients via WebSocket (same event, gallery will update)
+    io.emit("walrus:upload:complete", {
+      walletAddress,
+      blobId: localBlobId,
+      downloadUrl: localUrl,
+      cameraId,
+      fileType: fileType || 'video',
+      timestamp: timestamp || Date.now(),
+      accessGrantsCount: parsedAccessGrants.length,
+      isLocal: true,  // Flag to indicate this is served from Jetson
+      filename
+    });
+
+    res.json({
+      success: true,
+      blobId: localBlobId,
+      downloadUrl: localUrl,
+      isLocal: true,
+      message: "Local file registered. Upload to Walrus later for permanent storage."
+    });
+  } catch (error) {
+    console.error("❌ Failed to register local file:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to register local file"
+    });
+  }
+});
+
+// Jetson endpoint: Update local file after Walrus upload completes
+// Called when a previously local file has been uploaded to Walrus
+app.post("/api/walrus/upgrade-local", async (req, res) => {
+  const {
+    localBlobId,     // The local-xxx ID to upgrade
+    blobId,          // Real Walrus blob ID
+    downloadUrl,     // Walrus download URL
+    encryptedSize,
+    nonce,
+    suiOwner
+  } = req.body;
+
+  if (!localBlobId || !blobId || !downloadUrl) {
+    return res.status(400).json({
+      error: "localBlobId, blobId, and downloadUrl are required"
+    });
+  }
+
+  try {
+    console.log(`⬆️ Upgrading local file to Walrus:`);
+    console.log(`   Local ID: ${localBlobId}`);
+    console.log(`   Walrus Blob ID: ${blobId.slice(0, 16)}...`);
+
+    // Get existing local file record
+    const existingFile = await getWalrusFileByBlobId(localBlobId);
+    if (!existingFile) {
+      return res.status(404).json({ error: "Local file not found" });
+    }
+
+    // Delete old local record
+    await deleteWalrusFile(localBlobId, existingFile.walletAddress);
+
+    // Create new record with real Walrus blob ID
+    await saveWalrusFile({
+      blobId,
+      walletAddress: existingFile.walletAddress,
+      downloadUrl,
+      cameraId: existingFile.cameraId,
+      deviceSignature: existingFile.deviceSignature,
+      fileType: existingFile.fileType,
+      timestamp: existingFile.timestamp,
+      originalSize: existingFile.originalSize,
+      encryptedSize: encryptedSize || 0,
+      nonce: nonce || undefined,
+      suiOwner: suiOwner || undefined,
+      accessGrants: existingFile.accessGrants,
+      createdAt: new Date()
+    });
+
+    console.log(`✅ Local file upgraded to Walrus storage`);
+
+    // Notify connected clients
+    io.emit("walrus:local:upgraded", {
+      localBlobId,
+      blobId,
+      downloadUrl,
+      walletAddress: existingFile.walletAddress,
+      cameraId: existingFile.cameraId
+    });
+
+    res.json({
+      success: true,
+      oldBlobId: localBlobId,
+      newBlobId: blobId,
+      downloadUrl
+    });
+  } catch (error) {
+    console.error("❌ Failed to upgrade local file:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to upgrade local file"
+    });
+  }
+});
+
 // Jetson endpoint: Notify backend after Walrus upload (legacy - for direct publisher uploads)
 app.post("/api/walrus/upload-complete", async (req, res) => {
   const {

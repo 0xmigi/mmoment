@@ -754,9 +754,43 @@ def register_routes(app):
                     skip_video_upload = os.environ.get("SKIP_VIDEO_UPLOAD", "").lower() == "true"
 
                     if skip_video_upload:
-                        # Skip upload for testing - return mock job_id
+                        # Skip Walrus upload but still register with backend for gallery
                         job_id = -1
-                        logger.info(f"🎥 Video recorded for {wallet_address[:8]}... (UPLOAD SKIPPED - testing mode)")
+                        logger.info(f"🎥 Video recorded for {wallet_address[:8]}... (local storage, no Walrus upload)")
+
+                        # Register local file with backend so it appears in gallery
+                        try:
+                            backend_url = os.getenv("BACKEND_URL", "https://mmoment-production.up.railway.app")
+                            local_video_url = f"https://{camera_pda.lower()}.mmoment.xyz/videos/{latest_video['filename']}"
+
+                            # Get checked-in users for access grants
+                            checked_in_users = list(get_checked_in_users())
+                            if wallet_address not in checked_in_users:
+                                checked_in_users.append(wallet_address)
+
+                            register_response = requests.post(
+                                f"{backend_url}/api/walrus/register-local",
+                                json={
+                                    "walletAddress": wallet_address,
+                                    "localUrl": local_video_url,
+                                    "cameraId": camera_pda,
+                                    "deviceSignature": device_signature,
+                                    "fileType": "video",
+                                    "timestamp": latest_video.get("timestamp", int(time.time() * 1000)),
+                                    "originalSize": latest_video.get("size", 0),
+                                    "filename": latest_video.get("filename"),
+                                    "accessGrants": [{"pubkey": user} for user in checked_in_users]
+                                },
+                                timeout=10
+                            )
+
+                            if register_response.ok:
+                                register_data = register_response.json()
+                                logger.info(f"📁 Local video registered with backend: {register_data.get('blobId', 'unknown')[:20]}...")
+                            else:
+                                logger.warning(f"Failed to register local video with backend: {register_response.status_code}")
+                        except Exception as register_err:
+                            logger.warning(f"Failed to register local video with backend: {register_err}")
                     else:
                         # Queue background upload (returns immediately with job_id)
                         upload_queue = get_upload_queue()
@@ -921,9 +955,43 @@ def register_routes(app):
                 skip_video_upload = os.environ.get("SKIP_VIDEO_UPLOAD", "").lower() == "true"
 
                 if skip_video_upload:
-                    # Skip upload for testing - return mock job_id
+                    # Skip Walrus upload but still register with backend for gallery
                     job_id = -1
-                    logger.info(f"🎥 Video recorded for {wallet_address[:8]}... (UPLOAD SKIPPED - testing mode)")
+                    logger.info(f"🎥 Video recorded for {wallet_address[:8]}... (local storage, no Walrus upload)")
+
+                    # Register local file with backend so it appears in gallery
+                    try:
+                        backend_url = os.getenv("BACKEND_URL", "https://mmoment-production.up.railway.app")
+                        local_video_url = f"https://{camera_pda.lower()}.mmoment.xyz/videos/{latest_video['filename']}"
+
+                        # Get checked-in users for access grants
+                        checked_in_users = list(get_checked_in_users())
+                        if wallet_address not in checked_in_users:
+                            checked_in_users.append(wallet_address)
+
+                        register_response = requests.post(
+                            f"{backend_url}/api/walrus/register-local",
+                            json={
+                                "walletAddress": wallet_address,
+                                "localUrl": local_video_url,
+                                "cameraId": camera_pda,
+                                "deviceSignature": device_signature,
+                                "fileType": "video",
+                                "timestamp": latest_video.get("timestamp", int(time.time() * 1000)),
+                                "originalSize": latest_video.get("size", 0),
+                                "filename": latest_video.get("filename"),
+                                "accessGrants": [{"pubkey": user} for user in checked_in_users]
+                            },
+                            timeout=10
+                        )
+
+                        if register_response.ok:
+                            register_data = register_response.json()
+                            logger.info(f"📁 Local video registered with backend: {register_data.get('blobId', 'unknown')[:20]}...")
+                        else:
+                            logger.warning(f"Failed to register local video with backend: {register_response.status_code}")
+                    except Exception as register_err:
+                        logger.warning(f"Failed to register local video with backend: {register_err}")
                 else:
                     # Queue background upload
                     upload_queue = get_upload_queue()
@@ -3752,6 +3820,128 @@ def register_routes(app):
         queue = get_upload_queue()
         uploads = queue.get_user_uploads(wallet_address)
         return jsonify({"success": True, "uploads": uploads})
+
+    @app.route("/api/upload-local-to-walrus", methods=["POST"])
+    @require_session
+    def upload_local_to_walrus():
+        """
+        Manually trigger Walrus upload for a local video/photo.
+        Called when user wants to permanently save a local file to Walrus.
+
+        Request body:
+        - filename: Name of the local file to upload
+        - localBlobId: The local-xxx ID from backend (optional, for upgrading record)
+        - wallet_address: User's wallet address
+
+        Returns upload result with Walrus blobId.
+        """
+        from services.walrus_upload_service import get_walrus_upload_service
+        from services.capture_service import get_capture_service
+
+        data = request.json or {}
+        filename = data.get("filename")
+        local_blob_id = data.get("localBlobId")
+        wallet_address = data.get("wallet_address")
+
+        if not filename or not wallet_address:
+            return jsonify({"success": False, "error": "filename and wallet_address required"}), 400
+
+        try:
+            capture_service = get_capture_service()
+            camera_pda = get_camera_pda()
+
+            # Find the video file
+            videos_dir = "/app/videos"
+            photos_dir = "/app/photos"
+
+            video_path = os.path.join(videos_dir, filename)
+            photo_path = os.path.join(photos_dir, filename)
+
+            if os.path.exists(video_path):
+                file_path = video_path
+                file_type = "video"
+            elif os.path.exists(photo_path):
+                file_path = photo_path
+                file_type = "photo"
+            else:
+                return jsonify({"success": False, "error": f"File not found: {filename}"}), 404
+
+            logger.info(f"📤 Manual Walrus upload requested: {filename} ({file_type})")
+
+            # Calculate file hash and sign
+            upload_service = get_walrus_upload_service()
+            file_hash = upload_service.calculate_file_hash(file_path)
+
+            if not file_hash:
+                return jsonify({"success": False, "error": "Failed to calculate file hash"}), 500
+
+            signed_event = sign_capture(
+                user_wallet=wallet_address,
+                camera_pda=camera_pda,
+                file_hash=file_hash,
+                capture_type=file_type,
+                file_path=file_path,
+                metadata={"filename": filename},
+            )
+            device_signature = signed_event["device_signature"]
+
+            # Get checked-in users for access grants
+            checked_in_users = list(get_checked_in_users())
+            if wallet_address not in checked_in_users:
+                checked_in_users.append(wallet_address)
+
+            # Upload to Walrus
+            result = upload_service.upload_capture(
+                wallet_address=wallet_address,
+                file_path=file_path,
+                camera_id=camera_pda,
+                device_signature=device_signature,
+                checked_in_users=checked_in_users,
+                file_type=file_type,
+                timestamp=int(time.time() * 1000),
+            )
+
+            if not result.get("success"):
+                return jsonify({"success": False, "error": result.get("error", "Upload failed")}), 500
+
+            logger.info(f"✅ Manual Walrus upload complete: {result.get('blob_id', 'unknown')[:20]}...")
+
+            # If we have a localBlobId, upgrade the backend record
+            if local_blob_id and local_blob_id.startswith("local-"):
+                try:
+                    backend_url = os.getenv("BACKEND_URL", "https://mmoment-production.up.railway.app")
+                    upgrade_response = requests.post(
+                        f"{backend_url}/api/walrus/upgrade-local",
+                        json={
+                            "localBlobId": local_blob_id,
+                            "blobId": result.get("blob_id"),
+                            "downloadUrl": result.get("download_url"),
+                            "encryptedSize": result.get("encrypted_size", 0),
+                            "nonce": result.get("nonce"),
+                        },
+                        timeout=10
+                    )
+
+                    if upgrade_response.ok:
+                        logger.info(f"📁 Local record upgraded to Walrus: {local_blob_id} -> {result.get('blob_id', 'unknown')[:16]}...")
+                    else:
+                        logger.warning(f"Failed to upgrade local record: {upgrade_response.status_code}")
+                except Exception as upgrade_err:
+                    logger.warning(f"Failed to upgrade local record: {upgrade_err}")
+
+            return jsonify({
+                "success": True,
+                "blobId": result.get("blob_id"),
+                "downloadUrl": result.get("download_url"),
+                "fileType": file_type,
+                "filename": filename,
+                "localBlobId": local_blob_id,
+                "upgraded": bool(local_blob_id and local_blob_id.startswith("local-")),
+            })
+
+        except Exception as e:
+            logger.error(f"Manual Walrus upload failed: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)}), 500
 
     @app.route("/start_recording", methods=["POST"])
     @require_session
