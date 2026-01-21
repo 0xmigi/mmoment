@@ -161,27 +161,10 @@ export async function initializeDatabase(dbPath: string = './mmoment.db'): Promi
           // Column already exists, ignore
         }
 
-        // Migration: Add session_status column for tracking session state (ACTIVE, COMPLETED, ABANDONED)
-        try {
-          await runQuery(`ALTER TABLE session_activity_buffers ADD COLUMN session_status TEXT DEFAULT 'ACTIVE'`);
-          console.log('📦 Added session_status column to session_activity_buffers');
-        } catch {
-          // Column already exists, ignore
-        }
-
-        // Migration: Add checkout_reason column for tracking why session ended
-        try {
-          await runQuery(`ALTER TABLE session_activity_buffers ADD COLUMN checkout_reason TEXT`);
-          console.log('📦 Added checkout_reason column to session_activity_buffers');
-        } catch {
-          // Column already exists, ignore
-        }
-
         // Create indexes for session_activity_buffers
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_session_buffers_session ON session_activity_buffers(session_id)`);
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_session_buffers_camera ON session_activity_buffers(camera_id, timestamp)`);
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_session_buffers_created ON session_activity_buffers(created_at)`);
-        await runQuery(`CREATE INDEX IF NOT EXISTS idx_session_buffers_status ON session_activity_buffers(session_status, activity_type)`);
 
         // Create walrus_files table (for decentralized blob storage)
         await runQuery(`
@@ -689,18 +672,8 @@ export async function deleteUserProfile(walletAddress: string): Promise<number> 
 // SESSION ACTIVITY BUFFER OPERATIONS (Privacy-Preserving Timeline)
 // ============================================================================
 
-// Session status and checkout reason types
-export type SessionStatus = 'ACTIVE' | 'COMPLETED' | 'ABANDONED';
-export type CheckoutReason = 'NORMAL' | 'TIMEOUT' | 'JETSON_OFFLINE' | 'REPLACED' | 'AUTO_CLEANUP';
-
-// Extended activity with session status fields
-export interface SessionActivityWithStatus extends SessionActivityBuffer {
-  sessionStatus?: SessionStatus;
-  checkoutReason?: CheckoutReason;
-}
-
 // Save encrypted activity to session buffer (called by Jetson during session)
-export async function saveSessionActivity(activity: SessionActivityWithStatus): Promise<void> {
+export async function saveSessionActivity(activity: SessionActivityBuffer): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!db) {
       reject(new Error('Database not initialized'));
@@ -709,8 +682,8 @@ export async function saveSessionActivity(activity: SessionActivityWithStatus): 
 
     const stmt = db.prepare(`
       INSERT INTO session_activity_buffers
-      (session_id, camera_id, user_pubkey, timestamp, activity_type, encrypted_content, nonce, access_grants, created_at, metadata, session_status, checkout_reason)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (session_id, camera_id, user_pubkey, timestamp, activity_type, encrypted_content, nonce, access_grants, created_at, metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -724,8 +697,6 @@ export async function saveSessionActivity(activity: SessionActivityWithStatus): 
       activity.accessGrants,
       activity.createdAt.getTime(),
       activity.metadata || null,
-      activity.sessionStatus || 'ACTIVE',
-      activity.checkoutReason || null,
       (err: Error | null) => {
         if (err) {
           reject(err);
@@ -1524,179 +1495,6 @@ export async function getUserSuiWallet(walletAddress: string): Promise<UserSuiWa
             encryptedSuiKey: row.encrypted_sui_key,
             createdAt: new Date(row.created_at)
           });
-        }
-      }
-    );
-  });
-}
-
-// ============================================================================
-// ORPHANED SESSION CLEANUP FUNCTIONS
-// ============================================================================
-
-// Orphaned session info (CHECK_IN with no CHECK_OUT)
-export interface OrphanedSession {
-  sessionId: string;
-  cameraId: string;
-  userPubkey: string;
-  checkInTimestamp: number;
-  lastActivityTimestamp: number;
-}
-
-// Find orphaned sessions: CHECK_INs with no matching CHECK_OUT by session_id
-// Only returns sessions older than the threshold (default 30 minutes)
-export async function findOrphanedSessions(thresholdMs: number = 30 * 60 * 1000): Promise<OrphanedSession[]> {
-  return new Promise((resolve, reject) => {
-    if (!db) {
-      reject(new Error('Database not initialized'));
-      return;
-    }
-
-    const cutoffTime = Date.now() - thresholdMs;
-
-    // Find CHECK_INs that have no CHECK_OUT with the same session_id
-    // and are older than the threshold
-    db.all(
-      `SELECT
-        ci.session_id,
-        ci.camera_id,
-        ci.user_pubkey,
-        ci.timestamp as check_in_timestamp,
-        (SELECT MAX(timestamp) FROM session_activity_buffers WHERE session_id = ci.session_id) as last_activity_timestamp
-       FROM session_activity_buffers ci
-       WHERE ci.activity_type = 0
-         AND ci.timestamp < ?
-         AND NOT EXISTS (
-           SELECT 1 FROM session_activity_buffers co
-           WHERE co.session_id = ci.session_id
-             AND co.activity_type = 1
-         )
-       ORDER BY ci.timestamp ASC`,
-      [cutoffTime],
-      (err, rows: any[]) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(rows.map(row => ({
-            sessionId: row.session_id,
-            cameraId: row.camera_id,
-            userPubkey: row.user_pubkey,
-            checkInTimestamp: row.check_in_timestamp,
-            lastActivityTimestamp: row.last_activity_timestamp || row.check_in_timestamp,
-          })));
-        }
-      }
-    );
-  });
-}
-
-// Auto-close an orphaned session by inserting a CHECK_OUT activity
-export async function autoCloseOrphanedSession(
-  orphan: OrphanedSession,
-  reason: CheckoutReason = 'AUTO_CLEANUP'
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (!db) {
-      reject(new Error('Database not initialized'));
-      return;
-    }
-
-    const now = Date.now();
-
-    // Create a minimal CHECK_OUT activity
-    // Note: encrypted_content, nonce, access_grants are empty since this is auto-generated
-    const stmt = db.prepare(`
-      INSERT INTO session_activity_buffers
-      (session_id, camera_id, user_pubkey, timestamp, activity_type, encrypted_content, nonce, access_grants, created_at, metadata, session_status, checkout_reason)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      orphan.sessionId,
-      orphan.cameraId,
-      orphan.userPubkey,
-      now,
-      1, // CHECK_OUT activity type
-      Buffer.from([]), // Empty encrypted content
-      Buffer.from([]), // Empty nonce
-      JSON.stringify({}), // Empty access grants
-      now,
-      JSON.stringify({ autoGenerated: true, reason }),
-      'COMPLETED',
-      reason,
-      (err: Error | null) => {
-        if (err) {
-          reject(err);
-        } else {
-          console.log(`[OrphanedSessionCleanup] Auto-closed session ${orphan.sessionId.slice(0, 8)}... for user ${orphan.userPubkey.slice(0, 8)}... (reason: ${reason})`);
-          resolve();
-        }
-      }
-    );
-
-    stmt.finalize();
-  });
-}
-
-// Run the full orphaned session cleanup process
-// Returns the number of sessions closed
-export async function cleanupOrphanedSessions(thresholdMs: number = 30 * 60 * 1000): Promise<number> {
-  console.log(`[OrphanedSessionCleanup] Starting cleanup (threshold: ${thresholdMs / 1000 / 60} minutes)...`);
-
-  const orphanedSessions = await findOrphanedSessions(thresholdMs);
-
-  if (orphanedSessions.length === 0) {
-    console.log(`[OrphanedSessionCleanup] No orphaned sessions found`);
-    return 0;
-  }
-
-  console.log(`[OrphanedSessionCleanup] Found ${orphanedSessions.length} orphaned session(s)`);
-
-  let closedCount = 0;
-  for (const orphan of orphanedSessions) {
-    try {
-      await autoCloseOrphanedSession(orphan, 'AUTO_CLEANUP');
-      closedCount++;
-    } catch (error) {
-      console.error(`[OrphanedSessionCleanup] Failed to close session ${orphan.sessionId.slice(0, 8)}...:`, error);
-    }
-  }
-
-  console.log(`[OrphanedSessionCleanup] Closed ${closedCount}/${orphanedSessions.length} orphaned sessions`);
-  return closedCount;
-}
-
-// Mark very old sessions as ABANDONED (e.g., 24+ hours old with no checkout)
-export async function markAbandonedSessions(thresholdMs: number = 24 * 60 * 60 * 1000): Promise<number> {
-  return new Promise((resolve, reject) => {
-    if (!db) {
-      reject(new Error('Database not initialized'));
-      return;
-    }
-
-    const cutoffTime = Date.now() - thresholdMs;
-
-    // Update CHECK_IN activities that are very old and have no CHECK_OUT
-    db.run(
-      `UPDATE session_activity_buffers
-       SET session_status = 'ABANDONED'
-       WHERE activity_type = 0
-         AND timestamp < ?
-         AND session_status = 'ACTIVE'
-         AND NOT EXISTS (
-           SELECT 1 FROM session_activity_buffers co
-           WHERE co.session_id = session_activity_buffers.session_id
-             AND co.activity_type = 1
-         )`,
-      [cutoffTime],
-      function(err: Error | null) {
-        if (err) {
-          reject(err);
-        } else {
-          if (this.changes > 0) {
-            console.log(`[OrphanedSessionCleanup] Marked ${this.changes} session(s) as ABANDONED`);
-          }
-          resolve(this.changes);
         }
       }
     );
