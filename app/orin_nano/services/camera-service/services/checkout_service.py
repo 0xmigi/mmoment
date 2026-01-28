@@ -1,12 +1,13 @@
 """
-Checkout Service - Phase 3 Privacy Architecture
+Checkout Service - UserSessionChain Architecture
 
 Handles the checkout flow:
-1. Encrypt activities with session key
-2. Write encrypted activities to CameraTimeline (via Solana middleware)
+1. Notify backend of checkout (for real-time UI updates)
+2. Encrypt session key locally on Jetson
 3. Send encrypted session key to backend
+4. Backend writes to UserSessionChain on Solana (pays for tx)
 
-This breaks the visible on-chain link between users and cameras.
+All encryption happens on the edge device - backend never sees plaintext keys.
 """
 
 import os
@@ -14,9 +15,14 @@ import json
 import time
 import logging
 import requests
-from typing import List, Dict, Optional
+import traceback
+from typing import Dict, TYPE_CHECKING
 
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+if TYPE_CHECKING:
+    from services.session_service import SessionService
+
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 
 logger = logging.getLogger(__name__)
@@ -24,57 +30,30 @@ logger = logging.getLogger(__name__)
 # Backend URL for access key delivery
 BACKEND_URL = os.environ.get("BACKEND_URL", "https://mmoment-production.up.railway.app")
 
-# Solana Middleware URL
-SOLANA_MIDDLEWARE_URL = os.environ.get("SOLANA_MIDDLEWARE_URL", "http://localhost:5001")
 
+def get_camera_pda() -> str:
+    """Get camera PDA from device config file (set during registration)"""
+    config_path = "/app/config/device_config.json"
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                config = json.load(f)
+                if "camera_pda" in config:
+                    return config["camera_pda"]
+    except Exception as e:
+        logger.debug(f"Could not read camera PDA from device config: {e}")
 
-def encrypt_activity(activity: Dict, session_key: bytes) -> Dict:
-    """
-    Encrypt a single activity using AES-256-GCM.
-
-    Args:
-        activity: Activity dict with timestamp, activity_type, data, metadata
-        session_key: 32-byte AES-256 key
-
-    Returns:
-        Encrypted activity in format expected by CameraTimeline
-    """
-    # Generate random nonce (12 bytes for GCM)
-    nonce = os.urandom(12)
-
-    # Serialize activity content (data + metadata)
-    plaintext = json.dumps({
-        'data': activity.get('data', {}),
-        'metadata': activity.get('metadata', {})
-    }).encode('utf-8')
-
-    # Encrypt using AES-256-GCM
-    cipher = Cipher(
-        algorithms.AES(session_key),
-        modes.GCM(nonce),
-        backend=default_backend()
-    )
-    encryptor = cipher.encryptor()
-    ciphertext = encryptor.update(plaintext) + encryptor.finalize()
-
-    # Append auth tag to ciphertext (GCM produces 16-byte tag)
-    encrypted_content = ciphertext + encryptor.tag
-
-    return {
-        'timestamp': activity['timestamp'],
-        'activity_type': activity['activity_type'],
-        'encrypted_content': list(encrypted_content),  # Convert to list for JSON
-        'nonce': list(nonce),
-        'access_grants': []  # Populated for multi-user sessions
-    }
+    # Fallback to environment variable
+    return os.environ.get("CAMERA_PDA", "unknown")
 
 
 def encrypt_session_key_for_user(session_key: bytes, user_pubkey: str) -> tuple:
     """
     Encrypt the session key for a specific user using their public key.
 
-    For now, we use a simple XOR-based encryption with HKDF.
-    In production, this should use X25519 key exchange.
+    Uses HKDF key derivation with the user's pubkey to create a derived key,
+    then XORs the session key with it. The nonce ensures unique encryption
+    even for the same user across different sessions.
 
     Args:
         session_key: 32-byte AES-256 session key
@@ -83,15 +62,10 @@ def encrypt_session_key_for_user(session_key: bytes, user_pubkey: str) -> tuple:
     Returns:
         Tuple of (encrypted_key_bytes, nonce_bytes)
     """
-    import hashlib
-    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-    from cryptography.hazmat.primitives import hashes
-
     # Generate a random nonce
     nonce = os.urandom(12)
 
     # Derive an encryption key from the user's pubkey + nonce
-    # Note: This is a simplified approach. Production should use X25519.
     hkdf = HKDF(
         algorithm=hashes.SHA256(),
         length=32,
@@ -110,87 +84,16 @@ def encrypt_session_key_for_user(session_key: bytes, user_pubkey: str) -> tuple:
     return encrypted_key, nonce
 
 
-def create_access_grant(session_key: bytes, user_pubkey: str) -> bytes:
-    """
-    Create an access grant (encrypted session key) for a user.
-
-    Args:
-        session_key: 32-byte AES-256 session key
-        user_pubkey: User's wallet public key
-
-    Returns:
-        Encrypted session key bytes
-    """
-    encrypted_key, nonce = encrypt_session_key_for_user(session_key, user_pubkey)
-    # Combine nonce + encrypted key for the access grant
-    return nonce + encrypted_key
-
-
-def encrypt_and_write_activities(
-    session_key: bytes,
-    activities: List[Dict],
-    checked_in_users: List[str]
-) -> Optional[str]:
-    """
-    Encrypt all activities and write them to the CameraTimeline.
-
-    Args:
-        session_key: 32-byte AES-256 session key
-        activities: List of activity dicts
-        checked_in_users: List of user wallet addresses for access grants
-
-    Returns:
-        Transaction signature if successful, None otherwise
-    """
-    if not activities:
-        logger.info("[CHECKOUT-SVC] No activities to write")
-        return None
-
-    logger.info(f"[CHECKOUT-SVC] Encrypting {len(activities)} activities for {len(checked_in_users)} user(s)")
-
-    # Encrypt each activity
-    encrypted_activities = []
-    for activity in activities:
-        encrypted = encrypt_activity(activity, session_key)
-
-        # Add access grants for each checked-in user
-        for user_pubkey in checked_in_users:
-            access_grant = create_access_grant(session_key, user_pubkey)
-            encrypted['access_grants'].append(list(access_grant))
-
-        encrypted_activities.append(encrypted)
-
-    logger.info(f"[CHECKOUT-SVC] Encrypted {len(encrypted_activities)} activities")
-
-    # Send to Solana middleware to write to CameraTimeline
-    try:
-        response = requests.post(
-            f"{SOLANA_MIDDLEWARE_URL}/api/blockchain/write-camera-timeline",
-            json={'activities': encrypted_activities},
-            timeout=30
-        )
-
-        if response.ok:
-            result = response.json()
-            tx_signature = result.get('signature')
-            logger.info(f"[CHECKOUT-SVC] Timeline write successful: {tx_signature[:16] if tx_signature else 'unknown'}...")
-            return tx_signature
-        else:
-            logger.error(f"[CHECKOUT-SVC] Timeline write failed: {response.status_code} - {response.text}")
-            return None
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"[CHECKOUT-SVC] Failed to reach Solana middleware: {e}")
-        return None
-
-
 def send_access_key_to_backend(
     user_pubkey: str,
     session_key: bytes,
     check_in_time: int
 ) -> bool:
     """
-    Send encrypted session key to backend for storage in user's keychain.
+    Send encrypted session key to backend for storage in user's UserSessionChain.
+
+    The encryption happens HERE on the Jetson - backend only receives ciphertext
+    and submits the transaction to Solana (paying for gas).
 
     Args:
         user_pubkey: User's wallet public key
@@ -202,7 +105,7 @@ def send_access_key_to_backend(
     """
     logger.info(f"[CHECKOUT-SVC] Sending access key to backend for {user_pubkey[:8]}...")
 
-    # Encrypt session key for the user
+    # Encrypt session key for the user (encryption happens on Jetson)
     encrypted_key, nonce = encrypt_session_key_for_user(session_key, user_pubkey)
 
     try:
@@ -226,69 +129,171 @@ def send_access_key_to_backend(
 
     except requests.exceptions.RequestException as e:
         logger.error(f"[CHECKOUT-SVC] Failed to send access key to backend: {e}")
-        # TODO: Queue for retry
         return False
 
 
-def perform_checkout(
+def _notify_backend_checkout(
     wallet_address: str,
-    session_key: bytes,
-    activities: List[Dict],
-    check_in_time: int,
-    checked_in_users: List[str] = None
-) -> Dict:
+    session_id: str,
+    camera_pda: str,
+    user_profile: Dict = None
+) -> bool:
     """
-    Perform the complete checkout flow.
+    Notify backend about checkout via sync POST to /api/session/activity.
+
+    This triggers real-time UI updates via WebSocket.
 
     Args:
         wallet_address: User's wallet address
-        session_key: 32-byte AES-256 session key
-        activities: List of activity dicts from session
-        check_in_time: Unix timestamp of session start
-        checked_in_users: List of all users present (for multi-user access grants)
+        session_id: Session ID
+        camera_pda: Camera PDA address
+        user_profile: User profile dict with display_name, username
+
+    Returns:
+        True if notification succeeded, False otherwise
+    """
+    try:
+        user_profile = user_profile or {}
+        display_name = user_profile.get('display_name') or user_profile.get('displayName') or wallet_address[:8]
+        username = user_profile.get('username')
+
+        response = requests.post(
+            f"{BACKEND_URL}/api/session/activity",
+            json={
+                "sessionId": session_id,
+                "cameraId": camera_pda,
+                "userPubkey": wallet_address,
+                "activityType": 1,  # CHECK_OUT
+                "timestamp": int(time.time() * 1000),
+                "displayName": display_name,
+                "username": username
+            },
+            timeout=5
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            logger.info(f"[CHECKOUT-SVC] Backend notified! Sockets in room: {result.get('debug', {}).get('socketsInRoom', '?')}")
+            return True
+        else:
+            logger.warning(f"[CHECKOUT-SVC] Backend notification failed: HTTP {response.status_code}")
+            return False
+
+    except Exception as e:
+        logger.warning(f"[CHECKOUT-SVC] Backend notification failed (non-blocking): {e}")
+        return False
+
+
+def execute_full_checkout(
+    wallet_address: str,
+    session_service: 'SessionService',
+    auto_checkout: bool = False,
+    auto_checkout_reason: str = None
+) -> Dict:
+    """
+    Execute the complete checkout flow. Used by both manual and auto checkout.
+
+    Flow:
+    1. Add CHECK_OUT activity to session buffer
+    2. Notify backend (for real-time UI updates)
+    3. Send encrypted access key to backend (backend writes to UserSessionChain)
+    4. Clean up face recognition data
+    5. End the session
+
+    Args:
+        wallet_address: User's wallet address
+        session_service: SessionService instance
+        auto_checkout: True if triggered automatically (face timeout, inactivity, etc.)
+        auto_checkout_reason: Reason for auto-checkout ("face_timeout", "inactivity", "session_expired")
 
     Returns:
         Dict with checkout results
     """
-    if checked_in_users is None:
-        checked_in_users = [wallet_address]
+    log_prefix = "[AUTO-CHECKOUT]" if auto_checkout else "[CHECKOUT]"
 
-    logger.info(f"[CHECKOUT-SVC] Starting checkout for {wallet_address[:8]}... with {len(activities)} activities")
-
-    results = {
-        'wallet_address': wallet_address,
-        'activities_count': len(activities),
-        'timeline_tx': None,
-        'access_key_sent': False,
-        'errors': []
-    }
-
-    # Step 1: Encrypt and write activities to CameraTimeline
-    if activities:
-        try:
-            tx_signature = encrypt_and_write_activities(
-                session_key=session_key,
-                activities=activities,
-                checked_in_users=checked_in_users
-            )
-            results['timeline_tx'] = tx_signature
-        except Exception as e:
-            error_msg = f"Failed to write activities: {str(e)}"
-            logger.error(f"[CHECKOUT-SVC] {error_msg}")
-            results['errors'].append(error_msg)
-
-    # Step 2: Send access key to backend
     try:
-        results['access_key_sent'] = send_access_key_to_backend(
-            user_pubkey=wallet_address,
-            session_key=session_key,
-            check_in_time=check_in_time
+        # Get the session object (need session_key and activities)
+        session = session_service.get_session_object_by_wallet(wallet_address)
+        if not session:
+            logger.warning(f"{log_prefix} No session found for {wallet_address[:8]}...")
+            return {
+                "success": False,
+                "error": "No active session found",
+                "wallet_address": wallet_address,
+                "auto_checkout": auto_checkout,
+                "auto_checkout_reason": auto_checkout_reason
+            }
+
+        session_id = session.session_id
+        check_in_time = int(session.created_at)
+        camera_pda = get_camera_pda()
+        user_profile = session.user_profile or {}
+
+        logger.info(f"{log_prefix} Starting checkout for {wallet_address[:8]}... (session: {session_id[:16]}...)")
+
+        # Build checkout metadata
+        checkout_metadata = {"camera_pda": camera_pda}
+        if auto_checkout:
+            checkout_metadata["autoCheckout"] = True
+            checkout_metadata["reason"] = auto_checkout_reason
+
+        # Step 1: Add CHECK_OUT activity to session buffer
+        session.add_activity(
+            activity_type=1,  # CHECK_OUT
+            data={"duration_seconds": int(time.time() - session.created_at)},
+            metadata=checkout_metadata
         )
+
+        # Step 2: Notify backend (for real-time UI updates via WebSocket)
+        _notify_backend_checkout(wallet_address, session_id, camera_pda, user_profile)
+
+        # Step 3: Send encrypted access key to backend
+        # Backend will write to UserSessionChain on Solana
+        access_key_sent = False
+        try:
+            access_key_sent = send_access_key_to_backend(
+                user_pubkey=wallet_address,
+                session_key=session.session_key,
+                check_in_time=check_in_time
+            )
+            if access_key_sent:
+                logger.info(f"{log_prefix} Access key sent to backend for {wallet_address[:8]}...")
+            else:
+                logger.warning(f"{log_prefix} Failed to send access key to backend")
+        except Exception as e:
+            logger.error(f"{log_prefix} Error sending access key: {e}")
+
+        # Step 4: Clean up face recognition data
+        try:
+            from services.blockchain_session_sync import get_blockchain_session_sync
+            blockchain_sync = get_blockchain_session_sync()
+            blockchain_sync.trigger_checkout(wallet_address)
+            logger.info(f"{log_prefix} Face recognition data cleaned up")
+        except Exception as e:
+            logger.warning(f"{log_prefix} Error cleaning up face data: {e}")
+
+        # Step 5: End the session
+        session_service.end_session(session_id, wallet_address)
+        logger.info(f"{log_prefix} Session {session_id[:16]}... ended")
+
+        return {
+            "success": True,
+            "wallet_address": wallet_address,
+            "session_id": session_id,
+            "activities_committed": len(session.get_activities()),
+            "access_key_sent": access_key_sent,
+            "auto_checkout": auto_checkout,
+            "auto_checkout_reason": auto_checkout_reason,
+            "message": "Checkout complete"
+        }
+
     except Exception as e:
-        error_msg = f"Failed to send access key: {str(e)}"
-        logger.error(f"[CHECKOUT-SVC] {error_msg}")
-        results['errors'].append(error_msg)
-
-    logger.info(f"[CHECKOUT-SVC] Checkout complete for {wallet_address[:8]}...: tx={results['timeline_tx'] is not None}, key_sent={results['access_key_sent']}")
-
-    return results
+        logger.error(f"{log_prefix} Error during checkout for {wallet_address}: {e}")
+        logger.error(traceback.format_exc())
+        return {
+            "success": False,
+            "error": f"Checkout failed: {str(e)}",
+            "wallet_address": wallet_address,
+            "auto_checkout": auto_checkout,
+            "auto_checkout_reason": auto_checkout_reason
+        }

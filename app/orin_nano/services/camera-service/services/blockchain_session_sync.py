@@ -49,7 +49,14 @@ class BlockchainSessionSync:
 
         # Track when users were last seen in frame (for face-based auto-checkout)
         self.last_seen_at: Dict[str, float] = {}  # wallet_address -> timestamp
-        self.auto_checkout_threshold = 1800  # 30 minutes in seconds
+
+        # Auto-checkout thresholds (configurable via env for testing)
+        # Use FACE_TIMEOUT_SECONDS and ACTIVITY_TIMEOUT_SECONDS to override defaults
+        self.face_timeout_threshold = int(os.environ.get('FACE_TIMEOUT_SECONDS', 1800))    # Default: 30 minutes
+        self.activity_timeout_threshold = int(os.environ.get('ACTIVITY_TIMEOUT_SECONDS', 3600))  # Default: 1 hour
+        logger.info(f"[AUTO-CHECKOUT] Thresholds: face={self.face_timeout_threshold}s ({self.face_timeout_threshold/60:.1f}min), activity={self.activity_timeout_threshold}s ({self.activity_timeout_threshold/60:.1f}min)")
+        # Legacy alias for backwards compatibility
+        self.auto_checkout_threshold = self.face_timeout_threshold
 
         # Track when users checked in via API
         self._api_checkin_times: Dict[str, float] = {}  # wallet_address -> timestamp
@@ -102,10 +109,15 @@ class BlockchainSessionSync:
         logger.info("🔗 Blockchain session sync stopped")
         
     def _sync_loop(self):
-        """Main sync loop that monitors face-based auto-checkout"""
+        """Main sync loop that monitors both face and activity-based auto-checkout"""
         while self.is_running and not self.stop_event.is_set():
             try:
+                # Face-based timeout (30 min) - for users WITH face enrollment
                 self._monitor_face_based_checkout()
+
+                # Activity-based timeout (1 hour) - for users WITHOUT face enrollment
+                self._monitor_activity_based_checkout()
+
                 time.sleep(self.sync_interval)
             except Exception as e:
                 logger.error(f"Error in sync loop: {e}")
@@ -346,9 +358,7 @@ class BlockchainSessionSync:
         If a user hasn't been seen in frame for 30 minutes, auto check them out.
         """
         try:
-            if not self.face_service:
-                return  # Can't monitor without face service
-
+            # Note: We use identity_store to check for face embeddings, not face_service
             now = time.time()
 
             for wallet_address in list(self.checked_in_wallets):
@@ -360,10 +370,11 @@ class BlockchainSessionSync:
                 last_seen = self.last_seen_at.get(wallet_address, now)
                 time_not_seen = now - last_seen
 
-                # Check if user hasn't been seen for the threshold (30 minutes = 1800 seconds)
-                if time_not_seen > self.auto_checkout_threshold:
-                    logger.info(f"👋 User {wallet_address[:8]}... not seen for {int(time_not_seen/60)} minutes - initiating auto check-out")
-                    self._send_checkout_transaction(wallet_address)
+                # Check if user hasn't been seen for the threshold (30 minutes)
+                if time_not_seen > self.face_timeout_threshold:
+                    logger.info(f"[AUTO-CHECKOUT] User {wallet_address[:8]}... not seen for "
+                               f"{int(time_not_seen/60)} minutes - initiating face timeout checkout")
+                    self._send_checkout_transaction(wallet_address, reason="face_timeout")
 
         except Exception as e:
             logger.error(f"❌ Error monitoring face-based checkout: {e}")
@@ -377,23 +388,75 @@ class BlockchainSessionSync:
 
         return False
 
-    def _send_checkout_transaction(self, wallet_address: str):
+    def _monitor_activity_based_checkout(self):
         """
-        Send a check-out transaction to the blockchain for a user.
-        This is called when auto-checkout is triggered.
+        Monitor users WITHOUT face embeddings for activity-based auto-checkout.
+        If no activity (photos, videos, etc.) for 1 hour, auto check them out.
+
+        This complements _monitor_face_based_checkout() which handles users WITH
+        face embeddings using face presence detection.
         """
         try:
-            # For now, just call the existing check-out handler
-            # The actual blockchain transaction is handled by the frontend
-            # But we can still clean up the local session
-            self._handle_check_out(wallet_address)
+            if not self.session_service:
+                return  # Can't monitor without session service
 
-            # TODO: In the future, we might want to send an actual blockchain transaction here
-            # This would require the Jetson to have a wallet/keypair to sign transactions
-            # For now, rely on the 2-hour on-chain timeout as a fallback
+            now = time.time()
+
+            for wallet_address in list(self.checked_in_wallets):
+                # Skip users WITH face embeddings - they're handled by face timeout
+                if self._has_local_face_embedding(wallet_address):
+                    continue
+
+                # Get session to check last activity time
+                session = self.session_service.get_session_object_by_wallet(wallet_address)
+                if not session:
+                    continue
+
+                # Check how long since last activity (photo, video, etc.)
+                inactivity_seconds = now - session.last_active
+
+                if inactivity_seconds > self.activity_timeout_threshold:
+                    logger.info(f"[AUTO-CHECKOUT] User {wallet_address[:8]}... inactive for "
+                               f"{int(inactivity_seconds/60)} minutes (no face enrollment) - initiating checkout")
+                    self._send_checkout_transaction(wallet_address, reason="inactivity")
 
         except Exception as e:
-            logger.error(f"❌ Error sending checkout transaction for {wallet_address}: {e}")
+            logger.error(f"[AUTO-CHECKOUT] Error monitoring activity-based checkout: {e}")
+
+    def _send_checkout_transaction(self, wallet_address: str, reason: str = "face_timeout"):
+        """
+        Trigger full auto-checkout with on-chain publishing.
+        Uses the shared checkout function for consistent behavior.
+
+        Args:
+            wallet_address: User's wallet address
+            reason: Auto-checkout reason ("face_timeout", "inactivity", "session_expired")
+        """
+        try:
+            logger.info(f"[AUTO-CHECKOUT] Initiating for {wallet_address[:8]}... (reason: {reason})")
+
+            from services.checkout_service import execute_full_checkout
+
+            result = execute_full_checkout(
+                wallet_address=wallet_address,
+                session_service=self.session_service,
+                auto_checkout=True,
+                auto_checkout_reason=reason
+            )
+
+            if result.get("success"):
+                tx = result.get('timeline_tx')
+                tx_display = f"{tx[:16]}..." if tx else "None"
+                logger.info(f"[AUTO-CHECKOUT] Complete for {wallet_address[:8]}...: "
+                           f"tx={tx_display}, activities={result.get('activities_committed', 0)}, "
+                           f"key_sent={result.get('access_key_sent', False)}")
+            else:
+                logger.error(f"[AUTO-CHECKOUT] Failed for {wallet_address[:8]}...: {result.get('error')}")
+
+        except Exception as e:
+            logger.error(f"[AUTO-CHECKOUT] Error for {wallet_address}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     def trigger_checkin(self, wallet_address: str, profile: dict = None):
         """

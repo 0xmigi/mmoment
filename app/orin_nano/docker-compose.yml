@@ -93,6 +93,11 @@ services:
       - WALRUS_AGGREGATOR_URL=https://aggregator.walrus-mainnet.walrus.space
       # Testing: Skip video uploads to Walrus (set to "true" to disable)
       - SKIP_VIDEO_UPLOAD=true
+      # Auto-checkout timeout configuration (in seconds, for testing use shorter values)
+      # Face timeout: how long user can be absent from frame before auto-checkout (default: 1800 = 30 min)
+      # Activity timeout: how long user can be inactive (no face enrollment) before auto-checkout (default: 3600 = 60 min)
+      - FACE_TIMEOUT_SECONDS=${FACE_TIMEOUT_SECONDS:-1800}
+      - ACTIVITY_TIMEOUT_SECONDS=${ACTIVITY_TIMEOUT_SECONDS:-3600}
       # CV Dev Mode: Use video file instead of camera (no camera required)
       - CV_DEV_MODE=false
       # Native Mode: C++ TensorRT inference server runs inside this container

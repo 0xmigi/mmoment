@@ -641,6 +641,120 @@ def register_routes(app):
             logger.error(f"Error getting WHIP status: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
 
+    @app.route("/api/debug/auto-checkout", methods=["GET"])
+    def api_debug_auto_checkout():
+        """
+        Debug endpoint to check auto-checkout state.
+        Shows BlockchainSessionSync internal state for troubleshooting.
+        """
+        try:
+            import time
+            from services.blockchain_session_sync import get_blockchain_session_sync
+
+            blockchain_sync = get_blockchain_session_sync()
+            session_service = get_services()["session"]
+
+            # Get all active sessions for comparison
+            active_sessions = session_service.get_all_sessions()
+
+            # Calculate time since check-in for tracked users
+            now = time.time()
+            user_states = {}
+            for wallet in blockchain_sync.checked_in_wallets:
+                last_seen = blockchain_sync.last_seen_at.get(wallet, now)
+                time_since_seen = now - last_seen
+                has_face = blockchain_sync._has_local_face_embedding(wallet)
+
+                # Get session info
+                session_obj = session_service.get_session_object_by_wallet(wallet)
+                last_active = session_obj.last_active if session_obj else None
+                time_since_active = now - last_active if last_active else None
+
+                user_states[wallet[:8]] = {
+                    "has_face_embedding": has_face,
+                    "last_seen_at": last_seen,
+                    "seconds_since_seen": int(time_since_seen),
+                    "minutes_since_seen": int(time_since_seen / 60),
+                    "last_active": last_active,
+                    "seconds_since_active": int(time_since_active) if time_since_active else None,
+                    "timeout_type": "face (30 min)" if has_face else "activity (60 min)",
+                    "threshold_seconds": blockchain_sync.face_timeout_threshold if has_face else blockchain_sync.activity_timeout_threshold,
+                    "threshold_minutes": (blockchain_sync.face_timeout_threshold if has_face else blockchain_sync.activity_timeout_threshold) / 60,
+                    "time_until_auto_checkout_seconds": max(0, (blockchain_sync.face_timeout_threshold if has_face else blockchain_sync.activity_timeout_threshold) - (time_since_seen if has_face else (time_since_active or time_since_seen))),
+                }
+
+            return jsonify({
+                "success": True,
+                "blockchain_sync": {
+                    "is_running": blockchain_sync.is_running,
+                    "sync_interval": blockchain_sync.sync_interval,
+                    "face_timeout_threshold_seconds": blockchain_sync.face_timeout_threshold,
+                    "face_timeout_threshold_minutes": blockchain_sync.face_timeout_threshold / 60,
+                    "activity_timeout_threshold_seconds": blockchain_sync.activity_timeout_threshold,
+                    "activity_timeout_threshold_minutes": blockchain_sync.activity_timeout_threshold / 60,
+                    "checked_in_wallets": list(blockchain_sync.checked_in_wallets),
+                    "checked_in_count": len(blockchain_sync.checked_in_wallets),
+                    "last_seen_at": {k[:8]: v for k, v in blockchain_sync.last_seen_at.items()},
+                },
+                "session_service": {
+                    "active_sessions_count": len(active_sessions),
+                    "active_sessions": [s.get("wallet_address", "unknown")[:8] for s in active_sessions],
+                },
+                "user_states": user_states,
+                "current_time": now,
+            })
+        except Exception as e:
+            logger.error(f"Error in auto-checkout debug: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    @app.route("/api/debug/trigger-auto-checkout", methods=["POST"])
+    def api_debug_trigger_auto_checkout():
+        """
+        Debug endpoint to manually trigger auto-checkout for a user.
+        Use this for testing the auto-checkout flow without waiting for timeout.
+
+        Request body:
+            wallet_address: User's wallet address
+            reason: Optional reason (default: "debug_trigger")
+        """
+        try:
+            from services.blockchain_session_sync import get_blockchain_session_sync
+            from services.checkout_service import execute_full_checkout
+
+            data = request.json or {}
+            wallet_address = data.get("wallet_address")
+            reason = data.get("reason", "debug_trigger")
+
+            if not wallet_address:
+                return jsonify({"success": False, "error": "wallet_address required"}), 400
+
+            session_service = get_services()["session"]
+
+            # Check if user has an active session
+            session = session_service.get_session_object_by_wallet(wallet_address)
+            if not session:
+                return jsonify({"success": False, "error": f"No active session for {wallet_address[:8]}..."}), 404
+
+            logger.info(f"[DEBUG] Manually triggering auto-checkout for {wallet_address[:8]}... (reason: {reason})")
+
+            # Execute the full checkout flow
+            result = execute_full_checkout(
+                wallet_address=wallet_address,
+                session_service=session_service,
+                auto_checkout=True,
+                auto_checkout_reason=reason
+            )
+
+            return jsonify(result)
+
+        except Exception as e:
+            logger.error(f"Error in debug trigger auto-checkout: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return jsonify({"success": False, "error": str(e)}), 500
+
     # Camera Actions
     @app.route("/api/capture", methods=["POST"])
     @require_session
@@ -2354,130 +2468,30 @@ def register_routes(app):
                 {"success": False, "error": "Wallet address is required"}
             ), 400
 
-        logger.info(f"[CHECKOUT] User {wallet_address[:8]}... checking out")
+        logger.info(f"[CHECKOUT] User {wallet_address[:8]}... checking out (manual)")
 
         try:
             services = get_services()
             session_service = services["session"]
 
-            # Get the raw session object (need session_key and activities)
-            session = session_service.get_session_object_by_wallet(wallet_address)
-            if not session:
-                logger.warning(f"[CHECKOUT] No session found for {wallet_address[:8]}...")
-                return jsonify(
-                    {"success": True, "message": "No active session found (already cleaned up)"}
-                )
+            # Use shared checkout function for consistent behavior
+            from services.checkout_service import execute_full_checkout
 
-            session_id = session.session_id
-            check_in_time = int(session.created_at)
-            camera_pda = get_camera_pda()
-
-            # Get user profile info from session for timeline display
-            user_profile = session.user_profile or {}
-            display_name = user_profile.get('display_name') or user_profile.get('displayName') or wallet_address[:8]
-            username = user_profile.get('username')
-
-            # Add checkout activity to LOCAL buffer only (send_to_backend=False)
-            # We send to backend DIRECTLY below for guaranteed sync delivery
-            session_service.add_activity_to_session(
+            result = execute_full_checkout(
                 wallet_address=wallet_address,
-                activity_type=1,  # CHECK_OUT
-                data={"duration_seconds": int(time.time() - session.created_at)},
-                metadata={"camera_pda": camera_pda},
-                send_to_backend=False  # We send directly below
+                session_service=session_service,
+                auto_checkout=False
             )
 
-            # Tell backend about check-out DIRECTLY (sync POST - no async queue!)
-            # This ensures timeline event is saved BEFORE we return the response
-            backend_url = os.environ.get('BACKEND_URL', 'https://mmoment-production.up.railway.app')
-            try:
-                import requests as req
-                activity_response = req.post(
-                    f"{backend_url}/api/session/activity",
-                    json={
-                        "sessionId": session_id,
-                        "cameraId": camera_pda,
-                        "userPubkey": wallet_address,
-                        "activityType": 1,  # CHECK_OUT
-                        "timestamp": int(time.time() * 1000),
-                        "displayName": display_name,
-                        "username": username
-                    },
-                    timeout=5
-                )
-                if activity_response.status_code == 200:
-                    result = activity_response.json()
-                    logger.info(f"[CHECKOUT] ✅ Timeline notified! Sockets in room: {result.get('debug', {}).get('socketsInRoom', '?')}")
-                else:
-                    logger.warning(f"[CHECKOUT] Timeline notification failed: HTTP {activity_response.status_code}")
-            except Exception as e:
-                logger.warning(f"[CHECKOUT] Timeline notification failed (non-blocking): {e}")
-
-            # Get all activities from session
-            activities = session.get_activities()
-            logger.info(f"[CHECKOUT] Session has {len(activities)} activities to commit")
-
-            # Import checkout service functions
-            from services.checkout_service import (
-                encrypt_and_write_activities,
-                send_access_key_to_backend
-            )
-
-            tx_signature = None
-            access_key_sent = False
-
-            # Step 1: Encrypt activities and write to CameraTimeline
-            if activities:
-                try:
-                    tx_signature = encrypt_and_write_activities(
-                        session_key=session.session_key,
-                        activities=activities,
-                        checked_in_users=[wallet_address]  # For access grants
+            if result.get("success"):
+                return jsonify(result)
+            else:
+                # No session found is not an error for manual checkout
+                if "No active session" in result.get("error", ""):
+                    return jsonify(
+                        {"success": True, "message": "No active session found (already cleaned up)"}
                     )
-                    logger.info(f"[CHECKOUT] Timeline updated, tx: {tx_signature[:16] if tx_signature else 'None'}...")
-                except Exception as e:
-                    logger.error(f"[CHECKOUT] Failed to write activities to timeline: {e}")
-                    # Continue with checkout even if timeline write fails
-                    # Activities are lost but user is still checked out
-
-            # Step 2: Send encrypted session key to backend
-            try:
-                access_key_sent = send_access_key_to_backend(
-                    user_pubkey=wallet_address,
-                    session_key=session.session_key,
-                    check_in_time=check_in_time
-                )
-                if access_key_sent:
-                    logger.info(f"[CHECKOUT] Access key sent to backend for {wallet_address[:8]}...")
-                else:
-                    logger.warning(f"[CHECKOUT] Failed to send access key to backend")
-            except Exception as e:
-                logger.error(f"[CHECKOUT] Error sending access key: {e}")
-
-            # Step 3: Clean up face recognition data
-            try:
-                from services.blockchain_session_sync import get_blockchain_session_sync
-                blockchain_sync = get_blockchain_session_sync()
-                blockchain_sync.trigger_checkout(wallet_address)
-                logger.info(f"[CHECKOUT] Face recognition data cleaned up")
-            except Exception as e:
-                logger.warning(f"[CHECKOUT] Error cleaning up face data: {e}")
-
-            # Step 4: End the session
-            session_service.end_session(session_id, wallet_address)
-            logger.info(f"[CHECKOUT] Session {session_id[:16]}... ended")
-
-            return jsonify(
-                {
-                    "success": True,
-                    "wallet_address": wallet_address,
-                    "session_id": session_id,
-                    "activities_committed": len(activities),
-                    "timeline_tx": tx_signature,
-                    "access_key_sent": access_key_sent,
-                    "message": "Checkout complete (privacy-preserving)",
-                }
-            )
+                return jsonify(result), 500
 
         except Exception as e:
             logger.error(f"[CHECKOUT] Error: {e}")

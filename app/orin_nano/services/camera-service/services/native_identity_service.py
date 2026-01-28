@@ -298,6 +298,15 @@ class NativeIdentityService:
                 self.identity_store.update_face_seen(best_match)
                 self._wallet_face_last_seen[best_match] = current_time
 
+                # Update blockchain session sync for auto-checkout face tracking
+                # This tracks when users are last seen for the 30-minute face timeout
+                try:
+                    from services.blockchain_session_sync import get_blockchain_session_sync
+                    blockchain_sync = get_blockchain_session_sync()
+                    blockchain_sync.update_user_seen(best_match)
+                except Exception as e:
+                    logger.warning(f"[AUTO-CHECKOUT] Failed to update user seen: {e}")
+
                 # Associate with person
                 matched_person = self._associate_face_to_person_safe(
                     face, persons, best_match, best_similarity, current_time
