@@ -1558,6 +1558,7 @@ export function CameraView() {
       {currentCameraId && (
         <CompetitionControls
           cameraId={currentCameraId}
+          walletAddress={primaryWallet?.address}
           onEscrowChange={setCompetitionEscrowInfo}
           onHasLoadedAppChange={setHasCompetitionApp}
         />
