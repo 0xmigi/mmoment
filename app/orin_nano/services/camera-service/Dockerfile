@@ -39,7 +39,7 @@ RUN pip3 install --no-cache-dir --ignore-installed -i https://pypi.org/simple \
     numpy==1.24.4 \
     requests==2.32.3 \
     cryptography==44.0.0 \
-    solders==0.21.0 base58==2.1.1 pynacl==1.5.0 \
+    solana==0.34.0 solders==0.21.0 base58==2.1.1 pynacl==1.5.0 httpx \
     pyzbar==0.1.9 \
     PyYAML==6.0.2 \
     aiortc==1.14.0 \

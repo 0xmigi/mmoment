@@ -3289,6 +3289,7 @@ def register_routes(app):
         data = request.json or {}
         competitors = data.get("competitors", [])
         duration_limit = data.get("duration_limit")
+        competition_meta = data.get("competition_meta")  # Escrow info from frontend
 
         services = get_services()
         if "app_manager" not in services:
@@ -3306,7 +3307,8 @@ def register_routes(app):
             ), 400
 
         try:
-            app_manager.active_app.start_competition(competitors, duration_limit)
+            # Pass competition_meta so non-initiators can see escrow info via /api/apps/status
+            app_manager.active_app.start_competition(competitors, duration_limit, competition_meta)
             return jsonify({"success": True, "message": "Competition started"})
         except Exception as e:
             logger.error(f"Failed to start competition: {e}", exc_info=True)
@@ -3360,7 +3362,9 @@ def register_routes(app):
 
             # If competition has escrow, settle on-chain
             if competition_meta and competition_meta.get("escrow_pda"):
-                if not CAMERA_OWNER_WALLET:
+                if not settle_competition:
+                    logger.warning("Settlement not available - competition_settlement module not imported")
+                elif not CAMERA_OWNER_WALLET:
                     logger.warning("CAMERA_OWNER_WALLET not configured, skipping settlement")
                 else:
                     try:
