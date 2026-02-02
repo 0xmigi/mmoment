@@ -1433,16 +1433,22 @@ export function CameraView() {
                     <button
                       onClick={handleDirectVideo}
                       disabled={loading}
-                      className="w-16 h-full flex items-center justify-center hover:text-primary text-gray-800 transition-colors rounded-xl"
+                      className={`w-16 h-full flex items-center justify-center transition-all duration-200 rounded-xl ${
+                        isRecording
+                          ? "text-red-500 hover:text-red-600"
+                          : "text-gray-800 hover:text-primary"
+                      }`}
                     >
                       {loading ? (
                         <Loader className="w-5 h-5 animate-spin" />
+                      ) : isRecording ? (
+                        <div className="w-3.5 h-3.5 bg-red-500 rounded-sm" />
                       ) : (
                         <Video className="w-5 h-5" />
                       )}
                     </button>
                     <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-2 bg-black/75 text-white text-sm rounded opacity-0 group-hover:opacity-100 whitespace-nowrap transition-opacity">
-                      {loading ? "Processing..." : "Record Video"}
+                      {loading ? "Processing..." : isRecording ? "Stop Recording" : "Record Video"}
                     </span>
                   </div>
                 </div>
@@ -1454,6 +1460,7 @@ export function CameraView() {
               onTakePicture={handleDirectPhoto}
               onRecordVideo={handleDirectVideo}
               isLoading={loading}
+              isRecording={isRecording}
               // Stream toggle removed - WebRTC is always-on infrastructure for checked-in users
             />
           </div>
@@ -1551,6 +1558,7 @@ export function CameraView() {
       {currentCameraId && (
         <CompetitionControls
           cameraId={currentCameraId}
+          walletAddress={primaryWallet?.address}
           onEscrowChange={setCompetitionEscrowInfo}
           onHasLoadedAppChange={setHasCompetitionApp}
         />

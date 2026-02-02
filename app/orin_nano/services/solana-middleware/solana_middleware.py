@@ -1047,177 +1047,24 @@ def derive_camera_timeline_pda(camera_pubkey: str) -> tuple:
         return None, None
 
 
-def serialize_activity_data(activity: dict) -> bytes:
-    """Serialize an ActivityData struct for the Solana instruction."""
-    # ActivityData layout:
-    # - timestamp: i64 (8 bytes)
-    # - activity_type: u8 (1 byte)
-    # - encrypted_content: Vec<u8> (4 bytes length + data)
-    # - nonce: [u8; 12] (12 bytes)
-    # - access_grants: Vec<Vec<u8>> (4 bytes outer length + inner vecs)
-
-    data = b''
-
-    # timestamp (i64, little-endian)
-    data += struct.pack('<q', activity['timestamp'])
-
-    # activity_type (u8)
-    data += struct.pack('<B', activity['activity_type'])
-
-    # encrypted_content (Vec<u8>)
-    encrypted_content = bytes(activity['encrypted_content'])
-    data += struct.pack('<I', len(encrypted_content))
-    data += encrypted_content
-
-    # nonce ([u8; 12])
-    nonce = bytes(activity['nonce'])
-    if len(nonce) != 12:
-        raise ValueError(f"Nonce must be 12 bytes, got {len(nonce)}")
-    data += nonce
-
-    # access_grants (Vec<Vec<u8>>)
-    access_grants = activity.get('access_grants', [])
-    data += struct.pack('<I', len(access_grants))
-    for grant in access_grants:
-        grant_bytes = bytes(grant)
-        data += struct.pack('<I', len(grant_bytes))
-        data += grant_bytes
-
-    return data
-
-
-def build_write_timeline_instruction(activities: list, signer: Pubkey, camera_pda: str, timeline_pda: str) -> Instruction:
-    """Build the write_to_camera_timeline instruction."""
-    # Instruction discriminator for write_to_camera_timeline
-    # This is the first 8 bytes of SHA256("global:write_to_camera_timeline")
-    discriminator = hashlib.sha256(b"global:write_to_camera_timeline").digest()[:8]
-
-    # Serialize instruction data
-    instruction_data = discriminator
-
-    # Serialize activities Vec
-    instruction_data += struct.pack('<I', len(activities))
-    for activity in activities:
-        activity_bytes = serialize_activity_data(activity)
-        instruction_data += activity_bytes
-
-    # Build accounts list
-    accounts = [
-        AccountMeta(pubkey=signer, is_signer=True, is_writable=True),  # signer (fee payer)
-        AccountMeta(pubkey=Pubkey.from_string(camera_pda), is_signer=False, is_writable=True),  # camera
-        AccountMeta(pubkey=Pubkey.from_string(timeline_pda), is_signer=False, is_writable=True),  # camera_timeline
-        AccountMeta(pubkey=SYSTEM_PROGRAM_ID, is_signer=False, is_writable=False),  # system_program
-    ]
-
-    return Instruction(
-        program_id=Pubkey.from_string(CAMERA_PROGRAM_ID),
-        accounts=accounts,
-        data=instruction_data
-    )
-
-
-@app.route('/api/blockchain/write-camera-timeline', methods=['POST'])
-def api_write_camera_timeline():
-    """
-    Phase 3 Privacy Architecture: Write encrypted activities to CameraTimeline.
-
-    This endpoint:
-    1. Takes pre-encrypted activities from the camera service
-    2. Builds the write_to_camera_timeline instruction
-    3. Signs with the device keypair
-    4. Submits the transaction to Solana
-
-    The transaction contains NO USER INFORMATION - complete anonymity.
-
-    Expected body:
-    {
-        "activities": [
-            {
-                "timestamp": 1699000000,
-                "activity_type": 2,
-                "encrypted_content": [bytes...],
-                "nonce": [12 bytes],
-                "access_grants": [[bytes...], ...]
-            },
-            ...
-        ]
-    }
-    """
-    try:
-        data = request.json
-        activities = data.get('activities', [])
-
-        if not activities:
-            return jsonify({"error": "No activities provided"}), 400
-
-        logger.info(f"[WRITE-TIMELINE] Writing {len(activities)} activities to camera timeline")
-
-        # Get device keypair for signing
-        try:
-            device_keypair = get_device_keypair()
-        except Exception as e:
-            logger.error(f"[WRITE-TIMELINE] Failed to load device keypair: {e}")
-            return jsonify({"error": "Device keypair not available"}), 500
-
-        # Get camera PDA
-        camera_pda = get_camera_pda()
-        if not camera_pda:
-            return jsonify({"error": "Camera PDA not configured"}), 500
-
-        # Derive camera timeline PDA
-        timeline_pda, bump = derive_camera_timeline_pda(camera_pda)
-        if not timeline_pda:
-            return jsonify({"error": "Failed to derive timeline PDA"}), 500
-
-        logger.info(f"[WRITE-TIMELINE] Camera: {camera_pda[:16]}..., Timeline: {timeline_pda[:16]}...")
-
-        # Build the instruction
-        instruction = build_write_timeline_instruction(
-            activities=activities,
-            signer=device_keypair.pubkey(),
-            camera_pda=camera_pda,
-            timeline_pda=timeline_pda
-        )
-
-        # Get recent blockhash
-        blockhash_response = solana_client.get_latest_blockhash()
-        if not blockhash_response.value:
-            return jsonify({"error": "Failed to get blockhash"}), 500
-
-        recent_blockhash = blockhash_response.value.blockhash
-
-        # Build and sign transaction
-        message = Message.new_with_blockhash(
-            [instruction],
-            device_keypair.pubkey(),
-            recent_blockhash
-        )
-        tx = Transaction.new_unsigned(message)
-        tx.sign([device_keypair], recent_blockhash)
-
-        # Send transaction
-        tx_opts = TxOpts(skip_confirmation=False, preflight_commitment=Confirmed)
-        result = solana_client.send_transaction(tx, opts=tx_opts)
-
-        if result.value:
-            signature = str(result.value)
-            logger.info(f"[WRITE-TIMELINE] Transaction successful: {signature[:16]}...")
-            return jsonify({
-                "success": True,
-                "signature": signature,
-                "activities_count": len(activities),
-                "camera_pda": camera_pda,
-                "timeline_pda": timeline_pda
-            })
-        else:
-            logger.error(f"[WRITE-TIMELINE] Transaction failed: {result}")
-            return jsonify({"error": "Transaction failed"}), 500
-
-    except Exception as e:
-        logger.error(f"[WRITE-TIMELINE] Error: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
+# =============================================================================
+# REMOVED: write-camera-timeline endpoint and helpers (Jan 2026)
+#
+# The code that was here INCORRECTLY submitted transactions directly to Solana
+# from the Jetson device. This violates the CORRECT architecture:
+#
+# CORRECT PATTERN (applies to ALL on-chain submissions):
+#   1. Jetson packages data + partial-signs with device key
+#   2. Jetson POSTs to backend
+#   3. Backend adds payer signature + submits to Solana
+#   4. Backend pays ALL transaction fees
+#
+# The Jetson NEVER submits directly to Solana. Ever.
+#
+# If you need to implement timeline writing, follow the pattern in:
+#   - competition_settlement.py (camera-service)
+#   - checkout_service.py (camera-service)
+# =============================================================================
 
 
 if __name__ == "__main__":

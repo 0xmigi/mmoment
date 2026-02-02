@@ -621,9 +621,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::cout << "[Init] Loading InsightFace engines..." << std::endl;
+    std::cout << "[Init] Loading InsightFace engines (SCRFD + AdaFace)..." << std::endl;
     g_insightFace = new InsightFacePipeline();
-    if (!g_insightFace->initialize("retinaface.engine", "arcface_r50.engine")) {
+    if (!g_insightFace->initialize("scrfd_10g.engine", "adaface_ir50.engine")) {
         std::cerr << "[Init] Failed to load InsightFace engines" << std::endl;
         return 1;
     }
@@ -903,7 +903,7 @@ int main(int argc, char* argv[]) {
                             g_gpuRotatedFrame,
                             ROTATED_WIDTH, ROTATED_HEIGHT, ROTATED_WIDTH * 4,  // 720x1280, pitch=720*4
                             px1, py1, px2, py2,
-                            0.5f
+                            0.35f  // Lower threshold for SCRFD to detect smaller/distant faces
                         );
 
                         // Convert face coords back to landscape for display

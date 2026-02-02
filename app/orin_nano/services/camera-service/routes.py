@@ -32,8 +32,11 @@ from services.device_signer import DeviceSigner
 # Import native identity service for lightweight identity matching
 from services.native_identity_service import get_native_identity_service
 
-# Import competition settlement service for on-chain escrow settlement
-from services.competition_settlement import settle_competition
+# Import competition settlement service for on-chain escrow settlement (optional)
+try:
+    from services.competition_settlement import settle_competition
+except ImportError:
+    settle_competition = None  # Competition settlement disabled - missing dependencies
 
 # Set up logging
 logger = logging.getLogger("CameraRoutes")
@@ -638,6 +641,120 @@ def register_routes(app):
             logger.error(f"Error getting WHIP status: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
 
+    @app.route("/api/debug/auto-checkout", methods=["GET"])
+    def api_debug_auto_checkout():
+        """
+        Debug endpoint to check auto-checkout state.
+        Shows BlockchainSessionSync internal state for troubleshooting.
+        """
+        try:
+            import time
+            from services.blockchain_session_sync import get_blockchain_session_sync
+
+            blockchain_sync = get_blockchain_session_sync()
+            session_service = get_services()["session"]
+
+            # Get all active sessions for comparison
+            active_sessions = session_service.get_all_sessions()
+
+            # Calculate time since check-in for tracked users
+            now = time.time()
+            user_states = {}
+            for wallet in blockchain_sync.checked_in_wallets:
+                last_seen = blockchain_sync.last_seen_at.get(wallet, now)
+                time_since_seen = now - last_seen
+                has_face = blockchain_sync._has_local_face_embedding(wallet)
+
+                # Get session info
+                session_obj = session_service.get_session_object_by_wallet(wallet)
+                last_active = session_obj.last_active if session_obj else None
+                time_since_active = now - last_active if last_active else None
+
+                user_states[wallet[:8]] = {
+                    "has_face_embedding": has_face,
+                    "last_seen_at": last_seen,
+                    "seconds_since_seen": int(time_since_seen),
+                    "minutes_since_seen": int(time_since_seen / 60),
+                    "last_active": last_active,
+                    "seconds_since_active": int(time_since_active) if time_since_active else None,
+                    "timeout_type": "face (30 min)" if has_face else "activity (60 min)",
+                    "threshold_seconds": blockchain_sync.face_timeout_threshold if has_face else blockchain_sync.activity_timeout_threshold,
+                    "threshold_minutes": (blockchain_sync.face_timeout_threshold if has_face else blockchain_sync.activity_timeout_threshold) / 60,
+                    "time_until_auto_checkout_seconds": max(0, (blockchain_sync.face_timeout_threshold if has_face else blockchain_sync.activity_timeout_threshold) - (time_since_seen if has_face else (time_since_active or time_since_seen))),
+                }
+
+            return jsonify({
+                "success": True,
+                "blockchain_sync": {
+                    "is_running": blockchain_sync.is_running,
+                    "sync_interval": blockchain_sync.sync_interval,
+                    "face_timeout_threshold_seconds": blockchain_sync.face_timeout_threshold,
+                    "face_timeout_threshold_minutes": blockchain_sync.face_timeout_threshold / 60,
+                    "activity_timeout_threshold_seconds": blockchain_sync.activity_timeout_threshold,
+                    "activity_timeout_threshold_minutes": blockchain_sync.activity_timeout_threshold / 60,
+                    "checked_in_wallets": list(blockchain_sync.checked_in_wallets),
+                    "checked_in_count": len(blockchain_sync.checked_in_wallets),
+                    "last_seen_at": {k[:8]: v for k, v in blockchain_sync.last_seen_at.items()},
+                },
+                "session_service": {
+                    "active_sessions_count": len(active_sessions),
+                    "active_sessions": [s.get("wallet_address", "unknown")[:8] for s in active_sessions],
+                },
+                "user_states": user_states,
+                "current_time": now,
+            })
+        except Exception as e:
+            logger.error(f"Error in auto-checkout debug: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    @app.route("/api/debug/trigger-auto-checkout", methods=["POST"])
+    def api_debug_trigger_auto_checkout():
+        """
+        Debug endpoint to manually trigger auto-checkout for a user.
+        Use this for testing the auto-checkout flow without waiting for timeout.
+
+        Request body:
+            wallet_address: User's wallet address
+            reason: Optional reason (default: "debug_trigger")
+        """
+        try:
+            from services.blockchain_session_sync import get_blockchain_session_sync
+            from services.checkout_service import execute_full_checkout
+
+            data = request.json or {}
+            wallet_address = data.get("wallet_address")
+            reason = data.get("reason", "debug_trigger")
+
+            if not wallet_address:
+                return jsonify({"success": False, "error": "wallet_address required"}), 400
+
+            session_service = get_services()["session"]
+
+            # Check if user has an active session
+            session = session_service.get_session_object_by_wallet(wallet_address)
+            if not session:
+                return jsonify({"success": False, "error": f"No active session for {wallet_address[:8]}..."}), 404
+
+            logger.info(f"[DEBUG] Manually triggering auto-checkout for {wallet_address[:8]}... (reason: {reason})")
+
+            # Execute the full checkout flow
+            result = execute_full_checkout(
+                wallet_address=wallet_address,
+                session_service=session_service,
+                auto_checkout=True,
+                auto_checkout_reason=reason
+            )
+
+            return jsonify(result)
+
+        except Exception as e:
+            logger.error(f"Error in debug trigger auto-checkout: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return jsonify({"success": False, "error": str(e)}), 500
+
     # Camera Actions
     @app.route("/api/capture", methods=["POST"])
     @require_session
@@ -751,9 +868,43 @@ def register_routes(app):
                     skip_video_upload = os.environ.get("SKIP_VIDEO_UPLOAD", "").lower() == "true"
 
                     if skip_video_upload:
-                        # Skip upload for testing - return mock job_id
+                        # Skip Walrus upload but still register with backend for gallery
                         job_id = -1
-                        logger.info(f"🎥 Video recorded for {wallet_address[:8]}... (UPLOAD SKIPPED - testing mode)")
+                        logger.info(f"🎥 Video recorded for {wallet_address[:8]}... (local storage, no Walrus upload)")
+
+                        # Register local file with backend so it appears in gallery
+                        try:
+                            backend_url = os.getenv("BACKEND_URL", "https://mmoment-production.up.railway.app")
+                            local_video_url = f"https://{camera_pda.lower()}.mmoment.xyz/videos/{latest_video['filename']}"
+
+                            # Get checked-in users for access grants
+                            checked_in_users = list(get_checked_in_users())
+                            if wallet_address not in checked_in_users:
+                                checked_in_users.append(wallet_address)
+
+                            register_response = requests.post(
+                                f"{backend_url}/api/walrus/register-local",
+                                json={
+                                    "walletAddress": wallet_address,
+                                    "localUrl": local_video_url,
+                                    "cameraId": camera_pda,
+                                    "deviceSignature": device_signature,
+                                    "fileType": "video",
+                                    "timestamp": latest_video.get("timestamp", int(time.time() * 1000)),
+                                    "originalSize": latest_video.get("size", 0),
+                                    "filename": latest_video.get("filename"),
+                                    "accessGrants": [{"pubkey": user} for user in checked_in_users]
+                                },
+                                timeout=10
+                            )
+
+                            if register_response.ok:
+                                register_data = register_response.json()
+                                logger.info(f"📁 Local video registered with backend: {register_data.get('blobId', 'unknown')[:20]}...")
+                            else:
+                                logger.warning(f"Failed to register local video with backend: {register_response.status_code}")
+                        except Exception as register_err:
+                            logger.warning(f"Failed to register local video with backend: {register_err}")
                     else:
                         # Queue background upload (returns immediately with job_id)
                         upload_queue = get_upload_queue()
@@ -918,9 +1069,43 @@ def register_routes(app):
                 skip_video_upload = os.environ.get("SKIP_VIDEO_UPLOAD", "").lower() == "true"
 
                 if skip_video_upload:
-                    # Skip upload for testing - return mock job_id
+                    # Skip Walrus upload but still register with backend for gallery
                     job_id = -1
-                    logger.info(f"🎥 Video recorded for {wallet_address[:8]}... (UPLOAD SKIPPED - testing mode)")
+                    logger.info(f"🎥 Video recorded for {wallet_address[:8]}... (local storage, no Walrus upload)")
+
+                    # Register local file with backend so it appears in gallery
+                    try:
+                        backend_url = os.getenv("BACKEND_URL", "https://mmoment-production.up.railway.app")
+                        local_video_url = f"https://{camera_pda.lower()}.mmoment.xyz/videos/{latest_video['filename']}"
+
+                        # Get checked-in users for access grants
+                        checked_in_users = list(get_checked_in_users())
+                        if wallet_address not in checked_in_users:
+                            checked_in_users.append(wallet_address)
+
+                        register_response = requests.post(
+                            f"{backend_url}/api/walrus/register-local",
+                            json={
+                                "walletAddress": wallet_address,
+                                "localUrl": local_video_url,
+                                "cameraId": camera_pda,
+                                "deviceSignature": device_signature,
+                                "fileType": "video",
+                                "timestamp": latest_video.get("timestamp", int(time.time() * 1000)),
+                                "originalSize": latest_video.get("size", 0),
+                                "filename": latest_video.get("filename"),
+                                "accessGrants": [{"pubkey": user} for user in checked_in_users]
+                            },
+                            timeout=10
+                        )
+
+                        if register_response.ok:
+                            register_data = register_response.json()
+                            logger.info(f"📁 Local video registered with backend: {register_data.get('blobId', 'unknown')[:20]}...")
+                        else:
+                            logger.warning(f"Failed to register local video with backend: {register_response.status_code}")
+                    except Exception as register_err:
+                        logger.warning(f"Failed to register local video with backend: {register_err}")
                 else:
                     # Queue background upload
                     upload_queue = get_upload_queue()
@@ -1882,8 +2067,75 @@ def register_routes(app):
 
     @app.route("/api/face/recognize", methods=["POST"])
     def api_face_recognize():
-        """Standardized face recognition endpoint"""
-        return recognize_face()
+        """
+        Get all checked-in users at this camera.
+
+        This endpoint does NOT require session validation because:
+        - It's used for competition setup to list who can participate
+        - It returns public info (who's checked in at a public camera)
+        - The actual competition/app actions DO require session validation
+        """
+        try:
+            from services.identity_store import get_identity_store
+            identity_store = get_identity_store()
+            identity_service = get_native_identity_service()
+            session_service = get_services()["session"]
+
+            # Get current recognition state
+            status = identity_service.get_status()
+
+            # Get ALL checked-in users from session service (not just those with loaded tokens)
+            all_sessions = session_service.get_all_sessions()
+            session_wallets = set(s.wallet_address for s in all_sessions if hasattr(s, 'wallet_address'))
+
+            # Also include anyone in identity store
+            identity_wallets = set(identity_store.get_checked_in_wallets())
+
+            # Union of both
+            all_checked_in_wallets = session_wallets | identity_wallets
+
+            logger.info(f"[RECOGNIZE] Sessions: {len(session_wallets)}, Identity store: {len(identity_wallets)}, Total: {len(all_checked_in_wallets)}")
+
+            # Build recognized_data with display names for each wallet
+            recognized_data = {}
+            for w in all_checked_in_wallets:
+                identity = identity_store.get_identity(w)
+                if identity:
+                    recognized_data[w] = {
+                        "confidence": 1.0,
+                        "display_name": identity.get_display_name(),
+                        "username": identity.username,
+                        "is_checked_in": True,
+                        "has_recognition_token": True,
+                    }
+                else:
+                    # Try to get display_name from session
+                    session = session_service.get_session_by_wallet(w)
+                    display_name = f"{w[:8]}..."
+                    username = None
+                    if session and hasattr(session, 'user_profile') and session.user_profile:
+                        display_name = session.user_profile.get('display_name') or session.user_profile.get('displayName') or display_name
+                        username = session.user_profile.get('username')
+                    recognized_data[w] = {
+                        "confidence": 0.0,
+                        "display_name": display_name,
+                        "username": username,
+                        "is_checked_in": True,
+                        "has_recognition_token": False,
+                    }
+
+            return jsonify({
+                "success": True,
+                "mode": "native",
+                "detected_faces": status.get("total_faces_processed", 0),
+                "recognized_faces": status.get("currently_tracked", 0),
+                "recognized_data": recognized_data,
+            })
+        except Exception as e:
+            logger.error(f"[RECOGNIZE] Error: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return jsonify({"success": False, "error": str(e)}), 500
 
     @app.route("/api/gesture/current", methods=["GET"])
     def api_gesture_current():
@@ -2216,130 +2468,30 @@ def register_routes(app):
                 {"success": False, "error": "Wallet address is required"}
             ), 400
 
-        logger.info(f"[CHECKOUT] User {wallet_address[:8]}... checking out")
+        logger.info(f"[CHECKOUT] User {wallet_address[:8]}... checking out (manual)")
 
         try:
             services = get_services()
             session_service = services["session"]
 
-            # Get the raw session object (need session_key and activities)
-            session = session_service.get_session_object_by_wallet(wallet_address)
-            if not session:
-                logger.warning(f"[CHECKOUT] No session found for {wallet_address[:8]}...")
-                return jsonify(
-                    {"success": True, "message": "No active session found (already cleaned up)"}
-                )
+            # Use shared checkout function for consistent behavior
+            from services.checkout_service import execute_full_checkout
 
-            session_id = session.session_id
-            check_in_time = int(session.created_at)
-            camera_pda = get_camera_pda()
-
-            # Get user profile info from session for timeline display
-            user_profile = session.user_profile or {}
-            display_name = user_profile.get('display_name') or user_profile.get('displayName') or wallet_address[:8]
-            username = user_profile.get('username')
-
-            # Add checkout activity to LOCAL buffer only (send_to_backend=False)
-            # We send to backend DIRECTLY below for guaranteed sync delivery
-            session_service.add_activity_to_session(
+            result = execute_full_checkout(
                 wallet_address=wallet_address,
-                activity_type=1,  # CHECK_OUT
-                data={"duration_seconds": int(time.time() - session.created_at)},
-                metadata={"camera_pda": camera_pda},
-                send_to_backend=False  # We send directly below
+                session_service=session_service,
+                auto_checkout=False
             )
 
-            # Tell backend about check-out DIRECTLY (sync POST - no async queue!)
-            # This ensures timeline event is saved BEFORE we return the response
-            backend_url = os.environ.get('BACKEND_URL', 'https://mmoment-production.up.railway.app')
-            try:
-                import requests as req
-                activity_response = req.post(
-                    f"{backend_url}/api/session/activity",
-                    json={
-                        "sessionId": session_id,
-                        "cameraId": camera_pda,
-                        "userPubkey": wallet_address,
-                        "activityType": 1,  # CHECK_OUT
-                        "timestamp": int(time.time() * 1000),
-                        "displayName": display_name,
-                        "username": username
-                    },
-                    timeout=5
-                )
-                if activity_response.status_code == 200:
-                    result = activity_response.json()
-                    logger.info(f"[CHECKOUT] ✅ Timeline notified! Sockets in room: {result.get('debug', {}).get('socketsInRoom', '?')}")
-                else:
-                    logger.warning(f"[CHECKOUT] Timeline notification failed: HTTP {activity_response.status_code}")
-            except Exception as e:
-                logger.warning(f"[CHECKOUT] Timeline notification failed (non-blocking): {e}")
-
-            # Get all activities from session
-            activities = session.get_activities()
-            logger.info(f"[CHECKOUT] Session has {len(activities)} activities to commit")
-
-            # Import checkout service functions
-            from services.checkout_service import (
-                encrypt_and_write_activities,
-                send_access_key_to_backend
-            )
-
-            tx_signature = None
-            access_key_sent = False
-
-            # Step 1: Encrypt activities and write to CameraTimeline
-            if activities:
-                try:
-                    tx_signature = encrypt_and_write_activities(
-                        session_key=session.session_key,
-                        activities=activities,
-                        checked_in_users=[wallet_address]  # For access grants
+            if result.get("success"):
+                return jsonify(result)
+            else:
+                # No session found is not an error for manual checkout
+                if "No active session" in result.get("error", ""):
+                    return jsonify(
+                        {"success": True, "message": "No active session found (already cleaned up)"}
                     )
-                    logger.info(f"[CHECKOUT] Timeline updated, tx: {tx_signature[:16] if tx_signature else 'None'}...")
-                except Exception as e:
-                    logger.error(f"[CHECKOUT] Failed to write activities to timeline: {e}")
-                    # Continue with checkout even if timeline write fails
-                    # Activities are lost but user is still checked out
-
-            # Step 2: Send encrypted session key to backend
-            try:
-                access_key_sent = send_access_key_to_backend(
-                    user_pubkey=wallet_address,
-                    session_key=session.session_key,
-                    check_in_time=check_in_time
-                )
-                if access_key_sent:
-                    logger.info(f"[CHECKOUT] Access key sent to backend for {wallet_address[:8]}...")
-                else:
-                    logger.warning(f"[CHECKOUT] Failed to send access key to backend")
-            except Exception as e:
-                logger.error(f"[CHECKOUT] Error sending access key: {e}")
-
-            # Step 3: Clean up face recognition data
-            try:
-                from services.blockchain_session_sync import get_blockchain_session_sync
-                blockchain_sync = get_blockchain_session_sync()
-                blockchain_sync.trigger_checkout(wallet_address)
-                logger.info(f"[CHECKOUT] Face recognition data cleaned up")
-            except Exception as e:
-                logger.warning(f"[CHECKOUT] Error cleaning up face data: {e}")
-
-            # Step 4: End the session
-            session_service.end_session(session_id, wallet_address)
-            logger.info(f"[CHECKOUT] Session {session_id[:16]}... ended")
-
-            return jsonify(
-                {
-                    "success": True,
-                    "wallet_address": wallet_address,
-                    "session_id": session_id,
-                    "activities_committed": len(activities),
-                    "timeline_tx": tx_signature,
-                    "access_key_sent": access_key_sent,
-                    "message": "Checkout complete (privacy-preserving)",
-                }
-            )
+                return jsonify(result), 500
 
         except Exception as e:
             logger.error(f"[CHECKOUT] Error: {e}")
@@ -3137,6 +3289,7 @@ def register_routes(app):
         data = request.json or {}
         competitors = data.get("competitors", [])
         duration_limit = data.get("duration_limit")
+        competition_meta = data.get("competition_meta")  # Escrow info from frontend
 
         services = get_services()
         if "app_manager" not in services:
@@ -3154,7 +3307,8 @@ def register_routes(app):
             ), 400
 
         try:
-            app_manager.active_app.start_competition(competitors, duration_limit)
+            # Pass competition_meta so non-initiators can see escrow info via /api/apps/status
+            app_manager.active_app.start_competition(competitors, duration_limit, competition_meta)
             return jsonify({"success": True, "message": "Competition started"})
         except Exception as e:
             logger.error(f"Failed to start competition: {e}", exc_info=True)
@@ -3208,7 +3362,9 @@ def register_routes(app):
 
             # If competition has escrow, settle on-chain
             if competition_meta and competition_meta.get("escrow_pda"):
-                if not CAMERA_OWNER_WALLET:
+                if not settle_competition:
+                    logger.warning("Settlement not available - competition_settlement module not imported")
+                elif not CAMERA_OWNER_WALLET:
                     logger.warning("CAMERA_OWNER_WALLET not configured, skipping settlement")
                 else:
                     try:
@@ -3410,7 +3566,19 @@ def register_routes(app):
 
             # Get current recognition state
             status = identity_service.get_status()
-            checked_in_wallets = identity_store.get_checked_in_wallets()
+
+            # Get ALL checked-in users from session service (not just those with loaded tokens)
+            # This ensures competition selection shows everyone who is checked in
+            all_sessions = session_service.get_all_sessions()
+            session_wallets = set(s.wallet_address for s in all_sessions if hasattr(s, 'wallet_address'))
+
+            # Also include anyone in identity store (in case session expired but token still loaded)
+            identity_wallets = set(identity_store.get_checked_in_wallets())
+
+            # Union of both - all checked-in users
+            all_checked_in_wallets = session_wallets | identity_wallets
+
+            logger.info(f"[RECOGNIZE] Sessions: {len(session_wallets)}, Identity store: {len(identity_wallets)}, Total: {len(all_checked_in_wallets)}")
 
             # Check if requested wallet is being tracked
             wallet_recognized = False
@@ -3431,13 +3599,44 @@ def register_routes(app):
                 _, jpeg_data = cv2.imencode(".jpg", frame)
                 image_base64 = base64.b64encode(jpeg_data).decode("utf-8")
 
+            # Build recognized_data with display names for each wallet
+            # Include ALL checked-in users, not just those with loaded recognition tokens
+            recognized_data = {}
+            for w in all_checked_in_wallets:
+                identity = identity_store.get_identity(w)
+                if identity:
+                    # User has recognition token loaded - full data available
+                    recognized_data[w] = {
+                        "confidence": 1.0,
+                        "display_name": identity.get_display_name(),
+                        "username": identity.username,
+                        "is_checked_in": True,
+                        "has_recognition_token": True,
+                    }
+                else:
+                    # User checked in but no recognition token loaded yet
+                    # Try to get display_name from session
+                    session = session_service.get_session_by_wallet(w)
+                    display_name = f"{w[:8]}..."
+                    username = None
+                    if session and hasattr(session, 'user_profile') and session.user_profile:
+                        display_name = session.user_profile.get('display_name') or session.user_profile.get('displayName') or display_name
+                        username = session.user_profile.get('username')
+                    recognized_data[w] = {
+                        "confidence": 0.0,  # No face recognition confidence yet
+                        "display_name": display_name,
+                        "username": username,
+                        "is_checked_in": True,
+                        "has_recognition_token": False,
+                    }
+
             return jsonify(
                 {
                     "success": True,
                     "mode": "native",
                     "detected_faces": status.get("total_faces_processed", 0),
                     "recognized_faces": status.get("currently_tracked", 0),
-                    "recognized_data": {w: {"confidence": 1.0} for w in checked_in_wallets},
+                    "recognized_data": recognized_data,
                     "wallet_recognized": wallet_recognized,
                     "wallet_confidence": wallet_confidence,
                     "has_valid_session": has_valid_session,
@@ -3639,6 +3838,128 @@ def register_routes(app):
         queue = get_upload_queue()
         uploads = queue.get_user_uploads(wallet_address)
         return jsonify({"success": True, "uploads": uploads})
+
+    @app.route("/api/upload-local-to-walrus", methods=["POST"])
+    @require_session
+    def upload_local_to_walrus():
+        """
+        Manually trigger Walrus upload for a local video/photo.
+        Called when user wants to permanently save a local file to Walrus.
+
+        Request body:
+        - filename: Name of the local file to upload
+        - localBlobId: The local-xxx ID from backend (optional, for upgrading record)
+        - wallet_address: User's wallet address
+
+        Returns upload result with Walrus blobId.
+        """
+        from services.walrus_upload_service import get_walrus_upload_service
+        from services.capture_service import get_capture_service
+
+        data = request.json or {}
+        filename = data.get("filename")
+        local_blob_id = data.get("localBlobId")
+        wallet_address = data.get("wallet_address")
+
+        if not filename or not wallet_address:
+            return jsonify({"success": False, "error": "filename and wallet_address required"}), 400
+
+        try:
+            capture_service = get_capture_service()
+            camera_pda = get_camera_pda()
+
+            # Find the video file
+            videos_dir = "/app/videos"
+            photos_dir = "/app/photos"
+
+            video_path = os.path.join(videos_dir, filename)
+            photo_path = os.path.join(photos_dir, filename)
+
+            if os.path.exists(video_path):
+                file_path = video_path
+                file_type = "video"
+            elif os.path.exists(photo_path):
+                file_path = photo_path
+                file_type = "photo"
+            else:
+                return jsonify({"success": False, "error": f"File not found: {filename}"}), 404
+
+            logger.info(f"📤 Manual Walrus upload requested: {filename} ({file_type})")
+
+            # Calculate file hash and sign
+            upload_service = get_walrus_upload_service()
+            file_hash = upload_service.calculate_file_hash(file_path)
+
+            if not file_hash:
+                return jsonify({"success": False, "error": "Failed to calculate file hash"}), 500
+
+            signed_event = sign_capture(
+                user_wallet=wallet_address,
+                camera_pda=camera_pda,
+                file_hash=file_hash,
+                capture_type=file_type,
+                file_path=file_path,
+                metadata={"filename": filename},
+            )
+            device_signature = signed_event["device_signature"]
+
+            # Get checked-in users for access grants
+            checked_in_users = list(get_checked_in_users())
+            if wallet_address not in checked_in_users:
+                checked_in_users.append(wallet_address)
+
+            # Upload to Walrus
+            result = upload_service.upload_capture(
+                wallet_address=wallet_address,
+                file_path=file_path,
+                camera_id=camera_pda,
+                device_signature=device_signature,
+                checked_in_users=checked_in_users,
+                file_type=file_type,
+                timestamp=int(time.time() * 1000),
+            )
+
+            if not result.get("success"):
+                return jsonify({"success": False, "error": result.get("error", "Upload failed")}), 500
+
+            logger.info(f"✅ Manual Walrus upload complete: {result.get('blob_id', 'unknown')[:20]}...")
+
+            # If we have a localBlobId, upgrade the backend record
+            if local_blob_id and local_blob_id.startswith("local-"):
+                try:
+                    backend_url = os.getenv("BACKEND_URL", "https://mmoment-production.up.railway.app")
+                    upgrade_response = requests.post(
+                        f"{backend_url}/api/walrus/upgrade-local",
+                        json={
+                            "localBlobId": local_blob_id,
+                            "blobId": result.get("blob_id"),
+                            "downloadUrl": result.get("download_url"),
+                            "encryptedSize": result.get("encrypted_size", 0),
+                            "nonce": result.get("nonce"),
+                        },
+                        timeout=10
+                    )
+
+                    if upgrade_response.ok:
+                        logger.info(f"📁 Local record upgraded to Walrus: {local_blob_id} -> {result.get('blob_id', 'unknown')[:16]}...")
+                    else:
+                        logger.warning(f"Failed to upgrade local record: {upgrade_response.status_code}")
+                except Exception as upgrade_err:
+                    logger.warning(f"Failed to upgrade local record: {upgrade_err}")
+
+            return jsonify({
+                "success": True,
+                "blobId": result.get("blob_id"),
+                "downloadUrl": result.get("download_url"),
+                "fileType": file_type,
+                "filename": filename,
+                "localBlobId": local_blob_id,
+                "upgraded": bool(local_blob_id and local_blob_id.startswith("local-")),
+            })
+
+        except Exception as e:
+            logger.error(f"Manual Walrus upload failed: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)}), 500
 
     @app.route("/start_recording", methods=["POST"])
     @require_session

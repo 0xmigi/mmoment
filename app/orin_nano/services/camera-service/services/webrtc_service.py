@@ -158,11 +158,12 @@ class BaseBufferVideoTrack(VideoStreamTrack):
             
             # WORKING TIMESTAMP SOLUTION
             try:
-                # Use aiortc's built-in timestamp method if available
-                av_frame.pts = self.next_timestamp()
-                av_frame.time_base = self.time_base
+                # Use aiortc's built-in timestamp method if available (it's a coroutine!)
+                pts, time_base = await self.next_timestamp()
+                av_frame.pts = pts
+                av_frame.time_base = time_base
             except:
-                # Fallback to manual timestamp 
+                # Fallback to manual timestamp
                 from fractions import Fraction
                 av_frame.pts = int(time.time() * 90000)  # 90kHz clock
                 av_frame.time_base = Fraction(1, 90000)
@@ -180,17 +181,18 @@ class BaseBufferVideoTrack(VideoStreamTrack):
             
             av_frame = VideoFrame.from_ndarray(error_frame, format="rgb24")
             
-            # WORKING TIMESTAMP SOLUTION  
+            # WORKING TIMESTAMP SOLUTION
             try:
-                # Use aiortc's built-in timestamp method if available
-                av_frame.pts = self.next_timestamp()
-                av_frame.time_base = self.time_base
+                # Use aiortc's built-in timestamp method if available (it's a coroutine!)
+                pts, time_base = await self.next_timestamp()
+                av_frame.pts = pts
+                av_frame.time_base = time_base
             except:
-                # Fallback to manual timestamp 
+                # Fallback to manual timestamp
                 from fractions import Fraction
                 av_frame.pts = int(time.time() * 90000)  # 90kHz clock
                 av_frame.time_base = Fraction(1, 90000)
-            
+
             self.last_frame_time = time.time()
             return av_frame
 

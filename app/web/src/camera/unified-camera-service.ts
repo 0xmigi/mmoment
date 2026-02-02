@@ -1493,19 +1493,20 @@ export class UnifiedCameraService {
         console.log('🔧 Camera instance:', camera ? 'Found' : 'Not found');
       } else {
         console.log('❌ Camera not found in registry');
-        console.log('💡 Trying to register camera...');
-        
-        // Try to register the camera manually
+        console.log('💡 Trying to register camera using PDA-based URL...');
+
+        // Try to register the camera manually using PDA-based URL
         try {
+          const pdaUrl = CONFIG.getCameraApiUrlByPda(targetCameraId);
           cameraRegistry.registerCamera({
             cameraId: targetCameraId,
             cameraType: 'jetson',
-            apiUrl: 'https://jetson.mmoment.xyz',
+            apiUrl: pdaUrl,
             name: 'Jetson Camera',
             description: 'Jetson Nano camera with AI capabilities'
           });
-          console.log('✅ Camera registered successfully');
-          
+          console.log('✅ Camera registered successfully at:', pdaUrl);
+
           // Check again
           const hasNow = this.hasCamera(targetCameraId);
           console.log('🔄 Has camera after registration:', hasNow);

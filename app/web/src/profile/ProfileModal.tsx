@@ -37,6 +37,11 @@ interface ProfileModalProps {
 }
 
 export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProps) {
+  // Debug: Log what data we're receiving
+  console.log('[ProfileModal] Opened with action:', action);
+  console.log('[ProfileModal] cvActivity:', action?.cvActivity);
+  console.log('[ProfileModal] competition:', action?.cvActivity?.competition);
+
   if (!isOpen) return null;
 
   // Get social identity credentials (from current user's verifiedCredentials)

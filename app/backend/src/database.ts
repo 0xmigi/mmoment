@@ -952,8 +952,15 @@ export async function getUserSessions(walletAddress: string, limit: number = 50)
         for (const checkIn of checkIns) {
           if (sessions.length >= limit) break;
 
+          // Skip if session_id is missing or empty - we need valid session IDs for proper pairing
+          if (!checkIn.session_id) {
+            console.log(`[getUserSessions] Skipping check-in with no session_id (id: ${checkIn.id})`);
+            continue;
+          }
+
+          const sessionId = checkIn.session_id;
+
           // Skip if we've already processed this session_id (prevents duplicate sessions)
-          const sessionId = checkIn.session_id || `${checkIn.id}`;
           if (seenSessionIds.has(sessionId)) {
             console.log(`[getUserSessions] Skipping duplicate session_id: ${sessionId.slice(0, 8)}...`);
             continue;
@@ -961,18 +968,17 @@ export async function getUserSessions(walletAddress: string, limit: number = 50)
           seenSessionIds.add(sessionId);
 
           try {
-            // Find the next CHECK_OUT activity for this user at this camera after the check_in
+            // Find the CHECK_OUT activity for this SAME SESSION (by session_id)
+            // This is the key fix: match by session_id, not just camera + timestamp
             const checkOut = await new Promise<any>((res, rej) => {
               dbInstance.get(
                 `SELECT id, timestamp
                  FROM session_activity_buffers
-                 WHERE user_pubkey = ?
-                   AND camera_id = ?
+                 WHERE session_id = ?
                    AND activity_type = ?
-                   AND timestamp > ?
                  ORDER BY timestamp ASC
                  LIMIT 1`,
-                [walletAddress, checkIn.camera_id, ACTIVITY_TYPE.CHECK_OUT, checkIn.timestamp],
+                [sessionId, ACTIVITY_TYPE.CHECK_OUT],
                 (err, row) => err ? rej(err) : res(row)
               );
             });

@@ -50,7 +50,6 @@ class NativeIdentityService:
 
     KEY SAFEGUARDS:
     - If ANY face is detected, ReID matching is SKIPPED (faces are authoritative)
-    - If a face is detected but doesn't match the track's wallet, identity is REVOKED
     - ReID can only re-associate to tracks that appear near the original track's last position
     - ReID features expire after 2 seconds (not 5)
     - Face must have been seen within 1 second (not 3) for ReID to work
@@ -90,11 +89,12 @@ class NativeIdentityService:
         # Stats
         self.total_matches = 0
         self.total_faces_processed = 0
-        self.total_mismatches_revoked = 0  # Track identity revocations
         self._frame_counter = 0  # For rate-limited logging
 
         # Track → identity mapping (track_id from YOLO → wallet_address)
-        self._track_lock = threading.Lock()
+        # MUST be RLock (reentrant) because _maintain_reid_for_recognized_tracks
+        # holds this lock and calls functions that also try to acquire it
+        self._track_lock = threading.RLock()
         self._track_to_wallet: Dict[int, str] = {}
         self._wallet_to_track: Dict[str, int] = {}
 
@@ -111,19 +111,28 @@ class NativeIdentityService:
         self._reid_recovery_max_time = 5.0      # Max seconds since track lost for recovery
         self._reid_recovery_min_iou = 0.3       # Spatial overlap required (same region)
 
+        # Part 3: Unified ReID settings
+        self._unified_reid_threshold = 0.65     # Threshold for appearance cluster matching
+        self._unified_recovery_max_time = 30.0  # Extended window for confirmed users
+        self._body_maintenance_threshold = 0.60 # Body-only maintenance for face_confirmed users
+        self._face_confirmed_count = 3          # Face matches needed for 'face_confirmed' status
+        self._last_appearance_update: Dict[str, float] = {}  # Rate-limit appearance history updates
+
+        # Part 3.5: Body-assisted recognition when face is visible but weak
+        # For face_confirmed users: if face is detected but similarity is weak (not strong enough
+        # to match, but not so low it's clearly a different person), fall back to body matching
+        self._body_assisted_min_face_sim = 0.30  # Face must not be clearly different person
+        self._body_assisted_body_threshold = 0.70  # Body must match strongly to accept
+
         # Pending recovery - stores recently lost tracks for ReID re-acquisition
         # wallet → {last_track_id, last_bbox, reid_embedding, lost_time}
         self._pending_recovery: Dict[str, Dict] = {}
 
-        # Revocation protection - prevent instant drops from bad camera angles
-        # Track consecutive "bad face" frames before revoking identity
-        self._track_bad_face_count: Dict[int, int] = {}  # track_id -> consecutive bad frame count
-        self._revoke_after_bad_frames = 15  # Revoke only after 15 consecutive bad frames (~500ms at 30fps)
-
-        # Recent good match protection - don't revoke if we had a good match recently
-        # This handles fast movements like push-ups where face angle changes rapidly
-        self._track_last_good_face_time: Dict[int, float] = {}  # track_id -> timestamp of last good face match
-        self._good_match_grace_period = 3.0  # Don't revoke if good match within 3 seconds
+        # Track continuity protection - trust body tracking when face is unreliable at distance
+        # track_id -> timestamp when track was FIRST assigned via face (not recovered)
+        self._track_original_assignment_time: Dict[int, float] = {}
+        # track_id -> True if track was recovered (less trustworthy than original assignment)
+        self._track_was_recovered: Dict[int, bool] = {}
 
         # Similarity tracking for display
         # track_id -> latest similarity score (for showing on annotated stream)
@@ -132,13 +141,19 @@ class NativeIdentityService:
         self._track_identity_source: Dict[int, str] = {}    # 'face' or 'reid' - how identity was last confirmed
 
         # Debug mode - set to True for verbose logging during troubleshooting
-        self._debug_mode = False
+        self._debug_mode = False  # Production: False, enable via API for debugging
 
-        logger.info("NativeIdentityService initialized - BULLETPROOF EDITION")
+        logger.info("NativeIdentityService initialized - BULLETPROOF EDITION + Part 3/3.5 Unified ReID")
         logger.info(f"  Face threshold: {self._similarity_threshold}")
         logger.info(f"  ReID threshold: {self._reid_similarity_threshold}")
         logger.info(f"  ReID recovery window: {self._reid_recovery_max_time}s")
         logger.info(f"  ReID recovery min IoU: {self._reid_recovery_min_iou}")
+        logger.info(f"  Part 3 - Unified ReID threshold: {self._unified_reid_threshold}")
+        logger.info(f"  Part 3 - Unified recovery window: {self._unified_recovery_max_time}s")
+        logger.info(f"  Part 3 - Body maintenance threshold: {self._body_maintenance_threshold}")
+        logger.info(f"  Part 3 - Face confirmations for 'confirmed': {self._face_confirmed_count}")
+        logger.info(f"  Part 3.5 - Body-assisted min face sim: {self._body_assisted_min_face_sim}")
+        logger.info(f"  Part 3.5 - Body-assisted body threshold: {self._body_assisted_body_threshold}")
 
     def cosine_similarity(self, a: np.ndarray, b: np.ndarray) -> float:
         """Compute cosine similarity between two embeddings."""
@@ -178,11 +193,10 @@ class NativeIdentityService:
         """
         Process detection results from native server and perform identity matching.
 
-        BULLETPROOF IDENTITY LOGIC:
+        IDENTITY LOGIC:
         1. Face embedding match - THE ONLY way to assign identity
-        2. Face mismatch revocation - if face detected but doesn't match, REVOKE identity
-        3. Track continuity - existing track-wallet mappings persist unless revoked
-        4. ReID - ONLY for same-track re-acquisition during brief occlusions
+        2. Track continuity - existing track-wallet mappings persist
+        3. ReID - ONLY for same-track re-acquisition during brief occlusions
            (COMPLETELY SKIPPED if any face is detected in frame)
 
         Args:
@@ -284,6 +298,15 @@ class NativeIdentityService:
                 self.identity_store.update_face_seen(best_match)
                 self._wallet_face_last_seen[best_match] = current_time
 
+                # Update blockchain session sync for auto-checkout face tracking
+                # This tracks when users are last seen for the 30-minute face timeout
+                try:
+                    from services.blockchain_session_sync import get_blockchain_session_sync
+                    blockchain_sync = get_blockchain_session_sync()
+                    blockchain_sync.update_user_seen(best_match)
+                except Exception as e:
+                    logger.warning(f"[AUTO-CHECKOUT] Failed to update user seen: {e}")
+
                 # Associate with person
                 matched_person = self._associate_face_to_person_safe(
                     face, persons, best_match, best_similarity, current_time
@@ -292,6 +315,22 @@ class NativeIdentityService:
                 if matched_person:
                     # Store ReID embedding when face is confirmed (for same-track re-acquisition only)
                     self._store_reid_embedding(best_match, matched_person, current_time)
+
+                    # Part 3: Record face confirmation and update appearance history
+                    # RATE-LIMITED: Only update once per second to prevent lock contention
+                    last_history_update = self._last_appearance_update.get(best_match, 0)
+                    if current_time - last_history_update >= 1.0:
+                        confirmation_level = self.identity_store.record_face_confirmation(best_match)
+                        reid_embedding = matched_person.get('reid_embedding')
+                        if reid_embedding is not None:
+                            self.identity_store.update_appearance_history(best_match, reid_embedding)
+                            self._last_appearance_update[best_match] = current_time
+                            if self._debug_mode:
+                                identity = self.identity_store.get_identity(best_match)
+                                if identity:
+                                    logger.info(f"📊 [CONFIRM] {best_match[:8]}... level={confirmation_level}, "
+                                               f"face_count={identity.face_confirmations}, "
+                                               f"history_size={len(identity.appearance_history)}")
 
             else:
                 if self._debug_mode:
@@ -310,27 +349,19 @@ class NativeIdentityService:
                             logger.info(f"   🔍 [EMB-DEBUG] live[0:5]={[f'{v:.4f}' for v in live_preview]} stored[0:5]={[f'{v:.4f}' for v in stored_preview]}")
 
         # ==========================================================================
-        # STEP 2: PROACTIVE MISMATCH REVOCATION
-        # For ALL persons with associated wallets, if a face is visible but doesn't
-        # match, REVOKE the identity. This catches cases where:
-        # - ByteTracker reuses a track ID for a different person
-        # - A new person inherited an old track through tracker bugs
-        # ==========================================================================
-        self._revoke_all_mismatched_identities(persons, valid_faces, checked_in, current_time)
-
-        # ==========================================================================
-        # STEP 3: Clean up stale track associations
+        # STEP 2: Clean up stale track associations
         # If a track is no longer visible, store recovery data and remove mapping
         # ==========================================================================
         self._cleanup_stale_tracks(persons, current_time)
 
         # ==========================================================================
-        # STEP 4: ReID maintenance and recovery
+        # STEP 3: ReID maintenance, recovery, and body-assisted recognition
         # - For recognized tracks: update ReID features, show confidence when face not visible
         # - For unrecognized tracks: attempt recovery if recently lost (same person, brief occlusion)
+        # - For unrecognized tracks with weak face: try body-assisted recognition
         # ==========================================================================
         tracks_with_visible_face = self._get_tracks_with_visible_face(persons, valid_faces)
-        self._maintain_reid_for_recognized_tracks(persons, current_time, tracks_with_visible_face)
+        self._maintain_reid_for_recognized_tracks(persons, current_time, tracks_with_visible_face, valid_faces)
 
         # Check for slow processing - warn if taking more than 50ms
         elapsed_ms = (time.time() - start_time) * 1000
@@ -444,153 +475,17 @@ class NativeIdentityService:
                     self._wallet_to_track[wallet_address] = track_id
                     self._track_identity_source[track_id] = 'face'
 
+                    # Track when this assignment was made (for track continuity protection)
+                    # Only set if this is a NEW assignment (not updating existing)
+                    if track_id not in self._track_original_assignment_time:
+                        self._track_original_assignment_time[track_id] = current_time
+                        self._track_was_recovered[track_id] = False
+
                 self.identity_store.assign_track(wallet_address, track_id, confidence, 'face')
                 logger.info(f"[ASSOCIATE] Track {track_id} → {wallet_address[:8]}... (face in person bbox)")
 
         return best_person
 
-    def _revoke_all_mismatched_identities(
-        self,
-        persons: List[Dict],
-        faces: List[Dict],
-        checked_in: List[str],
-        current_time: float
-    ):
-        """
-        PROACTIVE MISMATCH REVOCATION:
-        For every person with an associated wallet, check if we can see their face.
-        If we CAN see a face and it DOESN'T match, REVOKE the identity.
-
-        This catches ALL cases where the wrong person has inherited an identity:
-        - ByteTracker reusing track IDs
-        - Track ID collisions
-        - Any other tracker bugs
-        """
-        # Build face lookup by person - only include HIGH QUALITY faces
-        # Low quality faces (side profiles, partial faces) have garbage embeddings
-        # and should not be used for revocation decisions
-        face_by_person: Dict[int, Dict] = {}  # track_id → face with embedding
-
-        for face in faces:
-            embedding = face.get('embedding')
-            if embedding is None:
-                continue
-
-            # CRITICAL: Only use high-quality faces for revocation
-            # Quality is typically 0-1 from the face detector
-            # Side profiles and partial faces have low quality scores
-            face_quality = face.get('quality', 0)
-            face_confidence = face.get('confidence', 0)
-
-            # Require high quality for revocation (frontal face, good lighting)
-            # Quality < 0.7 usually means partial/side view - don't use for revocation
-            min_quality_for_revoke = 0.7
-            if face_quality < min_quality_for_revoke:
-                continue
-
-            face_bbox = face.get('bbox', [])
-            if len(face_bbox) < 4:
-                continue
-
-            face_cx = (face_bbox[0] + face_bbox[2]) / 2
-            face_cy = (face_bbox[1] + face_bbox[3]) / 2
-
-            # Find which person this face belongs to
-            for person in persons:
-                p_bbox = person.get('bbox', [])
-                if len(p_bbox) < 4:
-                    continue
-
-                track_id = person.get('track_id')
-                if track_id is None:
-                    continue
-
-                # Check if face center is inside person bbox
-                if (p_bbox[0] <= face_cx <= p_bbox[2] and p_bbox[1] <= face_cy <= p_bbox[3]):
-                    face_by_person[track_id] = {
-                        'embedding': np.array(embedding, dtype=np.float32),
-                        'bbox': face_bbox,
-                        'quality': face_quality
-                    }
-                    break  # Face belongs to this person
-
-        # Now check all persons with wallet associations
-        with self._track_lock:
-            tracks_to_revoke = []
-
-            for person in persons:
-                track_id = person.get('track_id')
-                if track_id is None:
-                    continue
-
-                # Check if this track has an associated wallet
-                associated_wallet = self._track_to_wallet.get(track_id)
-                if not associated_wallet:
-                    continue
-
-                # Check if we detected a face for this person
-                face_info = face_by_person.get(track_id)
-                if not face_info:
-                    continue  # No face visible for this person - keep existing association
-
-                # We CAN see this person's face - verify it matches the associated wallet
-                identity = self.identity_store.get_identity(associated_wallet)
-                if identity is None or identity.face_embedding is None:
-                    continue
-
-                face_embedding = face_info['embedding']
-                similarity = self.cosine_similarity(face_embedding, identity.face_embedding)
-
-                # Use a MUCH lower threshold for revocation than for matching
-                # Match threshold: 0.65 (needs to be confident it's the right person)
-                # Revoke threshold: 0.3 (only revoke if clearly NOT the same person)
-                # This allows for face quality degradation at distance without losing identity
-                revoke_threshold = 0.3
-                current_time = time.time()
-
-                if similarity < revoke_threshold:
-                    # Potential mismatch - increment bad frame counter
-                    self._track_bad_face_count[track_id] = self._track_bad_face_count.get(track_id, 0) + 1
-                    bad_count = self._track_bad_face_count[track_id]
-
-                    if bad_count >= self._revoke_after_bad_frames:
-                        # Check if we had a good match recently - protects during fast movements
-                        last_good_time = self._track_last_good_face_time.get(track_id, 0)
-                        time_since_good = current_time - last_good_time
-
-                        if time_since_good > self._good_match_grace_period:
-                            # No recent good match - safe to revoke
-                            tracks_to_revoke.append((track_id, associated_wallet, similarity, bad_count))
-                        else:
-                            # Had a good match recently - probably just fast movement, don't revoke
-                            if bad_count == self._revoke_after_bad_frames:
-                                logger.info(f"🛡️ [PROTECTED] Track {track_id} protected by recent good match "
-                                           f"({time_since_good:.1f}s ago, need >{self._good_match_grace_period}s)")
-                    elif bad_count == 1 or bad_count % 5 == 0:
-                        # Not enough bad frames yet - log occasionally
-                        logger.info(f"⚠️ [BAD-FACE] Track {track_id} bad frame {bad_count}/{self._revoke_after_bad_frames} (sim={similarity:.3f})")
-                else:
-                    # Good enough face - reset bad frame counter and update last good time
-                    self._track_bad_face_count.pop(track_id, None)
-                    self._track_last_good_face_time[track_id] = current_time
-
-            # Revoke outside the iteration
-            for track_id, wallet, similarity, bad_count in tracks_to_revoke:
-                self._track_to_wallet.pop(track_id, None)
-                self._wallet_to_track.pop(wallet, None)
-                self._wallet_reid_features.pop(wallet, None)  # Clear ReID to prevent re-association
-                self._track_bad_face_count.pop(track_id, None)  # Clear counter
-                self._track_last_good_face_time.pop(track_id, None)  # Clear good face time
-                self._track_face_similarity.pop(track_id, None)  # Clear similarity display
-                self._track_reid_similarity.pop(track_id, None)  # Clear reid similarity
-                self._track_identity_source.pop(track_id, None)  # Clear identity source
-                self.total_mismatches_revoked += 1
-
-                logger.warning(
-                    f"⚠️ [REVOKE] Track {track_id} REVOKED from {wallet[:8]}... "
-                    f"(face similarity {similarity:.3f} < 0.3 for {bad_count} frames) - "
-                    f"DEFINITELY WRONG PERSON!"
-                )
 
     def _cleanup_stale_tracks(self, persons: List[Dict], current_time: float):
         """
@@ -604,6 +499,13 @@ class NativeIdentityService:
                 current_track_ids.add(track_id)
 
         with self._track_lock:
+            # DIAGNOSTIC: Log every frame when we have wallet mappings
+            if self._track_to_wallet:
+                wallet_tracks = list(self._track_to_wallet.keys())
+                missing = [t for t in wallet_tracks if t not in current_track_ids]
+                if missing:
+                    logger.warning(f"⚠️ [DIAG] Wallet tracks {wallet_tracks} but persons only has {list(current_track_ids)} - MISSING: {missing}")
+
             # Find tracks that are no longer visible
             stale_tracks = []
             for track_id in list(self._track_to_wallet.keys()):
@@ -625,18 +527,18 @@ class NativeIdentityService:
                             'reid_embedding': reid_features.get('embedding'),
                             'lost_time': current_time,
                         }
-                        if self._debug_mode:
-                            logger.info(f"🔄 [RECOVERY] Track {track_id} lost, stored for recovery ({wallet[:8]}...)")
+                        # ALWAYS log recovery storage (diagnostic)
+                        logger.warning(f"🔄 [TRACK-LOST] Track {track_id} disappeared from persons! Stored for recovery ({wallet[:8]}...)")
                     else:
-                        if self._debug_mode:
-                            logger.info(f"🗑️ [CLEANUP] Track {track_id} left frame (was {wallet[:8]}...)")
+                        # ALWAYS log cleanup (diagnostic)
+                        logger.warning(f"🗑️ [TRACK-LOST] Track {track_id} disappeared, NO ReID data for recovery ({wallet[:8]}...)")
 
                 # Clear per-track state
-                self._track_bad_face_count.pop(track_id, None)
-                self._track_last_good_face_time.pop(track_id, None)
                 self._track_face_similarity.pop(track_id, None)
                 self._track_reid_similarity.pop(track_id, None)
                 self._track_identity_source.pop(track_id, None)
+                self._track_original_assignment_time.pop(track_id, None)
+                self._track_was_recovered.pop(track_id, None)
 
     def _get_tracks_with_visible_face(self, persons: List[Dict], faces: List[Dict]) -> Set[int]:
         """
@@ -680,18 +582,41 @@ class NativeIdentityService:
         self,
         persons: List[Dict],
         current_time: float,
-        tracks_with_visible_face: Set[int]
+        tracks_with_visible_face: Set[int],
+        valid_faces: List[Dict] = None
     ):
         """
         Maintain ReID display confidence for already-recognized tracks.
 
-        IMPORTANT: This function does NOT assign identity. It only:
+        Also handles recovery and body-assisted recognition for unidentified tracks:
         1. Updates ReID features for continuous tracking (prevents expiry)
         2. Switches to ReID confidence display when face is not visible
-
-        Tracks without identity are skipped - they must face-match to get recognized.
-        This prevents false positives from ReID matching (e.g., girlfriend scenario).
+        3. Attempts recovery/reacquisition when face is not visible
+        4. Attempts body-assisted recognition when face IS visible but weak
         """
+        # Build mapping of track_id -> face for body-assisted recognition
+        track_to_face = {}
+        if valid_faces:
+            for face in valid_faces:
+                face_bbox = face.get('bbox', [])
+                if len(face_bbox) < 4:
+                    continue
+                # Find which person this face belongs to
+                for person in persons:
+                    person_bbox = person.get('bbox', [])
+                    if len(person_bbox) < 4:
+                        continue
+                    track_id = person.get('track_id')
+                    if track_id is None:
+                        continue
+                    # Check if face is inside person bbox
+                    face_cx = (face_bbox[0] + face_bbox[2]) / 2
+                    face_cy = (face_bbox[1] + face_bbox[3]) / 2
+                    if (person_bbox[0] <= face_cx <= person_bbox[2] and
+                        person_bbox[1] <= face_cy <= person_bbox[3]):
+                        track_to_face[track_id] = face
+                        break
+
         with self._track_lock:
             for person in persons:
                 track_id = person.get('track_id')
@@ -706,10 +631,20 @@ class NativeIdentityService:
                     if track_id not in tracks_with_visible_face:
                         self._switch_to_reid_mode_for_display(track_id, wallet, person)
                 else:
-                    # No identity - try ReID recovery for recently lost tracks
-                    # This only works if the person was recognized before and lost briefly
+                    # No identity - try recovery methods
                     if track_id not in tracks_with_visible_face:
+                        # Face NOT visible - try standard recovery and unified reacquisition
                         self._attempt_track_recovery(person, current_time)
+
+                        if track_id not in self._track_to_wallet:
+                            self._attempt_unified_reacquisition(person, current_time)
+                    else:
+                        # Face IS visible but didn't match during face matching
+                        # For face_confirmed users, try body-assisted recognition
+                        # This handles the case where face quality is too poor at distance
+                        face = track_to_face.get(track_id)
+                        if face is not None:
+                            self._attempt_body_assisted_recognition(person, face, current_time)
 
     def _update_reid_features_during_tracking(
         self,
@@ -741,20 +676,32 @@ class NativeIdentityService:
             if len(embedding) != 512:
                 return
 
-            # Get existing features
+            # Get existing features or create new ones
             existing = self._wallet_reid_features.get(wallet)
-            if existing is None:
-                # No existing features - this shouldn't happen but handle it
-                return
 
-            # Update with current data while preserving face_seen time
+            # Preserve original face_seen time if exists, otherwise use current time
+            face_seen_time = existing.get('face_seen', current_time) if existing else current_time
+
+            # Update/create with current data
             self._wallet_reid_features[wallet] = {
                 'embedding': embedding,
                 'timestamp': current_time,  # Keep features fresh
-                'face_seen': existing.get('face_seen', current_time),  # Preserve original face time
+                'face_seen': face_seen_time,  # Preserve original face time
                 'original_track_id': person.get('track_id'),
                 'last_bbox': bbox.copy() if isinstance(bbox, list) else list(bbox),
             }
+
+            if existing is None and self._debug_mode:
+                logger.info(f"[REID-CREATE] {wallet[:8]}...: created ReID features (was missing)")
+
+            # Part 3: Rate-limited appearance history update (1x/second max)
+            # Prevents lock contention that was causing WebRTC freezes
+            last_history_update = self._last_appearance_update.get(wallet, 0)
+            if current_time - last_history_update >= 1.0:
+                self.identity_store.update_appearance_history(wallet, embedding)
+                self.identity_store.update_last_bbox(wallet, tuple(bbox[:4]) if len(bbox) >= 4 else None)
+                self._last_appearance_update[wallet] = current_time
+
         except Exception:
             pass
 
@@ -869,11 +816,17 @@ class NativeIdentityService:
 
         if best_wallet:
             # Recovery successful - restore identity
-            with self._track_lock:
-                self._track_to_wallet[track_id] = best_wallet
-                self._wallet_to_track[best_wallet] = track_id
-                self._track_identity_source[track_id] = 'reid_recovery'
-                self._track_reid_similarity[track_id] = best_similarity
+            # NOTE: We don't acquire _track_lock here because this function is called from
+            # _maintain_reid_for_recognized_tracks() which already holds the lock.
+            self._track_to_wallet[track_id] = best_wallet
+            self._wallet_to_track[best_wallet] = track_id
+            self._track_identity_source[track_id] = 'reid_recovery'
+            self._track_reid_similarity[track_id] = best_similarity
+
+            # Mark this track as RECOVERED (less trustworthy than original face assignment)
+            # This means we should be more careful about trusting body-only tracking
+            self._track_original_assignment_time[track_id] = current_time
+            self._track_was_recovered[track_id] = True
 
             del self._pending_recovery[best_wallet]
 
@@ -881,6 +834,308 @@ class NativeIdentityService:
                 f"✅ [RECOVERY] Track {track_id} ← {best_wallet[:8]}... "
                 f"(similarity: {best_similarity:.3f}, IoU: {best_iou:.2f})"
             )
+
+    def _attempt_unified_reacquisition(self, person: Dict, current_time: float) -> bool:
+        """
+        Part 3: Unified appearance-based re-acquisition.
+
+        This runs for unidentified persons and attempts to match them against
+        ALL checked-in users who don't currently have an active track.
+
+        Unlike _attempt_track_recovery (which requires IoU overlap), this
+        uses appearance cluster matching with NO spatial requirement.
+        This allows re-acquisition even if the person entered from a different
+        location than where they were last seen.
+
+        Requirements:
+        - User must be face_once or face_confirmed
+        - Appearance cluster must exist (at least 3 body embeddings captured)
+        - Extended time window: 30s for face_confirmed, 10s for face_once
+
+        Returns:
+            True if re-acquisition succeeded
+        """
+        track_id = person.get('track_id')
+        if track_id is None:
+            return False
+
+        # Already has identity?
+        # NOTE: We don't acquire _track_lock here because this function is called from
+        # _maintain_reid_for_recognized_tracks() which already holds the lock.
+        # Using _track_lock here would cause a deadlock (it's a Lock, not RLock).
+        if track_id in self._track_to_wallet:
+            return False
+
+        # Get body embedding
+        person_reid = person.get('reid_embedding')
+        if person_reid is None:
+            return False
+
+        try:
+            person_embedding = np.array(person_reid, dtype=np.float32)
+            if len(person_embedding) != 512:
+                return False
+        except Exception:
+            return False
+
+        # Use the IdentityStore's cluster matching
+        result = self.identity_store.find_by_appearance_cluster(
+            embedding=person_embedding,
+            threshold=self._unified_reid_threshold,  # 0.65
+            require_confirmation=True,
+            exclude_active=True
+        )
+
+        if result is None:
+            return False
+
+        wallet, similarity = result
+        identity = self.identity_store.get_identity(wallet)
+
+        if identity is None:
+            return False
+
+        # Check time-based eligibility
+        # face_confirmed: 30 second window
+        # face_once: 10 second window
+        time_since_last_seen = current_time - identity.last_seen
+
+        if identity.confirmation_level == 'face_confirmed':
+            max_time = self._unified_recovery_max_time  # 30s
+        elif identity.confirmation_level == 'face_once':
+            max_time = 10.0
+        else:
+            # Should not happen due to require_confirmation, but be safe
+            return False
+
+        if time_since_last_seen > max_time:
+            if self._debug_mode:
+                logger.info(f"[UNIFIED-SKIP] {wallet[:8]}... expired: {time_since_last_seen:.1f}s > {max_time}s")
+            return False
+
+        # Re-acquisition successful
+        # NOTE: We don't acquire _track_lock here because this function is called from
+        # _maintain_reid_for_recognized_tracks() which already holds the lock.
+        
+        # Clear any old track association for this wallet
+        old_track = self._wallet_to_track.get(wallet)
+        if old_track is not None:
+            self._track_to_wallet.pop(old_track, None)
+
+        self._track_to_wallet[track_id] = wallet
+        self._wallet_to_track[wallet] = track_id
+        self._track_identity_source[track_id] = 'unified_reid'
+        self._track_reid_similarity[track_id] = similarity
+
+        # Mark as recovered (less trustworthy than original face assignment)
+        self._track_original_assignment_time[track_id] = current_time
+        self._track_was_recovered[track_id] = True
+
+        # Update identity store
+        self.identity_store.assign_track(wallet, track_id, similarity, 'appearance')
+
+        logger.info(
+            f"✅ [UNIFIED-REACQ] Track {track_id} ← {wallet[:8]}... "
+            f"(similarity: {similarity:.3f}, level: {identity.confirmation_level}, "
+            f"last_seen: {time_since_last_seen:.1f}s ago)"
+        )
+
+        return True
+
+    def _attempt_body_assisted_recognition(
+        self,
+        person: Dict,
+        face: Dict,
+        current_time: float
+    ) -> bool:
+        """
+        Part 3.5: Body-assisted recognition when face is visible but weak.
+
+        For face_confirmed users: if face is detected but similarity is in the "weak" range
+        (not strong enough to match, but not so low it's clearly a different person),
+        fall back to body matching.
+
+        Requirements:
+        - User must be face_confirmed with appearance cluster
+        - Face similarity must be >= _body_assisted_min_face_sim (0.30) - not clearly different
+        - Face similarity must be < _similarity_threshold (0.65) - didn't match normally
+        - Body similarity must be >= _body_assisted_body_threshold (0.70) - strong body match
+
+        Returns:
+            True if body-assisted recognition succeeded
+        """
+        track_id = person.get('track_id')
+        if track_id is None:
+            return False
+
+        if self._debug_mode:
+            logger.info(f"[BODY-ASSIST] Called for track {track_id}")
+
+        # Already has identity?
+        if track_id in self._track_to_wallet:
+            if self._debug_mode:
+                logger.info(f"[BODY-ASSIST] Track {track_id} already has identity, skip")
+            return False
+
+        # Get face embedding
+        face_embedding = face.get('embedding')
+        if face_embedding is None:
+            if self._debug_mode:
+                logger.info(f"[BODY-ASSIST] Track {track_id} no face embedding, skip")
+            return False
+
+        # Get body embedding
+        body_embedding = person.get('reid_embedding')
+        if body_embedding is None:
+            if self._debug_mode:
+                logger.info(f"[BODY-ASSIST] Track {track_id} no body embedding, skip")
+            return False
+
+        try:
+            face_emb = np.array(face_embedding, dtype=np.float32)
+            body_emb = np.array(body_embedding, dtype=np.float32)
+
+            if len(face_emb) != 512 or len(body_emb) != 512:
+                return False
+
+            # Normalize
+            face_norm = np.linalg.norm(face_emb)
+            body_norm = np.linalg.norm(body_emb)
+            if face_norm > 0:
+                face_emb = face_emb / face_norm
+            if body_norm > 0:
+                body_emb = body_emb / body_norm
+
+        except Exception:
+            return False
+
+        # Check each face_confirmed user
+        best_wallet = None
+        best_body_sim = 0.0  # Track best among valid matches (threshold checked per-candidate)
+        best_face_sim = 0.0
+
+        checked_in = self.identity_store.get_checked_in_wallets()
+        if self._debug_mode:
+            logger.info(f"[BODY-ASSIST] Checking {len(checked_in)} checked-in wallets")
+
+        for wallet in checked_in:
+            identity = self.identity_store.get_identity(wallet)
+            if identity is None:
+                continue
+
+            # Must be at least face_once with appearance cluster
+            # face_confirmed: standard thresholds
+            # face_once: require higher body similarity (adds 0.10 to threshold)
+            if identity.confirmation_level not in ('face_confirmed', 'face_once'):
+                if self._debug_mode:
+                    logger.info(f"[BODY-ASSIST] {wallet[:8]}... not face_confirmed/face_once (level={identity.confirmation_level})")
+                continue
+
+            # Determine extra threshold for face_once users
+            body_threshold_boost = 0.10 if identity.confirmation_level == 'face_once' else 0.0
+
+            if identity.last_appearance_cluster is None:
+                if self._debug_mode:
+                    logger.info(f"[BODY-ASSIST] {wallet[:8]}... no appearance cluster")
+                continue
+            if identity.face_embedding is None:
+                if self._debug_mode:
+                    logger.info(f"[BODY-ASSIST] {wallet[:8]}... no face embedding")
+                continue
+
+            # Skip if already has an ACTUALLY ACTIVE track (track still exists in our tracking)
+            if identity.active_track_id is not None:
+                # Check if that track is still valid (exists in our tracking)
+                if identity.active_track_id in self._track_to_wallet:
+                    if self._debug_mode:
+                        logger.info(f"[BODY-ASSIST] {wallet[:8]}... has active track {identity.active_track_id}")
+                    continue
+                # Old track is stale - this user is eligible for body-assisted recognition
+                if self._debug_mode:
+                    logger.info(f"[BODY-ASSIST] {wallet[:8]}... old track {identity.active_track_id} is stale, proceeding")
+
+            # Check face similarity - determine required body threshold
+            stored_face = identity.face_embedding
+            face_sim = float(np.dot(face_emb, stored_face / np.linalg.norm(stored_face)))
+
+            if face_sim >= self._similarity_threshold:
+                # Face should have matched normally - something is wrong
+                if self._debug_mode:
+                    logger.info(f"[BODY-ASSIST] {wallet[:8]}... face_sim={face_sim:.3f} >= threshold (should have matched normally)")
+                continue
+
+            # Determine body threshold based on face similarity
+            # - face_sim >= 0.30: normal body threshold (0.70) - weak face, trust body
+            # - face_sim 0.15-0.30: very high body threshold (0.85) - face might be angle change
+            # - face_sim 0.05-0.15: extreme angle (90° profile) - require exceptional body (0.90)
+            # - face_sim < 0.05: truly different person, skip entirely
+            if face_sim < 0.05:
+                # Face is truly a different person - even exceptional body can't override
+                if self._debug_mode:
+                    logger.info(f"[BODY-ASSIST-SKIP] {wallet[:8]}... face_sim={face_sim:.3f} < 0.05 (truly different person)")
+                continue
+
+            if face_sim < 0.15:
+                # Very low face similarity - extreme angle (e.g., 90° side profile)
+                # Require exceptional body similarity to match (0.90)
+                required_body_threshold = 0.90 + body_threshold_boost
+            elif face_sim < self._body_assisted_min_face_sim:  # 0.30
+                # Low face similarity - might be angle change
+                # Require very high body similarity to match (0.85)
+                required_body_threshold = 0.85 + body_threshold_boost
+            else:
+                # Normal weak face range (0.30-0.65) - use standard body threshold
+                required_body_threshold = self._body_assisted_body_threshold + body_threshold_boost  # 0.70 + boost
+
+            # Cap threshold at 0.88 - even exceptional body similarity rarely exceeds 0.90
+            required_body_threshold = min(required_body_threshold, 0.88)
+
+            # Check body similarity against appearance cluster
+            body_sim = float(np.dot(body_emb, identity.last_appearance_cluster))
+
+            if self._debug_mode:
+                level_str = f"[{identity.confirmation_level}]" if identity.confirmation_level == 'face_once' else ""
+                logger.info(f"[BODY-ASSIST] {wallet[:8]}...{level_str} face_sim={face_sim:.3f}, body_sim={body_sim:.3f} (need>{required_body_threshold:.2f})")
+
+            # Check if this candidate meets its required body threshold
+            if body_sim < required_body_threshold:
+                if self._debug_mode:
+                    logger.info(f"[BODY-ASSIST-SKIP] {wallet[:8]}... body_sim={body_sim:.3f} < {required_body_threshold:.2f}")
+                continue
+
+            # This candidate meets threshold - track if best so far
+            if body_sim > best_body_sim:
+                best_body_sim = body_sim
+                best_wallet = wallet
+                best_face_sim = face_sim
+
+        if best_wallet is None:
+            if self._debug_mode:
+                logger.info(f"[BODY-ASSIST] No match found for track {track_id}")
+            return False
+
+        # Body-assisted recognition successful!
+        identity = self.identity_store.get_identity(best_wallet)
+
+        self._track_to_wallet[track_id] = best_wallet
+        self._wallet_to_track[best_wallet] = track_id
+        self._track_identity_source[track_id] = 'body_assisted'
+        self._track_reid_similarity[track_id] = best_body_sim
+        self._track_face_similarity[track_id] = best_face_sim
+
+        # Mark as recovered (since it wasn't a direct face match)
+        self._track_original_assignment_time[track_id] = current_time
+        self._track_was_recovered[track_id] = True
+
+        # Update identity store
+        self.identity_store.assign_track(best_wallet, track_id, best_body_sim, 'body_assisted')
+
+        logger.info(
+            f"✅ [BODY-ASSIST] Track {track_id} ← {best_wallet[:8]}... "
+            f"(face_sim={best_face_sim:.3f} [weak], body_sim={best_body_sim:.3f} [strong])"
+        )
+
+        return True
 
     def _store_reid_embedding(self, wallet: str, person: Dict, current_time: float):
         """
@@ -921,7 +1176,11 @@ class NativeIdentityService:
             logger.warning(f"Failed to store ReID embedding: {e}")
 
     def _enhance_persons_with_identity(self, persons: List[Dict]) -> List[Dict]:
-        """Add wallet_address to person detections that have been identified."""
+        """Add wallet_address and display_name to person detections that have been identified.
+
+        IMPORTANT: Caches display_name here to avoid repeated lock acquisitions
+        in _draw_native_annotations which runs on every WebRTC frame.
+        """
         enhanced = []
 
         with self._track_lock:
@@ -942,15 +1201,42 @@ class NativeIdentityService:
                         wallet = self._track_to_wallet[track_id]
                         person['wallet_address'] = wallet
 
-                        # Compute display confidence based on identity source
-                        # Face-based: use face similarity (primary authority)
-                        # ReID-based: use reid similarity (secondary fallback)
-                        source = self._track_identity_source.get(track_id, 'face')
-                        if source == 'face':
-                            confidence = self._track_face_similarity.get(track_id, 0.8)
+                        # Cache display_name to avoid lock contention in drawing code
+                        # This is critical - drawing runs at 30fps and would otherwise
+                        # acquire identity_store lock on every frame for every person
+                        identity = self.identity_store.get_identity(wallet)
+                        if identity:
+                            person['display_name'] = identity.get_display_name()
                         else:
-                            confidence = self._track_reid_similarity.get(track_id, 0.7)
-                        person['identity_confidence'] = confidence
+                            person['display_name'] = wallet[:8]
+
+                        # Compute UNIFIED confidence score combining face and body
+                        # This gives a holistic view of recognition confidence
+                        face_sim = self._track_face_similarity.get(track_id)
+                        reid_sim = self._track_reid_similarity.get(track_id)
+
+                        if face_sim is not None and reid_sim is not None:
+                            # Both available - weighted average (face weighted higher)
+                            unified_confidence = 0.6 * face_sim + 0.4 * reid_sim
+                            confidence_source = None  # Combined, no indicator needed
+                        elif face_sim is not None:
+                            # Face only
+                            unified_confidence = face_sim
+                            confidence_source = "F"
+                        elif reid_sim is not None:
+                            # Body only
+                            unified_confidence = reid_sim
+                            confidence_source = "B"
+                        else:
+                            # Fallback
+                            unified_confidence = 0.7
+                            confidence_source = None
+
+                        person['unified_confidence'] = unified_confidence
+                        person['confidence_source'] = confidence_source
+                        person['identity_confidence'] = unified_confidence  # Keep for compatibility
+
+                        source = self._track_identity_source.get(track_id, 'face')
                         person['tracking_method'] = f'native_{source}'
                 enhanced.append(person)
 
@@ -964,14 +1250,23 @@ class NativeIdentityService:
             pending_recovery_count = len(self._pending_recovery)
             track_mappings = dict(self._track_to_wallet)
 
+        # Part 3: Get confirmation level stats
+        identities = self.identity_store.get_all_identities()
+        confirmation_stats = {'none': 0, 'face_once': 0, 'face_confirmed': 0, 'body_maintained': 0}
+        appearance_clusters = 0
+        for identity in identities:
+            level = identity.confirmation_level
+            confirmation_stats[level] = confirmation_stats.get(level, 0) + 1
+            if identity.last_appearance_cluster is not None:
+                appearance_clusters += 1
+
         return {
             'initialized': self._initialized,
             'enabled': self._processing_enabled,
-            'mode': 'BULLETPROOF_EDITION',
+            'mode': 'BULLETPROOF_EDITION_v2_UNIFIED_REID',
             # Stats
             'total_faces_processed': self.total_faces_processed,
             'total_matches': self.total_matches,
-            'total_mismatches_revoked': self.total_mismatches_revoked,
             'currently_tracked': tracked_count,
             'reid_features_stored': reid_features_count,
             'pending_recovery': pending_recovery_count,
@@ -981,6 +1276,13 @@ class NativeIdentityService:
             'reid_recovery_window_s': self._reid_recovery_max_time,
             'reid_recovery_min_iou': self._reid_recovery_min_iou,
             'debug_mode': self._debug_mode,
+            # Part 3: Unified ReID config
+            'unified_reid_threshold': self._unified_reid_threshold,
+            'unified_recovery_window_s': self._unified_recovery_max_time,
+            'body_maintenance_threshold': self._body_maintenance_threshold,
+            # Part 3: Stats
+            'confirmation_levels': confirmation_stats,
+            'appearance_clusters_stored': appearance_clusters,
             # Current mappings (for debugging)
             'track_mappings': {str(k): v[:8] + '...' for k, v in track_mappings.items()},
         }
@@ -999,7 +1301,6 @@ class NativeIdentityService:
         """Reset all statistics counters."""
         self.total_faces_processed = 0
         self.total_matches = 0
-        self.total_mismatches_revoked = 0
         logger.info("Stats reset")
 
     def clear_tracks(self):
@@ -1010,7 +1311,39 @@ class NativeIdentityService:
             self._wallet_face_last_seen.clear()
             self._wallet_reid_features.clear()
             self._pending_recovery.clear()
+            self._track_face_similarity.clear()
+            self._track_reid_similarity.clear()
+            self._track_identity_source.clear()
+            self._track_original_assignment_time.clear()
+            self._track_was_recovered.clear()
         logger.info("Cleared all track associations and ReID features")
+
+    def clear_wallet_tracks(self, wallet_address: str):
+        """
+        Clear all track associations and ReID features for a specific wallet.
+        Called on checkout to ensure the user is no longer recognized.
+
+        Args:
+            wallet_address: User's wallet address to clear
+        """
+        with self._track_lock:
+            # Find and remove track_id -> wallet mapping
+            track_id = self._wallet_to_track.pop(wallet_address, None)
+            if track_id is not None:
+                self._track_to_wallet.pop(track_id, None)
+                self._track_face_similarity.pop(track_id, None)
+                self._track_reid_similarity.pop(track_id, None)
+                self._track_identity_source.pop(track_id, None)
+                self._track_original_assignment_time.pop(track_id, None)
+                self._track_was_recovered.pop(track_id, None)
+
+            # Clear wallet-specific data
+            self._wallet_face_last_seen.pop(wallet_address, None)
+            self._wallet_reid_features.pop(wallet_address, None)
+            self._pending_recovery.pop(wallet_address, None)
+            self._last_appearance_update.pop(wallet_address, None)
+
+        logger.info(f"Cleared track associations for {wallet_address[:8]}... (track_id={track_id})")
 
     def add_identity(self, wallet_address: str, embedding: np.ndarray,
                      metadata: Dict = None) -> bool:

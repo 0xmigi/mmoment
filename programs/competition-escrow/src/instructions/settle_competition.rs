@@ -5,10 +5,14 @@ use crate::state::*;
 
 /// Settle the competition - only the authorized camera can call this
 /// Camera submits results, program determines winners and distributes funds
+/// Payer (backend) covers transaction fees, camera authorizes the settlement
 #[derive(Accounts)]
 pub struct SettleCompetition<'info> {
-    /// The camera (Jetson device key) authorized to settle
+    /// Fee payer (backend wallet) - pays for transaction fees
     #[account(mut)]
+    pub payer: Signer<'info>,
+
+    /// The camera (Jetson device key) authorized to settle - must sign to prove authenticity
     pub camera: Signer<'info>,
 
     /// The escrow account holding the funds

@@ -14,6 +14,7 @@ import threading
 import numpy as np
 import logging
 import sys
+import math
 from collections import deque
 from typing import Optional, Dict, List, Tuple
 
@@ -177,10 +178,15 @@ class NativeBufferService:
 
                 # Run identity matching OUTSIDE the lock (can be slow due to embedding comparisons)
                 # This prevents health check timeouts by not holding _buffer_lock during slow operations
+                id_elapsed = 0.0  # Initialize for diagnostic logging
                 if self._identity_service:
+                    id_start = time.time()
                     persons = self._identity_service.process_native_results(persons, faces, frame)
+                    id_elapsed = (time.time() - id_start) * 1000
+                    if id_elapsed > 100:  # Log if identity processing takes >100ms
+                        logger.warning(f"⚠️ SLOW identity processing: {id_elapsed:.1f}ms")
 
-                # Update buffer - now just quick assignments, no slow operations
+                # Update buffer - quick assignments
                 with self._buffer_lock:
                     self._frame_buffer.append((frame, current_time))
                     self._latest_frame = frame
@@ -191,7 +197,6 @@ class NativeBufferService:
                     self._latest_faces = faces
                     # Update dimensions
                     self._height, self._width = frame.shape[:2]
-
                 # Process CV apps if one is active
                 if self._app_manager and self._app_manager.active_app:
                     self._process_cv_app(persons, current_time)
@@ -356,8 +361,7 @@ class NativeBufferService:
             conf = person.get('confidence', 0)
             wallet = person.get('wallet_address')
             track = person.get('track_id')
-            if wallet:
-                logger.info(f"[DRAW] Person track={track} has wallet={wallet[:8]}...")
+            # Removed excessive per-frame logging - was causing WebRTC freeze
             if conf < 0.5:
                 continue
 
@@ -370,27 +374,25 @@ class NativeBufferService:
 
                 # Check if person is recognized
                 wallet_address = person.get('wallet_address')
-                face_similarity = person.get('face_similarity')
+                unified_confidence = person.get('unified_confidence')
+                confidence_source = person.get('confidence_source')
 
                 if wallet_address:
-                    # Get display name - try identity store first, then session service fallback
-                    from .identity_store import get_identity_store
-                    from .session_service import get_session_service
-                    identity_store = get_identity_store()
-                    display_name = identity_store.get_display_name(wallet_address)
+                    # Use cached display_name from person dict (populated by _enhance_persons_with_identity)
+                    # This avoids lock contention - we don't acquire identity_store lock on every frame
+                    display_name = person.get('display_name')
 
-                    # Fallback to session_service if we got truncated wallet (timing issue)
-                    if display_name == wallet_address[:8]:
-                        session_service = get_session_service()
-                        session = session_service.get_session_by_wallet(wallet_address)
-                        if session and session.get('display_name'):
-                            display_name = session['display_name']
-                        elif session and session.get('username'):
-                            display_name = session['username']
+                    # Fallback if display_name not cached (shouldn't happen normally)
+                    if not display_name:
+                        display_name = wallet_address[:8]
 
-                    # Build label with face similarity
-                    if face_similarity is not None:
-                        label_text = f"{display_name} ({face_similarity:.2f})"
+                    # Build label with unified confidence score
+                    # Format: "Name (0.85)" for combined, "Name (0.85 F)" for face-only, "Name (0.78 B)" for body-only
+                    if unified_confidence is not None:
+                        if confidence_source:
+                            label_text = f"{display_name} ({unified_confidence:.2f} {confidence_source})"
+                        else:
+                            label_text = f"{display_name} ({unified_confidence:.2f})"
                     else:
                         label_text = display_name
 
@@ -428,9 +430,11 @@ class NativeBufferService:
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
 
                     # Show label for unrecognized people
+                    # Use face_similarity from person dict if available
+                    face_sim = person.get('face_similarity')
                     label_text = "Unrecognized"
-                    if face_similarity is not None:
-                        label_text = f"Unrecognized ({face_similarity:.2f})"
+                    if face_sim is not None:
+                        label_text = f"Unrecognized ({face_sim:.2f})"
 
                     font = cv2.FONT_HERSHEY_SIMPLEX
                     font_scale = 0.55
@@ -485,11 +489,56 @@ class NativeBufferService:
                             cv2.line(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
 
             # Draw keypoint circles (only confident ones, skip face keypoints)
+            # Hand indices: 9=left_wrist, 10=right_wrist
+            # Foot indices: 15=left_ankle, 16=right_ankle
+            HAND_KEYPOINTS = {9, 10}
+            FOOT_KEYPOINTS = {15, 16}
+
             for idx, (px, py, pc) in enumerate(kps_transformed):
                 if idx in self.FACE_KEYPOINTS:
                     continue  # Skip face keypoints
                 if pc > self.KPS_THRESHOLD and 0 <= px < w and 0 <= py < h:
-                    cv2.circle(frame, (px, py), 4, (255, 0, 0), -1)
+                    if idx in HAND_KEYPOINTS:
+                        # Draw hand marker - larger cyan circle with palm indicator
+                        cv2.circle(frame, (px, py), 10, (255, 255, 0), 2)  # Cyan outline
+                        cv2.circle(frame, (px, py), 5, (255, 255, 0), -1)  # Cyan filled center
+                        # Draw palm direction based on elbow position
+                        elbow_idx = 7 if idx == 9 else 8  # left_elbow for left_wrist, right_elbow for right_wrist
+                        if elbow_idx < len(kps_transformed) and kps_transformed[elbow_idx][2] > self.KPS_THRESHOLD:
+                            ex, ey = kps_transformed[elbow_idx][0], kps_transformed[elbow_idx][1]
+                            # Direction away from elbow (towards fingertips)
+                            dx, dy = px - ex, py - ey
+                            length = max(1, (dx*dx + dy*dy) ** 0.5)
+                            dx, dy = dx / length, dy / length
+                            # Draw small lines for "fingers"
+                            finger_len = 12
+                            for angle_offset in [-0.4, -0.15, 0.1, 0.35]:
+                                fx = int(px + finger_len * (dx * math.cos(angle_offset) - dy * math.sin(angle_offset)))
+                                fy = int(py + finger_len * (dx * math.sin(angle_offset) + dy * math.cos(angle_offset)))
+                                if 0 <= fx < w and 0 <= fy < h:
+                                    cv2.line(frame, (px, py), (fx, fy), (255, 255, 0), 2)
+                    elif idx in FOOT_KEYPOINTS:
+                        # Draw foot marker - elongated magenta shape
+                        cv2.circle(frame, (px, py), 8, (255, 0, 255), 2)  # Magenta outline
+                        cv2.circle(frame, (px, py), 4, (255, 0, 255), -1)  # Magenta filled center
+                        # Draw foot direction based on knee position
+                        knee_idx = 13 if idx == 15 else 14  # left_knee for left_ankle, right_knee for right_ankle
+                        if knee_idx < len(kps_transformed) and kps_transformed[knee_idx][2] > self.KPS_THRESHOLD:
+                            kx, ky = kps_transformed[knee_idx][0], kps_transformed[knee_idx][1]
+                            # Direction away from knee (towards toes)
+                            dx, dy = px - kx, py - ky
+                            length = max(1, (dx*dx + dy*dy) ** 0.5)
+                            dx, dy = dx / length, dy / length
+                            # Draw elongated foot shape
+                            foot_len = 18
+                            toe_x = int(px + foot_len * dx)
+                            toe_y = int(py + foot_len * dy)
+                            if 0 <= toe_x < w and 0 <= toe_y < h:
+                                cv2.line(frame, (px, py), (toe_x, toe_y), (255, 0, 255), 4)
+                                cv2.circle(frame, (toe_x, toe_y), 5, (255, 0, 255), -1)
+                    else:
+                        # Regular joint - small blue circle
+                        cv2.circle(frame, (px, py), 4, (255, 0, 0), -1)
 
         # Face detection disabled - was causing purple line artifacts
         # TODO: Fix face coordinate handling if needed later

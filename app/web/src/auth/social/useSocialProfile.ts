@@ -51,10 +51,13 @@ export function useSocialProfile() {
 
         setProfiles(enhancedProfiles);
 
-        // Set first profile as primary by default, or maintain existing if it still exists
+        // Prioritize Farcaster over Twitter (consistent with useProfileSync)
+        // Only update primary if it's not already set or no longer exists
         if (enhancedProfiles.length > 0) {
           if (!primaryProfile || !enhancedProfiles.find(p => p.id === primaryProfile.id)) {
-            setPrimaryProfile(enhancedProfiles[0]);
+            const farcasterProfile = enhancedProfiles.find(p => p.provider === 'farcaster');
+            const twitterProfile = enhancedProfiles.find(p => p.provider === 'twitter');
+            setPrimaryProfile(farcasterProfile || twitterProfile || enhancedProfiles[0]);
           }
         } else {
           setPrimaryProfile(null);

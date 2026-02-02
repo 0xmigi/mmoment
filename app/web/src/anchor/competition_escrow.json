@@ -333,11 +333,18 @@
       ],
       "accounts": [
         {
-          "name": "camera",
+          "name": "payer",
           "docs": [
-            "The camera (Jetson device key) authorized to settle"
+            "Fee payer (backend wallet) - pays for transaction fees"
           ],
           "writable": true,
+          "signer": true
+        },
+        {
+          "name": "camera",
+          "docs": [
+            "The camera (Jetson device key) authorized to settle - must sign to prove authenticity"
+          ],
           "signer": true
         },
         {

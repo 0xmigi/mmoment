@@ -231,6 +231,7 @@ pub struct UpdateCameraArgs {
     pub location: Option<[i64; 2]>,
     pub description: Option<String>,
     pub features: Option<CameraFeatures>,
+    pub device_pubkey: Option<Pubkey>,
 }
 
 // Activity data structure for timeline writes

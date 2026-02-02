@@ -61,9 +61,9 @@ class PushupApp(CompetitionApp):
             'rejection_reason': None,  # Why position was rejected (if any)
         }
 
-    def start_competition(self, competitors: List[Dict], duration_limit: int = None):
+    def start_competition(self, competitors: List[Dict], duration_limit: int = None, competition_meta: dict = None):
         """Start competition"""
-        super().start_competition(competitors, duration_limit)
+        super().start_competition(competitors, duration_limit, competition_meta)
 
         # Initialize state for each competitor
         for wallet in self.competitors.keys():

@@ -13,6 +13,7 @@ onnxruntime>=1.18.0  # Required for InsightFace import (we use TensorRT for infe
 
 # Networking and encryption
 requests==2.32.3
+httpx>=0.27.0
 cryptography==44.0.0
 
 # Blockchain

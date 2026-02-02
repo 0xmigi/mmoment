@@ -46,6 +46,10 @@ class NativeInferenceClient:
             self.socket.connect(self.socket_path)
             self.connected = True
 
+            # Set socket timeout for all operations (not just connect)
+            # This prevents indefinite blocking if C++ server stops responding
+            self.socket.settimeout(2.0)  # 2 second timeout for all socket ops
+            
             # Ping to verify connection
             response = self._send_request({'cmd': 'ping'})
             if response and response.get('status') == 'ok':
@@ -143,14 +147,21 @@ class NativeInferenceClient:
             return None
 
     def _recv_exact(self, n: int) -> Optional[bytes]:
-        """Receive exactly n bytes"""
+        """Receive exactly n bytes. Returns None on timeout or connection error."""
         data = b''
-        while len(data) < n:
-            chunk = self.socket.recv(n - len(data))
-            if not chunk:
-                return None
-            data += chunk
-        return data
+        try:
+            while len(data) < n:
+                chunk = self.socket.recv(n - len(data))
+                if not chunk:
+                    return None
+                data += chunk
+            return data
+        except socket.timeout:
+            logger.warning(f'Socket recv timeout after receiving {len(data)}/{n} bytes')
+            return None
+        except Exception as e:
+            logger.error(f'Socket recv error: {e}')
+            return None
 
     def _send_request(self, request: dict) -> Optional[dict]:
         """Send a request and receive response"""

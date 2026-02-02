@@ -5,6 +5,7 @@ import { useCompetitionEscrow, type ActiveCompetition } from '../hooks/useCompet
 
 interface CompetitionControlsProps {
   cameraId: string;
+  walletAddress?: string;
   onEscrowChange?: (escrowInfo: EscrowInfo | null) => void;
   onHasLoadedAppChange?: (hasLoaded: boolean) => void;
 }
@@ -20,9 +21,12 @@ export interface EscrowInfo {
 
 export function CompetitionControls({
   cameraId,
+  walletAddress,
   onEscrowChange,
   onHasLoadedAppChange
 }: CompetitionControlsProps) {
+  // Track if this user is a non-initiator participant (joined via Jetson sync)
+  const [isParticipantOnly, setIsParticipantOnly] = useState(false);
   const [isActive, setIsActive] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [hasLoadedApp, setHasLoadedApp] = useState(false);
@@ -108,30 +112,74 @@ export function CompetitionControls({
 
   useEffect(() => {
     // Check if app is loaded and ready
+    // IMPORTANT: Poll Jetson FIRST to detect if current user is a participant in an active competition
+    // This enables non-initiators to see the competition UI
     const checkAppStatus = async () => {
       try {
-        // Only consider competition "loaded" if we have competitors in sessionStorage
-        // This prevents stale app state on Jetson from affecting the UI
         const competitorsJson = sessionStorage.getItem('competition_competitors');
         const hasCompetitors = !!competitorsJson;
 
-        if (!hasCompetitors) {
-          // No competition setup in progress - don't show competition UI
-          setHasLoadedApp(false);
-          setIsActive(false);
-          return;
-        }
-
+        // Always poll Jetson for app status (even without sessionStorage)
         const result = await unifiedCameraService.getAppStatus(cameraId);
+
         if (result.success && result.data?.active_app) {
-          setHasLoadedApp(true);
-          // Check if competition is already running
-          if (result.data.state?.active) {
-            setIsActive(true);
+          const jetsonCompetitors = result.data.state?.competitors || [];
+          const isActiveOnJetson = result.data.state?.active === true;
+
+          // Check if current user is a participant in the Jetson competition
+          const isUserParticipant = walletAddress && jetsonCompetitors.some(
+            (c: { wallet_address: string }) =>
+              c.wallet_address?.toLowerCase() === walletAddress.toLowerCase()
+          );
+
+          console.log('[CompetitionControls] App status check:', {
+            activeApp: result.data.active_app,
+            isActiveOnJetson,
+            jetsonCompetitors: jetsonCompetitors.length,
+            isUserParticipant,
+            hasSessionStorage: hasCompetitors,
+          });
+
+          if (isUserParticipant) {
+            // User is a participant - show the competition UI
+            setHasLoadedApp(true);
+
+            if (isActiveOnJetson) {
+              setIsActive(true);
+            }
+
+            // If user didn't initiate (no sessionStorage), sync from Jetson
+            if (!hasCompetitors && jetsonCompetitors.length > 0) {
+              console.log('[CompetitionControls] Syncing competition state for non-initiator');
+              setIsParticipantOnly(true);
+
+              // Sync competitors to sessionStorage so scoreboard works
+              sessionStorage.setItem('competition_competitors', JSON.stringify(jetsonCompetitors));
+
+              // Try to get escrow info from Jetson state if available
+              const escrowPda = result.data.state?.escrow_pda;
+              if (escrowPda) {
+                sessionStorage.setItem('competition_escrow_pda', escrowPda);
+              }
+            }
+          } else if (hasCompetitors) {
+            // User initiated but might not be in Jetson's list yet (pre-start)
+            setHasLoadedApp(true);
+            if (isActiveOnJetson) {
+              setIsActive(true);
+            }
+          } else {
+            // No sessionStorage and user not in Jetson's participants - don't show UI
+            setHasLoadedApp(false);
+            setIsActive(false);
           }
         } else {
-          setHasLoadedApp(false);
-          setIsActive(false);
+          // No active app on Jetson
+          if (!hasCompetitors) {
+            setHasLoadedApp(false);
+            setIsActive(false);
+          }
+          // If hasCompetitors but no Jetson app, keep current state (pre-start phase)
         }
       } catch (error) {
         console.error('Error checking app status:', error);
@@ -141,7 +189,7 @@ export function CompetitionControls({
     checkAppStatus();
     const interval = setInterval(checkAppStatus, 2000);
     return () => clearInterval(interval);
-  }, [cameraId]);
+  }, [cameraId, walletAddress]);
 
   const handleStart = async () => {
     setIsLoading(true);
@@ -235,6 +283,7 @@ export function CompetitionControls({
 
   const handleStop = async () => {
     setIsLoading(true);
+
     try {
       // Build competition metadata from sessionStorage
       const competitionMode = sessionStorage.getItem('competition_mode') || 'none';
@@ -252,19 +301,26 @@ export function CompetitionControls({
       console.log('[CompetitionControls] Ending competition with meta:', competitionMeta);
 
       // End the CV competition on Jetson with competition metadata
-      // Note: The Jetson will handle calling settle_competition on-chain
-      // since it has the camera's device key required to sign the settlement
+      // The Jetson handles settlement and includes result in cv_activity_meta for timeline
       const result = await unifiedCameraService.endCompetition(cameraId, competitionMeta);
+
       if (result.success) {
         setIsActive(false);
+
+        // Log settlement result (will appear in timeline via cv_activity_meta)
+        const jetsonResult = result.data?.result;
+        const settlement = jetsonResult?.settlement;
+        const settlementError = jetsonResult?.settlement_error;
+
+        if (settlement?.success) {
+          console.log('[CompetitionControls] Settlement succeeded:', settlement);
+        } else if (settlementError) {
+          console.error('[CompetitionControls] Settlement failed:', settlementError);
+        }
+
         // Deactivate the app
         await unifiedCameraService.deactivateApp(cameraId);
         setHasLoadedApp(false);
-
-        // Refresh escrow status to see settlement results
-        if (escrowInfo?.pda) {
-          await refreshEscrowStatus();
-        }
 
         // Clear session storage
         clearSessionStorage();
@@ -283,6 +339,9 @@ export function CompetitionControls({
     sessionStorage.removeItem('competition_escrow_pda');
     sessionStorage.removeItem('competition_escrow_created_at');
     sessionStorage.removeItem('competition_stake_sol');
+    sessionStorage.removeItem('competition_user_wallet');
+    sessionStorage.removeItem('competition_mode');
+    sessionStorage.removeItem('competition_target_pushups');
     setEscrowInfo(null);
     setEscrowCompetition(null);
   };
@@ -292,9 +351,15 @@ export function CompetitionControls({
     return null;
   }
 
+  // For participant-only users (non-initiators), don't show START/STOP controls
+  // They can only view the scoreboard - the initiator controls the competition
+  if (isParticipantOnly) {
+    return null;
+  }
+
   return (
     <>
-      {/* Start/Stop Button - Bottom center */}
+      {/* Start/Stop Button - Bottom center (only shown to initiator) */}
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
         <button
           onClick={!isActive ? handleStart : handleStop}

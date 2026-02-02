@@ -98,19 +98,22 @@ class CompetitionApp(BaseApp):
         self.competitors = {}  # wallet -> competitor data
         self.start_time = None
         self.duration_limit = None
+        self.competition_meta = None  # Escrow info for on-chain competitions
 
-    def start_competition(self, competitors: List[Dict], duration_limit: Optional[int] = None):
+    def start_competition(self, competitors: List[Dict], duration_limit: Optional[int] = None, competition_meta: Optional[Dict] = None):
         """
         Start competition.
 
         Args:
             competitors: List of {'wallet_address': str, 'display_name': str}
             duration_limit: Optional time limit in seconds
+            competition_meta: Optional escrow metadata {'escrow_pda': str, 'mode': str, ...}
         """
         import time
         self.active = True
         self.start_time = time.time()
         self.duration_limit = duration_limit
+        self.competition_meta = competition_meta  # Store for non-initiators to sync
 
         for comp in competitors:
             wallet = comp['wallet_address']
@@ -148,12 +151,17 @@ class CompetitionApp(BaseApp):
         elapsed = time.time() - self.start_time if self.start_time else 0
         time_remaining = self.duration_limit - elapsed if self.duration_limit else None
 
-        return {
+        state = {
             'active': True,
             'competitors': list(self.competitors.values()),
             'elapsed': elapsed,
             'time_remaining': time_remaining
         }
+        # Include escrow_pda so non-initiators can sync (frontend expects state.escrow_pda)
+        if self.competition_meta and self.competition_meta.get('escrow_pda'):
+            state['escrow_pda'] = self.competition_meta['escrow_pda']
+            state['competition_mode'] = self.competition_meta.get('mode')
+        return state
 
     def reset(self):
         """Reset competition"""

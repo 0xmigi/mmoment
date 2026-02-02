@@ -41,11 +41,14 @@ services:
       - ./native/build:/app/native/build:ro
       - ./native/yolov8n-pose-native.engine:/app/native/yolov8n-pose-native.engine:ro
       - ./native/retinaface.engine:/app/native/retinaface.engine:ro
+      - ./native/scrfd_10g.engine:/app/native/scrfd_10g.engine:ro
       - ./native/arcface_r50.engine:/app/native/arcface_r50.engine:ro
+      - ./native/adaface_ir50.engine:/app/native/adaface_ir50.engine:ro
       - ./native/osnet_x0_25.engine:/app/native/osnet_x0_25.engine:ro
     # Camera devices - native server now runs inside container
     # DRI devices required for headless EGL on Jetson
     devices:
+      # Logitech StreamCam on video0/video1
       - /dev/video0:/dev/video0
       - /dev/video1:/dev/video1
       - /dev/dri:/dev/dri
@@ -90,6 +93,11 @@ services:
       - WALRUS_AGGREGATOR_URL=https://aggregator.walrus-mainnet.walrus.space
       # Testing: Skip video uploads to Walrus (set to "true" to disable)
       - SKIP_VIDEO_UPLOAD=true
+      # Auto-checkout timeout configuration (in seconds, for testing use shorter values)
+      # Face timeout: how long user can be absent from frame before auto-checkout (default: 1800 = 30 min)
+      # Activity timeout: how long user can be inactive (no face enrollment) before auto-checkout (default: 3600 = 60 min)
+      - FACE_TIMEOUT_SECONDS=${FACE_TIMEOUT_SECONDS:-1800}
+      - ACTIVITY_TIMEOUT_SECONDS=${ACTIVITY_TIMEOUT_SECONDS:-3600}
       # CV Dev Mode: Use video file instead of camera (no camera required)
       - CV_DEV_MODE=false
       # Native Mode: C++ TensorRT inference server runs inside this container

@@ -8,7 +8,7 @@ import { PipeClient, generateCredentialsFromAddress, PipeAccount, UploadResult, 
 import dgram from "dgram";
 import net from "net";
 import axios from "axios";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey, Keypair, Transaction, SystemProgram } from "@solana/web3.js";
 // Using built-in fetch in Node.js 18+
 
 // Load environment variables
@@ -1453,6 +1453,138 @@ app.post("/api/clear-all-sponsorships", (_req, res) => {
 });
 
 // ============================================================================
+// COMPETITION SETTLEMENT ENDPOINT
+// ============================================================================
+
+const COMPETITION_ESCROW_PROGRAM_ID = '32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ';
+
+// Settle competition - receives camera-signed transaction, adds payer signature, submits
+app.post("/api/competition/settle", async (req, res) => {
+  try {
+    const { transaction, cameraPubkey, escrowPda } = req.body;
+
+    if (!transaction || !cameraPubkey) {
+      return res.status(400).json({
+        success: false,
+        error: 'transaction and cameraPubkey are required'
+      });
+    }
+
+    // Validate service is configured
+    if (!process.env.FEE_PAYER_SECRET_KEY || !process.env.SOLANA_RPC_URL) {
+      return res.status(503).json({
+        success: false,
+        error: 'Settlement service not configured'
+      });
+    }
+
+    // Parse fee payer keypair
+    const secretKeyArray = JSON.parse(process.env.FEE_PAYER_SECRET_KEY);
+    const payer = Keypair.fromSecretKey(new Uint8Array(secretKeyArray));
+    const connection = new Connection(process.env.SOLANA_RPC_URL, 'confirmed');
+
+    console.log(`🏆 Competition settlement request from camera ${cameraPubkey.slice(0, 8)}...`);
+    if (escrowPda) {
+      console.log(`   Escrow PDA: ${escrowPda.slice(0, 8)}...`);
+    }
+
+    // Deserialize the transaction
+    const txBuffer = Buffer.from(transaction, 'base64');
+    const tx = Transaction.from(txBuffer);
+
+    // Validate transaction is for competition-escrow program
+    const validProgram = tx.instructions.every(ix =>
+      ix.programId.toString() === COMPETITION_ESCROW_PROGRAM_ID ||
+      ix.programId.toString() === SystemProgram.programId.toString()
+    );
+    if (!validProgram) {
+      const programs = tx.instructions.map(ix => ix.programId.toString());
+      console.error('Invalid programs in transaction:', programs);
+      return res.status(400).json({
+        success: false,
+        error: 'Transaction contains unauthorized program'
+      });
+    }
+
+    // Validate camera is a signer in the transaction
+    const cameraKey = new PublicKey(cameraPubkey);
+    const cameraIsSigner = tx.instructions.some(ix =>
+      ix.keys.some(key => key.pubkey.equals(cameraKey) && key.isSigner)
+    );
+    if (!cameraIsSigner) {
+      return res.status(400).json({
+        success: false,
+        error: 'Camera must be a signer in the transaction'
+      });
+    }
+
+    // Check that camera has already signed
+    const cameraSig = tx.signatures.find(s => s.publicKey.equals(cameraKey));
+    if (!cameraSig || cameraSig.signature === null) {
+      return res.status(400).json({
+        success: false,
+        error: 'Transaction must be signed by camera before submission'
+      });
+    }
+
+    // Verify fee payer matches our payer (camera should have set this)
+    if (!tx.feePayer?.equals(payer.publicKey)) {
+      console.log(`Fee payer mismatch: tx has ${tx.feePayer?.toString()}, expected ${payer.publicKey.toString()}`);
+      // Set fee payer if not set (shouldn't happen, but handle gracefully)
+      tx.feePayer = payer.publicKey;
+    }
+
+    // IMPORTANT: Do NOT change the blockhash - the camera already signed with it!
+    // Changing blockhash would invalidate the camera's signature.
+    // The blockhash should still be valid since this is happening in a single request cycle.
+    console.log(`Using blockhash from camera: ${tx.recentBlockhash}`);
+
+    // Sign with fee payer
+    tx.partialSign(payer);
+
+    console.log('✅ Fee payer signed transaction');
+    console.log('   Signatures:', tx.signatures.map(s =>
+      `${s.publicKey.toString().slice(0, 8)}... signed: ${s.signature !== null}`
+    ));
+
+    // Submit transaction
+    const signature = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed'
+    });
+
+    console.log(`📤 Transaction submitted: ${signature}`);
+
+    // Wait for confirmation
+    const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+
+    if (confirmation.value.err) {
+      console.error('Transaction failed:', confirmation.value.err);
+      return res.status(500).json({
+        success: false,
+        error: 'Transaction failed on-chain',
+        details: confirmation.value.err
+      });
+    }
+
+    console.log(`✅ Competition settled successfully: ${signature}`);
+
+    res.json({
+      success: true,
+      signature,
+      message: 'Competition settled successfully'
+    });
+
+  } catch (error) {
+    console.error('Competition settlement error:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to settle competition'
+    });
+  }
+});
+
+// ============================================================================
 // SESSION CLEANUP CRON ENDPOINTS
 // ============================================================================
 
@@ -2124,6 +2256,166 @@ app.get("/api/walrus/relay-status", async (req, res) => {
     backendSuiAddress: getBackendSuiAddress(),
     relayUrl: process.env.WALRUS_UPLOAD_RELAY || 'https://upload-relay.mainnet.walrus.space'
   });
+});
+
+// Jetson endpoint: Register local file (before Walrus upload)
+// This allows videos/photos to appear in gallery immediately while served from Jetson storage
+// Later, when uploaded to Walrus, the record is updated with the real blobId
+app.post("/api/walrus/register-local", async (req, res) => {
+  const {
+    walletAddress,
+    localUrl,        // e.g., https://camera-pda.mmoment.xyz/videos/filename.mp4
+    cameraId,
+    deviceSignature,
+    fileType,
+    timestamp,
+    originalSize,
+    filename,
+    accessGrants     // Users who should have access (typically checked-in users)
+  } = req.body;
+
+  if (!walletAddress || !localUrl || !cameraId || !deviceSignature) {
+    return res.status(400).json({
+      error: "walletAddress, localUrl, cameraId, and deviceSignature are required"
+    });
+  }
+
+  try {
+    // Generate synthetic blob_id for local files
+    // Format: local-{first 16 chars of deviceSignature}-{timestamp}
+    const localBlobId = `local-${deviceSignature.slice(0, 16)}-${timestamp || Date.now()}`;
+
+    console.log(`📁 Registering local file from Jetson:`);
+    console.log(`   Wallet: ${walletAddress.slice(0, 8)}...`);
+    console.log(`   Local ID: ${localBlobId}`);
+    console.log(`   File Type: ${fileType}`);
+    console.log(`   Local URL: ${localUrl}`);
+    console.log(`   Filename: ${filename || 'unknown'}`);
+
+    // Parse access grants if provided as string
+    const parsedAccessGrants = typeof accessGrants === 'string'
+      ? JSON.parse(accessGrants)
+      : (accessGrants || []);
+
+    // Save to database with local URL as downloadUrl
+    await saveWalrusFile({
+      blobId: localBlobId,
+      walletAddress,
+      downloadUrl: localUrl,  // Jetson's local URL
+      cameraId,
+      deviceSignature,
+      fileType: fileType || 'video',
+      timestamp: timestamp || Date.now(),
+      originalSize: originalSize || 0,
+      encryptedSize: 0,  // Not encrypted yet (local file)
+      nonce: undefined,
+      suiOwner: undefined,
+      accessGrants: JSON.stringify(parsedAccessGrants),
+      createdAt: new Date()
+    });
+
+    console.log(`💾 Saved local file reference to database`);
+
+    // Notify connected clients via WebSocket (same event, gallery will update)
+    io.emit("walrus:upload:complete", {
+      walletAddress,
+      blobId: localBlobId,
+      downloadUrl: localUrl,
+      cameraId,
+      fileType: fileType || 'video',
+      timestamp: timestamp || Date.now(),
+      accessGrantsCount: parsedAccessGrants.length,
+      isLocal: true,  // Flag to indicate this is served from Jetson
+      filename
+    });
+
+    res.json({
+      success: true,
+      blobId: localBlobId,
+      downloadUrl: localUrl,
+      isLocal: true,
+      message: "Local file registered. Upload to Walrus later for permanent storage."
+    });
+  } catch (error) {
+    console.error("❌ Failed to register local file:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to register local file"
+    });
+  }
+});
+
+// Jetson endpoint: Update local file after Walrus upload completes
+// Called when a previously local file has been uploaded to Walrus
+app.post("/api/walrus/upgrade-local", async (req, res) => {
+  const {
+    localBlobId,     // The local-xxx ID to upgrade
+    blobId,          // Real Walrus blob ID
+    downloadUrl,     // Walrus download URL
+    encryptedSize,
+    nonce,
+    suiOwner
+  } = req.body;
+
+  if (!localBlobId || !blobId || !downloadUrl) {
+    return res.status(400).json({
+      error: "localBlobId, blobId, and downloadUrl are required"
+    });
+  }
+
+  try {
+    console.log(`⬆️ Upgrading local file to Walrus:`);
+    console.log(`   Local ID: ${localBlobId}`);
+    console.log(`   Walrus Blob ID: ${blobId.slice(0, 16)}...`);
+
+    // Get existing local file record
+    const existingFile = await getWalrusFileByBlobId(localBlobId);
+    if (!existingFile) {
+      return res.status(404).json({ error: "Local file not found" });
+    }
+
+    // Delete old local record
+    await deleteWalrusFile(localBlobId, existingFile.walletAddress);
+
+    // Create new record with real Walrus blob ID
+    await saveWalrusFile({
+      blobId,
+      walletAddress: existingFile.walletAddress,
+      downloadUrl,
+      cameraId: existingFile.cameraId,
+      deviceSignature: existingFile.deviceSignature,
+      fileType: existingFile.fileType,
+      timestamp: existingFile.timestamp,
+      originalSize: existingFile.originalSize,
+      encryptedSize: encryptedSize || 0,
+      nonce: nonce || undefined,
+      suiOwner: suiOwner || undefined,
+      accessGrants: existingFile.accessGrants,
+      createdAt: new Date()
+    });
+
+    console.log(`✅ Local file upgraded to Walrus storage`);
+
+    // Notify connected clients
+    io.emit("walrus:local:upgraded", {
+      localBlobId,
+      blobId,
+      downloadUrl,
+      walletAddress: existingFile.walletAddress,
+      cameraId: existingFile.cameraId
+    });
+
+    res.json({
+      success: true,
+      oldBlobId: localBlobId,
+      newBlobId: blobId,
+      downloadUrl
+    });
+  } catch (error) {
+    console.error("❌ Failed to upgrade local file:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to upgrade local file"
+    });
+  }
 });
 
 // Jetson endpoint: Notify backend after Walrus upload (legacy - for direct publisher uploads)

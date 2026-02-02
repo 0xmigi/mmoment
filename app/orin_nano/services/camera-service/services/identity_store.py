@@ -57,6 +57,29 @@ class UserIdentity:
     last_known_bbox: Optional[Tuple[int, int, int, int]] = None
     last_known_center: Optional[Tuple[float, float]] = None
 
+    # =========================================================================
+    # Part 3: Unified ReID - Appearance History & Confirmation Levels
+    # =========================================================================
+
+    # Appearance history for robust body-based re-acquisition
+    # Rolling buffer of recent body embeddings (512-dim from OSNet)
+    appearance_history: List[np.ndarray] = field(default_factory=list)
+    appearance_history_max: int = 10  # Keep last N body snapshots
+
+    # Averaged appearance embedding for efficient cluster matching
+    last_appearance_cluster: Optional[np.ndarray] = None
+
+    # Identity confirmation level - determines trust in body-only tracking
+    # 'none': Never face-confirmed (must face camera to be recognized)
+    # 'face_once': Face matched 1-2 times (basic recognition)
+    # 'face_confirmed': Face matched 3+ times (high trust, body-only OK)
+    # 'body_maintained': Currently maintained by body tracking (face not visible)
+    confirmation_level: str = 'none'
+    face_confirmations: int = 0  # How many distinct face matches
+
+    # Time of last face confirmation (for confidence decay)
+    last_face_confirmation: float = 0.0
+
     # App-specific stats (for cv-apps to use)
     stats: Dict[str, Any] = field(default_factory=dict)
 
@@ -94,6 +117,11 @@ class UserIdentity:
             'checked_in_at': self.checked_in_at,
             'last_seen': self.last_seen,
             'session_duration': time.time() - self.checked_in_at,
+            # Part 3: Unified ReID fields
+            'confirmation_level': self.confirmation_level,
+            'face_confirmations': self.face_confirmations,
+            'appearance_history_size': len(self.appearance_history),
+            'has_appearance_cluster': self.last_appearance_cluster is not None,
             'stats': self.stats
         }
 
@@ -583,6 +611,194 @@ class IdentityStore:
                     best_match = wallet
 
             return best_match
+
+    # =========================================================================
+    # Part 3: Unified ReID - Appearance History & Confirmation
+    # =========================================================================
+
+    def update_appearance_history(self, wallet_address: str, embedding: np.ndarray) -> bool:
+        """
+        Add a body embedding to the rolling appearance history.
+        Also updates the appearance cluster (average of recent embeddings).
+
+        Args:
+            wallet_address: User's wallet address
+            embedding: Body appearance embedding (512-dim from OSNet)
+
+        Returns:
+            True if successful
+        """
+        with self._store_lock:
+            identity = self._identities.get(wallet_address)
+            if identity is None:
+                return False
+
+            # Validate embedding
+            embedding = np.asarray(embedding, dtype=np.float32)
+            if embedding.size != 512:
+                logger.warning(f"Invalid appearance embedding size: {embedding.size}")
+                return False
+
+            # Normalize
+            norm = np.linalg.norm(embedding)
+            if norm > 0:
+                embedding = embedding / norm
+
+            # Add to history
+            identity.appearance_history.append(embedding.copy())
+
+            # Trim to max size
+            while len(identity.appearance_history) > identity.appearance_history_max:
+                identity.appearance_history.pop(0)
+
+            # Update cluster center (average of recent appearances)
+            if len(identity.appearance_history) >= 3:
+                cluster = np.mean(identity.appearance_history, axis=0)
+                # Re-normalize the cluster
+                cluster_norm = np.linalg.norm(cluster)
+                if cluster_norm > 0:
+                    identity.last_appearance_cluster = cluster / cluster_norm
+                else:
+                    identity.last_appearance_cluster = cluster
+
+            identity.last_appearance_update = time.time()
+            return True
+
+    def record_face_confirmation(self, wallet_address: str) -> str:
+        """
+        Record a face confirmation and update confirmation level.
+
+        Confirmation levels:
+        - 'none': Never face-confirmed
+        - 'face_once': Face matched 1-2 times
+        - 'face_confirmed': Face matched 3+ times (high trust)
+
+        Args:
+            wallet_address: User's wallet address
+
+        Returns:
+            New confirmation level
+        """
+        with self._store_lock:
+            identity = self._identities.get(wallet_address)
+            if identity is None:
+                return 'none'
+
+            identity.face_confirmations += 1
+            identity.last_face_confirmation = time.time()
+
+            # Update confirmation level
+            if identity.face_confirmations >= 3:
+                identity.confirmation_level = 'face_confirmed'
+            elif identity.face_confirmations >= 1:
+                identity.confirmation_level = 'face_once'
+
+            return identity.confirmation_level
+
+    def get_confirmation_level(self, wallet_address: str) -> str:
+        """Get confirmation level for a wallet"""
+        with self._store_lock:
+            identity = self._identities.get(wallet_address)
+            return identity.confirmation_level if identity else 'none'
+
+    def find_by_appearance_cluster(
+        self,
+        embedding: np.ndarray,
+        threshold: float = 0.65,
+        require_confirmation: bool = True,
+        exclude_active: bool = True
+    ) -> Optional[Tuple[str, float]]:
+        """
+        Find an identity by matching against appearance clusters.
+
+        This is used for extended re-acquisition - matching against the
+        averaged appearance of face-confirmed users who have lost their track.
+
+        Args:
+            embedding: Current body appearance embedding
+            threshold: Similarity threshold for matching
+            require_confirmation: Only match 'face_once' or 'face_confirmed' users
+            exclude_active: Skip users who already have an active track
+
+        Returns:
+            Tuple of (wallet_address, similarity) if match found, None otherwise
+        """
+        with self._store_lock:
+            embedding = np.asarray(embedding, dtype=np.float32)
+            norm = np.linalg.norm(embedding)
+            if norm > 0:
+                embedding = embedding / norm
+
+            best_match = None
+            best_similarity = threshold
+
+            for wallet, identity in self._identities.items():
+                # Skip if no appearance cluster
+                if identity.last_appearance_cluster is None:
+                    continue
+
+                # Skip if requires confirmation and not confirmed
+                if require_confirmation:
+                    if identity.confirmation_level not in ('face_once', 'face_confirmed'):
+                        continue
+
+                # Skip if has active track (unless we want to include active)
+                if exclude_active and identity.active_track_id is not None:
+                    continue
+
+                # Cosine similarity against cluster
+                similarity = float(np.dot(embedding, identity.last_appearance_cluster))
+
+                # Apply confirmation-based threshold adjustment
+                # face_confirmed users: use base threshold
+                # face_once users: require higher similarity
+                effective_threshold = threshold
+                if identity.confirmation_level == 'face_once':
+                    effective_threshold = threshold + 0.10  # More strict for less-confirmed
+
+                if similarity > effective_threshold and similarity > best_similarity:
+                    best_similarity = similarity
+                    best_match = wallet
+
+            if best_match:
+                return (best_match, best_similarity)
+            return None
+
+    def get_all_checked_in_with_cluster(self) -> List[Tuple[str, 'UserIdentity']]:
+        """
+        Get all checked-in identities that have an appearance cluster.
+        Used for unified re-acquisition.
+
+        Returns:
+            List of (wallet_address, identity) tuples
+        """
+        with self._store_lock:
+            return [
+                (wallet, identity)
+                for wallet, identity in self._identities.items()
+                if identity.last_appearance_cluster is not None
+            ]
+
+    def set_confirmation_level(self, wallet_address: str, level: str) -> bool:
+        """
+        Manually set confirmation level (e.g., for body_maintained state).
+
+        Args:
+            wallet_address: User's wallet address
+            level: New confirmation level
+
+        Returns:
+            True if successful
+        """
+        with self._store_lock:
+            identity = self._identities.get(wallet_address)
+            if identity is None:
+                return False
+
+            if level in ('none', 'face_once', 'face_confirmed', 'body_maintained'):
+                identity.confirmation_level = level
+                return True
+            return False
 
     # =========================================================================
     # Persistence

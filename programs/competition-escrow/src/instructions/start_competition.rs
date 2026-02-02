@@ -35,14 +35,33 @@ pub fn handler(ctx: Context<StartCompetition>) -> Result<()> {
         CompetitionError::InvalidStatus
     );
 
-    // Either all invites resolved OR timeout passed
-    let invites_resolved = escrow.pending_invites.is_empty();
-    let timeout_passed = escrow.is_invite_expired(clock.unix_timestamp);
+    // For ThresholdSplit (prize mode): auto-promote pending invites to participants
+    // They don't need to deposit - only the initiator put up the prize
+    // For WinnerTakesAll (bet mode): require invites resolved or timeout
+    match &escrow.payout_rule {
+        PayoutRule::ThresholdSplit { .. } => {
+            // Prize mode: auto-add all pending invites as participants (no deposit needed)
+            for invitee in escrow.pending_invites.clone() {
+                if !escrow.participants.contains(&invitee) {
+                    escrow.participants.push(invitee);
+                }
+            }
+            escrow.pending_invites.clear();
+        }
+        PayoutRule::WinnerTakesAll => {
+            // Bet mode: require all invites resolved OR timeout passed
+            let invites_resolved = escrow.pending_invites.is_empty();
+            let timeout_passed = escrow.is_invite_expired(clock.unix_timestamp);
 
-    require!(
-        invites_resolved || timeout_passed,
-        CompetitionError::InvalidStatus
-    );
+            require!(
+                invites_resolved || timeout_passed,
+                CompetitionError::InvalidStatus
+            );
+
+            // Clear any remaining pending invites (treated as declined due to timeout)
+            escrow.pending_invites.clear();
+        }
+    }
 
     // For WinnerTakesAll (bet), need at least 2 participants
     // For ThresholdSplit (prize), can be solo (1 participant betting against themselves)
@@ -55,9 +74,6 @@ pub fn handler(ctx: Context<StartCompetition>) -> Result<()> {
         escrow.participants.len() >= min_participants,
         CompetitionError::NoParticipants
     );
-
-    // Clear any remaining pending invites (treated as declined due to timeout)
-    escrow.pending_invites.clear();
 
     // Activate the competition
     escrow.status = CompetitionStatus::Active;
