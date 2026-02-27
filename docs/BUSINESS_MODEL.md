@@ -2,7 +2,7 @@
 
 ## What MMOMENT Sells
 
-User-consented, identity-resolved perception data across a network of cameras. Every identified data point is backed by a cryptographic check-in signature on Solana. The data ranges from single-camera real-time pose streams to cross-network activity histories spanning every camera a user has visited.
+User-consented, identity-resolved perception data across a network of cameras. Every identified data point is backed by a cryptographic consent signature (ed25519 between user wallet and camera), with the full session published on-chain at checkout. The data ranges from single-camera real-time pose streams to cross-network activity histories spanning every camera a user has visited.
 
 ## Participants
 
@@ -28,7 +28,7 @@ Buy or receive camera hardware (Jetson rig), place it in a physical location, ma
 
 ### Users
 
-Enroll their face (create a RecognitionToken on-chain with encrypted embedding). Check in at cameras by signing a transaction with their Solana wallet. Do physical things. Check out.
+Enroll their face once (create a RecognitionToken on-chain with encrypted embedding — works at every camera in the network). Check in at cameras by producing an ed25519 signature between their wallet and the camera (local, instant, no tx fees). Do physical things. Session published to chain at checkout.
 
 **What they get**:
 - Camera-attested activity data (not self-reported)
@@ -70,16 +70,18 @@ Build the consumers. Use MMOMENT's SDK, the `frame_data` contract, and reference
 
 The consent mechanism is structural, not policy:
 
-1. User enrolls face → encrypted embedding stored on-chain as RecognitionToken
-2. User checks in at camera → signs Solana transaction → check-in recorded on-chain
+1. User enrolls face once → encrypted embedding stored on-chain as RecognitionToken (works network-wide)
+2. User checks in at camera → ed25519 signature between wallet and camera PDA (local, instant, no tx fees)
 3. Camera detects face → matches embedding → resolves identity ONLY for checked-in users
 4. Non-checked-in individuals → detected but NOT identified, obfuscated in output
 5. All identity-resolved data → encrypted at the Jetson (AES-256-GCM) before leaving device
-6. Activity committed to blockchain at checkout → tamper-evident, user-owned
+6. Full session (check-in, activities, checkout) published to blockchain when user leaves → tamper-evident, user-owned
 
-**No check-in, no identity.** The system cannot produce identity-resolved data without the cryptographic consent event. This is not "we promise to respect privacy" — it's "the architecture makes violation impossible."
+**No signature, no identity.** The system cannot produce identity-resolved data without the ed25519 consent signature. This is not "we promise to respect privacy" — it's "the architecture makes violation impossible."
 
-**Auditability**: Any consumer querying identified data can verify: this user signed a check-in at this camera PDA at this timestamp. The consent proof is a Solana transaction, not a checkbox in a database.
+**Auditability**: Any consumer querying identified data can verify the on-chain session record published at checkout. The consent proof is cryptographic, not a checkbox in a database.
+
+**Check-in UX**: The ed25519 signature is local and instant — no blockchain latency at the moment of check-in. Target UX is NFC-triggered signing (tap phone near camera → wallet app signs → done). The chain interaction is deferred to checkout, asynchronous, invisible to the user.
 
 ## Money Flow
 
@@ -131,5 +133,6 @@ The user doesn't pay the camera or the network directly. Consumers pay MMOMENT f
 
 **Sequencing considerations**:
 - Cold start requires cameras + users + consumers in the same location. First deployment should be vertically integrated (MMOMENT controls camera, recruits users, builds first consumer) in one venue type.
-- Check-in friction is high (Solana wallet + face enrollment). First users will be crypto-native. Path to mainstream requires making check-in feel like tapping a subway turnstile.
-- Biometric data triggers regulatory attention (BIPA, GDPR) even with encryption. The cryptographic consent architecture is the strongest legal defense, but the argument needs to be ready.
+- Face enrollment (RecognitionToken creation) is the main friction point, but it's one-time and network-wide. Once enrolled, every camera in the network recognizes the user. Check-in itself is an instant local signature — target UX is NFC tap.
+- First users will be crypto-native (already have wallets). Path to mainstream is reducing check-in to a physical gesture (NFC, QR) that triggers signing under the hood.
+- Biometric data triggers regulatory attention (BIPA, GDPR) even with encryption. The cryptographic consent architecture — provable ed25519 signatures, on-chain session records — is probably the strongest legal position anything in this space can have.

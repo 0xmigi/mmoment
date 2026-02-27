@@ -32,13 +32,14 @@ This is not video. It's a **perception stream** — a real-time structured repre
 
 ## Cryptographic Consent
 
-Identity resolution is gated by a cryptographic act. A user signs a check-in transaction with their Solana wallet. That signature is what unlocks identity for their bounding box. Without it, the system cannot attribute data to them — they remain an anonymous detection.
+Identity resolution is gated by a cryptographic act. A user produces an ed25519 signature between their wallet and the camera they're visiting. This signature is local and instant — no blockchain latency, no transaction fees at the moment of check-in. It unlocks identity for their bounding box at that camera. The session data (check-in, activities, checkout) is published to the chain when the user leaves.
 
 This means:
-- **No check-in, no identity.** The face embedding match has no wallet to map to.
+- **No signature, no identity.** The face embedding match has no wallet to map to without the ed25519 consent signature.
 - **Unconsented bodies are obfuscated.** YOLO detects them, but the network doesn't expose them as identified individuals.
-- **Consent is verifiable.** Every identity-resolved data point has a corresponding on-chain check-in signature anyone can audit.
+- **Consent is verifiable.** Every identity-resolved session has a corresponding on-chain record (published at checkout) that anyone can audit.
 - **Privacy is architectural, not policy.** The system physically cannot produce identity-resolved data without the consent event.
+- **One-time enrollment, network-wide recognition.** A user creates a RecognitionToken once. That token works at every camera in the network — no re-enrollment per location.
 
 ## What Each Camera Produces
 
