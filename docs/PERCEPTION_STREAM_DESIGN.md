@@ -1,17 +1,17 @@
-# Perception Stream as x402 Primitive
+# Perception Stream Architecture
 
-This document describes the architecture for treating MMOMENT's computer vision pipeline as a monetizable perception stream — a structured mathematical representation of physical reality that AI agents and developers can subscribe to via x402 micropayments.
+The MMOMENT camera network produces a structured mathematical representation of physical reality — not video, but identity-resolved perception data. This document describes the architecture of that perception stream, how it flows through the network, and how consumers access it.
 
 ## Core Insight
 
-The camera system already produces a **mathematical abstraction of the physical world** before any application logic runs. The pushup counter never touches a pixel — it reads keypoint coordinates and computes angles. The basketball tracker works from bounding boxes and trajectories. Every CV app in the plugin system consumes the same structured `frame_data` dictionary:
+The camera system produces a **mathematical abstraction of the physical world** before any application logic runs. The pushup counter never touches a pixel — it reads keypoint coordinates and computes angles. The basketball tracker works from bounding boxes and trajectories. Every consumer of the system operates on the same structured data:
 
 ```python
 frame_data = {
     'detections': [
         {
             'track_id': int,           # Persistent person tracking ID
-            'wallet_address': str,     # Solana wallet (identity-resolved)
+            'wallet_address': str,     # Solana wallet (identity-resolved, only if checked in)
             'x1': float, 'y1': float,
             'x2': float, 'y2': float,  # Bounding box
             'confidence': float,
@@ -28,170 +28,100 @@ frame_data = {
 }
 ```
 
-This is not video. It's a **perception stream** — a real-time structured representation of who is where, doing what, with cryptographic identity attached. The raw pixels are the input to the pipeline, not its output.
+This is not video. It's a **perception stream** — a real-time structured representation of who is where, doing what. The raw pixels are the input to the pipeline, not its output.
 
-## What Makes This Different
+## Cryptographic Consent
 
-### Identity-Resolved Detections
+Identity resolution is gated by a cryptographic act. A user signs a check-in transaction with their Solana wallet. That signature is what unlocks identity for their bounding box. Without it, the system cannot attribute data to them — they remain an anonymous detection.
 
-Every detection carries a `wallet_address` from the identity pipeline:
+This means:
+- **No check-in, no identity.** The face embedding match has no wallet to map to.
+- **Unconsented bodies are obfuscated.** YOLO detects them, but the network doesn't expose them as identified individuals.
+- **Consent is verifiable.** Every identity-resolved data point has a corresponding on-chain check-in signature anyone can audit.
+- **Privacy is architectural, not policy.** The system physically cannot produce identity-resolved data without the consent event.
 
-1. Native C++ server detects faces and computes ArcFace embeddings (512-dim)
-2. NativeIdentityService matches embeddings against enrolled faces
-3. Track continuity maintains identity across frames
-4. ReID (OSNet x0.25) re-acquires identity after brief occlusions
+## What Each Camera Produces
 
-Result: each bounding box in the stream is tied to a specific Solana wallet. The stream doesn't just say "person at (x1,y1,x2,y2)" — it says "wallet `7xKp...` at (x1,y1,x2,y2) with 17-joint pose skeleton."
+### The Perception Pipeline
 
-### Privacy by Architecture
+1. Native C++ server runs YOLOv8 (person detection + tracking) and computes ArcFace embeddings (512-dim)
+2. NativeIdentityService matches embeddings against enrolled, checked-in users
+3. COCO 17-joint pose estimation runs per detected person
+4. Track continuity + ReID (OSNet x0.25) maintains identity across frames and brief occlusions
 
-Activities derived from the perception stream are encrypted at the Jetson before leaving the device:
+Output: `frame_data` dicts at frame rate with identity-resolved detections and pose skeletons.
 
-1. AES-256-GCM encrypts the activity content
-2. Each checked-in user gets an access grant (their pubkey encrypts the AES key)
-3. Only encrypted bundles reach the backend
-4. Users decrypt with their Solana private key at read time
+### What Makes Single-Camera Data Useful
 
-The stream itself never leaves the camera. Only encrypted derivatives do.
-
-### Scale-Invariant Math
-
-The existing apps demonstrate how to build robust detections from the stream using pure geometry:
+The structured output supports pure geometric analysis without additional CV models:
 
 - **Angle calculation**: Dot product of vectors between keypoints (shoulder-elbow-wrist)
-- **Position validation**: Torso-vertical / shoulder-width ratio (standing vs. push-up)
-- **View detection**: Keypoint visibility confidence determines front/left/right
-- **Anti-cheat**: Minimum rep timing, wrist-above-shoulder checks
+- **Position validation**: Torso-vertical / shoulder-width ratio (standing vs. push-up position)
+- **View detection**: Keypoint visibility confidence determines front/left/right camera angle
+- **Proximity**: Bounding box distance between identified individuals
 
-No model retraining needed. New activities are just new geometric functions over the same keypoint stream.
+No model retraining needed. New analyses are just new geometric functions over the same keypoint stream.
 
-## x402 Access Model
+## Network-Level Data
 
-### The Primitive
+The unit of value is not a single camera's stream — it's the **network**. Individual camera #8282229 seeing a user do push-ups is useful. The network knowing that wallet `7xKp...` checked in at the gym at 6am, did 50 push-ups at camera #8282229, walked past camera #4419102 in the lobby, and checked in at the basketball court camera #7731004 at 7pm — that's an activity graph across physical space.
 
-The perception stream is the billable unit. An x402 payment grants time-bounded access to the structured `frame_data` output of a specific camera PDA. The subscriber receives:
+MMOMENT aggregates perception data across all cameras in the network. The API can answer questions no single camera can:
 
-- **Detections**: Identity-resolved bounding boxes at frame rate
-- **Poses**: 17-joint COCO keypoints per tracked person
-- **Events**: Buffered activity events from active CV apps
-- **Metadata**: Camera PDA, timestamp, checked-in wallet list
+- "What has this user done across all cameras today?"
+- "Who is at this location right now?"
+- "Show me this user's basketball stats across every court they've played at"
+- Cross-camera co-presence, movement patterns, aggregate activity history
 
-The subscriber does NOT receive raw video frames unless explicitly requested and paid for at a higher tier. The mathematical stream is both more useful (structured, queryable) and more privacy-preserving (no pixel data) than raw video.
+All identity-resolved queries require the user's cryptographic check-in at each camera. The network sees more, but only what users have consented to at each point.
 
-### Tiered Access
+## Access Tiers
 
-| Tier | Content | Use Case |
-|------|---------|----------|
-| **Events only** | Buffered activity events (encrypted) | Social feed, timeline aggregation |
-| **Detections** | Real-time bounding boxes + identities | Occupancy analytics, crowd flow |
-| **Full pose** | Detections + 17-joint keypoints | Fitness apps, gesture recognition, sports analytics |
-| **Pose + frame** | Full stream including raw pixels | Custom CV models, AR/VR integration |
+| Tier | Content | Example Use |
+|------|---------|-------------|
+| **Events** | Buffered activity events | Social feed, timeline, notifications |
+| **Detections** | Real-time bounding boxes + identities | Occupancy, crowd flow, co-presence |
+| **Full pose** | Detections + 17-joint keypoints | Fitness coaching, gesture recognition, sports analytics |
+| **Pose + frame** | Full stream including raw pixels | Custom CV models, AR/VR, content creation |
 
-Each tier has a different x402 price per second of access. The camera owner (Solana wallet that registered the camera PDA) receives payment.
+Higher tiers include all data from lower tiers. Unconsented (non-checked-in) individuals are excluded from identity-resolved tiers and obfuscated in frame-level tiers.
 
-### Agent Consumption
+## Consumer Patterns
 
-AI agents are the primary expected consumer. An agent that wants to build a fitness coaching product:
+Consumers access the network through MMOMENT's API, not through individual cameras. Typical consumption patterns:
 
-1. Discovers cameras via on-chain camera registry
-2. Pays x402 for "full pose" tier access to a gym camera
-3. Receives the `frame_data` stream in real-time
-4. Runs its own angle/position analysis (like pushup app does)
-5. Sends coaching feedback to the user's wallet
+**Real-time single-camera stream** — A fitness coaching agent subscribes to live pose data from one gym camera, computes form feedback, sends it to the user. Needs full pose tier.
 
-The agent never needs to run its own computer vision. The Jetson already did the expensive GPU inference. The agent just does math on coordinates.
+**Cross-camera user history** — A personal analytics app queries a user's activity across all cameras they've checked into today/week/month. Needs events tier.
 
-## Where Developers Plug In
+**Location intelligence** — A venue analytics service queries real-time occupancy and flow across cameras in a building. Needs detections tier (no individual identity required for aggregate counts).
 
-### Current Plugin System (On-Camera)
+**Content generation** — A social app detects co-presence (two users checked in at the same camera simultaneously) and generates shared moment content. Needs events or detections tier.
 
-Apps run directly on the Jetson as Python modules:
+## On-Device vs. Remote Processing
 
-```
-/opt/mmoment/apps/
-└── myapp/
-    ├── __init__.py
-    └── app.py          # Must expose get_app() or App class
-```
+The existing on-camera app system (BaseApp/CompetitionApp in `/opt/mmoment/apps/`) serves a narrow use case: **sub-frame-latency overlays on the camera's own stream.** Live competition rep counts appearing on the stream in real-time require on-device execution.
 
-Activated via HTTP API:
-```
-POST /api/apps/load     {"app_name": "myapp"}
-POST /api/apps/activate {"app_name": "myapp"}
-```
+Most consumers will be remote. A coaching agent on a VPS doing trigonometry on keypoints doesn't need to run on the Jetson. The same `frame_data` contract works in both contexts — the only difference is latency and who pays for compute. Remote is the default path. On-device is the exception for latency-critical visualization.
 
-Single active app at a time. App receives `frame_data`, returns `state` + `visualization` + optional `event`/`should_buffer` flags.
+## Camera as Oracle
 
-### Future: Remote App Execution via x402
-
-The same `frame_data` dict that on-camera apps receive can be serialized and streamed to remote subscribers. A remote app would:
-
-1. Subscribe to a camera's perception stream (x402 payment)
-2. Receive `frame_data` dicts over WebSocket/SSE
-3. Process them identically to an on-camera app
-4. Return `state`/`visualization` back to the camera for overlay rendering (optional)
-5. Or just consume silently for analytics/coaching
-
-This means the same app code works both on-camera and remote — the only difference is latency and who pays for compute.
-
-### App Development Contract
-
-Whether on-camera or remote, every app implements the same interface:
-
-```python
-class MyApp(BaseApp):
-    def process(self, frame_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Input:  frame_data with detections, keypoints, timestamp
-        Output: {
-            'state': {},           # App-specific state
-            'visualization': {},   # Drawing commands (skeleton, text, boxes, lines, circles)
-            'event': str,          # Optional discrete event name
-            'should_buffer': bool  # Optional force-buffer flag
-        }
-        """
-```
-
-For competition apps (multi-player with escrow):
-
-```python
-class MyCompetitionApp(CompetitionApp):
-    def init_competitor_stats(self) -> Dict:
-        """Return initial stats dict for each competitor"""
-
-    def process(self, frame_data) -> Dict:
-        """Process frame, update self.competitors[wallet]['stats']"""
-```
-
-## Architectural Implications
-
-### The Camera is an Oracle
-
-Each camera PDA is a Solana-verifiable oracle for physical-world events. When the pushup app counts 15 reps for wallet `7xKp...`, that count is:
+Each camera PDA is a Solana-verifiable oracle for physical-world events. When the system counts 15 push-up reps for wallet `7xKp...`:
 
 1. Computed on-device from raw sensor data
-2. Encrypted with the user's public key
+2. Encrypted with checked-in users' public keys (AES-256-GCM)
 3. Buffered to the backend
 4. Committed to the blockchain at checkout
 
-The camera PDA signs the attestation. The on-chain program can verify the camera is registered and trusted. This is a credibly neutral count of push-ups — not self-reported, not from a phone the user controls.
+The camera PDA signs the attestation. The on-chain program verifies the camera is registered. The count is camera-attested — not self-reported, not from a device the user controls.
 
-### Composability
+## Composability
 
 Because the stream is structured data (not pixels), it composes naturally:
 
-- **Multi-camera**: Merge detections from overlapping cameras by wallet address
-- **Multi-app**: Run a fitness tracker and a social proximity detector on the same stream
-- **Temporal**: Query "show me all moments where wallet X was within 2m of wallet Y" from historical buffered events
-- **Cross-chain**: Attestation data feeds into DeFi (escrow settlement), social (content creation), identity (reputation)
-
-### What This Enables
-
-- **Fitness-as-a-Service**: Gym cameras sell pose streams to coaching agents
-- **Verified Competitions**: Escrow-backed 1v1 challenges with camera-attested results
-- **Social Moments**: "You were both here" notifications from co-presence detection
-- **Occupancy Intelligence**: Real-time anonymized crowd analytics (detections tier, no identity)
-- **Content Attribution**: Camera-signed proof that a specific person was in a specific frame
+- **Multi-camera**: Merge activity by wallet address across cameras
+- **Temporal**: Query historical activity patterns from buffered events
+- **Cross-domain**: Attestation data feeds into DeFi (escrow settlement), social (content creation), identity (activity reputation)
 
 ## File References
 
@@ -199,8 +129,8 @@ Because the stream is structured data (not pixels), it composes naturally:
 |-----------|------|
 | BaseApp / CompetitionApp | `app/orin_nano/apps/sdk/base_app.py` |
 | AppManager (plugin loader) | `app/orin_nano/services/camera-service/services/app_manager.py` |
-| Push-up app (reference) | `app/orin_nano/apps/pushup/app.py` |
-| Basketball app (reference) | `app/orin_nano/apps/basketball/basketball_app.py` |
+| Push-up app (reference impl) | `app/orin_nano/apps/pushup/app.py` |
+| Basketball app (reference impl) | `app/orin_nano/apps/basketball/basketball_app.py` |
 | Identity service | `app/orin_nano/services/camera-service/services/native_identity_service.py` |
 | Activity encryption | `app/orin_nano/services/camera-service/services/activity_encryption_service.py` |
 | Activity buffer client | `app/orin_nano/services/camera-service/services/activity_buffer_client.py` |
