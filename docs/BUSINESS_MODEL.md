@@ -136,3 +136,35 @@ The user doesn't pay the camera or the network directly. Consumers pay MMOMENT f
 - Face enrollment (RecognitionToken creation) is the main friction point, but it's one-time and network-wide. Once enrolled, every camera in the network recognizes the user. Check-in itself is an instant local signature — target UX is NFC tap.
 - First users will be crypto-native (already have wallets). Path to mainstream is reducing check-in to a physical gesture (NFC, QR) that triggers signing under the hood.
 - Biometric data triggers regulatory attention (BIPA, GDPR) even with encryption. The cryptographic consent architecture — provable ed25519 signatures, on-chain session records — is probably the strongest legal position anything in this space can have.
+
+## Long-Term Hardware Vision
+
+Venues already maintain two categories of hardware that don't talk to each other: **security cameras** (perception without identity or consent) and **payment terminals** (identity + payment without perception). MMOMENT can eventually replace both.
+
+### The convergence
+
+A MMOMENT terminal is a sleekly designed payment kiosk paired with one or more cameras. The venue installs them where they'd put payment points and security cameras today — entrances, checkout counters, court entrances, class check-in desks. The hardware handles:
+
+1. **Payment processing** — tap to pay for entry, class, membership, etc.
+2. **Consent signing** — the payment tap triggers the ed25519 signature as part of the same gesture
+3. **Perception** — paired cameras run the perception engine, identity-resolved from the moment of payment
+
+The check-in friction problem disappears entirely. Users aren't "consenting to a camera network" — they're paying to enter the gym. The consent is embedded in a transaction they were already going to do. One tap, two functions.
+
+### Why venues would adopt this
+
+- They already buy and maintain security cameras and payment kiosks from separate vendors
+- MMOMENT replaces both with a single integrated system
+- They get perception data (occupancy, flow, activity analytics) that their current security cameras can't provide
+- They earn revenue share from the network data their hardware generates
+- The hardware form factor is familiar — it's a kiosk and cameras, not something alien
+
+### Phased rollout
+
+**Now**: Standalone Jetson camera rigs deployed by MMOMENT in partner venues. Separate check-in flow (phone-based ed25519 signing). Crypto-native early adopters.
+
+**Next**: NFC-triggered check-in. Phone tap at a point near the camera. Still separate from venue payment flow, but physically co-located and much lower friction.
+
+**Later**: Integrated MMOMENT terminal — payment + consent + perception in one device. Venue replaces their existing kiosk and camera infrastructure. Check-in is invisible, embedded in the payment the user was already making. Non-crypto users can participate (wallet creation abstracted behind the terminal UX).
+
+**End state**: MMOMENT terminals are the venue's payment and perception infrastructure. Every transaction at the terminal is a consent event. Every camera paired with a terminal produces identity-resolved perception. The network grows with every venue that switches from legacy kiosks + dumb security cameras to MMOMENT hardware.
