@@ -358,6 +358,10 @@ app.get("/robots.txt", (_req, res) => {
   res.send("User-agent: *\nDisallow: /\n");
 });
 
+// Mount consumer API (/v1/*)
+import { createApiRouter } from './api/router';
+app.use(createApiRouter());
+
 // Add response timeout middleware
 app.use((req, res, next) => {
   res.setTimeout(300000, () => {
@@ -1598,6 +1602,144 @@ app.post("/api/competition/settle", async (req, res) => {
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to settle competition'
+    });
+  }
+});
+
+// ============================================================================
+// CAMERA TIMELINE RELAY ENDPOINTS
+// ============================================================================
+
+const CAMERA_NETWORK_PROGRAM_ID = 'E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL';
+
+// Provide blockhash + payer pubkey so Jetson can build timeline transactions
+app.get("/api/relay-timeline-info", async (_req, res) => {
+  try {
+    if (!process.env.FEE_PAYER_SECRET_KEY || !process.env.SOLANA_RPC_URL) {
+      return res.status(503).json({ error: 'Timeline relay not configured' });
+    }
+
+    const secretKeyArray = JSON.parse(process.env.FEE_PAYER_SECRET_KEY);
+    const payer = Keypair.fromSecretKey(new Uint8Array(secretKeyArray));
+    const conn = new Connection(process.env.SOLANA_RPC_URL, 'confirmed');
+
+    const { blockhash } = await conn.getLatestBlockhash();
+
+    res.json({
+      payer_pubkey: payer.publicKey.toString(),
+      recent_blockhash: blockhash,
+    });
+  } catch (error) {
+    console.error('Relay timeline info error:', error);
+    res.status(500).json({ error: 'Failed to get timeline info' });
+  }
+});
+
+// Receive device-signed writeToCameraTimeline transaction, add fee payer signature, submit
+app.post("/api/relay-timeline-write", async (req, res) => {
+  try {
+    const { transaction, session_id, camera_id, device_pubkey, activity_count } = req.body;
+
+    if (!transaction || !device_pubkey) {
+      return res.status(400).json({
+        success: false,
+        error: 'transaction and device_pubkey are required'
+      });
+    }
+
+    if (!process.env.FEE_PAYER_SECRET_KEY || !process.env.SOLANA_RPC_URL) {
+      return res.status(503).json({
+        success: false,
+        error: 'Timeline relay not configured'
+      });
+    }
+
+    const secretKeyArray = JSON.parse(process.env.FEE_PAYER_SECRET_KEY);
+    const payer = Keypair.fromSecretKey(new Uint8Array(secretKeyArray));
+    const conn = new Connection(process.env.SOLANA_RPC_URL, 'confirmed');
+
+    console.log(`📋 Timeline write relay from device ${device_pubkey.slice(0, 8)}... (${activity_count} activities)`);
+
+    // Deserialize the transaction
+    const txBuffer = Buffer.from(transaction, 'base64');
+    const tx = Transaction.from(txBuffer);
+
+    // Validate transaction is for camera-network program
+    const validProgram = tx.instructions.every(ix =>
+      ix.programId.toString() === CAMERA_NETWORK_PROGRAM_ID ||
+      ix.programId.toString() === SystemProgram.programId.toString()
+    );
+    if (!validProgram) {
+      return res.status(400).json({
+        success: false,
+        error: 'Transaction contains unauthorized program'
+      });
+    }
+
+    // Validate device has signed
+    const deviceKey = new PublicKey(device_pubkey);
+    const deviceSig = tx.signatures.find(s => s.publicKey.equals(deviceKey));
+    if (!deviceSig || deviceSig.signature === null) {
+      return res.status(400).json({
+        success: false,
+        error: 'Transaction must be signed by device before submission'
+      });
+    }
+
+    // Verify fee payer matches
+    if (!tx.feePayer?.equals(payer.publicKey)) {
+      tx.feePayer = payer.publicKey;
+    }
+
+    // Sign with fee payer (do NOT change blockhash — device already signed with it)
+    tx.partialSign(payer);
+
+    console.log('   Fee payer signed. Submitting...');
+
+    // Submit transaction
+    const signature = await conn.sendRawTransaction(tx.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed'
+    });
+
+    console.log(`   Submitted: ${signature}`);
+
+    // Wait for confirmation
+    const confirmation = await conn.confirmTransaction(signature, 'confirmed');
+
+    if (confirmation.value.err) {
+      console.error('   Timeline write failed on-chain:', confirmation.value.err);
+      return res.status(500).json({
+        success: false,
+        error: 'Transaction failed on-chain',
+        details: confirmation.value.err
+      });
+    }
+
+    console.log(`   ✅ CameraTimeline written successfully: ${signature}`);
+
+    // Clean up session_activity_buffers for this session
+    if (session_id) {
+      try {
+        const deleted = await clearSessionActivities(session_id);
+        console.log(`   🗑️ Cleared ${deleted} buffered activities for session ${session_id.slice(0, 16)}...`);
+      } catch (cleanupErr) {
+        // Non-blocking — on-chain write succeeded, buffer cleanup is best-effort
+        console.warn(`   ⚠️ Buffer cleanup failed (non-blocking):`, cleanupErr);
+      }
+    }
+
+    res.json({
+      success: true,
+      signature,
+      message: `Wrote ${activity_count} activities to CameraTimeline`
+    });
+
+  } catch (error) {
+    console.error('Timeline write relay error:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to relay timeline write'
     });
   }
 });

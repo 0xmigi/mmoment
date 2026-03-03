@@ -18,15 +18,22 @@ pub struct TimelineUpdated {
 #[derive(Accounts)]
 #[instruction(activities: Vec<ActivityData>)]
 pub struct WriteToCameraTimeline<'info> {
-    /// The signer - must be the camera's device key or owner
+    /// Fee payer — pays rent for init_if_needed + transaction gas.
+    /// Separated from device signer so the backend can sponsor fees
+    /// while only the device that captured the data can authenticate writes.
     #[account(mut)]
-    pub signer: Signer<'info>,
+    pub payer: Signer<'info>,
+
+    /// Device authenticator — must be the camera's device key or owner.
+    /// This is what makes timeline writes trustless: only the physical device
+    /// (or camera owner) can attest to what happened at this camera.
+    pub device: Signer<'info>,
 
     #[account(
         mut,
         constraint = (
-            camera.device_pubkey == Some(signer.key()) ||
-            camera.owner == signer.key()
+            camera.device_pubkey == Some(device.key()) ||
+            camera.owner == device.key()
         ) @ CameraNetworkError::Unauthorized
     )]
     pub camera: Account<'info, CameraAccount>,
@@ -34,7 +41,7 @@ pub struct WriteToCameraTimeline<'info> {
     /// Camera timeline - created lazily on first write
     #[account(
         init_if_needed,
-        payer = signer,
+        payer = payer,
         space = 8 + 32 + 4 + 8 + 1 + 10187,  // 10240 bytes total
         seeds = [b"camera-timeline", camera.key().as_ref()],
         bump

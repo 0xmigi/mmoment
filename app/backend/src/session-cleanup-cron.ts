@@ -5,7 +5,7 @@ import { Connection, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet, BN } from '@coral-xyz/anchor';
 import { IDL } from './idl';
 import { Server } from 'socket.io';
-import { updateActivityTransactionId } from './database';
+import { updateActivityTransactionId, cleanupOldSessionActivities } from './database';
 
 const PROGRAM_ID = new PublicKey('E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL');
 const RETRY_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes for retrying pending keys
@@ -90,9 +90,20 @@ function startRetryInterval() {
     return;
   }
 
-  // Retry pending keys periodically
-  retryIntervalId = setInterval(() => {
+  // Retry pending keys and clean up orphaned buffer entries periodically
+  retryIntervalId = setInterval(async () => {
     processAllPendingKeys();
+
+    // Safety net: purge any buffer entries older than 7 days
+    // These are orphans from failed on-chain writes or crashed sessions
+    try {
+      const deleted = await cleanupOldSessionActivities(7);
+      if (deleted > 0) {
+        console.log(`🗑️ Periodic buffer cleanup: removed ${deleted} orphaned entries (>7 days old)`);
+      }
+    } catch (err) {
+      console.warn('⚠️ Periodic buffer cleanup failed (non-blocking):', err);
+    }
   }, RETRY_INTERVAL_MS);
 
   console.log('🔄 Access key retry interval started');

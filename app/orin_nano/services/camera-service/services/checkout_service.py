@@ -197,8 +197,9 @@ def execute_full_checkout(
     1. Add CHECK_OUT activity to session buffer
     2. Notify backend (for real-time UI updates)
     3. Send encrypted access key to backend (backend writes to UserSessionChain)
-    4. Clean up face recognition data
-    5. End the session
+    4. Write encrypted activities to CameraTimeline on Solana (device signs, backend pays)
+    5. Clean up face recognition data
+    6. End the session
 
     Args:
         wallet_address: User's wallet address
@@ -263,7 +264,34 @@ def execute_full_checkout(
         except Exception as e:
             logger.error(f"{log_prefix} Error sending access key: {e}")
 
-        # Step 4: Clean up face recognition data
+        # Step 4: Write encrypted activities to CameraTimeline on Solana
+        # Device signs (authenticates), backend pays gas and submits
+        timeline_written = False
+        try:
+            from services.timeline_writer import write_session_to_timeline
+            from services.device_signer import DeviceSigner
+
+            device_signer = DeviceSigner()
+            device_kp = device_signer.get_keypair()
+
+            if device_kp and session.encrypted_activities:
+                signature = write_session_to_timeline(
+                    device_keypair=device_kp,
+                    camera_pda=camera_pda,
+                    encrypted_activities=session.encrypted_activities,
+                    session_id=session_id
+                )
+                timeline_written = signature is not None
+                if timeline_written:
+                    logger.info(f"{log_prefix} CameraTimeline written. Tx: {signature[:16]}...")
+                else:
+                    logger.warning(f"{log_prefix} Failed to write CameraTimeline (will retry via backend)")
+            else:
+                logger.info(f"{log_prefix} No encrypted activities or device key — skipping timeline write")
+        except Exception as e:
+            logger.warning(f"{log_prefix} Error writing CameraTimeline (non-blocking): {e}")
+
+        # Step 5: Clean up face recognition data
         try:
             from services.blockchain_session_sync import get_blockchain_session_sync
             blockchain_sync = get_blockchain_session_sync()
@@ -272,7 +300,7 @@ def execute_full_checkout(
         except Exception as e:
             logger.warning(f"{log_prefix} Error cleaning up face data: {e}")
 
-        # Step 5: End the session
+        # Step 6: End the session
         session_service.end_session(session_id, wallet_address)
         logger.info(f"{log_prefix} Session {session_id[:16]}... ended")
 
@@ -282,6 +310,7 @@ def execute_full_checkout(
             "session_id": session_id,
             "activities_committed": len(session.get_activities()),
             "access_key_sent": access_key_sent,
+            "timeline_written": timeline_written,
             "auto_checkout": auto_checkout,
             "auto_checkout_reason": auto_checkout_reason,
             "message": "Checkout complete"

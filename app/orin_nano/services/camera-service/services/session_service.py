@@ -79,6 +79,7 @@ class Session:
         # Phase 3 Privacy Architecture: Per-session encryption
         self.session_key = generate_session_key()  # AES-256 key for this session
         self.activities: List[Dict] = []  # Buffered activities (encrypted at checkout)
+        self.encrypted_activities: List[Dict] = []  # Encrypted versions for CameraTimeline write
 
     def touch(self):
         """Update the last active timestamp"""
@@ -495,7 +496,10 @@ class SessionService:
                     activity_type=activity_type
                 )
 
-                # Send to backend
+                # Store encrypted activity locally for CameraTimeline write at checkout
+                session.encrypted_activities.append(encrypted_activity)
+
+                # Send to backend for real-time UI display
                 buffer_client = get_activity_buffer()
                 camera_pda = get_camera_pda_for_session()
 

@@ -53,6 +53,20 @@ export interface WalrusFileMapping {
   createdAt: Date;
 }
 
+// API key record interface
+export interface ApiKeyRecord {
+  id: string;
+  keyHash: string;
+  keyPrefix: string;
+  walletAddress: string;
+  name: string;
+  permissions: string;       // JSON array
+  rateLimit: number;
+  createdAt: number;
+  lastUsedAt: number | null;
+  revokedAt: number | null;
+}
+
 // User Sui wallet interface (for Walrus blob ownership)
 export interface UserSuiWallet {
   walletAddress: string;  // Solana wallet (primary key)
@@ -199,6 +213,25 @@ export async function initializeDatabase(dbPath: string = './mmoment.db'): Promi
             created_at INTEGER NOT NULL
           )
         `);
+
+        // Create api_keys table
+        await runQuery(`
+          CREATE TABLE IF NOT EXISTS api_keys (
+            id TEXT PRIMARY KEY,
+            key_hash TEXT NOT NULL UNIQUE,
+            key_prefix TEXT NOT NULL,
+            wallet_address TEXT NOT NULL,
+            name TEXT NOT NULL DEFAULT 'default',
+            permissions TEXT NOT NULL DEFAULT '[]',
+            rate_limit INTEGER NOT NULL DEFAULT 100,
+            created_at INTEGER NOT NULL,
+            last_used_at INTEGER,
+            revoked_at INTEGER
+          )
+        `);
+
+        await runQuery(`CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`);
+        await runQuery(`CREATE INDEX IF NOT EXISTS idx_api_keys_wallet ON api_keys(wallet_address)`);
 
         console.log('✅ Database tables initialized');
         resolve();
@@ -1496,6 +1529,114 @@ export async function getUserSuiWallet(walletAddress: string): Promise<UserSuiWa
             createdAt: new Date(row.created_at)
           });
         }
+      }
+    );
+  });
+}
+
+// ============================================================================
+// API KEYS OPERATIONS
+// ============================================================================
+
+export async function createApiKey(
+  id: string, keyHash: string, keyPrefix: string, walletAddress: string, name: string
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    const stmt = db.prepare(`
+      INSERT INTO api_keys (id, key_hash, key_prefix, wallet_address, name, permissions, rate_limit, created_at)
+      VALUES (?, ?, ?, ?, ?, '[]', 100, ?)
+    `);
+
+    stmt.run(id, keyHash, keyPrefix, walletAddress, name, Date.now(), (err: Error | null) => {
+      if (err) { reject(err); } else { resolve(); }
+    });
+    stmt.finalize();
+  });
+}
+
+export async function getApiKeyByHash(keyHash: string): Promise<ApiKeyRecord | null> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.get(
+      'SELECT * FROM api_keys WHERE key_hash = ?',
+      [keyHash],
+      (err: Error | null, row: any) => {
+        if (err) { reject(err); }
+        else if (!row) { resolve(null); }
+        else {
+          resolve({
+            id: row.id,
+            keyHash: row.key_hash,
+            keyPrefix: row.key_prefix,
+            walletAddress: row.wallet_address,
+            name: row.name,
+            permissions: row.permissions,
+            rateLimit: row.rate_limit,
+            createdAt: row.created_at,
+            lastUsedAt: row.last_used_at,
+            revokedAt: row.revoked_at,
+          });
+        }
+      }
+    );
+  });
+}
+
+export async function getApiKeysForWallet(walletAddress: string): Promise<ApiKeyRecord[]> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.all(
+      'SELECT * FROM api_keys WHERE wallet_address = ? ORDER BY created_at DESC',
+      [walletAddress],
+      (err: Error | null, rows: any[]) => {
+        if (err) { reject(err); }
+        else {
+          resolve((rows || []).map(row => ({
+            id: row.id,
+            keyHash: row.key_hash,
+            keyPrefix: row.key_prefix,
+            walletAddress: row.wallet_address,
+            name: row.name,
+            permissions: row.permissions,
+            rateLimit: row.rate_limit,
+            createdAt: row.created_at,
+            lastUsedAt: row.last_used_at,
+            revokedAt: row.revoked_at,
+          })));
+        }
+      }
+    );
+  });
+}
+
+export async function revokeApiKey(id: string, walletAddress: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.run(
+      'UPDATE api_keys SET revoked_at = ? WHERE id = ? AND wallet_address = ?',
+      [Date.now(), id, walletAddress],
+      function(err: Error | null) {
+        if (err) { reject(err); }
+        else { resolve(this.changes > 0); }
+      }
+    );
+  });
+}
+
+export async function updateApiKeyLastUsed(keyHash: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.run(
+      'UPDATE api_keys SET last_used_at = ? WHERE key_hash = ?',
+      [Date.now(), keyHash],
+      (err: Error | null) => {
+        if (err) { reject(err); } else { resolve(); }
       }
     );
   });
