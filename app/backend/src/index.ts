@@ -317,7 +317,10 @@ app.use(
   }),
 );
 
-// Configure Socket.IO with extremely permissive settings
+// Bot user-agent pattern for filtering Socket.IO connections
+const BOT_UA_PATTERN = /bot|crawler|spider|crawling|googlebot|bingbot|yandex|baidu|slurp|duckduck|facebookexternalhit|twitterbot|linkedinbot|semrush|ahrefs|mj12bot|dotbot|petalbot|bytespider/i;
+
+// Configure Socket.IO
 const io = new Server(httpServer, {
   cors: {
     origin: "*",
@@ -326,19 +329,34 @@ const io = new Server(httpServer, {
     allowedHeaders: "*",
   },
   path: "/socket.io/",
-  transports: ["polling", "websocket"], // Try polling first
-  pingTimeout: 300000, // 5 minutes
+  transports: ["polling", "websocket"],
+  pingTimeout: 60000,
   pingInterval: 25000,
-  connectTimeout: 300000, // 5 minutes
-  upgradeTimeout: 300000, // 5 minutes
+  connectTimeout: 45000,
+  upgradeTimeout: 30000,
   maxHttpBufferSize: 1e8,
   allowUpgrades: true,
   perMessageDeflate: false,
   destroyUpgrade: false,
+  allowRequest: (req, callback) => {
+    const ua = req.headers["user-agent"] || "";
+    if (BOT_UA_PATTERN.test(ua)) {
+      console.log(`🤖 Rejected bot Socket.IO connection: ${ua.slice(0, 80)}`);
+      callback("Bot connections not allowed", false);
+      return;
+    }
+    callback(null, true);
+  },
 });
 
 // Trust proxy and handle HTTPS
 app.enable("trust proxy");
+
+// Block bots/crawlers from the backend
+app.get("/robots.txt", (_req, res) => {
+  res.type("text/plain");
+  res.send("User-agent: *\nDisallow: /\n");
+});
 
 // Add response timeout middleware
 app.use((req, res, next) => {
