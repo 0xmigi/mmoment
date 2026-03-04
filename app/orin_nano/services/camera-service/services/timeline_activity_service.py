@@ -196,6 +196,15 @@ class TimelineActivityService:
                 activity_type=activity_type,
             )
 
+            # Store encrypted activity on session object for CameraTimeline write at checkout
+            try:
+                session_service = self._get_session_service()
+                session_obj = session_service.get_session_object_by_wallet(wallet_address)
+                if session_obj:
+                    session_obj.encrypted_activities.append(encrypted)
+            except Exception as store_err:
+                logger.debug(f"Could not store encrypted activity locally: {store_err}")
+
             # Get session ID for this user
             session_id = self._get_session_id(wallet_address)
 

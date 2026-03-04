@@ -486,6 +486,20 @@ class BlockchainSessionSync:
         if self.face_service:
             self.face_service.enable_boxes(True)
 
+        # Buffer check-in activity for CameraTimeline
+        try:
+            from services.timeline_activity_service import get_timeline_activity_service
+            timeline_service = get_timeline_activity_service()
+            session = self.session_service.get_session_by_wallet(wallet_address) if self.session_service else None
+            sid = session["session_id"] if session else f"{wallet_address[:8]}-{int(time.time())}"
+            timeline_service.buffer_checkin_activity(
+                wallet_address=wallet_address,
+                session_id=sid,
+                metadata={"timestamp": int(time.time() * 1000)},
+            )
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to buffer check-in activity: {e}")
+
         # Fetch and decrypt recognition token with profile
         self._fetch_and_decrypt_recognition_token(wallet_address, profile)
 

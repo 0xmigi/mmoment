@@ -137,10 +137,40 @@ def write_session_to_timeline(
                 ],
             })
 
-        # Build instruction data
-        instruction_data = WRITE_TIMELINE_DISCRIMINATOR + _borsh_serialize_activities(activities_for_tx)
+        # Solana tx max size is 1232 bytes. Overhead (sigs, accounts, discriminator) ~280 bytes.
+        # Each encrypted activity is ~400-600 bytes. Send one activity per tx to stay safe.
+        # Batch into groups that fit within the tx size limit.
+        MAX_TX_DATA = 900  # conservative limit for instruction data (excluding overhead)
 
-        # Build accounts list (order must match Rust struct)
+        batches = []
+        current_batch = []
+        current_size = 4  # Vec length prefix (u32)
+
+        for activity in activities_for_tx:
+            # Estimate this activity's serialized size
+            activity_size = (
+                8 +  # timestamp i64
+                1 +  # activity_type u8
+                4 + len(activity['encrypted_content']) +  # Vec<u8> encrypted_content
+                12 +  # nonce [u8;12]
+                4 +  # Vec outer length for access_grants
+                sum(4 + len(g) for g in activity['access_grants'])  # each Vec<u8> grant
+            )
+
+            if current_size + activity_size > MAX_TX_DATA and current_batch:
+                batches.append(current_batch)
+                current_batch = [activity]
+                current_size = 4 + activity_size
+            else:
+                current_batch.append(activity)
+                current_size += activity_size
+
+        if current_batch:
+            batches.append(current_batch)
+
+        logger.info(f"[TIMELINE] {len(activities_for_tx)} activities split into {len(batches)} transaction(s)")
+
+        # Build accounts list (same for all batches)
         accounts = [
             AccountMeta(pubkey=BACKEND_PAYER_PUBKEY, is_signer=True, is_writable=True),   # payer
             AccountMeta(pubkey=device_keypair.pubkey(), is_signer=True, is_writable=False),  # device
@@ -149,62 +179,70 @@ def write_session_to_timeline(
             AccountMeta(pubkey=SYSTEM_PROGRAM_ID, is_signer=False, is_writable=False),     # system_program
         ]
 
-        instruction = Instruction(
-            program_id=PROGRAM_ID,
-            accounts=accounts,
-            data=instruction_data,
-        )
+        last_signature = None
 
-        # Get recent blockhash from Solana via backend relay
-        # (avoids needing a direct RPC connection on Jetson)
-        try:
-            info_resp = requests.get(f"{BACKEND_URL}/api/relay-timeline-info", timeout=10)
-            if info_resp.ok:
-                recent_blockhash = info_resp.json()['recent_blockhash']
+        for batch_idx, batch in enumerate(batches):
+            # Get fresh blockhash for each batch
+            try:
+                info_resp = requests.get(f"{BACKEND_URL}/api/relay-timeline-info", timeout=10)
+                if info_resp.ok:
+                    recent_blockhash = info_resp.json()['recent_blockhash']
+                else:
+                    logger.error(f"[TIMELINE] Failed to get blockhash from backend: {info_resp.status_code}")
+                    continue
+            except requests.exceptions.RequestException as e:
+                logger.error(f"[TIMELINE] Failed to reach backend for blockhash: {e}")
+                continue
+
+            instruction_data = WRITE_TIMELINE_DISCRIMINATOR + _borsh_serialize_activities(batch)
+
+            instruction = Instruction(
+                program_id=PROGRAM_ID,
+                accounts=accounts,
+                data=instruction_data,
+            )
+
+            blockhash_obj = Hash.from_string(recent_blockhash)
+            message = Message.new_with_blockhash(
+                [instruction],
+                BACKEND_PAYER_PUBKEY,
+                blockhash_obj
+            )
+
+            tx = Transaction.new_unsigned(message)
+            tx.partial_sign([device_keypair], blockhash_obj)
+
+            tx_bytes = bytes(tx)
+            logger.info(f"[TIMELINE] Batch {batch_idx+1}/{len(batches)}: {len(batch)} activities, tx size={len(tx_bytes)} bytes")
+
+            tx_base64 = base64.b64encode(tx_bytes).decode('utf-8')
+
+            # Only pass session_id on the last batch so buffer cleanup happens after all writes
+            is_last = (batch_idx == len(batches) - 1)
+
+            response = requests.post(
+                f"{BACKEND_URL}/api/relay-timeline-write",
+                json={
+                    'transaction': tx_base64,
+                    'session_id': session_id if is_last else None,
+                    'camera_id': camera_pda,
+                    'device_pubkey': str(device_keypair.pubkey()),
+                    'activity_count': len(batch),
+                },
+                timeout=30
+            )
+
+            if response.ok:
+                result = response.json()
+                last_signature = result.get('signature', '?')
+                logger.info(f"[TIMELINE] Batch {batch_idx+1} written. Tx: {last_signature[:16]}...")
             else:
-                logger.error(f"[TIMELINE] Failed to get blockhash from backend: {info_resp.status_code}")
-                return None
-        except requests.exceptions.RequestException as e:
-            logger.error(f"[TIMELINE] Failed to reach backend for blockhash: {e}")
-            return None
+                logger.error(f"[TIMELINE] Batch {batch_idx+1} failed: {response.status_code} - {response.text}")
 
-        # Build message with backend as fee payer
-        blockhash_obj = Hash.from_string(recent_blockhash)
-        message = Message.new_with_blockhash(
-            [instruction],
-            BACKEND_PAYER_PUBKEY,
-            blockhash_obj
-        )
-
-        # Create transaction and partially sign with device key
-        tx = Transaction.new_unsigned(message)
-        tx.partial_sign([device_keypair], blockhash_obj)
-
-        logger.info(f"[TIMELINE] Transaction built and signed by device: {device_keypair.pubkey()}")
-
-        # Serialize and send to backend for fee payer signature + submission
-        tx_bytes = bytes(tx)
-        tx_base64 = base64.b64encode(tx_bytes).decode('utf-8')
-
-        response = requests.post(
-            f"{BACKEND_URL}/api/relay-timeline-write",
-            json={
-                'transaction': tx_base64,
-                'session_id': session_id,
-                'camera_id': camera_pda,
-                'device_pubkey': str(device_keypair.pubkey()),
-                'activity_count': len(activities_for_tx),
-            },
-            timeout=30
-        )
-
-        if response.ok:
-            result = response.json()
-            signature = result.get('signature', '?')
-            logger.info(f"[TIMELINE] Wrote {len(activities_for_tx)} activities to CameraTimeline. Tx: {signature[:16]}...")
-            return signature
+        if last_signature:
+            logger.info(f"[TIMELINE] All {len(activities_for_tx)} activities written to CameraTimeline")
+            return last_signature
         else:
-            logger.error(f"[TIMELINE] Backend relay failed: {response.status_code} - {response.text}")
             return None
 
     except Exception as e:

@@ -264,6 +264,19 @@ def execute_full_checkout(
         except Exception as e:
             logger.error(f"{log_prefix} Error sending access key: {e}")
 
+        # Step 3b: Buffer checkout activity (encrypted) before timeline write
+        try:
+            from services.timeline_activity_service import get_timeline_activity_service
+            timeline_service = get_timeline_activity_service()
+            timeline_service.buffer_checkout_activity(
+                wallet_address=wallet_address,
+                session_id=session_id,
+                duration_seconds=int(time.time() - session.created_at),
+                metadata=checkout_metadata,
+            )
+        except Exception as e:
+            logger.warning(f"{log_prefix} Failed to buffer checkout activity: {e}")
+
         # Step 4: Write encrypted activities to CameraTimeline on Solana
         # Device signs (authenticates), backend pays gas and submits
         timeline_written = False
@@ -287,7 +300,7 @@ def execute_full_checkout(
                 else:
                     logger.warning(f"{log_prefix} Failed to write CameraTimeline (will retry via backend)")
             else:
-                logger.info(f"{log_prefix} No encrypted activities or device key — skipping timeline write")
+                logger.info(f"{log_prefix} Skipping timeline write — device_key={'yes' if device_kp else 'NO'}, activities={len(session.encrypted_activities)}")
         except Exception as e:
             logger.warning(f"{log_prefix} Error writing CameraTimeline (non-blocking): {e}")
 
