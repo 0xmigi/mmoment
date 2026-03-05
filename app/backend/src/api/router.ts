@@ -458,11 +458,13 @@ export function createApiRouter(): Router {
       );
 
       const serializedTx = Buffer.from(tx.serialize()).toString('base64');
+      const messageBytes = Buffer.from(message.serialize()).toString('base64');
 
       console.log(`[Relay] Prepared timeline entry for camera ${camera_address}, entry_index=${entryIndex.toString()}, device_signer_index=${deviceSignerIndex}`);
 
       res.json({
         transaction: serializedTx,
+        message_bytes: messageBytes,
         device_signer_index: deviceSignerIndex,
         entry_index: entryIndex.toString(),
       });
