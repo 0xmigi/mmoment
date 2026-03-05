@@ -9,7 +9,7 @@ pub mod delete_recognition_token;
 // Privacy-preserving session management
 pub mod create_user_session_chain;
 pub mod store_session_access_keys;
-pub mod write_to_camera_timeline;
+pub mod create_timeline_entry;
 
 pub use initialize::*;
 pub use register_camera::*;
@@ -22,4 +22,4 @@ pub use delete_recognition_token::*;
 // Privacy-preserving session management
 pub use create_user_session_chain::*;
 pub use store_session_access_keys::*;
-pub use write_to_camera_timeline::*; 
+pub use create_timeline_entry::*;

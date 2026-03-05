@@ -71,7 +71,7 @@ pub fn handler(
             )?;
         }
 
-        account_info.realloc(new_size, false)?;
+        account_info.resize(new_size)?;
     }
 
     // Add the new keys

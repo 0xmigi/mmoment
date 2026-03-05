@@ -72,7 +72,7 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
       console.log('[DeleteToken] Recognition Token PDA:', recognitionTokenPda.toString());
 
       // Build the transaction instruction - DO NOT use .rpc()
-      const instruction = await program.methods
+      const instruction = await (program.methods as any)
         .deleteRecognitionToken()
         .accounts({
           user: userPublicKey,

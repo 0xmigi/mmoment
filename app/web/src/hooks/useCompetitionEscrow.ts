@@ -149,7 +149,7 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
       });
 
       // Build transaction
-      const tx = await program.methods
+      const tx = await (program.methods as any)
         .createCompetition(args, new BN(createdAt))
         .accounts({
           initiator: initiatorPubkey,
@@ -174,7 +174,7 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
       console.log('[CompetitionEscrow] Competition created:', signature);
 
       // Fetch and set the active competition
-      const account = await program.account.competitionEscrow.fetch(escrowPda);
+      const account = await (program.account as any).competitionEscrow.fetch(escrowPda);
       const competition = parseCompetitionAccount(account, escrowPda);
       setActiveCompetition(competition);
 
@@ -207,7 +207,7 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
       const escrowPda = new PublicKey(escrowPdaStr);
       const participantPubkey = new PublicKey(walletAddress);
 
-      const tx = await program.methods
+      const tx = await (program.methods as any)
         .joinCompetition()
         .accounts({
           participant: participantPubkey,
@@ -228,7 +228,7 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
       console.log('[CompetitionEscrow] Joined competition:', signature);
 
       // Refresh competition state
-      const account = await program.account.competitionEscrow.fetch(escrowPda);
+      const account = await (program.account as any).competitionEscrow.fetch(escrowPda);
       const competition = parseCompetitionAccount(account, escrowPda);
       setActiveCompetition(competition);
 
@@ -261,7 +261,7 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
       const escrowPda = new PublicKey(escrowPdaStr);
       const participantPubkey = new PublicKey(walletAddress);
 
-      const tx = await program.methods
+      const tx = await (program.methods as any)
         .declineCompetition()
         .accounts({
           participant: participantPubkey,
@@ -309,7 +309,7 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
       const escrowPda = new PublicKey(escrowPdaStr);
       const authorityPubkey = new PublicKey(walletAddress);
 
-      const tx = await program.methods
+      const tx = await (program.methods as any)
         .startCompetition()
         .accounts({
           authority: authorityPubkey,
@@ -329,7 +329,7 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
       console.log('[CompetitionEscrow] Started competition:', signature);
 
       // Refresh competition state
-      const account = await program.account.competitionEscrow.fetch(escrowPda);
+      const account = await (program.account as any).competitionEscrow.fetch(escrowPda);
       const competition = parseCompetitionAccount(account, escrowPda);
       setActiveCompetition(competition);
 
@@ -363,10 +363,10 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
       const initiatorPubkey = new PublicKey(walletAddress);
 
       // Fetch escrow to get participants for remaining accounts
-      const escrowAccount = await program.account.competitionEscrow.fetch(escrowPda) as any;
+      const escrowAccount = await (program.account as any).competitionEscrow.fetch(escrowPda);
       const participants = escrowAccount.participants as PublicKey[];
 
-      const tx = await program.methods
+      const tx = await (program.methods as any)
         .cancelCompetition(reason)
         .accounts({
           initiator: initiatorPubkey,
@@ -413,7 +413,7 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
 
     try {
       const escrowPda = new PublicKey(escrowPdaStr);
-      const account = await program.account.competitionEscrow.fetch(escrowPda);
+      const account = await (program.account as any).competitionEscrow.fetch(escrowPda);
       return parseCompetitionAccount(account, escrowPda);
     } catch (err) {
       console.error('[CompetitionEscrow] Error fetching competition:', err);
@@ -431,7 +431,7 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
       // Fetch all competition escrows for this camera
       // Note: In production, you'd want to use getProgramAccounts with filters
       // or an indexer for better performance
-      const accounts = await program.account.competitionEscrow.all([
+      const accounts = await (program.account as any).competitionEscrow.all([
         {
           memcmp: {
             offset: 8 + 32, // After discriminator + initiator

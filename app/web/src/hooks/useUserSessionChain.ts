@@ -111,7 +111,7 @@ export async function createUserSessionChain(
     console.log('[SessionChain] Authority:', authority.toString());
 
     // Build the transaction
-    const tx = await program.methods
+    const tx = await (program.methods as any)
       .createUserSessionChain()
       .accounts({
         user: userPubkey,

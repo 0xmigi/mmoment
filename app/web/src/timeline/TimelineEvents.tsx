@@ -1,5 +1,5 @@
 // src/components/EventListener.tsx
-// NEW PRIVACY ARCHITECTURE: Uses TimelineUpdated event which doesn't expose user info
+// NEW PRIVACY ARCHITECTURE: Uses TimelineEntryCreated event which doesn't expose user info
 
 import { useEffect, useState } from 'react';
 import { useProgram } from '../anchor/setup';
@@ -21,13 +21,13 @@ export default function EventListener() {
     let eventListener: number | null = null;
 
     try {
-      // Use TimelineUpdated event (privacy-preserving - no user info exposed)
-      eventListener = program.addEventListener('TimelineUpdated', (event: any) => {
+      // Use TimelineEntryCreated event (privacy-preserving - no user info exposed)
+      eventListener = program.addEventListener('timelineEntryCreated', (event: any) => {
         const newEvent: Event = {
           timestamp: new Date().toISOString(),
           signature: event.signature,
           cameraAccount: event.camera?.toString(),
-          activityCount: event.activityCount?.toNumber?.() || event.activityCount
+          activityCount: event.activityCount
         };
         setEvents(prev => [...prev, newEvent]);
       });

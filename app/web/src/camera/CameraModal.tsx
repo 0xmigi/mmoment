@@ -344,7 +344,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       console.log('[CameraModal] Authority:', authority.toString());
 
       // Build the transaction
-      const tx = await program.methods
+      const tx = await (program.methods as any)
         .createUserSessionChain()
         .accounts({
           user: userPublicKey,

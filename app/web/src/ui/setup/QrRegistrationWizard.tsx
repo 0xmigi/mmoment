@@ -12,9 +12,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { PublicKey, SystemProgram, Connection } from '@solana/web3.js';
-import { AnchorProvider, Program, Idl } from '@coral-xyz/anchor';
+import { AnchorProvider, Program } from '@coral-xyz/anchor';
 import { IDL } from '../../anchor/idl';
-import { CAMERA_ACTIVATION_PROGRAM_ID } from '../../anchor/setup';
 import QRCode from 'qrcode';
 
 type QrStep = 'wifi' | 'qr' | 'scanning' | 'register' | 'complete';
@@ -64,7 +63,7 @@ export function QrRegistrationWizard({
   
   // Blockchain
   const { primaryWallet } = useDynamicContext();
-  const [program, setProgram] = useState<Program<Idl> | null>(null);
+  const [program, setProgram] = useState<Program<any> | null>(null);
   const [programLoading, setProgramLoading] = useState(true);
   const [connection] = useState(new Connection('https://api.devnet.solana.com'));
   
@@ -108,7 +107,7 @@ export function QrRegistrationWizard({
       );
 
       // Create the program with the general Idl type
-      const prog = new Program(IDL as Idl, CAMERA_ACTIVATION_PROGRAM_ID, provider);
+      const prog = new Program(IDL as any, provider);
       setProgram(prog);
       console.log('Program initialized with ID:', prog.programId.toString());
     } catch (err) {
@@ -312,7 +311,7 @@ export function QrRegistrationWizard({
       console.log('Owner:', ownerPublicKey.toString());
 
       // IMPORTANT: Exactly match the working pattern
-      const tx = await program.methods
+      const tx = await (program.methods as any)
         .registerCamera(registerCameraArgs)
         .accounts({
           owner: ownerPublicKey,

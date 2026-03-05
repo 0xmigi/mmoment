@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { AnchorProvider, Program, Idl, setProvider, BN } from '@coral-xyz/anchor';
+import { AnchorProvider, Program, setProvider, BN } from '@coral-xyz/anchor';
 import { PublicKey, Keypair } from '@solana/web3.js';
 import { useConnection, useAnchorWallet } from '@solana/wallet-adapter-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
@@ -118,11 +118,10 @@ export function useCameraActivationProgram() {
         // Create program instance
         const prog = new Program(
           IDL as any,
-          CAMERA_ACTIVATION_PROGRAM_ID,
           provider
-        );
+        ) as unknown as Program<CameraNetwork>;
         console.log('Successfully created program instance');
-        
+
         // Update global cache
         globalProgramInstance = prog;
         lastWalletAddress = walletAddress;
@@ -190,7 +189,7 @@ export const useCameraNetworkProgram = () => {
         setProvider(provider);
 
         // Initialize program
-        const program = new Program(IDL as Idl, programId, provider) as unknown as Program<CameraNetwork>;
+        const program = new Program(IDL as any, provider) as unknown as Program<CameraNetwork>;
         setProgram(program);
         console.log("[useCameraNetworkProgram] Program initialized");
 
@@ -275,8 +274,7 @@ export const useCameraNetworkProgramWithoutWallet = (walletKeyPair?: Keypair) =>
 
         // Initialize program
         const program = new Program(
-          IDL as Idl,
-          CAMERA_NETWORK_PROGRAM_ID,
+          IDL as any,
           provider
         ) as unknown as Program<CameraNetwork>;
         setProgram(program);
@@ -419,9 +417,12 @@ export function useCompetitionEscrowProgram() {
           { commitment: "confirmed" }
         );
 
+        const escrowIdlWithAddress = {
+          ...COMPETITION_ESCROW_IDL,
+          address: COMPETITION_ESCROW_PROGRAM_ID.toString(),
+        };
         const prog = new Program(
-          COMPETITION_ESCROW_IDL as any,
-          COMPETITION_ESCROW_PROGRAM_ID,
+          escrowIdlWithAddress as any,
           provider
         );
 
@@ -515,14 +516,13 @@ export function useProgram() {
           console.log('[useProgram] Creating program instance');
           const programInstance = new Program(
             IDL as any,
-            CAMERA_ACTIVATION_PROGRAM_ID,
             provider
-          );
+          ) as unknown as Program<CameraNetwork>;
 
           console.log('[useProgram] Program initialized successfully:', programInstance.programId.toString());
-          console.log('[useProgram] IDL methods available:', 
+          console.log('[useProgram] IDL methods available:',
             Object.keys(programInstance.methods)
-              .filter(key => typeof programInstance.methods[key] === 'function')
+              .filter(key => typeof (programInstance.methods as any)[key] === 'function')
           );
           
           if (isMounted) {

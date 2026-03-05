@@ -67,7 +67,7 @@ export function initializeSessionCleanupCron(
     // Create Anchor provider and program
     const wallet = new Wallet(cronBotKeypair);
     const provider = new AnchorProvider(connection, wallet, { commitment: 'confirmed' });
-    program = new Program(IDL as any, PROGRAM_ID, provider);
+    program = new Program(IDL as any, provider);
 
     console.log('✅ Session Access Key Service Initialized');
     console.log(`   Cron Bot (Authority): ${cronBotKeypair.publicKey.toString()}`);

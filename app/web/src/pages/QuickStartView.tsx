@@ -71,7 +71,7 @@ export default function QuickStartView() {
       );
 
       // Create the program
-      const prog = new Program(IDL as any, CAMERA_ACTIVATION_PROGRAM_ID, provider);
+      const prog = new Program(IDL as any, provider);
       setProgram(prog);
       console.log('Program initialized with ID:', prog.programId.toString());
     } catch (err) {

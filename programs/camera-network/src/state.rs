@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use light_sdk::{LightDiscriminator, LightHasher};
 
 // The global camera registry that tracks all cameras in the network
 #[account]
@@ -45,7 +46,7 @@ pub struct CameraFeatures {
 }
 
 // NOTE: UserSession removed - sessions are now managed off-chain by Jetson
-// Check-in is an ed25519 handshake, checkout writes to CameraTimeline + UserSessionChain
+// Check-in is an ed25519 handshake, checkout creates compressed TimelineEntry + UserSessionChain
 // This breaks the visible on-chain user↔camera link
 
 // Recognition token - stores encrypted facial embedding for user authentication
@@ -93,32 +94,38 @@ pub struct AccessGrant {
     pub bump: u8,                // PDA bump
 }
 
-// Camera timeline - stores encrypted activity history for a camera
-// Created lazily on first checkout with activities
-#[account]
-pub struct CameraTimeline {
-    pub camera: Pubkey,                         // Link back to camera account
-    pub encrypted_activities: Vec<EncryptedActivity>, // Growing list of encrypted activities
-    pub activity_count: u64,                    // Total activities (public stat)
-    pub bump: u8,                               // PDA bump
+// A single timeline entry — one per checkout, stored as a compressed account via Light Protocol.
+// Contains all encrypted activities from that session at this camera.
+// Immutable once created. No user identity — just anonymous encrypted blobs with access grants.
+#[event]
+#[derive(Clone, Debug, Default, LightDiscriminator, LightHasher)]
+pub struct TimelineEntry {
+    /// Which camera this entry belongs to (for querying all entries by camera)
+    #[hash]
+    pub camera: Pubkey,
+
+    /// Sequential index (camera.activity_counter at time of write)
+    pub entry_index: u64,
+
+    /// When this checkout occurred
+    pub timestamp: i64,
+
+    /// Number of activities in this entry
+    pub activity_count: u8,
+
+    /// All activities from this session, serialized and encrypted together.
+    /// Format: AES-256-GCM encrypted JSON array of activities.
+    #[hash]
+    pub encrypted_payload: Vec<u8>,
+
+    /// AES-GCM nonce for decrypting encrypted_payload
+    pub nonce: [u8; 12],
+
+    /// Flattened access grants blob.
+    /// Format: [num_grants (2 bytes BE)] + for each grant: [grant_len (2 bytes BE)] + [grant_bytes]
+    #[hash]
+    pub access_grants_blob: Vec<u8>,
 }
-
-// Space: 8 (discriminator) + 32 (camera) + 4 (vec length) + (N * activity_size) + 8 (count) + 1 (bump)
-// Initial: ~53 bytes + dynamic activity data
-// Seeds: ["camera-timeline", camera.key()]
-
-// Single encrypted activity entry
-#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
-pub struct EncryptedActivity {
-    pub timestamp: i64,              // When activity occurred (public for overlap queries)
-    pub activity_type: u8,           // Type of activity (photo, video, etc.) - public
-    pub encrypted_content: Vec<u8>,  // AES-256-GCM encrypted activity data
-    pub nonce: [u8; 12],             // AES-GCM nonce for decryption
-    pub access_grants: Vec<Vec<u8>>, // Encrypted activity key for each user present
-}
-
-// Typical size per activity: 8 + 1 + 4 + ~150 (content) + 12 + 4 + (N_users * 64) bytes
-// Example: 2 users present = ~300 bytes per activity
 
 // User session chain - stores encrypted access keys to camera session history
 // This is the user's "keychain" for accessing their sessions across cameras
@@ -234,13 +241,3 @@ pub struct UpdateCameraArgs {
     pub device_pubkey: Option<Pubkey>,
 }
 
-// Activity data structure for timeline writes
-// This is passed from Jetson (already encrypted) to the checkout instruction
-#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
-pub struct ActivityData {
-    pub timestamp: i64,              // When the activity occurred (public)
-    pub activity_type: u8,           // Type (photo, video, etc.) - public
-    pub encrypted_content: Vec<u8>,  // AES-256-GCM encrypted by Jetson
-    pub nonce: [u8; 12],             // AES-GCM nonce
-    pub access_grants: Vec<Vec<u8>>, // Encrypted AES keys for each user present
-} 

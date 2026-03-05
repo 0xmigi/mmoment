@@ -69,8 +69,7 @@ export const fetchCameraByPublicKey = async (publicKey: string, connection: Conn
     
     // Create a direct program instance
     const program = new Program(
-      IDL,
-      CAMERA_ACTIVATION_PROGRAM_ID,
+      IDL as any,
       provider
     );
     
@@ -398,7 +397,7 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
         
         // Initialize the registry directly without explicitly using the signer
         // as the signer will be provided by the AnchorProvider
-        const tx = await program.methods.initialize()
+        const tx = await (program.methods as any).initialize()
           .accounts({
             authority: new PublicKey(primaryWallet.address),
             cameraRegistry: registryAddress,

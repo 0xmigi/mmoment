@@ -8,6 +8,14 @@ mod instructions;
 
 use instructions::*;
 use state::*;
+use light_sdk::{
+    cpi::CpiSigner,
+    derive_light_cpi_signer,
+    instruction::{PackedAddressTreeInfo, ValidityProof},
+};
+
+pub const LIGHT_CPI_SIGNER: CpiSigner =
+    derive_light_cpi_signer!("E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL");
 
 #[program]
 pub mod camera_network {
@@ -61,7 +69,7 @@ pub mod camera_network {
     //
     // New architecture:
     // - Check-in is OFF-CHAIN (ed25519 handshake with Jetson)
-    // - Jetson writes encrypted activities to CameraTimeline (write_to_camera_timeline)
+    // - At checkout, a compressed TimelineEntry is created (create_timeline_entry)
     // - User stores access keys in their UserSessionChain (store_session_access_keys)
     // - No on-chain link between user and camera
 
@@ -80,12 +88,21 @@ pub mod camera_network {
         instructions::store_session_access_keys::handler(ctx, keys)
     }
 
-    /// Write encrypted activities to a camera's timeline
-    /// Called by Jetson (device key) or camera owner - NO user account involved
-    pub fn write_to_camera_timeline(
-        ctx: Context<WriteToCameraTimeline>,
-        activities: Vec<ActivityData>,
+    /// Create a compressed timeline entry for a camera session
+    /// Called at checkout — device signs, backend pays gas
+    pub fn create_timeline_entry<'info>(
+        ctx: Context<'_, '_, '_, 'info, CreateTimelineEntry<'info>>,
+        proof: ValidityProof,
+        address_tree_info: PackedAddressTreeInfo,
+        output_merkle_tree_index: u8,
+        encrypted_payload: Vec<u8>,
+        nonce: [u8; 12],
+        access_grants_blob: Vec<u8>,
+        activity_count: u8,
     ) -> Result<()> {
-        instructions::write_to_camera_timeline::handler(ctx, activities)
+        instructions::create_timeline_entry::handler(
+            ctx, proof, address_tree_info, output_merkle_tree_index,
+            encrypted_payload, nonce, access_grants_blob, activity_count,
+        )
     }
 } 

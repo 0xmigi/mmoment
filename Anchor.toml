@@ -1,7 +1,8 @@
 [toolchain]
+anchor_version = "0.32.1"
 
 [features]
-resolution = true
+resolution = false
 skip-lint = true
 
 [programs.devnet]
@@ -17,7 +18,7 @@ url = "https://api.apr.dev"
 
 [provider]
 cluster = "devnet"
-wallet = "target/deploy/camera_network-authority.json"
+wallet = "~/.config/solana/program-keypairs/authority-keypair.json"
 
 [scripts]
 camera-network = "node scripts/camera-network-client.js"

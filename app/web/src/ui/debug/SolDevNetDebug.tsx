@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, SystemProgram, Transaction, Connection } from '@solana/web3.js';
-import { Program, AnchorProvider, Idl } from '@coral-xyz/anchor';
+import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import { CAMERA_ACTIVATION_PROGRAM_ID } from '../../anchor/setup';
 import { IDL } from '../../anchor/idl';
 import { isSolanaWallet } from '@dynamic-labs/solana';
@@ -136,7 +136,7 @@ export function SolDevNetDebug() {
   const [initialized, setInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [txResult, setTxResult] = useState<string | null>(null);
-  const [program, setProgram] = useState<Program<Idl> | null>(null);
+  const [program, setProgram] = useState<Program<any> | null>(null);
 
   // Form state
   const [cameraName, setCameraName] = useState('');
@@ -202,7 +202,7 @@ export function SolDevNetDebug() {
       );
 
       // Create the program with the general Idl type
-      const prog = new Program(IDL as Idl, CAMERA_ACTIVATION_PROGRAM_ID, provider);
+      const prog = new Program(IDL as any, provider);
       setProgram(prog);
       console.log('Program initialized with ID:', prog.programId.toString());
     } catch (err) {
@@ -289,7 +289,7 @@ export function SolDevNetDebug() {
       console.log('Registry PDA:', registryPda.toString());
 
       // Initialize the registry
-      const tx = await program.methods
+      const tx = await (program.methods as any)
         .initialize()
         .accounts({
           authority: authorityPublicKey,
@@ -458,7 +458,7 @@ export function SolDevNetDebug() {
       console.log('Program ID:', CAMERA_ACTIVATION_PROGRAM_ID.toString());
         
       // IMPORTANT: Exactly match the working test script pattern
-      const tx = await program.methods
+      const tx = await (program.methods as any)
         .registerCamera(registerCameraArgs)
         .accounts({
           owner: ownerPublicKey,
@@ -541,7 +541,7 @@ export function SolDevNetDebug() {
     
     try {
       // Create the method call with proper account naming
-      const tx = await program.methods
+      const tx = await (program.methods as any)
         .upsertRecognitionToken(
           mockEmbedding,
           "Debug Token", // display_name
@@ -594,7 +594,7 @@ export function SolDevNetDebug() {
         
         // Check if session exists
         try {
-          await program.account.userSession.fetch(sessionPda);
+          await (program.account as any).userSession.fetch(sessionPda);
           sessionStatus[camera.publicKey] = true;
         } catch {
           sessionStatus[camera.publicKey] = false;
@@ -684,7 +684,7 @@ export function SolDevNetDebug() {
       try {
         // Fetch with generic account type
          
-        const faceAccount = await program.account.recognitionToken.fetch(faceDataPda) as any;
+        const faceAccount = await (program.account as any).recognitionToken.fetch(faceDataPda);
         if (faceAccount) { // Check if account data is valid
            faceDataExists = true;
            console.log('Face data exists');
@@ -716,7 +716,7 @@ export function SolDevNetDebug() {
         // MATCH THE EXACT APPROACH FROM THE JAVASCRIPT TEST SCRIPTS
         
         // Create a method call that matches the face-recognition-checkin.js script
-        const methodCall = program.methods.checkIn(useFaceRec);
+        const methodCall = (program.methods as any).checkIn(useFaceRec);
         
         // Define the accounts like in the test script
         const accountsObj: Record<string, PublicKey> = {
@@ -841,7 +841,7 @@ export function SolDevNetDebug() {
       // Check if the session exists before trying to check out
       try {
         // Fetch with generic account type
-        await program.account.userSession.fetch(sessionPda);
+        await (program.account as any).userSession.fetch(sessionPda);
         console.log('Found session, proceeding with checkout');
       } catch (checkoutFetchErr) { // Use the error variable
         console.log('No session found, cannot check out:', checkoutFetchErr);
@@ -862,7 +862,7 @@ export function SolDevNetDebug() {
         );
 
         // Create a method call with empty activities array
-        const methodCall = program.methods.checkOut([]);
+        const methodCall = (program.methods as any).checkOut([]);
 
         // Define the accounts
         const accountsObj: Record<string, PublicKey> = {
@@ -954,7 +954,7 @@ export function SolDevNetDebug() {
       console.log('Fetching user sessions for analytics...');
       
       // Fetch all user sessions
-      const userSessionAccounts = await program.account.userSession.all();
+      const userSessionAccounts = await (program.account as any).userSession.all();
       console.log('Found user session accounts:', userSessionAccounts.length);
       
       // Count active users per camera
@@ -1017,7 +1017,7 @@ export function SolDevNetDebug() {
       let registryAccount: any | undefined;
       try {
         // Explicitly use the cameraRegistry type
-        registryAccount = await program.account.cameraRegistry.fetch(registryAddress);
+        registryAccount = await (program.account as any).cameraRegistry.fetch(registryAddress);
         console.log('Registry account successfully fetched:', registryAccount);
       } catch (registryFetchErr) { // Use the error variable
         console.warn('Could not fetch registry account, it may not be initialized yet:', registryFetchErr);
@@ -1035,7 +1035,7 @@ export function SolDevNetDebug() {
 
       try {
         // Use the correct account type from program.account
-        const cameraAccounts = await program.account.cameraAccount.all();
+        const cameraAccounts = await (program.account as any).cameraAccount.all();
         console.log('Found camera accounts:', cameraAccounts.length);
 
         for (const accountInfo of cameraAccounts) {
@@ -1272,7 +1272,7 @@ export function SolDevNetDebug() {
       const transaction = new Transaction();
       
       // Create the instruction with the correct accounts
-      const ix = await program.methods
+      const ix = await (program.methods as any)
         .deregisterCamera()
         .accounts({
           owner: ownerPublicKey,
@@ -1359,7 +1359,7 @@ export function SolDevNetDebug() {
       const transaction = new Transaction();
       
       // Create the instruction with the correct accounts
-      const ix = await program.methods
+      const ix = await (program.methods as any)
         .setCameraActive(newActiveState)
         .accounts({
           owner: ownerPublicKey,
@@ -1512,7 +1512,7 @@ export function SolDevNetDebug() {
           };
 
           // Call the upsertRecognitionToken instruction
-          const tx = await program.methods
+          const tx = await (program.methods as any)
               .upsertRecognitionToken(
                 Buffer.from(capturedEmbedding), // Pass embedding as Buffer
                 "Debug Token", // display_name

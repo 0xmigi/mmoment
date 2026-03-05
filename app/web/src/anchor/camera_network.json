@@ -879,6 +879,12 @@
                 "defined": "CameraFeatures"
               }
             }
+          },
+          {
+            "name": "devicePubkey",
+            "type": {
+              "option": "publicKey"
+            }
           }
         ]
       }

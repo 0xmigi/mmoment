@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import crypto from 'crypto';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection, PublicKey, Keypair, ComputeBudgetProgram, SystemProgram } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet } from '@coral-xyz/anchor';
-import { Keypair } from '@solana/web3.js';
+import BN from 'bn.js';
 import { IDL } from '../idl';
 import { apiKeyAuth, AuthenticatedRequest } from './middleware/api-key-auth';
 import { generateApiKey, hashApiKey, getKeyPrefix } from './keys/api-key-gen';
@@ -14,8 +14,30 @@ import {
   getWalrusFilesForWallet,
   getDatabaseStats,
 } from '../database';
+import {
+  createRpc,
+  bn,
+  deriveAddressSeed,
+  deriveAddress,
+  getDefaultAddressTreeInfo,
+  selectStateTreeInfo,
+  getRegisteredProgramPda,
+  getAccountCompressionAuthority,
+  buildAndSignTx,
+  sendAndConfirmTx,
+  packNewAddressParams,
+} from '@lightprotocol/stateless.js';
 
 const PROGRAM_ID = new PublicKey('E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL');
+const LIGHT_SYSTEM_PROGRAM = new PublicKey('SySTEM1eSU2p4BGQfQpimFEWWSC1XDFeun3Nqzz3rT7');
+const ACCOUNT_COMPRESSION_PROGRAM = new PublicKey('compr6CUsB5m2jS4Y3831ztGSTnDpnKJTKS95d64XVq');
+const NOOP_PROGRAM = new PublicKey('noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV');
+
+// CPI signer PDA: findProgramAddress(["cpi_authority"], PROGRAM_ID)
+const [CPI_SIGNER_PDA] = PublicKey.findProgramAddressSync(
+  [Buffer.from('cpi_authority')],
+  PROGRAM_ID
+);
 
 export function createApiRouter(): Router {
   const router = Router();
@@ -28,7 +50,10 @@ export function createApiRouter(): Router {
   // Anchor requires a wallet for Provider but we only read — use a throwaway keypair
   const readOnlyWallet = new Wallet(Keypair.generate());
   const provider = new AnchorProvider(connection, readOnlyWallet, { commitment: 'confirmed' });
-  const program = new Program(IDL as any, PROGRAM_ID, provider);
+  const program = new Program(IDL as any, provider);
+
+  // Helius RPC for compressed account operations
+  const heliusRpcUrl = process.env.HELIUS_RPC_URL;
 
   // ============================================================================
   // KEY MANAGEMENT (wallet-based, no API key needed to create)
@@ -151,10 +176,14 @@ export function createApiRouter(): Router {
     }
   });
 
-  // Camera timeline — anonymous encrypted activities stored on-chain
+  // Camera timeline — reads compressed TimelineEntry accounts via Helius
   // No user identification in this data. Caller decrypts if they have access grants.
   router.get('/v1/cameras/:cameraId/timeline', async (req, res) => {
     try {
+      if (!heliusRpcUrl) {
+        return res.status(503).json({ error: 'service_unavailable', message: 'HELIUS_RPC_URL not configured' });
+      }
+
       let cameraPubkey: PublicKey;
       try {
         cameraPubkey = new PublicKey(req.params.cameraId);
@@ -162,39 +191,226 @@ export function createApiRouter(): Router {
         return res.status(400).json({ error: 'bad_request', message: 'Invalid camera ID (must be a Solana public key)' });
       }
 
-      const [timelinePda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('camera-timeline'), cameraPubkey.toBuffer()],
-        PROGRAM_ID
-      );
+      const rpc = createRpc(heliusRpcUrl);
 
-      try {
-        const timeline = await (program.account as any).cameraTimeline.fetch(timelinePda);
-        res.json({
-          data: {
-            camera: timeline.camera.toString(),
-            activity_count: timeline.activityCount.toNumber(),
-            encrypted_activities: timeline.encryptedActivities.map((a: any) => ({
-              timestamp: a.timestamp.toNumber(),
-              activity_type: a.activityType,
-              encrypted_content: Buffer.from(a.encryptedContent).toString('base64'),
-              nonce: Buffer.from(a.nonce).toString('base64'),
-              access_grants: a.accessGrants.map((g: any) => Buffer.from(g).toString('base64')),
-            })),
-          }
-        });
-      } catch {
-        // No timeline exists for this camera yet
-        res.json({
-          data: {
-            camera: req.params.cameraId,
-            activity_count: 0,
-            encrypted_activities: [],
-          }
-        });
-      }
+      // Fetch all compressed accounts owned by our program, filtered by camera pubkey
+      // In the compressed account data layout:
+      // [8 bytes discriminator][32 bytes camera pubkey][8 bytes entry_index]...
+      const accounts = await rpc.getCompressedAccountsByOwner(PROGRAM_ID, {
+        filters: [
+          { memcmp: { offset: 8, bytes: cameraPubkey.toBase58() } },
+        ],
+      });
+
+      const entries = accounts.items.map(account => {
+        try {
+          if (!account.data) return null;
+          const data = Buffer.from(account.data.data);
+          // Manual decode: discriminator(8) + camera(32) + entry_index(8) + timestamp(8) +
+          // activity_count(1) + encrypted_payload(4+len) + nonce(12) + access_grants_blob(4+len)
+          let offset = 8; // skip discriminator
+          offset += 32; // skip camera (already filtered)
+          const entryIndex = Number(data.readBigUInt64LE(offset));
+          offset += 8;
+          const timestamp = Number(data.readBigInt64LE(offset));
+          offset += 8;
+          const activityCount = data.readUInt8(offset);
+          offset += 1;
+          const payloadLen = data.readUInt32LE(offset);
+          offset += 4;
+          const encryptedPayload = data.subarray(offset, offset + payloadLen);
+          offset += payloadLen;
+          const nonce = data.subarray(offset, offset + 12);
+          offset += 12;
+          const grantsLen = data.readUInt32LE(offset);
+          offset += 4;
+          const accessGrantsBlob = data.subarray(offset, offset + grantsLen);
+
+          return {
+            entry_index: entryIndex,
+            timestamp,
+            activity_count: activityCount,
+            encrypted_payload: Buffer.from(encryptedPayload).toString('base64'),
+            nonce: Buffer.from(nonce).toString('base64'),
+            access_grants_blob: Buffer.from(accessGrantsBlob).toString('base64'),
+          };
+        } catch (e) {
+          console.error('[API] Failed to decode timeline entry:', e);
+          return null;
+        }
+      }).filter(Boolean);
+
+      entries.sort((a: any, b: any) => a.entry_index - b.entry_index);
+
+      res.json({
+        data: {
+          camera: req.params.cameraId,
+          entries,
+          total: entries.length,
+        }
+      });
     } catch (err) {
       console.error('[API] Failed to get camera timeline:', err);
       res.status(500).json({ error: 'internal', message: 'Failed to read camera timeline from blockchain' });
+    }
+  });
+
+  // ============================================================================
+  // RELAY ENDPOINT — builds and submits compressed timeline entry transactions
+  // Called by Jetson at checkout. Jetson sends encrypted data + device key.
+  // ============================================================================
+
+  router.post('/relay/create-timeline-entry', async (req, res) => {
+    try {
+      if (!heliusRpcUrl) {
+        return res.status(503).json({ error: 'service_unavailable', message: 'HELIUS_RPC_URL not configured' });
+      }
+
+      const {
+        camera_address,
+        encrypted_payload,
+        nonce,
+        access_grants_blob,
+        activity_count,
+        device_secret_key,
+      } = req.body;
+
+      if (!camera_address || !encrypted_payload || !nonce || !access_grants_blob ||
+          activity_count === undefined || !device_secret_key) {
+        return res.status(400).json({
+          error: 'bad_request',
+          message: 'Required: camera_address, encrypted_payload, nonce, access_grants_blob, activity_count, device_secret_key'
+        });
+      }
+
+      const cameraPubkey = new PublicKey(camera_address);
+      const deviceKeypair = Keypair.fromSecretKey(new Uint8Array(device_secret_key));
+
+      const feePayerSecret = process.env.FEE_PAYER_SECRET_KEY;
+      if (!feePayerSecret) {
+        return res.status(503).json({ error: 'service_unavailable', message: 'Fee payer not configured' });
+      }
+      const payerKeypair = Keypair.fromSecretKey(new Uint8Array(JSON.parse(feePayerSecret)));
+
+      const rpc = createRpc(heliusRpcUrl);
+
+      // Fetch camera to get current activity_counter
+      const camera = await (program.account as any).cameraAccount.fetch(cameraPubkey);
+      const entryIndex = camera.activityCounter as BN;
+
+      // Get address tree info and derive compressed account address
+      const addressTreeInfo = getDefaultAddressTreeInfo();
+      const addressSeed = deriveAddressSeed(
+        [
+          Buffer.from('timeline-entry'),
+          cameraPubkey.toBuffer(),
+          entryIndex.toArrayLike(Buffer, 'le', 8),
+        ],
+        PROGRAM_ID,
+      );
+      const address = deriveAddress(addressSeed, addressTreeInfo.tree);
+
+      // Get validity proof for the new address
+      const proofResult = await rpc.getValidityProofV0(
+        [],
+        [{
+          address: bn(address.toBytes()),
+          tree: addressTreeInfo.tree,
+          queue: addressTreeInfo.queue,
+        }]
+      );
+
+      // Get state tree for output
+      const stateTreeInfos = await rpc.getStateTreeInfos();
+      const outputStateTreeInfo = selectStateTreeInfo(stateTreeInfos);
+
+      // Build remaining accounts matching Rust CpiAccounts layout
+      const systemAccounts: PublicKey[] = [
+        LIGHT_SYSTEM_PROGRAM,                // [0] light_system_program
+        CPI_SIGNER_PDA,                      // [1] authority (cpi signer)
+        getRegisteredProgramPda(),            // [2] registered_program_pda
+        NOOP_PROGRAM,                        // [3] noop_program
+        getAccountCompressionAuthority(),     // [4] account_compression_authority
+        ACCOUNT_COMPRESSION_PROGRAM,          // [5] account_compression_program
+        PROGRAM_ID,                          // [6] invoking_program
+        SystemProgram.programId,             // [7] system_program
+      ];
+
+      // Pack address params into remaining accounts
+      const { newAddressParamsPacked, remainingAccounts } = packNewAddressParams(
+        [{
+          seed: addressSeed,
+          addressMerkleTreeRootIndex: proofResult.rootIndices[0],
+          addressMerkleTreePubkey: addressTreeInfo.tree,
+          addressQueuePubkey: addressTreeInfo.queue,
+        }],
+        systemAccounts,
+      );
+
+      // Add output state tree queue
+      const outputTreeIndex = remainingAccounts.length;
+      remainingAccounts.push(outputStateTreeInfo.queue);
+
+      // Build instruction args
+      const packedAddressTreeInfo = {
+        addressMerkleTreePubkeyIndex: newAddressParamsPacked[0].addressMerkleTreeAccountIndex,
+        addressQueuePubkeyIndex: newAddressParamsPacked[0].addressQueueAccountIndex,
+        rootIndex: proofResult.rootIndices[0],
+      };
+
+      const encryptedPayloadBuf = Buffer.from(encrypted_payload, 'base64');
+      const nonceBuf = Array.from(Buffer.from(nonce, 'base64'));
+      const accessGrantsBlobBuf = Buffer.from(access_grants_blob, 'base64');
+
+      const ix = await (program.methods as any)
+        .createTimelineEntry(
+          { 0: proofResult.compressedProof },
+          packedAddressTreeInfo,
+          outputTreeIndex,
+          encryptedPayloadBuf,
+          nonceBuf,
+          accessGrantsBlobBuf,
+          activity_count,
+        )
+        .accounts({
+          payer: payerKeypair.publicKey,
+          device: deviceKeypair.publicKey,
+          camera: cameraPubkey,
+        })
+        .remainingAccounts(
+          remainingAccounts.map(pubkey => ({
+            pubkey,
+            isSigner: false,
+            isWritable: false,
+          }))
+        )
+        .instruction();
+
+      const computeIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 });
+      const { blockhash } = await rpc.getLatestBlockhash();
+
+      const tx = buildAndSignTx(
+        [computeIx, ix],
+        payerKeypair,
+        blockhash,
+        [deviceKeypair],
+      );
+
+      const signature = await sendAndConfirmTx(rpc, tx);
+
+      console.log(`[Relay] Timeline entry created for camera ${camera_address}, entry_index=${entryIndex.toString()}, sig=${signature}`);
+
+      res.json({
+        success: true,
+        signature,
+        entry_index: entryIndex.toString(),
+      });
+    } catch (err: any) {
+      console.error('[Relay] Failed to create timeline entry:', err);
+      res.status(500).json({
+        error: 'relay_failed',
+        message: err.message || 'Failed to create timeline entry',
+      });
     }
   });
 
