@@ -163,11 +163,14 @@ class TimelineActivityService:
         cv_activity_meta: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
-        Internal method to encrypt and buffer an activity.
+        Internal method to buffer a raw activity on the session.
+
+        Activities are stored unencrypted on the session object and encrypted
+        as a single blob at checkout time (in timeline_writer.py).
 
         Args:
             wallet_address: User who triggered the activity
-            activity_content: Activity data to encrypt
+            activity_content: Activity data to store
             activity_type: Activity type enum
             transaction_signature: Optional Solana tx signature for Solscan link
             cv_activity_meta: Optional CV activity metadata for timeline display
@@ -176,34 +179,38 @@ class TimelineActivityService:
             True if buffered successfully
         """
         try:
-            # Get all checked-in users for access grants
-            checked_in_users = self._get_checked_in_users()
+            # Store raw activity on session for single-blob encryption at checkout
+            try:
+                session_service = self._get_session_service()
+                session_obj = session_service.get_session_object_by_wallet(wallet_address)
+                if session_obj:
+                    session_obj.add_activity(
+                        activity_type=activity_type,
+                        data=activity_content,
+                        metadata={
+                            'transaction_signature': transaction_signature,
+                            'cv_activity_meta': cv_activity_meta,
+                        }
+                    )
+            except Exception as store_err:
+                logger.debug(f"Could not store activity locally: {store_err}")
 
-            # Ensure the triggering user is included in access grants
-            # (Important: Do this BEFORE the empty check so their own activities are always buffered)
+            # Get checked-in users for backend buffer encryption (real-time UI)
+            checked_in_users = self._get_checked_in_users()
             if wallet_address not in checked_in_users:
                 checked_in_users.append(wallet_address)
 
             if not checked_in_users:
-                logger.debug("No users checked in, skipping activity buffer")
-                return False
+                logger.debug("No users checked in, skipping backend buffer")
+                return True
 
-            # Encrypt activity for all checked-in users
+            # Per-activity encryption only for backend buffer (real-time display)
             encryption_service = self._get_encryption_service()
             encrypted = encryption_service.encrypt_activity(
                 activity_content=activity_content,
                 users_present=checked_in_users,
                 activity_type=activity_type,
             )
-
-            # Store encrypted activity on session object for CameraTimeline write at checkout
-            try:
-                session_service = self._get_session_service()
-                session_obj = session_service.get_session_object_by_wallet(wallet_address)
-                if session_obj:
-                    session_obj.encrypted_activities.append(encrypted)
-            except Exception as store_err:
-                logger.debug(f"Could not store encrypted activity locally: {store_err}")
 
             # Get session ID for this user
             session_id = self._get_session_id(wallet_address)

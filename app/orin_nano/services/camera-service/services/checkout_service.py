@@ -277,8 +277,8 @@ def execute_full_checkout(
         except Exception as e:
             logger.warning(f"{log_prefix} Failed to buffer checkout activity: {e}")
 
-        # Step 4: Write encrypted activities to CameraTimeline on Solana
-        # Device signs (authenticates), backend pays gas and submits
+        # Step 4: Write session activities to compressed CameraTimeline on Solana
+        # Single-blob encryption at checkout, device signs locally, backend relays
         timeline_written = False
         try:
             from services.timeline_writer import write_session_to_timeline
@@ -287,12 +287,25 @@ def execute_full_checkout(
             device_signer = DeviceSigner()
             device_kp = device_signer.get_keypair()
 
-            if device_kp and session.encrypted_activities:
+            # Collect all users who were present during this session for access grants
+            users_present = []
+            try:
+                from services.blockchain_session_sync import get_blockchain_session_sync
+                blockchain_sync = get_blockchain_session_sync()
+                users_present = list(blockchain_sync.checked_in_wallets)
+            except Exception:
+                pass
+            if wallet_address not in users_present:
+                users_present.append(wallet_address)
+
+            raw_activities = session.get_activities()
+
+            if device_kp and raw_activities:
                 signature = write_session_to_timeline(
                     device_keypair=device_kp,
                     camera_pda=camera_pda,
-                    encrypted_activities=session.encrypted_activities,
-                    session_id=session_id
+                    raw_activities=raw_activities,
+                    users_present=users_present,
                 )
                 timeline_written = signature is not None
                 if timeline_written:
@@ -300,7 +313,7 @@ def execute_full_checkout(
                 else:
                     logger.warning(f"{log_prefix} Failed to write CameraTimeline (will retry via backend)")
             else:
-                logger.info(f"{log_prefix} Skipping timeline write — device_key={'yes' if device_kp else 'NO'}, activities={len(session.encrypted_activities)}")
+                logger.info(f"{log_prefix} Skipping timeline write — device_key={'yes' if device_kp else 'NO'}, activities={len(raw_activities)}")
         except Exception as e:
             logger.warning(f"{log_prefix} Error writing CameraTimeline (non-blocking): {e}")
 

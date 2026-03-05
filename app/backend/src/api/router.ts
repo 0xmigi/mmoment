@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import crypto from 'crypto';
-import { Connection, PublicKey, Keypair, ComputeBudgetProgram, SystemProgram } from '@solana/web3.js';
+import { Connection, PublicKey, Keypair, ComputeBudgetProgram, SystemProgram, VersionedTransaction, TransactionMessage } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet } from '@coral-xyz/anchor';
 import BN from 'bn.js';
 import { IDL } from '../idl';
@@ -23,7 +23,6 @@ import {
   selectStateTreeInfo,
   getRegisteredProgramPda,
   getAccountCompressionAuthority,
-  buildAndSignTx,
   sendAndConfirmTx,
   packNewAddressParams,
 } from '@lightprotocol/stateless.js';
@@ -256,11 +255,13 @@ export function createApiRouter(): Router {
   });
 
   // ============================================================================
-  // RELAY ENDPOINT — builds and submits compressed timeline entry transactions
-  // Called by Jetson at checkout. Jetson sends encrypted data + device key.
+  // RELAY ENDPOINTS — two-phase compressed timeline entry creation
+  // Phase 1: Backend builds tx, signs with payer, returns serialized message
+  // Phase 2: Jetson signs message with device key, sends signature back
+  // Device private key NEVER leaves the Jetson.
   // ============================================================================
 
-  router.post('/relay/create-timeline-entry', async (req, res) => {
+  router.post('/relay/prepare-timeline-entry', async (req, res) => {
     try {
       if (!heliusRpcUrl) {
         return res.status(503).json({ error: 'service_unavailable', message: 'HELIUS_RPC_URL not configured' });
@@ -268,23 +269,23 @@ export function createApiRouter(): Router {
 
       const {
         camera_address,
+        device_pubkey,
         encrypted_payload,
         nonce,
         access_grants_blob,
         activity_count,
-        device_secret_key,
       } = req.body;
 
-      if (!camera_address || !encrypted_payload || !nonce || !access_grants_blob ||
-          activity_count === undefined || !device_secret_key) {
+      if (!camera_address || !device_pubkey || !encrypted_payload || !nonce ||
+          !access_grants_blob || activity_count === undefined) {
         return res.status(400).json({
           error: 'bad_request',
-          message: 'Required: camera_address, encrypted_payload, nonce, access_grants_blob, activity_count, device_secret_key'
+          message: 'Required: camera_address, device_pubkey, encrypted_payload, nonce, access_grants_blob, activity_count'
         });
       }
 
       const cameraPubkey = new PublicKey(camera_address);
-      const deviceKeypair = Keypair.fromSecretKey(new Uint8Array(device_secret_key));
+      const devicePubkey = new PublicKey(device_pubkey);
 
       const feePayerSecret = process.env.FEE_PAYER_SECRET_KEY;
       if (!feePayerSecret) {
@@ -374,11 +375,11 @@ export function createApiRouter(): Router {
         )
         .accounts({
           payer: payerKeypair.publicKey,
-          device: deviceKeypair.publicKey,
+          device: devicePubkey,
           camera: cameraPubkey,
         })
         .remainingAccounts(
-          remainingAccounts.map(pubkey => ({
+          remainingAccounts.map((pubkey: PublicKey) => ({
             pubkey,
             isSigner: false,
             isWritable: false,
@@ -389,27 +390,74 @@ export function createApiRouter(): Router {
       const computeIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 });
       const { blockhash } = await rpc.getLatestBlockhash();
 
-      const tx = buildAndSignTx(
-        [computeIx, ix],
-        payerKeypair,
-        blockhash,
-        [deviceKeypair],
+      // Build the versioned message with both payer and device as signers
+      const message = new TransactionMessage({
+        payerKey: payerKeypair.publicKey,
+        recentBlockhash: blockhash,
+        instructions: [computeIx, ix],
+      }).compileToV0Message();
+
+      // Create tx and sign with payer ONLY — device signs on Jetson
+      const tx = new VersionedTransaction(message);
+      tx.sign([payerKeypair]);
+
+      // Find device key's signer index in the message
+      const accountKeys = message.staticAccountKeys;
+      const deviceSignerIndex = accountKeys.findIndex(
+        (key: PublicKey) => key.equals(devicePubkey)
       );
+
+      const serializedTx = Buffer.from(tx.serialize()).toString('base64');
+
+      console.log(`[Relay] Prepared timeline entry for camera ${camera_address}, entry_index=${entryIndex.toString()}, device_signer_index=${deviceSignerIndex}`);
+
+      res.json({
+        transaction: serializedTx,
+        device_signer_index: deviceSignerIndex,
+        entry_index: entryIndex.toString(),
+      });
+    } catch (err: any) {
+      console.error('[Relay] Failed to prepare timeline entry:', err);
+      res.status(500).json({
+        error: 'relay_failed',
+        message: err.message || 'Failed to prepare timeline entry',
+      });
+    }
+  });
+
+  router.post('/relay/submit-timeline-entry', async (req, res) => {
+    try {
+      if (!heliusRpcUrl) {
+        return res.status(503).json({ error: 'service_unavailable', message: 'HELIUS_RPC_URL not configured' });
+      }
+
+      const { signed_transaction } = req.body;
+
+      if (!signed_transaction) {
+        return res.status(400).json({
+          error: 'bad_request',
+          message: 'Required: signed_transaction (base64 serialized VersionedTransaction)'
+        });
+      }
+
+      const rpc = createRpc(heliusRpcUrl);
+
+      const txBytes = Buffer.from(signed_transaction, 'base64');
+      const tx = VersionedTransaction.deserialize(txBytes);
 
       const signature = await sendAndConfirmTx(rpc, tx);
 
-      console.log(`[Relay] Timeline entry created for camera ${camera_address}, entry_index=${entryIndex.toString()}, sig=${signature}`);
+      console.log(`[Relay] Timeline entry submitted, sig=${signature}`);
 
       res.json({
         success: true,
         signature,
-        entry_index: entryIndex.toString(),
       });
     } catch (err: any) {
-      console.error('[Relay] Failed to create timeline entry:', err);
+      console.error('[Relay] Failed to submit timeline entry:', err);
       res.status(500).json({
         error: 'relay_failed',
-        message: err.message || 'Failed to create timeline entry',
+        message: err.message || 'Failed to submit timeline entry',
       });
     }
   });
