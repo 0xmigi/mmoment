@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import crypto from 'crypto';
-import { Connection, PublicKey, Keypair, ComputeBudgetProgram, SystemProgram, VersionedTransaction, TransactionMessage } from '@solana/web3.js';
+import { Connection, PublicKey, Keypair, ComputeBudgetProgram, SystemProgram, VersionedTransaction, TransactionMessage, TransactionInstruction } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet } from '@coral-xyz/anchor';
 import BN from 'bn.js';
 import { IDL } from '../idl';
@@ -352,40 +352,80 @@ export function createApiRouter(): Router {
       const outputTreeIndex = remainingAccounts.length;
       remainingAccounts.push(outputStateTreeInfo.queue);
 
-      // Build instruction args
-      const packedAddressTreeInfo = {
-        addressMerkleTreePubkeyIndex: newAddressParamsPacked[0].addressMerkleTreeAccountIndex,
-        addressQueuePubkeyIndex: newAddressParamsPacked[0].addressQueueAccountIndex,
-        rootIndex: proofResult.rootIndices[0],
-      };
-
+      // Build instruction data manually — Anchor's BorshInstructionCoder uses
+      // Buffer.alloc(1000) which overflows with large encrypted payloads.
       const encryptedPayloadBuf = Buffer.from(encrypted_payload, 'base64');
-      const nonceBuf = Array.from(Buffer.from(nonce, 'base64'));
+      const nonceBuf = Buffer.from(nonce, 'base64');
       const accessGrantsBlobBuf = Buffer.from(access_grants_blob, 'base64');
 
-      const ix = await (program.methods as any)
-        .createTimelineEntry(
-          { 0: proofResult.compressedProof },
-          packedAddressTreeInfo,
-          outputTreeIndex,
-          encryptedPayloadBuf,
-          nonceBuf,
-          accessGrantsBlobBuf,
-          activity_count,
-        )
-        .accounts({
-          payer: payerKeypair.publicKey,
-          device: devicePubkey,
-          camera: cameraPubkey,
-        })
-        .remainingAccounts(
-          remainingAccounts.map((pubkey: PublicKey) => ({
-            pubkey,
-            isSigner: false,
-            isWritable: false,
-          }))
-        )
-        .instruction();
+      // Discriminator from IDL: create_timeline_entry
+      const discriminator = Buffer.from([243, 124, 212, 170, 45, 118, 145, 86]);
+
+      // Calculate total size and allocate
+      const proof = proofResult.compressedProof;
+      const proofSize = proof ? 1 + 128 : 1; // Option tag + CompressedProof {a:[u8;32], b:[u8;64], c:[u8;32]}
+      const totalSize = 8 // discriminator
+        + proofSize
+        + 4 // PackedAddressTreeInfo: u8 + u8 + u16
+        + 1 // output_merkle_tree_index: u8
+        + 4 + encryptedPayloadBuf.length // Vec<u8>: 4-byte len + data
+        + 12 // nonce: [u8; 12]
+        + 4 + accessGrantsBlobBuf.length // Vec<u8>: 4-byte len + data
+        + 1; // activity_count: u8
+
+      const ixData = Buffer.alloc(totalSize);
+      let offset = 0;
+
+      // Discriminator
+      discriminator.copy(ixData, offset); offset += 8;
+
+      // ValidityProof: Option<CompressedProof>
+      if (proof) {
+        ixData.writeUInt8(1, offset); offset += 1; // Some
+        Buffer.from(proof.a).copy(ixData, offset); offset += 32;
+        Buffer.from(proof.b).copy(ixData, offset); offset += 64;
+        Buffer.from(proof.c).copy(ixData, offset); offset += 32;
+      } else {
+        ixData.writeUInt8(0, offset); offset += 1; // None
+      }
+
+      // PackedAddressTreeInfo
+      ixData.writeUInt8(newAddressParamsPacked[0].addressMerkleTreeAccountIndex, offset); offset += 1;
+      ixData.writeUInt8(newAddressParamsPacked[0].addressQueueAccountIndex, offset); offset += 1;
+      ixData.writeUInt16LE(proofResult.rootIndices[0], offset); offset += 2;
+
+      // output_merkle_tree_index: u8
+      ixData.writeUInt8(outputTreeIndex, offset); offset += 1;
+
+      // encrypted_payload: Vec<u8>
+      ixData.writeUInt32LE(encryptedPayloadBuf.length, offset); offset += 4;
+      encryptedPayloadBuf.copy(ixData, offset); offset += encryptedPayloadBuf.length;
+
+      // nonce: [u8; 12]
+      nonceBuf.copy(ixData, offset); offset += 12;
+
+      // access_grants_blob: Vec<u8>
+      ixData.writeUInt32LE(accessGrantsBlobBuf.length, offset); offset += 4;
+      accessGrantsBlobBuf.copy(ixData, offset); offset += accessGrantsBlobBuf.length;
+
+      // activity_count: u8
+      ixData.writeUInt8(activity_count, offset); offset += 1;
+
+      // Build account metas
+      const keys = [
+        { pubkey: payerKeypair.publicKey, isSigner: true, isWritable: true },
+        { pubkey: devicePubkey, isSigner: true, isWritable: false },
+        { pubkey: cameraPubkey, isSigner: false, isWritable: true },
+        ...remainingAccounts.map((pubkey: PublicKey) => ({
+          pubkey, isSigner: false, isWritable: false,
+        })),
+      ];
+
+      const ix = new TransactionInstruction({
+        programId: PROGRAM_ID,
+        keys,
+        data: ixData,
+      });
 
       const computeIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 1_000_000 });
       const { blockhash } = await rpc.getLatestBlockhash();
