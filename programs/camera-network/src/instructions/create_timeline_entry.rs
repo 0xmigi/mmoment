@@ -46,11 +46,15 @@ pub fn handler<'info>(
     nonce: [u8; 12],
     access_grants_blob: Vec<u8>,
     activity_count: u8,
+    chunk_index: u8,
+    total_chunks: u8,
 ) -> Result<()> {
     let camera = &mut ctx.accounts.camera;
     let now = Clock::get()?.unix_timestamp;
 
     require!(!encrypted_payload.is_empty(), CameraNetworkError::InvalidCameraData);
+    require!(total_chunks >= 1, CameraNetworkError::InvalidCameraData);
+    require!(chunk_index < total_chunks, CameraNetworkError::InvalidCameraData);
 
     let program_id = crate::ID.into();
     let light_cpi_accounts = CpiAccounts::new(
@@ -90,6 +94,8 @@ pub fn handler<'info>(
     entry.encrypted_payload = encrypted_payload;
     entry.nonce = nonce;
     entry.access_grants_blob = access_grants_blob;
+    entry.chunk_index = chunk_index;
+    entry.total_chunks = total_chunks;
 
     // CPI to light-system-program
     let cpi = CpiInputs::new_with_address(

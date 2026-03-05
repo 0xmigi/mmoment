@@ -99,10 +99,13 @@ pub mod camera_network {
         nonce: [u8; 12],
         access_grants_blob: Vec<u8>,
         activity_count: u8,
+        chunk_index: u8,
+        total_chunks: u8,
     ) -> Result<()> {
         instructions::create_timeline_entry::handler(
             ctx, proof, address_tree_info, output_merkle_tree_index,
             encrypted_payload, nonce, access_grants_blob, activity_count,
+            chunk_index, total_chunks,
         )
     }
 } 

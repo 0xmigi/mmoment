@@ -274,6 +274,8 @@ export function createApiRouter(): Router {
         nonce,
         access_grants_blob,
         activity_count,
+        chunk_index = 0,
+        total_chunks = 1,
       } = req.body;
 
       if (!camera_address || !device_pubkey || !encrypted_payload || !nonce ||
@@ -371,7 +373,9 @@ export function createApiRouter(): Router {
         + 4 + encryptedPayloadBuf.length // Vec<u8>: 4-byte len + data
         + 12 // nonce: [u8; 12]
         + 4 + accessGrantsBlobBuf.length // Vec<u8>: 4-byte len + data
-        + 1; // activity_count: u8
+        + 1 // activity_count: u8
+        + 1 // chunk_index: u8
+        + 1; // total_chunks: u8
 
       const ixData = Buffer.alloc(totalSize);
       let offset = 0;
@@ -410,6 +414,12 @@ export function createApiRouter(): Router {
 
       // activity_count: u8
       ixData.writeUInt8(activity_count, offset); offset += 1;
+
+      // chunk_index: u8
+      ixData.writeUInt8(chunk_index, offset); offset += 1;
+
+      // total_chunks: u8
+      ixData.writeUInt8(total_chunks, offset); offset += 1;
 
       // Build account metas
       const keys = [

@@ -179,18 +179,19 @@ class TimelineActivityService:
             True if buffered successfully
         """
         try:
-            # Store raw activity on session for single-blob encryption at checkout
+            # Store lean activity on session for single-blob encryption at checkout.
+            # Strip redundant fields (camera_id, user, session_id) — these are derivable
+            # from the compressed account's address and access grants.
             try:
                 session_service = self._get_session_service()
                 session_obj = session_service.get_session_object_by_wallet(wallet_address)
                 if session_obj:
+                    lean_data = {k: v for k, v in activity_content.items()
+                                 if k not in ('camera_id', 'user', 'session_id')
+                                 and v is not None}
                     session_obj.add_activity(
                         activity_type=activity_type,
-                        data=activity_content,
-                        metadata={
-                            'transaction_signature': transaction_signature,
-                            'cv_activity_meta': cv_activity_meta,
-                        }
+                        data=lean_data,
                     )
             except Exception as store_err:
                 logger.debug(f"Could not store activity locally: {store_err}")

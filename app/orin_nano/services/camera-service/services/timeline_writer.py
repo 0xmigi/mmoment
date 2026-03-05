@@ -18,6 +18,13 @@ Encryption model:
       [32 bytes: user Solana pubkey]
       [2 bytes: encrypted key length (u16 LE)]
       [N bytes: sealed-box-encrypted AES key]
+
+Chunking:
+- If the encrypted blob fits in a single Solana transaction (~450 bytes payload),
+  it is sent as chunk_index=0, total_chunks=1.
+- If larger, the ciphertext is split across multiple transactions.
+  Chunk 0 carries nonce + access_grants_blob. Subsequent chunks carry empty grants/nonce.
+  Client reassembles all chunks (ordered by entry_index), concatenates ciphertext, decrypts once.
 """
 
 import os
@@ -33,6 +40,14 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 logger = logging.getLogger(__name__)
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "https://mmoment-production.up.railway.app")
+
+# Max encrypted payload bytes per chunk.
+# Transaction budget: 1232 total - ~600 overhead (sigs, accounts, blockhash)
+#   - ~170 ix overhead (discriminator, proof, tree info, nonce, vec headers, chunk fields)
+#   - ~116 access grants (1 user; scales ~82 per additional user)
+# Conservatively allow ~450 bytes for payload in chunk 0, ~550 in subsequent chunks.
+MAX_PAYLOAD_CHUNK0 = 450
+MAX_PAYLOAD_CONTINUATION = 550
 
 
 def _encrypt_key_for_user(activity_key: bytes, user_pubkey: str) -> bytes:
@@ -126,6 +141,86 @@ def _encrypt_session_blob(
     return encrypted_payload, nonce, access_grants_blob, len(raw_activities)
 
 
+def _relay_chunk(
+    device_keypair,
+    camera_pda: str,
+    encrypted_chunk: bytes,
+    nonce: bytes,
+    access_grants_blob: bytes,
+    activity_count: int,
+    chunk_index: int,
+    total_chunks: int,
+) -> Optional[str]:
+    """
+    Send a single chunk through the two-phase relay.
+
+    Returns transaction signature on success, None on failure.
+    """
+    device_pubkey_str = str(device_keypair.pubkey())
+
+    # Phase 1: Prepare — backend builds tx, signs with payer
+    prepare_resp = requests.post(
+        f"{BACKEND_URL}/relay/prepare-timeline-entry",
+        json={
+            'camera_address': camera_pda,
+            'device_pubkey': device_pubkey_str,
+            'encrypted_payload': base64.b64encode(encrypted_chunk).decode('utf-8'),
+            'nonce': base64.b64encode(nonce).decode('utf-8'),
+            'access_grants_blob': base64.b64encode(access_grants_blob).decode('utf-8'),
+            'activity_count': activity_count,
+            'chunk_index': chunk_index,
+            'total_chunks': total_chunks,
+        },
+        timeout=30
+    )
+
+    if not prepare_resp.ok:
+        logger.error(f"[TIMELINE] Prepare failed (chunk {chunk_index}/{total_chunks}): "
+                      f"{prepare_resp.status_code} - {prepare_resp.text}")
+        return None
+
+    prepare_data = prepare_resp.json()
+    tx_base64 = prepare_data['transaction']
+    device_signer_index = prepare_data['device_signer_index']
+    entry_index = prepare_data.get('entry_index', '?')
+
+    logger.info(f"[TIMELINE] Prepared chunk {chunk_index}/{total_chunks}, "
+                f"entry_index={entry_index}, device_signer_index={device_signer_index}")
+
+    # Phase 2: Sign with device key, submit
+    from solders.transaction import VersionedTransaction
+    from solders.signature import Signature
+
+    tx_bytes = base64.b64decode(tx_base64)
+    tx = VersionedTransaction.from_bytes(tx_bytes)
+
+    message_bytes = bytes(tx.message)
+    device_signature = device_keypair.sign_message(message_bytes)
+
+    signatures = list(tx.signatures)
+    signatures[device_signer_index] = Signature(bytes(device_signature))
+
+    signed_tx = VersionedTransaction.populate(tx.message, signatures)
+    signed_tx_base64 = base64.b64encode(bytes(signed_tx)).decode('utf-8')
+
+    submit_resp = requests.post(
+        f"{BACKEND_URL}/relay/submit-timeline-entry",
+        json={'signed_transaction': signed_tx_base64},
+        timeout=30
+    )
+
+    if not submit_resp.ok:
+        logger.error(f"[TIMELINE] Submit failed (chunk {chunk_index}/{total_chunks}): "
+                      f"{submit_resp.status_code} - {submit_resp.text}")
+        return None
+
+    result = submit_resp.json()
+    signature = result.get('signature', '?')
+    logger.info(f"[TIMELINE] Chunk {chunk_index}/{total_chunks} written. "
+                f"entry_index={entry_index}, tx={signature[:16]}...")
+    return signature
+
+
 def write_session_to_timeline(
     device_keypair,
     camera_pda: str,
@@ -134,6 +229,7 @@ def write_session_to_timeline(
 ) -> Optional[str]:
     """
     Encrypt session activities and write to compressed CameraTimeline via two-phase relay.
+    Automatically chunks large payloads across multiple transactions.
 
     Args:
         device_keypair: Device's solders Keypair (private key stays local)
@@ -142,7 +238,7 @@ def write_session_to_timeline(
         users_present: List of wallet addresses who were checked in during this session
 
     Returns:
-        Transaction signature on success, None on failure
+        Transaction signature of the last chunk on success, None on failure
     """
     if not raw_activities:
         logger.info("[TIMELINE] No activities to write")
@@ -163,73 +259,61 @@ def write_session_to_timeline(
             f"for {len(users_present)} users"
         )
 
-        # Step 2: Phase 1 — send encrypted data to backend, get back payer-signed tx
-        device_pubkey_str = str(device_keypair.pubkey())
+        # Step 2: Determine chunking
+        if len(encrypted_payload) <= MAX_PAYLOAD_CHUNK0:
+            # Single chunk — everything fits in one transaction
+            return _relay_chunk(
+                device_keypair, camera_pda,
+                encrypted_payload, nonce, access_grants_blob,
+                activity_count, chunk_index=0, total_chunks=1,
+            )
 
-        prepare_resp = requests.post(
-            f"{BACKEND_URL}/relay/prepare-timeline-entry",
-            json={
-                'camera_address': camera_pda,
-                'device_pubkey': device_pubkey_str,
-                'encrypted_payload': base64.b64encode(encrypted_payload).decode('utf-8'),
-                'nonce': base64.b64encode(nonce).decode('utf-8'),
-                'access_grants_blob': base64.b64encode(access_grants_blob).decode('utf-8'),
-                'activity_count': activity_count,
-            },
-            timeout=30
-        )
+        # Multi-chunk: split ciphertext across transactions
+        # Chunk 0 carries nonce + access_grants, subsequent chunks carry empty nonce/grants
+        chunks = []
+        offset = 0
 
-        if not prepare_resp.ok:
-            logger.error(f"[TIMELINE] Prepare failed: {prepare_resp.status_code} - {prepare_resp.text}")
-            return None
+        # First chunk has smaller payload budget (nonce + grants take space)
+        first_size = MAX_PAYLOAD_CHUNK0
+        chunks.append(encrypted_payload[:first_size])
+        offset = first_size
 
-        prepare_data = prepare_resp.json()
-        tx_base64 = prepare_data['transaction']
-        device_signer_index = prepare_data['device_signer_index']
-        entry_index = prepare_data.get('entry_index', '?')
+        # Remaining chunks get more space (empty nonce/grants)
+        while offset < len(encrypted_payload):
+            end = min(offset + MAX_PAYLOAD_CONTINUATION, len(encrypted_payload))
+            chunks.append(encrypted_payload[offset:end])
+            offset = end
 
-        logger.info(f"[TIMELINE] Prepared tx for entry_index={entry_index}, device_signer_index={device_signer_index}")
+        total_chunks = len(chunks)
+        logger.info(f"[TIMELINE] Splitting {len(encrypted_payload)} bytes into {total_chunks} chunks")
 
-        # Step 3: Phase 2 — sign the transaction message with device key, send back
-        tx_bytes = base64.b64decode(tx_base64)
+        # Empty nonce/grants for continuation chunks
+        empty_nonce = b'\x00' * 12
+        empty_grants = struct.pack('<H', 0)  # 0 grants
 
-        # Deserialize the versioned transaction to get the message for signing
-        from solders.transaction import VersionedTransaction
+        last_signature = None
+        for i, chunk in enumerate(chunks):
+            if i == 0:
+                sig = _relay_chunk(
+                    device_keypair, camera_pda,
+                    chunk, nonce, access_grants_blob,
+                    activity_count, chunk_index=i, total_chunks=total_chunks,
+                )
+            else:
+                sig = _relay_chunk(
+                    device_keypair, camera_pda,
+                    chunk, empty_nonce, empty_grants,
+                    activity_count, chunk_index=i, total_chunks=total_chunks,
+                )
 
-        tx = VersionedTransaction.from_bytes(tx_bytes)
+            if sig is None:
+                logger.error(f"[TIMELINE] Chunk {i}/{total_chunks} failed, aborting remaining chunks")
+                return None
 
-        # Sign the message with the device key
-        message_bytes = bytes(tx.message)
-        device_signature = device_keypair.sign_message(message_bytes)
+            last_signature = sig
 
-        # Insert device signature at the correct index
-        signatures = list(tx.signatures)
-        from solders.signature import Signature
-        signatures[device_signer_index] = Signature(bytes(device_signature))
-
-        # Reconstruct the transaction with both signatures
-        signed_tx = VersionedTransaction.populate(tx.message, signatures)
-        signed_tx_bytes = bytes(signed_tx)
-
-        signed_tx_base64 = base64.b64encode(signed_tx_bytes).decode('utf-8')
-
-        # Submit the fully-signed transaction
-        submit_resp = requests.post(
-            f"{BACKEND_URL}/relay/submit-timeline-entry",
-            json={
-                'signed_transaction': signed_tx_base64,
-            },
-            timeout=30
-        )
-
-        if not submit_resp.ok:
-            logger.error(f"[TIMELINE] Submit failed: {submit_resp.status_code} - {submit_resp.text}")
-            return None
-
-        result = submit_resp.json()
-        signature = result.get('signature', '?')
-        logger.info(f"[TIMELINE] Timeline entry written. entry_index={entry_index}, tx={signature[:16]}...")
-        return signature
+        logger.info(f"[TIMELINE] All {total_chunks} chunks written successfully")
+        return last_signature
 
     except Exception as e:
         logger.error(f"[TIMELINE] Failed to write timeline: {e}")

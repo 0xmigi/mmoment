@@ -122,9 +122,15 @@ pub struct TimelineEntry {
     pub nonce: [u8; 12],
 
     /// Flattened access grants blob.
-    /// Format: [num_grants (2 bytes BE)] + for each grant: [grant_len (2 bytes BE)] + [grant_bytes]
+    /// Format: [num_grants (2 bytes LE)] + for each grant: [32 bytes pubkey] + [2 bytes len LE] + [N bytes sealed-box key]
     #[hash]
     pub access_grants_blob: Vec<u8>,
+
+    /// Chunk index within a multi-chunk session write (0 for single-chunk entries)
+    pub chunk_index: u8,
+
+    /// Total number of chunks in this session write (1 for single-chunk entries)
+    pub total_chunks: u8,
 }
 
 // User session chain - stores encrypted access keys to camera session history

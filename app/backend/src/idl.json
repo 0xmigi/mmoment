@@ -88,6 +88,14 @@
         {
           "name": "activity_count",
           "type": "u8"
+        },
+        {
+          "name": "chunk_index",
+          "type": "u8"
+        },
+        {
+          "name": "total_chunks",
+          "type": "u8"
         }
       ]
     },
@@ -1097,9 +1105,23 @@
             "name": "access_grants_blob",
             "docs": [
               "Flattened access grants blob.",
-              "Format: [num_grants (2 bytes BE)] + for each grant: [grant_len (2 bytes BE)] + [grant_bytes]"
+              "Format: [num_grants (2 bytes LE)] + for each grant: [32 bytes pubkey] + [2 bytes len LE] + [N bytes sealed-box key]"
             ],
             "type": "bytes"
+          },
+          {
+            "name": "chunk_index",
+            "docs": [
+              "Chunk index within a multi-chunk session write (0 for single-chunk entries)"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "total_chunks",
+            "docs": [
+              "Total number of chunks in this session write (1 for single-chunk entries)"
+            ],
+            "type": "u8"
           }
         ]
       }

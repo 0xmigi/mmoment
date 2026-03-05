@@ -238,14 +238,8 @@ def execute_full_checkout(
             checkout_metadata["autoCheckout"] = True
             checkout_metadata["reason"] = auto_checkout_reason
 
-        # Step 1: Add CHECK_OUT activity to session buffer
-        session.add_activity(
-            activity_type=1,  # CHECK_OUT
-            data={"duration_seconds": int(time.time() - session.created_at)},
-            metadata=checkout_metadata
-        )
-
-        # Step 2: Notify backend (for real-time UI updates via WebSocket)
+        # Step 1: Notify backend (for real-time UI updates via WebSocket)
+        # NOTE: checkout activity is buffered via timeline_service.buffer_checkout_activity() below
         _notify_backend_checkout(wallet_address, session_id, camera_pda, user_profile)
 
         # Step 3: Send encrypted access key to backend
