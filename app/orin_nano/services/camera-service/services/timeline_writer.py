@@ -194,7 +194,9 @@ def _relay_chunk(
     tx_bytes = base64.b64decode(tx_base64)
     tx = VersionedTransaction.from_bytes(tx_bytes)
 
-    message_bytes = bytes(tx.message)
+    # Use the exact message bytes from the backend to avoid re-serialization mismatches
+    # that would invalidate the payer's signature
+    message_bytes = base64.b64decode(prepare_data['message_bytes'])
     device_signature = device_keypair.sign_message(message_bytes)
 
     signatures = list(tx.signatures)

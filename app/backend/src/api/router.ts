@@ -19,24 +19,19 @@ import {
   bn,
   deriveAddressSeed,
   deriveAddress,
-  getDefaultAddressTreeInfo,
+  batchAddressTree,
   selectStateTreeInfo,
-  getRegisteredProgramPda,
-  getAccountCompressionAuthority,
   sendAndConfirmTx,
-  packNewAddressParams,
+  PackedAccounts,
+  SystemAccountMetaConfig,
+  featureFlags,
+  VERSION,
 } from '@lightprotocol/stateless.js';
 
-const PROGRAM_ID = new PublicKey('E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL');
-const LIGHT_SYSTEM_PROGRAM = new PublicKey('SySTEM1eSU2p4BGQfQpimFEWWSC1XDFeun3Nqzz3rT7');
-const ACCOUNT_COMPRESSION_PROGRAM = new PublicKey('compr6CUsB5m2jS4Y3831ztGSTnDpnKJTKS95d64XVq');
-const NOOP_PROGRAM = new PublicKey('noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV');
+// Force V2 mode for Light Protocol (needed for PackedAccounts API)
+(featureFlags as any).version = VERSION.V2;
 
-// CPI signer PDA: findProgramAddress(["cpi_authority"], PROGRAM_ID)
-const [CPI_SIGNER_PDA] = PublicKey.findProgramAddressSync(
-  [Buffer.from('cpi_authority')],
-  PROGRAM_ID
-);
+const PROGRAM_ID = new PublicKey('E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL');
 
 export function createApiRouter(): Router {
   const router = Router();
@@ -301,8 +296,8 @@ export function createApiRouter(): Router {
       const camera = await (program.account as any).cameraAccount.fetch(cameraPubkey);
       const entryIndex = camera.activityCounter as BN;
 
-      // Get address tree info and derive compressed account address
-      const addressTreeInfo = getDefaultAddressTreeInfo();
+      // Derive compressed account address (v1 — must match Rust program's v1::derive_address)
+      const addressTree = new PublicKey(batchAddressTree);
       const addressSeed = deriveAddressSeed(
         [
           Buffer.from('timeline-entry'),
@@ -311,15 +306,15 @@ export function createApiRouter(): Router {
         ],
         PROGRAM_ID,
       );
-      const address = deriveAddress(addressSeed, addressTreeInfo.tree);
+      const address = deriveAddress(addressSeed, addressTree);
 
       // Get validity proof for the new address
       const proofResult = await rpc.getValidityProofV0(
         [],
         [{
           address: bn(address.toBytes()),
-          tree: addressTreeInfo.tree,
-          queue: addressTreeInfo.queue,
+          tree: addressTree,
+          queue: addressTree,
         }]
       );
 
@@ -327,32 +322,16 @@ export function createApiRouter(): Router {
       const stateTreeInfos = await rpc.getStateTreeInfos();
       const outputStateTreeInfo = selectStateTreeInfo(stateTreeInfos);
 
-      // Build remaining accounts matching Rust CpiAccounts layout
-      const systemAccounts: PublicKey[] = [
-        LIGHT_SYSTEM_PROGRAM,                // [0] light_system_program
-        CPI_SIGNER_PDA,                      // [1] authority (cpi signer)
-        getRegisteredProgramPda(),            // [2] registered_program_pda
-        NOOP_PROGRAM,                        // [3] noop_program
-        getAccountCompressionAuthority(),     // [4] account_compression_authority
-        ACCOUNT_COMPRESSION_PROGRAM,          // [5] account_compression_program
-        PROGRAM_ID,                          // [6] invoking_program
-        SystemProgram.programId,             // [7] system_program
-      ];
+      // Build remaining accounts using PackedAccounts (V2 API)
+      const systemAccountConfig = new SystemAccountMetaConfig(PROGRAM_ID);
+      const packedAccounts = new PackedAccounts();
+      packedAccounts.addSystemAccountsV2(systemAccountConfig);
 
-      // Pack address params into remaining accounts
-      const { newAddressParamsPacked, remainingAccounts } = packNewAddressParams(
-        [{
-          seed: addressSeed,
-          addressMerkleTreeRootIndex: proofResult.rootIndices[0],
-          addressMerkleTreePubkey: addressTreeInfo.tree,
-          addressQueuePubkey: addressTreeInfo.queue,
-        }],
-        systemAccounts,
-      );
+      const addressMerkleTreePubkeyIndex = packedAccounts.insertOrGet(addressTree);
+      const addressQueuePubkeyIndex = addressMerkleTreePubkeyIndex; // same for batch trees
+      const outputTreeIndex = packedAccounts.insertOrGet(outputStateTreeInfo.queue);
 
-      // Add output state tree queue
-      const outputTreeIndex = remainingAccounts.length;
-      remainingAccounts.push(outputStateTreeInfo.queue);
+      const { remainingAccounts } = packedAccounts.toAccountMetas();
 
       // Build instruction data manually — Anchor's BorshInstructionCoder uses
       // Buffer.alloc(1000) which overflows with large encrypted payloads.
@@ -394,8 +373,8 @@ export function createApiRouter(): Router {
       }
 
       // PackedAddressTreeInfo
-      ixData.writeUInt8(newAddressParamsPacked[0].addressMerkleTreeAccountIndex, offset); offset += 1;
-      ixData.writeUInt8(newAddressParamsPacked[0].addressQueueAccountIndex, offset); offset += 1;
+      ixData.writeUInt8(addressMerkleTreePubkeyIndex, offset); offset += 1;
+      ixData.writeUInt8(addressQueuePubkeyIndex, offset); offset += 1;
       ixData.writeUInt16LE(proofResult.rootIndices[0], offset); offset += 2;
 
       // output_merkle_tree_index: u8
@@ -426,9 +405,7 @@ export function createApiRouter(): Router {
         { pubkey: payerKeypair.publicKey, isSigner: true, isWritable: true },
         { pubkey: devicePubkey, isSigner: true, isWritable: false },
         { pubkey: cameraPubkey, isSigner: false, isWritable: true },
-        ...remainingAccounts.map((pubkey: PublicKey) => ({
-          pubkey, isSigner: false, isWritable: false,
-        })),
+        ...remainingAccounts,
       ];
 
       const ix = new TransactionInstruction({
