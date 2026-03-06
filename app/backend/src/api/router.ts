@@ -27,7 +27,13 @@ import {
   lightSystemProgram,
   noopProgram,
   accountCompressionProgram,
+  featureFlags,
+  VERSION,
 } from '@lightprotocol/stateless.js';
+
+// Force V2 mode so RPC discovers batch trees in its state tree lookup tables.
+// Without this, getValidityProofV0 can't resolve V2 batch address trees.
+(featureFlags as any).version = VERSION.V2;
 
 const PROGRAM_ID = new PublicKey('E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL');
 
