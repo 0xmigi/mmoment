@@ -397,13 +397,17 @@ export function createApiRouter(): Router {
         ixData.writeUInt8(0, offset); offset += 1; // None
       }
 
-      // PackedAddressTreeInfo
-      ixData.writeUInt8(newAddressParamsPacked[0].addressMerkleTreeAccountIndex, offset); offset += 1;
-      ixData.writeUInt8(newAddressParamsPacked[0].addressQueueAccountIndex, offset); offset += 1;
+      // PackedAddressTreeInfo — indices must be relative to tree_accounts
+      // (i.e., offset by system accounts length), not absolute remaining account indices.
+      // The Rust SDK's CpiAccounts splits remaining_accounts into system_accounts[0..8]
+      // and tree_accounts[8..], and get_tree_pubkey indexes into tree_accounts.
+      const SYSTEM_ACCOUNTS_LEN = systemAccounts.length;
+      ixData.writeUInt8(newAddressParamsPacked[0].addressMerkleTreeAccountIndex - SYSTEM_ACCOUNTS_LEN, offset); offset += 1;
+      ixData.writeUInt8(newAddressParamsPacked[0].addressQueueAccountIndex - SYSTEM_ACCOUNTS_LEN, offset); offset += 1;
       ixData.writeUInt16LE(proofResult.rootIndices[0], offset); offset += 2;
 
-      // output_merkle_tree_index: u8
-      ixData.writeUInt8(outputTreeIndex, offset); offset += 1;
+      // output_merkle_tree_index: u8 — also relative to tree_accounts
+      ixData.writeUInt8(outputTreeIndex - SYSTEM_ACCOUNTS_LEN, offset); offset += 1;
 
       // encrypted_payload: Vec<u8>
       ixData.writeUInt32LE(encryptedPayloadBuf.length, offset); offset += 4;
@@ -462,8 +466,7 @@ export function createApiRouter(): Router {
       const serializedTx = Buffer.from(tx.serialize()).toString('base64');
       const messageBytes = Buffer.from(message.serialize()).toString('base64');
 
-      console.log(`[Relay] Prepared timeline entry for camera ${camera_address}, entry_index=${entryIndex.toString()}, device_signer_index=${deviceSignerIndex}, accounts=${keys.length} (3 named + ${keys.length - 3} remaining), ixData=${ixData.length} bytes`);
-      console.log(`[Relay] Account keys: ${keys.map((k, i) => `[${i}] ${k.pubkey.toBase58().slice(0, 8)}... signer=${k.isSigner} writable=${k.isWritable}`).join(', ')}`);
+      console.log(`[Relay] Prepared timeline entry for camera ${camera_address}, entry_index=${entryIndex.toString()}, device_signer_index=${deviceSignerIndex}`);
 
       res.json({
         transaction: serializedTx,
