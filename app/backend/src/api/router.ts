@@ -29,7 +29,13 @@ import {
   lightSystemProgram,
   noopProgram,
   accountCompressionProgram,
+  featureFlags,
+  VERSION,
 } from '@lightprotocol/stateless.js';
+
+// Force V2 mode so selectStateTreeInfo returns batch state trees
+// that match the Light system program's expected discriminator on devnet
+(featureFlags as any).version = VERSION.V2;
 
 const PROGRAM_ID = new PublicKey('E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL');
 
