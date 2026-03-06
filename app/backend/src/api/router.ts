@@ -27,21 +27,15 @@ import {
   lightSystemProgram,
   noopProgram,
   accountCompressionProgram,
-  featureFlags,
-  VERSION,
 } from '@lightprotocol/stateless.js';
-
-// Force V2 mode so RPC discovers batch trees in its state tree lookup tables.
-// Without this, getValidityProofV0 can't resolve V2 batch address trees.
-(featureFlags as any).version = VERSION.V2;
 
 const PROGRAM_ID = new PublicKey('E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL');
 
-// Devnet V2 batch trees — hardcoded because selectStateTreeInfo doesn't
-// discover them via RPC, and V1 trees give StateMerkleTreeAccountDiscriminatorMismatch
-const BATCH_STATE_TREE = new PublicKey('bmt1LryLZUMmF7ZtqESaw7wifBXLfXHQYoE4GAmrahU');
+// V1 address tree — must match Rust v1::derive_address for consistent addresses
+const ADDRESS_TREE = new PublicKey('amt1Ayt45jfbdw5YSo7iz6WZxUmnZsQTYXy82hVwyC2');
+const ADDRESS_QUEUE = new PublicKey('aq1S9z4reTSQAdgWHGD2zDaS39sjGrAxbR31vxJ2F4F');
+// V2 batch state tree for output — V1 trees give StateMerkleTreeAccountDiscriminatorMismatch
 const BATCH_STATE_QUEUE = new PublicKey('oq1na8gojfdUhsfCpyjNt6h4JaDWtHf1yQj4koBWfto');
-const BATCH_ADDRESS_TREE = new PublicKey('amt2kaJA14v3urZbZvnc5v2np8jqvc4Z8zDep5wbtzx');
 
 // CPI signer PDA: findProgramAddress(["cpi_authority"], PROGRAM_ID)
 const [CPI_SIGNER_PDA] = PublicKey.findProgramAddressSync(
@@ -312,9 +306,9 @@ export function createApiRouter(): Router {
       const camera = await (program.account as any).cameraAccount.fetch(cameraPubkey);
       const entryIndex = camera.activityCounter as BN;
 
-      // Use devnet V2 batch address tree for address derivation
-      const addressTreePubkey = BATCH_ADDRESS_TREE;
-      const addressQueuePubkey = BATCH_ADDRESS_TREE; // V2: queue is part of tree account
+      // Use V1 address tree — must match Rust v1::derive_address
+      const addressTreePubkey = ADDRESS_TREE;
+      const addressQueuePubkey = ADDRESS_QUEUE;
       const addressSeed = deriveAddressSeed(
         [
           Buffer.from('timeline-entry'),
