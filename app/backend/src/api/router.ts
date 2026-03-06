@@ -19,8 +19,6 @@ import {
   bn,
   deriveAddressSeed,
   deriveAddress,
-  getDefaultAddressTreeInfo,
-  selectStateTreeInfo,
   getRegisteredProgramPda,
   getAccountCompressionAuthority,
   sendAndConfirmTx,
@@ -29,15 +27,15 @@ import {
   lightSystemProgram,
   noopProgram,
   accountCompressionProgram,
-  featureFlags,
-  VERSION,
 } from '@lightprotocol/stateless.js';
 
-// Force V2 mode so selectStateTreeInfo returns batch state trees
-// that match the Light system program's expected discriminator on devnet
-(featureFlags as any).version = VERSION.V2;
-
 const PROGRAM_ID = new PublicKey('E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL');
+
+// Devnet V2 batch trees — hardcoded because selectStateTreeInfo doesn't
+// discover them via RPC, and V1 trees give StateMerkleTreeAccountDiscriminatorMismatch
+const BATCH_STATE_TREE = new PublicKey('bmt1LryLZUMmF7ZtqESaw7wifBXLfXHQYoE4GAmrahU');
+const BATCH_STATE_QUEUE = new PublicKey('oq1na8gojfdUhsfCpyjNt6h4JaDWtHf1yQj4koBWfto');
+const BATCH_ADDRESS_TREE = new PublicKey('amt2kaJA14v3urZbZvnc5v2np8jqvc4Z8zDep5wbtzx');
 
 // CPI signer PDA: findProgramAddress(["cpi_authority"], PROGRAM_ID)
 const [CPI_SIGNER_PDA] = PublicKey.findProgramAddressSync(
@@ -308,8 +306,9 @@ export function createApiRouter(): Router {
       const camera = await (program.account as any).cameraAccount.fetch(cameraPubkey);
       const entryIndex = camera.activityCounter as BN;
 
-      // Get address tree info and derive compressed account address
-      const addressTreeInfo = getDefaultAddressTreeInfo();
+      // Use devnet V2 batch address tree for address derivation
+      const addressTreePubkey = BATCH_ADDRESS_TREE;
+      const addressQueuePubkey = BATCH_ADDRESS_TREE; // V2: queue is part of tree account
       const addressSeed = deriveAddressSeed(
         [
           Buffer.from('timeline-entry'),
@@ -318,21 +317,17 @@ export function createApiRouter(): Router {
         ],
         PROGRAM_ID,
       );
-      const address = deriveAddress(addressSeed, addressTreeInfo.tree);
+      const address = deriveAddress(addressSeed, addressTreePubkey);
 
       // Get validity proof for the new address
       const proofResult = await rpc.getValidityProofV0(
         [],
         [{
           address: bn(address.toBytes()),
-          tree: addressTreeInfo.tree,
-          queue: addressTreeInfo.queue,
+          tree: addressTreePubkey,
+          queue: addressQueuePubkey,
         }]
       );
-
-      // Get state tree for output
-      const stateTreeInfos = await rpc.getStateTreeInfos();
-      const outputStateTreeInfo = selectStateTreeInfo(stateTreeInfos);
 
       // Build remaining accounts matching Rust CpiAccounts layout
       const systemAccounts: PublicKey[] = [
@@ -351,15 +346,15 @@ export function createApiRouter(): Router {
         [{
           seed: addressSeed,
           addressMerkleTreeRootIndex: proofResult.rootIndices[0],
-          addressMerkleTreePubkey: addressTreeInfo.tree,
-          addressQueuePubkey: addressTreeInfo.queue,
+          addressMerkleTreePubkey: addressTreePubkey,
+          addressQueuePubkey: addressQueuePubkey,
         }],
         systemAccounts,
       );
 
       // Add output state tree queue
       const outputTreeIndex = remainingPubkeys.length;
-      remainingPubkeys.push(outputStateTreeInfo.queue);
+      remainingPubkeys.push(BATCH_STATE_QUEUE);
 
       // Convert to AccountMetas with proper isSigner/isWritable flags
       const remainingAccounts = toAccountMetas(remainingPubkeys);
