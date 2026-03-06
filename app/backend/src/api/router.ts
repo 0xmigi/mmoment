@@ -330,12 +330,12 @@ export function createApiRouter(): Router {
 
       // Build remaining accounts matching Rust CpiAccounts layout
       const systemAccounts: PublicKey[] = [
-        lightSystemProgram,                  // [0] light_system_program
+        new PublicKey(lightSystemProgram),     // [0] light_system_program
         CPI_SIGNER_PDA,                      // [1] authority (cpi signer)
         getRegisteredProgramPda(),            // [2] registered_program_pda
-        noopProgram,                         // [3] noop_program
+        new PublicKey(noopProgram),           // [3] noop_program
         getAccountCompressionAuthority(),     // [4] account_compression_authority
-        accountCompressionProgram,            // [5] account_compression_program
+        new PublicKey(accountCompressionProgram), // [5] account_compression_program
         PROGRAM_ID,                          // [6] invoking_program
         SystemProgram.programId,             // [7] system_program
       ];
