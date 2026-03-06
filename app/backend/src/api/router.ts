@@ -369,7 +369,10 @@ export function createApiRouter(): Router {
 
       // Calculate total size and allocate
       const proof = proofResult.compressedProof;
-      const proofSize = proof ? 1 + 128 : 1; // Option tag + CompressedProof {a:[u8;32], b:[u8;64], c:[u8;32]}
+      const proofA = proof ? Buffer.from(proof.a) : null;
+      const proofB = proof ? Buffer.from(proof.b) : null;
+      const proofC = proof ? Buffer.from(proof.c) : null;
+      const proofSize = proof ? 1 + proofA!.length + proofB!.length + proofC!.length : 1;
       const totalSize = 8 // discriminator
         + proofSize
         + 4 // PackedAddressTreeInfo: u8 + u8 + u16
@@ -388,11 +391,11 @@ export function createApiRouter(): Router {
       discriminator.copy(ixData, offset); offset += 8;
 
       // ValidityProof: Option<CompressedProof>
-      if (proof) {
+      if (proof && proofA && proofB && proofC) {
         ixData.writeUInt8(1, offset); offset += 1; // Some
-        Buffer.from(proof.a).copy(ixData, offset); offset += 32;
-        Buffer.from(proof.b).copy(ixData, offset); offset += 64;
-        Buffer.from(proof.c).copy(ixData, offset); offset += 32;
+        proofA.copy(ixData, offset); offset += proofA.length;
+        proofB.copy(ixData, offset); offset += proofB.length;
+        proofC.copy(ixData, offset); offset += proofC.length;
       } else {
         ixData.writeUInt8(0, offset); offset += 1; // None
       }
