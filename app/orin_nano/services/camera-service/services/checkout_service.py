@@ -271,39 +271,30 @@ def execute_full_checkout(
         except Exception as e:
             logger.warning(f"{log_prefix} Failed to buffer checkout activity: {e}")
 
-        # Step 4: Write session activities to compressed CameraTimeline on Solana
-        # Single-blob encryption at checkout, device signs locally, backend relays
+        # Step 4: Flush camera-level activity buffer and write to compressed CameraTimeline
+        # The buffer contains ALL users' activities since the last write.
         timeline_written = False
         try:
             from services.timeline_writer import write_session_to_timeline
             from services.device_signer import DeviceSigner
+            from services.timeline_activity_service import get_timeline_activity_service
 
             device_signer = DeviceSigner()
             device_kp = device_signer.get_keypair()
+            timeline_service = get_timeline_activity_service()
 
-            # Collect all users who were present during this session for access grants
-            users_present = []
-            try:
-                from services.blockchain_session_sync import get_blockchain_session_sync
-                blockchain_sync = get_blockchain_session_sync()
-                users_present = list(blockchain_sync.checked_in_wallets)
-            except Exception:
-                pass
-            if wallet_address not in users_present:
-                users_present.append(wallet_address)
-
-            raw_activities = session.get_activities()
+            # Flush all activities from the camera-level buffer
+            raw_activities = timeline_service.flush_camera_activities()
 
             if device_kp and raw_activities:
                 signature = write_session_to_timeline(
                     device_keypair=device_kp,
                     camera_pda=camera_pda,
                     raw_activities=raw_activities,
-                    users_present=users_present,
                 )
                 timeline_written = signature is not None
                 if timeline_written:
-                    logger.info(f"{log_prefix} CameraTimeline written. Tx: {signature[:16]}...")
+                    logger.info(f"{log_prefix} CameraTimeline written ({len(raw_activities)} activities). Tx: {signature[:16]}...")
                 else:
                     logger.warning(f"{log_prefix} Failed to write CameraTimeline (will retry via backend)")
             else:

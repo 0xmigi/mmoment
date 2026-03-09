@@ -81,6 +81,11 @@ class TimelineActivityService:
         # Camera configuration - read from device config file
         self._camera_id = _get_camera_pda()
 
+        # Camera-level activity buffer — ALL users' activities go here.
+        # Flushed to a compressed CameraTimeline entry on each checkout.
+        self._camera_activities: List[Dict] = []
+        self._camera_activities_lock = __import__('threading').Lock()
+
         # Statistics
         self._buffered_photos = 0
         self._buffered_videos = 0
@@ -132,6 +137,16 @@ class TimelineActivityService:
             logger.warning(f"Failed to get checked-in users: {e}")
             return []
 
+    def flush_camera_activities(self) -> List[Dict]:
+        """
+        Flush and return all buffered camera activities.
+        Called at checkout to get everything since the last write.
+        """
+        with self._camera_activities_lock:
+            activities = self._camera_activities.copy()
+            self._camera_activities.clear()
+        return activities
+
     def _get_session_id(self, wallet_address: str) -> str:
         """
         Get session ID for a user, with fallback to camera-based ID.
@@ -179,22 +194,18 @@ class TimelineActivityService:
             True if buffered successfully
         """
         try:
-            # Store lean activity on session for single-blob encryption at checkout.
-            # Strip redundant fields (camera_id, user, session_id) — these are derivable
-            # from the compressed account's address and access grants.
-            try:
-                session_service = self._get_session_service()
-                session_obj = session_service.get_session_object_by_wallet(wallet_address)
-                if session_obj:
-                    lean_data = {k: v for k, v in activity_content.items()
-                                 if k not in ('camera_id', 'user', 'session_id')
-                                 and v is not None}
-                    session_obj.add_activity(
-                        activity_type=activity_type,
-                        data=lean_data,
-                    )
-            except Exception as store_err:
-                logger.debug(f"Could not store activity locally: {store_err}")
+            # Store lean activity on camera-level buffer for single-blob encryption at checkout.
+            # Strip redundant fields (camera_id) — derivable from the compressed account address.
+            lean_data = {k: v for k, v in activity_content.items()
+                         if k not in ('camera_id', 'session_id')
+                         and v is not None}
+            camera_activity = {
+                'timestamp': lean_data.get('timestamp', int(time.time() * 1000)),
+                'activity_type': activity_type,
+                'data': lean_data,
+            }
+            with self._camera_activities_lock:
+                self._camera_activities.append(camera_activity)
 
             # Get checked-in users for backend buffer encryption (real-time UI)
             checked_in_users = self._get_checked_in_users()
