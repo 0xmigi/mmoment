@@ -98,6 +98,12 @@ services:
       # Activity timeout: how long user can be inactive (no face enrollment) before auto-checkout (default: 3600 = 60 min)
       - FACE_TIMEOUT_SECONDS=${FACE_TIMEOUT_SECONDS:-1800}
       - ACTIVITY_TIMEOUT_SECONDS=${ACTIVITY_TIMEOUT_SECONDS:-3600}
+      # NFC presence verification (NTAG424 DNA SUN messages)
+      # Generate keys with: python3 scripts/provision_nfc_tag.py
+      - NFC_SDM_ENC_KEY=${NFC_SDM_ENC_KEY:-}
+      - NFC_SDM_MAC_KEY=${NFC_SDM_MAC_KEY:-}
+      # Set to true to require NFC tap for stream access (false = dev mode, no NFC needed)
+      - NFC_REQUIRED=${NFC_REQUIRED:-false}
       # CV Dev Mode: Use video file instead of camera (no camera required)
       - CV_DEV_MODE=false
       # Native Mode: C++ TensorRT inference server runs inside this container

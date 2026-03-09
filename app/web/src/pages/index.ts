@@ -6,6 +6,7 @@ import ProductPageDefault from './ProductPage';
 import QuickStartViewDefault from './QuickStartView';
 import AboutPageDefault from './AboutPage';
 import LoginPageDefault from './LoginPage';
+import TapLandingPageDefault from './TapLandingPage';
 
 // Re-export with named exports
 export const LandingPage = LandingPageDefault;
@@ -13,3 +14,4 @@ export const ProductPage = ProductPageDefault;
 export const QuickStartView = QuickStartViewDefault;
 export const AboutPage = AboutPageDefault;
 export const LoginPage = LoginPageDefault;
+export const TapLandingPage = TapLandingPageDefault;

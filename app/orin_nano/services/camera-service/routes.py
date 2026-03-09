@@ -4287,6 +4287,101 @@ def register_routes(app):
     except Exception as e:
         logger.warning(f"Failed to register CV Apps routes: {e}")
 
+    # ------------------------------------------------------------------ #
+    #  NFC Presence — NTAG424 DNA SUN verification                        #
+    # ------------------------------------------------------------------ #
+
+    @app.route("/api/nfc/verify-tap", methods=["POST"])
+    def api_nfc_verify_tap():
+        """
+        Verify an NTAG424 DNA SUN (Secure Unique NFC) message and issue a
+        presence token granting access to the live stream.
+
+        Called immediately when a user lands on /tap/{camera_pda} after
+        tapping the NFC sticker. No authentication required — the valid tap
+        IS the proof of physical presence.
+
+        Expected body:
+        {
+            "e": "<32 hex chars>",   # EncryptedPICCData (UID + counter, AES-CBC)
+            "c": "<16 hex chars>"    # SDMMAC (truncated AES-CMAC, 8 bytes)
+        }
+
+        Returns:
+        {
+            "valid": true,
+            "presence_token": "<64 hex chars>",
+            "expires_in": 28800,      # seconds (8 hours)
+            "nfc_mode": true|false    # whether NFC keys are configured
+        }
+        """
+        from services.nfc_sdm_service import get_nfc_sdm_service
+
+        nfc = get_nfc_sdm_service()
+        data = request.json or {}
+
+        e_hex = data.get("e", "").strip()
+        c_hex = data.get("c", "").strip()
+        camera_pda = get_camera_pda()
+
+        logger.info(f"[NFC] verify-tap request: e={e_hex[:8]}... c={c_hex[:8]}...")
+
+        if not nfc.enabled:
+            # Keys not configured — still issue a token so the stream works
+            # during development. In production set NFC_SDM_ENC_KEY + NFC_SDM_MAC_KEY.
+            logger.warning("[NFC] SDM keys not configured — issuing unchecked token")
+            token = nfc.issue_presence_token(camera_pda, uid_hex=None, counter=0)
+            return jsonify({
+                "valid": True,
+                "presence_token": token,
+                "expires_in": 8 * 60 * 60,
+                "nfc_mode": False,
+                "warning": "NFC_SDM_ENC_KEY not set — presence not cryptographically verified",
+            })
+
+        if not e_hex or not c_hex:
+            return jsonify({
+                "valid": False,
+                "error": "e and c params are required",
+                "nfc_mode": True,
+            }), 400
+
+        valid, uid_hex, counter, error_msg = nfc.verify_sun_message(e_hex, c_hex)
+
+        if not valid:
+            logger.warning(f"[NFC] ❌ Invalid tap: {error_msg}")
+            return jsonify({
+                "valid": False,
+                "error": error_msg,
+                "nfc_mode": True,
+            }), 401
+
+        token = nfc.issue_presence_token(camera_pda, uid_hex, counter)
+        logger.info(f"[NFC] ✅ Presence token issued for UID={uid_hex} counter={counter}")
+
+        return jsonify({
+            "valid": True,
+            "presence_token": token,
+            "expires_in": 8 * 60 * 60,
+            "nfc_mode": True,
+        })
+
+    @app.route("/api/nfc/validate-token", methods=["POST"])
+    def api_nfc_validate_token():
+        """
+        Check whether a presence token is still valid.
+        Used by the frontend to decide whether to re-prompt for a tap.
+        """
+        from services.nfc_sdm_service import get_nfc_sdm_service
+
+        nfc = get_nfc_sdm_service()
+        data = request.json or {}
+        token = data.get("presence_token", "")
+        camera_pda = get_camera_pda()
+
+        valid = nfc.validate_presence_token(token, camera_pda)
+        return jsonify({"valid": valid})
+
     # Add resource not found handler
     @app.errorhandler(404)
     def resource_not_found(e):
