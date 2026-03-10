@@ -19,8 +19,11 @@ export default function LoginPage() {
     const [showOtpInput, setShowOtpInput] = useState(false);
     const [otp, setOtp] = useState('');
 
-    // Get the redirect destination from query params, default to /app
-    const redirectTo = new URLSearchParams(location.search).get('redirect') || '/app';
+    // Get the redirect destination from query params (survives OAuth redirects), default to /app
+    const redirectTo =
+      new URLSearchParams(location.search).get('redirect') ||
+      (location.state as { returnTo?: string })?.returnTo ||
+      '/app';
 
     // If already logged in, redirect
     useEffect(() => {

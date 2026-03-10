@@ -46,7 +46,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { useRef, useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 
 // CameraIdDisplay component - uses unified check-in state from CameraProvider
 const CameraIdDisplay = ({
@@ -161,9 +161,10 @@ const CameraIdDisplay = ({
 export function CameraView() {
   const { primaryWallet, user } = useDynamicContext();
   const { cameraId } = useParams<{ cameraId: string }>();
+  const location = useLocation();
   useEmbeddedWallet();
   // Use unified check-in state from CameraProvider (Phase 3 Privacy Architecture)
-  const { selectedCamera, setSelectedCamera, fetchCameraById, isCheckedIn, refreshCheckInStatus } = useCamera();
+  const { selectedCamera, setSelectedCamera, fetchCameraById, isCheckedIn, checkIn, refreshCheckInStatus } = useCamera();
   const { program } = useProgram();
   const { connection } = useConnection();
   const timelineRef = useRef<{
@@ -205,6 +206,20 @@ export function CameraView() {
   // Competition state
   const [competitionEscrowInfo, setCompetitionEscrowInfo] = useState<EscrowInfo | null>(null);
   const [hasCompetitionApp, setHasCompetitionApp] = useState(false);
+
+  // Auto check-in when arriving from NFC tap flow (via location state or query param)
+  const fromTap =
+    (location.state as { fromTap?: boolean })?.fromTap ||
+    new URLSearchParams(location.search).get('fromTap') === 'true';
+  const hasAutoCheckedInRef = useRef(false);
+  useEffect(() => {
+    if (!fromTap || hasAutoCheckedInRef.current || isCheckedIn) return;
+    if (!selectedCamera?.publicKey || !primaryWallet) return;
+
+    hasAutoCheckedInRef.current = true;
+    console.log('[CameraView] Auto check-in from NFC tap flow');
+    checkIn();
+  }, [fromTap, selectedCamera?.publicKey, primaryWallet, isCheckedIn, checkIn]);
 
   // Helper function to detect if we're using the Jetson camera
   // const isJetsonCamera = (cameraId: string | null): boolean => {
