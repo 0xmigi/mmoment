@@ -4303,8 +4303,8 @@ def register_routes(app):
 
         Expected body:
         {
-            "e": "<32 hex chars>",   # EncryptedPICCData (UID + counter, AES-CBC)
-            "c": "<16 hex chars>"    # SDMMAC (truncated AES-CMAC, 8 bytes)
+            "picc_data": "<32 hex chars>",  # EncryptedPICCData (UID + counter, AES-CBC)
+            "cmac": "<16 hex chars>"        # SDMMAC (truncated AES-CMAC, 8 bytes)
         }
 
         Returns:
@@ -4320,15 +4320,16 @@ def register_routes(app):
         nfc = get_nfc_sdm_service()
         data = request.json or {}
 
-        e_hex = data.get("e", "").strip()
-        c_hex = data.get("c", "").strip()
+        picc_data_hex = data.get("picc_data", "").strip()
+        cmac_hex = data.get("cmac", "").strip()
+        enc_hex = data.get("enc", "").strip() or None
         camera_pda = get_camera_pda()
 
-        logger.info(f"[NFC] verify-tap request: e={e_hex[:8]}... c={c_hex[:8]}...")
+        logger.info(f"[NFC] verify-tap request: picc_data={picc_data_hex[:8]}... cmac={cmac_hex[:8]}...")
 
         if not nfc.enabled:
             # Keys not configured — still issue a token so the stream works
-            # during development. In production set NFC_SDM_ENC_KEY + NFC_SDM_MAC_KEY.
+            # during development. In production set NFC_MASTER_KEY.
             logger.warning("[NFC] SDM keys not configured — issuing unchecked token")
             token = nfc.issue_presence_token(camera_pda, uid_hex=None, counter=0)
             return jsonify({
@@ -4336,17 +4337,17 @@ def register_routes(app):
                 "presence_token": token,
                 "expires_in": 8 * 60 * 60,
                 "nfc_mode": False,
-                "warning": "NFC_SDM_ENC_KEY not set — presence not cryptographically verified",
+                "warning": "NFC_MASTER_KEY not set — presence not cryptographically verified",
             })
 
-        if not e_hex or not c_hex:
+        if not picc_data_hex or not cmac_hex:
             return jsonify({
                 "valid": False,
-                "error": "e and c params are required",
+                "error": "picc_data and cmac params are required",
                 "nfc_mode": True,
             }), 400
 
-        valid, uid_hex, counter, error_msg = nfc.verify_sun_message(e_hex, c_hex)
+        valid, uid_hex, counter, error_msg = nfc.verify_sun_message(picc_data_hex, cmac_hex, enc_hex)
 
         if not valid:
             logger.warning(f"[NFC] ❌ Invalid tap: {error_msg}")

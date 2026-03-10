@@ -14,7 +14,7 @@ type TapState =
   | 'verified'        // valid tap, stream loading
   | 'already_valid'   // had a stored presence token that's still good
   | 'failed'          // invalid tap / network error
-  | 'no_nfc_params';  // arrived without e & c (direct URL access, not from a tap)
+  | 'no_nfc_params';  // arrived without picc_data & cmac (direct URL access, not from a tap)
 
 // ------------------------------------------------------------------ //
 //  Presence token helpers (sessionStorage, scoped per camera)          //
@@ -58,9 +58,10 @@ export default function TapLandingPage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [showSignUpPrompt, setShowSignUpPrompt] = useState(false);
 
-  // NFC SUN params from the tag URL
-  const eParam = searchParams.get('e') || '';
-  const cParam = searchParams.get('c') || '';
+  // NFC SUN params from the tag URL (NFC Developer App uses picc_data/enc/cmac)
+  const piccData = searchParams.get('picc_data') || '';
+  const encFileData = searchParams.get('enc') || '';
+  const cmac = searchParams.get('cmac') || '';
 
   const cameraApiUrl = cameraPda ? CONFIG.getCameraApiUrlByPda(cameraPda) : null;
 
@@ -90,7 +91,7 @@ export default function TapLandingPage() {
     }
 
     // 2. No stored token — check we have NFC params
-    if (!eParam || !cParam) {
+    if (!piccData || !cmac) {
       // Direct URL access without a tap — don't show the stream
       setTapState('no_nfc_params');
       return;
@@ -102,7 +103,7 @@ export default function TapLandingPage() {
       const res = await fetch(`${cameraApiUrl}/api/nfc/verify-tap`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ e: eParam, c: cParam }),
+        body: JSON.stringify({ picc_data: piccData, enc: encFileData, cmac }),
       });
 
       const data = await res.json();
@@ -121,7 +122,7 @@ export default function TapLandingPage() {
       setErrorMsg('Could not reach the camera. Are you near the device?');
       setTapState('failed');
     }
-  }, [cameraPda, cameraApiUrl, eParam, cParam]);
+  }, [cameraPda, cameraApiUrl, piccData, cmac]);
 
   useEffect(() => {
     verifyTap();
@@ -233,7 +234,7 @@ export default function TapLandingPage() {
                 Create an account to be recognised, save captures, and join competitions.
               </p>
               <button
-                onClick={() => navigate('/login', { state: { returnTo: `/tap/${cameraPda}?e=${eParam}&c=${cParam}` } })}
+                onClick={() => navigate('/login', { state: { returnTo: `/tap/${cameraPda}?picc_data=${piccData}&cmac=${cmac}` } })}
                 className="w-full py-3 rounded-2xl bg-white text-black font-semibold text-sm"
               >
                 Create account
