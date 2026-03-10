@@ -213,13 +213,30 @@ export function CameraView() {
     new URLSearchParams(location.search).get('fromTap') === 'true';
   const hasAutoCheckedInRef = useRef(false);
   useEffect(() => {
-    if (!fromTap || hasAutoCheckedInRef.current || isCheckedIn) return;
+    if (!fromTap || hasAutoCheckedInRef.current) return;
     if (!selectedCamera?.publicKey || !primaryWallet) return;
 
     hasAutoCheckedInRef.current = true;
-    console.log('[CameraView] Auto check-in from NFC tap flow');
-    checkIn();
-  }, [fromTap, selectedCamera?.publicKey, primaryWallet, isCheckedIn, checkIn]);
+
+    // Ask the Jetson directly if we're already checked in before attempting
+    (async () => {
+      try {
+        const status = await unifiedCameraService.getSessionStatus(
+          selectedCamera.publicKey,
+          primaryWallet.address
+        );
+        if (status.success && status.data?.isCheckedIn) {
+          console.log('[CameraView] Already checked in at this camera — skipping auto check-in');
+          await refreshCheckInStatus(); // sync React state with Jetson
+          return;
+        }
+        console.log('[CameraView] Auto check-in from NFC tap flow');
+        checkIn();
+      } catch (err) {
+        console.error('[CameraView] Failed to verify session status, skipping auto check-in:', err);
+      }
+    })();
+  }, [fromTap, selectedCamera?.publicKey, primaryWallet, checkIn, refreshCheckInStatus]);
 
   // Helper function to detect if we're using the Jetson camera
   // const isJetsonCamera = (cameraId: string | null): boolean => {

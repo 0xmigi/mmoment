@@ -4,7 +4,6 @@ import { WalletIcon } from '@dynamic-labs/wallet-book';
 import { Dialog } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { HeadlessSocialLogin } from './HeadlessSocialLogin';
-import { useNavigate } from 'react-router-dom';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -15,7 +14,6 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
   const { walletOptions, selectWalletOption } = useWalletOptions();
   const { connectWithEmail, verifyOneTimePassword } = useConnectWithOtp();
   const { createEmbeddedWallet, userHasEmbeddedWallet } = useEmbeddedWallet();
-  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -26,7 +24,6 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
   const handleSuccessfulAuth = () => {
     onClose();
-    navigate('/app');
   };
 
   const handleWalletSelect = async (wallet: WalletOption) => {

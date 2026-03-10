@@ -18,11 +18,6 @@ export function HeadlessAuthButton() {
 
   const handleAuthModalClose = () => {
     setShowAuthModal(false);
-    // Only navigate if we're not already authenticated
-    // This prevents unnecessary navigation when canceling the modal
-    if (primaryWallet?.address) {
-      navigate('/app');
-    }
   };
 
   if (!primaryWallet?.address) {
