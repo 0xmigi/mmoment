@@ -46,7 +46,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { useRef, useState, useEffect } from "react";
-import { useParams, useLocation } from "react-router-dom";
+import { useParams } from "react-router-dom";
 
 // CameraIdDisplay component - uses unified check-in state from CameraProvider
 const CameraIdDisplay = ({
@@ -161,7 +161,6 @@ const CameraIdDisplay = ({
 export function CameraView() {
   const { primaryWallet, user } = useDynamicContext();
   const { cameraId } = useParams<{ cameraId: string }>();
-  const location = useLocation();
   useEmbeddedWallet();
   // Use unified check-in state from CameraProvider (Phase 3 Privacy Architecture)
   const { selectedCamera, setSelectedCamera, fetchCameraById, isCheckedIn, checkIn, refreshCheckInStatus } = useCamera();
@@ -207,13 +206,11 @@ export function CameraView() {
   const [competitionEscrowInfo, setCompetitionEscrowInfo] = useState<EscrowInfo | null>(null);
   const [hasCompetitionApp, setHasCompetitionApp] = useState(false);
 
-  // Auto check-in when arriving from NFC tap flow (via location state or query param)
-  const fromTap =
-    (location.state as { fromTap?: boolean })?.fromTap ||
-    new URLSearchParams(location.search).get('fromTap') === 'true';
+  // Auto check-in: connecting to a camera IS checking in
+  // No separate button press needed — if you're on the camera page and authenticated, you're checked in
   const hasAutoCheckedInRef = useRef(false);
   useEffect(() => {
-    if (!fromTap || hasAutoCheckedInRef.current) return;
+    if (hasAutoCheckedInRef.current) return;
     if (!selectedCamera?.publicKey || !primaryWallet) return;
 
     hasAutoCheckedInRef.current = true;
@@ -226,17 +223,17 @@ export function CameraView() {
           primaryWallet.address
         );
         if (status.success && status.data?.isCheckedIn) {
-          console.log('[CameraView] Already checked in at this camera — skipping auto check-in');
-          await refreshCheckInStatus(); // sync React state with Jetson
+          console.log('[CameraView] Already checked in at this camera — syncing state');
+          await refreshCheckInStatus();
           return;
         }
-        console.log('[CameraView] Auto check-in from NFC tap flow');
+        console.log('[CameraView] Auto check-in — connecting to camera');
         checkIn();
       } catch (err) {
         console.error('[CameraView] Failed to verify session status, skipping auto check-in:', err);
       }
     })();
-  }, [fromTap, selectedCamera?.publicKey, primaryWallet, checkIn, refreshCheckInStatus]);
+  }, [selectedCamera?.publicKey, primaryWallet, checkIn, refreshCheckInStatus]);
 
   // Helper function to detect if we're using the Jetson camera
   // const isJetsonCamera = (cameraId: string | null): boolean => {

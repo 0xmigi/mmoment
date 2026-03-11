@@ -14,18 +14,19 @@ interface MainLayoutProps {
 export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps) {
   const [isOpen, setIsOpen] = useState(false);
   const isLoggedIn = useIsLoggedIn();
-  useDynamicContext();
+  const { sdkHasLoaded } = useDynamicContext();
   const navigate = useNavigate();
   const { cameraId } = useParams<{ cameraId?: string }>();
   const location = useLocation();
 
-  // Redirect to login if not authenticated
+  // Redirect to login if not authenticated (wait for SDK to hydrate first)
   useEffect(() => {
+    if (!sdkHasLoaded) return;
     if (!isLoggedIn) {
       const currentPath = location.pathname + location.search;
       navigate(`/login?redirect=${encodeURIComponent(currentPath)}`);
     }
-  }, [isLoggedIn, navigate, location.pathname, location.search]);
+  }, [sdkHasLoaded, isLoggedIn, navigate, location.pathname, location.search]);
 
   // Debug logging for navigation
   useEffect(() => {

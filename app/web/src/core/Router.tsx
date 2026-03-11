@@ -1,6 +1,6 @@
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { MainLayout, CameraView, GalleryView, ActivitiesView } from '../ui';
+import { MainLayout, CameraView, HomeView, GalleryView, ActivitiesView } from '../ui';
 import { LandingPage, ProductPage, QuickStartView, AboutPage, LoginPage, TapLandingPage } from '../pages';
 import { Settings } from '../ui/settings/Settings';
 import { AccountPage } from '../ui/account/AccountPage';
@@ -123,7 +123,7 @@ function Router() {
           path="/app"
           element={
             <MainLayout activeTab={activeTab} onTabChange={setActiveTab}>
-              {activeTab === 'camera' ? <CameraView /> :
+              {activeTab === 'camera' ? <HomeView /> :
                 activeTab === 'gallery' ? <GalleryView /> :
                   <ActivitiesView />}
             </MainLayout>

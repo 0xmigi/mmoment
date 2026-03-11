@@ -46,7 +46,7 @@ export default function LandingPage() {
                                     </h1>
                                 </div>
                                 <p className="text-base sm:text-xl text-gray-600 mb-6 max-w-md mx-auto lg:mx-0">
-                                    Capture moments and their context instantly with a NFC-enabled camera system. Just tap your phone and record.
+                                    Capture moments and their context instantly with a tap into a presence defined camera network. Just check-in and record.
                                 </p>
                                 <div className="space-y-3">
                                     <div className="flex items-center justify-center lg:justify-start gap-2 text-sm sm:text-base text-gray-600">
