@@ -41,7 +41,7 @@ export function HomeView() {
   };
 
   return (
-    <div className="relative flex flex-col min-h-[calc(100vh-4rem)]">
+    <div className="relative flex flex-col h-[calc(100dvh-4rem)]">
       {/* Centered content */}
       <div className="flex-1 flex items-center justify-center px-4">
         <div className="w-full max-w-sm space-y-8 text-center">
