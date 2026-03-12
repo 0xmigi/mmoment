@@ -146,17 +146,18 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       const isCurrentUser = user.verifiedCredentials.some(cred => cred.address === event.user.address);
       
       if (isCurrentUser) {
-        // Find matching social credentials - prioritize Farcaster over Twitter
+        // Find matching social credentials - prioritize Farcaster > Google > Twitter
         const farcasterCred = user.verifiedCredentials.find(
           cred => cred.oauthProvider === 'farcaster'
         );
-
+        const googleCred = user.verifiedCredentials.find(
+          cred => cred.oauthProvider === 'google'
+        );
         const twitterCred = user.verifiedCredentials.find(
           cred => cred.oauthProvider === 'twitter'
         );
-        
-        // Prioritize Farcaster over Twitter
-        const socialCred = farcasterCred || twitterCred;
+
+        const socialCred = farcasterCred || googleCred || twitterCred;
         
         if (socialCred) {
           // Store this profile for future use
@@ -514,9 +515,10 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                         className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary-muted transition-all"
                       >
                         {event.user.pfpUrl ? (
-                          <img 
-                            src={event.user.pfpUrl} 
-                            alt={event.user.displayName || event.user.username || 'User'} 
+                          <img
+                            src={event.user.pfpUrl}
+                            alt={event.user.displayName || event.user.username || 'User'}
+                            referrerPolicy="no-referrer"
                             className="w-full h-full object-cover"
                           />
                         ) : (
@@ -601,6 +603,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                             <img
                               src={pfpUrl}
                               alt={displayName || username || 'User'}
+                              referrerPolicy="no-referrer"
                               className="w-full h-full object-cover"
                             />
                           ) : (
@@ -638,7 +641,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
               user?.verifiedCredentials?.some(cred => 
                 cred.address === selectedUser.address)
                 ? user?.verifiedCredentials?.filter(cred => 
-                    cred.oauthProvider === 'farcaster' || cred.oauthProvider === 'twitter'
+                    cred.oauthProvider === 'farcaster' || cred.oauthProvider === 'google' || cred.oauthProvider === 'twitter'
                   )?.map(cred => ({
                     oauthProvider: cred.oauthProvider as string,
                     oauthDisplayName: cred.oauthDisplayName || undefined,
@@ -647,7 +650,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                   }))
                 : user?.verifiedCredentials
                   ?.filter(cred => 
-                    (cred.oauthProvider === 'farcaster' || cred.oauthProvider === 'twitter') && 
+                    (cred.oauthProvider === 'farcaster' || cred.oauthProvider === 'google' || cred.oauthProvider === 'twitter') && 
                     cred.address === selectedUser.address
                   )
                   ?.map(cred => ({

@@ -46,6 +46,7 @@ export function SocialProfile() {
             <img
               src={primaryProfile.pfpUrl}
               alt={primaryProfile.displayName || primaryProfile.username || 'Profile'}
+              referrerPolicy="no-referrer"
               className="w-10 h-10 rounded-full"
             />
           ) : (
@@ -85,9 +86,10 @@ export function SocialProfile() {
                 <div className="flex items-center space-x-3">
                   <div className="relative">
                     {profile.pfpUrl ? (
-                      <img 
-                        src={profile.pfpUrl} 
+                      <img
+                        src={profile.pfpUrl}
                         alt={profile.displayName || profile.username || 'Profile'}
+                        referrerPolicy="no-referrer"
                         className="w-8 h-8 rounded-full" 
                       />
                     ) : (

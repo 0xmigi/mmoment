@@ -171,19 +171,19 @@ export function WalrusStorageSection() {
 
   if (loading) {
     return (
-      <div className="bg-gray-50 rounded-xl p-4 sm:p-6 mb-6">
+      <div className="bg-neutral-100 rounded-xl p-4 sm:p-6 mb-6">
         <div className="flex items-center justify-center py-8">
-          <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
-          <span className="ml-2 text-gray-600">Loading Walrus info...</span>
+          <Loader2 className="w-6 h-6 animate-spin text-neutral-400" />
+          <span className="ml-2 text-neutral-600">Loading Walrus info...</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-gray-50 rounded-xl p-4 sm:p-6 mb-6">
+    <div className="bg-neutral-100 rounded-xl p-4 sm:p-6 mb-6">
       <div className="flex items-center gap-2 mb-4">
-        <HardDrive className="w-5 h-5 text-gray-700" />
+        <HardDrive className="w-5 h-5 text-neutral-600" />
         <h2 className="text-lg font-medium">Walrus Storage</h2>
       </div>
 
@@ -214,18 +214,18 @@ export function WalrusStorageSection() {
         <>
           {/* Balance Info */}
           <div className="grid grid-cols-2 gap-4 mb-6">
-            <div className="bg-white rounded-lg p-3 border">
+            <div className="bg-white rounded-lg p-3 border border-neutral-200">
               <div className="flex items-center gap-2 mb-1">
-                <Coins className="w-4 h-4 text-blue-500" />
+                <Coins className="w-4 h-4 text-accent" />
                 <span className="text-sm font-medium">SUI</span>
               </div>
               <div className="text-lg font-semibold">
                 {formatBalance(walrusInfo.suiBalance)}
               </div>
             </div>
-            <div className="bg-white rounded-lg p-3 border">
+            <div className="bg-white rounded-lg p-3 border border-neutral-200">
               <div className="flex items-center gap-2 mb-1">
-                <HardDrive className="w-4 h-4 text-purple-500" />
+                <HardDrive className="w-4 h-4 text-accent" />
                 <span className="text-sm font-medium">WAL</span>
               </div>
               <div className="text-lg font-semibold">
@@ -239,15 +239,15 @@ export function WalrusStorageSection() {
             <div className="mb-6">
               <div className="flex justify-between items-center mb-2">
                 <div className="flex items-center gap-2">
-                  <Database className="w-4 h-4 text-gray-500" />
-                  <span className="text-sm text-gray-600">Blobs Stored</span>
+                  <Database className="w-4 h-4 text-neutral-400" />
+                  <span className="text-sm text-neutral-600">Blobs Stored</span>
                 </div>
                 <span className="text-sm font-medium">
                   {walrusInfo.blobCount} blob{walrusInfo.blobCount !== 1 ? 's' : ''}
                 </span>
               </div>
               {walrusInfo.storageUsedMB > 0 && (
-                <div className="text-xs text-gray-500">
+                <div className="text-xs text-neutral-400">
                   ~{walrusInfo.storageUsedMB.toFixed(1)} MB estimated
                 </div>
               )}
@@ -255,11 +255,11 @@ export function WalrusStorageSection() {
           )}
 
           {/* Wallet Address Info */}
-          <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-            <h4 className="text-sm font-medium text-gray-700 mb-2">
+          <div className="mb-4 p-3 bg-neutral-100 rounded-lg border border-neutral-200">
+            <h4 className="text-sm font-medium text-neutral-600 mb-2">
               Sui Wallet
             </h4>
-            <div className="space-y-1 text-xs text-gray-600">
+            <div className="space-y-1 text-xs text-neutral-600">
               <div className="flex items-center justify-between">
                 <span className="font-medium">Address:</span>
                 <a
@@ -285,7 +285,7 @@ export function WalrusStorageSection() {
               setLoading(true);
               loadWalrusInfo();
             }}
-            className="w-full py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+            className="w-full py-2 text-sm text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-colors"
           >
             Refresh
           </button>
@@ -300,11 +300,11 @@ export function WalrusStorageSection() {
       ) : (
         /* Walrus Not Available */
         <div className="text-center py-6">
-          <HardDrive className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-          <h3 className="font-medium text-gray-700 mb-2">
+          <HardDrive className="w-12 h-12 text-neutral-400 mx-auto mb-3" />
+          <h3 className="font-medium text-neutral-600 mb-2">
             Walrus Storage
           </h3>
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-neutral-600 mb-4">
             Could not fetch wallet information from Sui network.
           </p>
           <button
@@ -313,7 +313,7 @@ export function WalrusStorageSection() {
               setStatusMessage(null);
               loadWalrusInfo();
             }}
-            className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors"
+            className="px-4 py-2 bg-neutral-600 text-white rounded-lg text-sm font-medium hover:bg-neutral-600/90 transition-colors"
           >
             Retry
           </button>

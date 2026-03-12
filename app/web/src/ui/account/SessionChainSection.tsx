@@ -19,10 +19,10 @@ export function SessionChainSection() {
   const { hasSessionChain, sessionChainPda, sessionCount, isLoading } = useUserSessionChain();
 
   return (
-    <div className="bg-gray-50 rounded-xl p-4 mb-4">
+    <div className="bg-neutral-100 rounded-xl p-4 mb-4">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          <KeyRound className="w-4 h-4 text-gray-600" />
+          <KeyRound className="w-4 h-4 text-neutral-600" />
           <span className="font-medium text-sm">Session Keychain</span>
         </div>
         {isLoading ? (
@@ -35,7 +35,7 @@ export function SessionChainSection() {
       </div>
 
       {isLoading ? (
-        <div className="text-sm text-gray-500">Checking status...</div>
+        <div className="text-sm text-neutral-400">Checking status...</div>
       ) : hasSessionChain ? (
         <div className="space-y-2">
           <div className="text-sm text-green-600">
@@ -54,7 +54,7 @@ export function SessionChainSection() {
           )}
         </div>
       ) : (
-        <div className="text-sm text-gray-500">
+        <div className="text-sm text-neutral-400">
           Will be created automatically on your first check-in
         </div>
       )}

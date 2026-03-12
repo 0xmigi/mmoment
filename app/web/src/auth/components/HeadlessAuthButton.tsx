@@ -63,6 +63,7 @@ export function HeadlessAuthButton() {
           <img
             src={socialCred.oauthAccountPhotos[0]}
             alt="Profile"
+            referrerPolicy="no-referrer"
             className="w-6 h-6 rounded-full"
           />
         )}

@@ -137,16 +137,16 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
       <div className="fixed inset-0 flex items-end sm:items-center justify-center p-2 sm:p-0">
         <Dialog.Panel className="mx-auto w-full sm:w-[360px] rounded-xl bg-white shadow-xl">
           {/* Header with close button */}
-          <div className="flex items-center justify-between p-3 border-b border-gray-100">
+          <div className="flex items-center justify-between p-3 border-b border-neutral-100">
             <Dialog.Title className="text-base font-medium flex items-center">
               <ScanFace className="w-4 h-4 mr-2" />
               Recognition Token
             </Dialog.Title>
             <button
               onClick={onClose}
-              className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
+              className="p-1 rounded-lg hover:bg-neutral-100 transition-colors"
             >
-              <X className="w-4 h-4 text-gray-500" />
+              <X className="w-4 h-4 text-neutral-400" />
             </button>
           </div>
 
@@ -196,7 +196,7 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
                     </div>
                     <div>
                       <div className="font-medium text-sm">Security Level</div>
-                      <div className="text-xs text-gray-500">Encryption & Privacy</div>
+                      <div className="text-xs text-neutral-400">Encryption & Privacy</div>
                     </div>
                   </div>
                   <div className="text-sm font-medium text-green-600">AES-256 Encrypted</div>
@@ -209,23 +209,23 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
                     </div>
                     <div>
                       <div className="font-medium text-sm">Storage</div>
-                      <div className="text-xs text-gray-500">Blockchain location</div>
+                      <div className="text-xs text-neutral-400">Blockchain location</div>
                     </div>
                   </div>
-                  <div className="text-sm font-medium text-gray-700">Solana DevNet</div>
+                  <div className="text-sm font-medium text-neutral-600">Solana DevNet</div>
                 </div>
 
                 <div className="flex items-center justify-between py-2">
                   <div className="flex items-center">
-                    <div className="w-6 h-6 bg-gray-100 rounded p-1 mr-3">
-                      <div className="w-2 h-2 bg-gray-400 rounded-full mx-auto mt-1"></div>
+                    <div className="w-6 h-6 bg-neutral-100 rounded p-1 mr-3">
+                      <div className="w-2 h-2 bg-neutral-400 rounded-full mx-auto mt-1"></div>
                     </div>
                     <div>
                       <div className="font-medium text-sm">Last Checked</div>
-                      <div className="text-xs text-gray-500">Status verification</div>
+                      <div className="text-xs text-neutral-400">Status verification</div>
                     </div>
                   </div>
-                  <div className="text-sm font-medium text-gray-700">
+                  <div className="text-sm font-medium text-neutral-600">
                     {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
@@ -236,7 +236,7 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
                     href={`https://explorer.solana.com/address/${faceDataPda}?cluster=devnet`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center justify-between py-2 hover:bg-gray-50 rounded-lg px-2 -mx-2 transition-colors"
+                    className="flex items-center justify-between py-2 hover:bg-neutral-50 rounded-lg px-2 -mx-2 transition-colors"
                   >
                     <div className="flex items-center">
                       <div className="w-6 h-6 bg-indigo-100 rounded p-1 mr-3">
@@ -244,10 +244,10 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
                       </div>
                       <div>
                         <div className="font-medium text-sm">View On-Chain</div>
-                        <div className="text-xs text-gray-500">Solana Explorer</div>
+                        <div className="text-xs text-neutral-400">Solana Explorer</div>
                       </div>
                     </div>
-                    <ExternalLink className="w-4 h-4 text-gray-400" />
+                    <ExternalLink className="w-4 h-4 text-neutral-400" />
                   </a>
                 )}
               </div>
@@ -283,7 +283,7 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
                       <button
                         onClick={() => setShowConfirmDelete(false)}
                         disabled={isDeleting}
-                        className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors"
+                        className="flex-1 px-4 py-3 bg-neutral-100 text-neutral-600 font-medium rounded-lg hover:bg-neutral-200 disabled:opacity-50 transition-colors"
                       >
                         Cancel
                       </button>

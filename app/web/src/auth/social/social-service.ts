@@ -132,6 +132,22 @@ export class SocialService {
       });
     }
     
+    // Process Google credentials
+    const googleCred = verifiedCredentials?.find(
+      cred => cred.oauthProvider === 'google'
+    );
+
+    if (googleCred) {
+      profiles.push({
+        id: googleCred.oauthAccountId || googleCred.id,
+        username: googleCred.oauthUsername,
+        displayName: googleCred.oauthDisplayName,
+        pfpUrl: googleCred.oauthAccountPhotos?.[0],
+        provider: 'google',
+        isVerified: googleCred.isVerified
+      });
+    }
+
     // Process Twitter credentials
     const twitterCred = verifiedCredentials?.find(
       cred => cred.oauthProvider === 'twitter'
@@ -147,7 +163,7 @@ export class SocialService {
         isVerified: twitterCred.isVerified
       });
     }
-    
+
     return profiles;
   }
 }

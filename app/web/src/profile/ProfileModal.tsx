@@ -46,14 +46,15 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
 
   // Get social identity credentials (from current user's verifiedCredentials)
   const farcasterCred = user?.verifiedCredentials?.find(cred => cred.oauthProvider === 'farcaster');
+  const googleCred = user?.verifiedCredentials?.find(cred => cred.oauthProvider === 'google');
   const twitterCred = user?.verifiedCredentials?.find(cred => cred.oauthProvider === 'twitter');
 
   // Check if we have backend profile data (for other users)
   const hasBackendProfile = user.provider && user.username;
   const backendProvider = user.provider?.toLowerCase();
 
-  // Prioritize Farcaster, then Twitter (from verifiedCredentials)
-  const primarySocialCred = farcasterCred || twitterCred;
+  // Prioritize Farcaster > Google > Twitter (from verifiedCredentials)
+  const primarySocialCred = farcasterCred || googleCred || twitterCred;
   
   // Get display information
   const displayName = user.displayName || primarySocialCred?.oauthDisplayName || primarySocialCred?.oauthUsername;
@@ -146,6 +147,7 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
                   <img
                     src={profileImage}
                     alt={displayIdentity}
+                    referrerPolicy="no-referrer"
                     className="w-full h-full object-cover"
                   />
                 )}
@@ -159,6 +161,23 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
 
             {/* Connected Accounts */}
             <div className="space-y-2">
+              {/* Google Account */}
+              {(googleCred || (hasBackendProfile && backendProvider === 'google')) && (
+                <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-gray-700">Google</span>
+                      {(googleCred === primarySocialCred || (hasBackendProfile && backendProvider === 'google')) && (
+                        <span className="text-[10px] text-primary bg-primary-light px-1.5 py-0.5 rounded">source</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {googleCred?.oauthDisplayName || user.username}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Farcaster Account - from verifiedCredentials OR backend */}
               {(farcasterCred || (hasBackendProfile && backendProvider === 'farcaster')) && (
                 <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">

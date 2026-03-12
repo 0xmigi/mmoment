@@ -75,7 +75,7 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete, d
     <>
       <button
         onClick={handleIRLAppsClick}
-        className="flex items-center space-x-2 bg-primary hover:bg-primary-hover text-white px-1.5 py-0.5 rounded shadow-lg transition-colors text-xs"
+        className="flex items-center space-x-2 bg-gray-800/70 hover:bg-gray-800/90 text-white px-1.5 py-0.5 rounded shadow-lg backdrop-blur-sm transition-colors text-xs"
         title={effectiveHasEmbedding ? "Access Apps" : "Create Recognition Token for Apps"}
       >
         <Zap className="w-3.5 h-3.5" />

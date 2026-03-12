@@ -47,27 +47,27 @@ export function HomeView() {
         <div className="w-full max-w-sm space-y-8 text-center">
           {/* IRL Time Display */}
           <div className="space-y-2">
-            <p className="text-sm text-gray-400 uppercase tracking-widest">
+            <p className="text-sm text-neutral-400 uppercase tracking-widest">
               Time in the moment
             </p>
 
             {isLoading ? (
-              <Loader className="w-6 h-6 mx-auto animate-spin text-gray-300" />
+              <Loader className="w-6 h-6 mx-auto animate-spin text-neutral-200" />
             ) : totalIrlTime ? (
               <>
-                <p className="text-5xl font-bold text-black tabular-nums">
+                <p className="text-5xl font-bold text-neutral-900 tabular-nums">
                   {totalIrlTime.formatted}
                 </p>
-                <p className="text-sm text-gray-400">
+                <p className="text-sm text-neutral-400">
                   across {totalIrlTime.sessionCount} session{totalIrlTime.sessionCount !== 1 ? 's' : ''}
                 </p>
               </>
             ) : (
               <>
-                <p className="text-5xl font-bold text-gray-200 tabular-nums">
+                <p className="text-5xl font-bold text-neutral-200 tabular-nums">
                   0m
                 </p>
-                <p className="text-sm text-gray-400">
+                <p className="text-sm text-neutral-400">
                   no sessions yet
                 </p>
               </>
@@ -91,7 +91,7 @@ export function HomeView() {
       <div className="px-4 pb-8">
         <button
           onClick={() => setShowScanModal(true)}
-          className="w-full py-3 rounded-xl bg-white text-black font-semibold text-sm border border-gray-200 hover:bg-gray-50 transition-colors"
+          className="w-full py-3 rounded-xl bg-white text-neutral-900 font-semibold text-sm border border-neutral-200 hover:bg-neutral-50 transition-colors"
         >
           Check in to a camera
         </button>

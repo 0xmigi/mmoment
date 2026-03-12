@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { Menu, X, Camera, ExternalLink, User, MapPin } from 'lucide-react';
+import { X, Camera, ExternalLink, User, MapPin } from 'lucide-react';
 import Logo from '../ui/common/Logo';
 import { CONFIG } from '../core/config';
 import { useCamera, fetchCameraByPublicKey } from '../camera/CameraProvider';
@@ -70,7 +70,6 @@ export default function TapLandingPage() {
   const [presenceToken, setPresenceToken] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [showBottomSheet, setShowBottomSheet] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [showCameraInfo, setShowCameraInfo] = useState(false);
   const [activeCount, setActiveCount] = useState<number>(0);
   const activeCountInterval = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -286,7 +285,7 @@ export default function TapLandingPage() {
         </div>
       )}
 
-      {/* ---- Top bar — Logo + hamburger (matches MainLayout) ---- */}
+      {/* ---- Top bar — Logo left, camera status right ---- */}
       {streamLoaded && (
         <div className="absolute top-0 left-0 right-0 z-50">
           <div className="px-4 h-16 flex items-center justify-between">
@@ -299,44 +298,35 @@ export default function TapLandingPage() {
               <h1 className="text-2xl text-white font-bold">Moment</h1>
             </div>
 
-            {/* Right — Hamburger menu */}
+            {/* Right — Camera status + location */}
             <button
               type="button"
-              onClick={() => setMenuOpen(true)}
-              className="p-2 rounded-lg bg-white hover:bg-gray-100 transition-colors"
+              onClick={() => setShowCameraInfo(true)}
+              className="flex items-center gap-2 cursor-pointer"
             >
-              <Menu className="w-5 h-5 text-black" />
+              <div className="flex items-center bg-black/70 backdrop-blur-sm rounded overflow-hidden">
+                <div className="bg-green-500 text-white text-xs font-bold px-1.5 py-0.5">
+                  ONLINE
+                </div>
+                {locationName && (
+                  <div className="text-white text-xs px-1.5 py-0.5 border-l border-white/20 flex items-center gap-1">
+                    <MapPin className="w-3 h-3" />
+                    {locationName}
+                  </div>
+                )}
+              </div>
             </button>
           </div>
-        </div>
-      )}
 
-      {/* ---- Camera info overlay (status + location + who's here) ---- */}
-      {streamLoaded && (
-        <div className="absolute top-[72px] left-4 z-40 flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={() => setShowCameraInfo(true)}
-            className="flex items-center gap-2 cursor-pointer"
-          >
-            <div className="flex items-center bg-black/70 backdrop-blur-sm rounded overflow-hidden">
-              <div className="bg-green-500 text-white text-xs font-bold px-1.5 py-0.5">
-                ONLINE
-              </div>
-              {locationName && (
-                <div className="text-white text-xs px-1.5 py-0.5 border-l border-white/20 flex items-center gap-1">
-                  <MapPin className="w-3 h-3" />
-                  {locationName}
-                </div>
-              )}
-            </div>
-          </button>
+          {/* People count — right-aligned, tight below the top bar */}
           {activeCount > 0 && (
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 bg-green-400 rounded-full" />
-              <span className="text-white text-sm">
-                {activeCount} {activeCount === 1 ? 'person' : 'people'} here
-              </span>
+            <div className="px-4 -mt-2 flex justify-end">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 bg-green-400 rounded-full" />
+                <span className="text-white text-sm">
+                  {activeCount} {activeCount === 1 ? 'person' : 'people'} here
+                </span>
+              </div>
             </div>
           )}
         </div>
@@ -399,93 +389,6 @@ export default function TapLandingPage() {
               </button>
             </div>
           )}
-        </div>
-      )}
-
-      {/* ---- Mobile menu overlay (matches MainLayout style) ---- */}
-      {menuOpen && (
-        <div className="fixed inset-0 z-[80]">
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 bg-black/50"
-            onClick={() => setMenuOpen(false)}
-          />
-
-          <div className="relative">
-            {/* Header */}
-            <div className="bg-white px-4 h-16 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Logo width={30} height={21} className="text-black" />
-                <h1 className="text-2xl text-black font-bold">Moment</h1>
-              </div>
-              <button
-                type="button"
-                onClick={() => setMenuOpen(false)}
-                className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
-              >
-                <X className="w-5 h-5 text-gray-700" />
-              </button>
-            </div>
-
-            {/* Navigation card */}
-            <div className="w-full bg-white shadow-lg rounded-b-xl">
-              <div className="p-6 space-y-4">
-                {primaryWallet ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        handleCheckIn();
-                      }}
-                      className="w-full text-left px-4 py-3 rounded-lg bg-gray-100 text-black transition-colors"
-                    >
-                      Camera
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        navigate('/app/gallery');
-                      }}
-                      className="w-full text-left px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
-                    >
-                      Gallery
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        navigate('/app/activities');
-                      }}
-                      className="w-full text-left px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
-                    >
-                      Activities
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      navigate(`/login?redirect=${encodeURIComponent(`/app/camera/${cameraPda}?fromTap=true`)}`);
-                    }}
-                    className="w-full text-left px-4 py-3 rounded-lg bg-gray-100 text-black transition-colors"
-                  >
-                    Log in / Create account
-                  </button>
-                )}
-
-                <div className="my-4 border-t border-gray-200" />
-
-                <div className="px-4 flex justify-center py-2">
-                  <p className="text-sm text-gray-500">
-                    social memory and compute for IRL
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 

@@ -66,13 +66,15 @@ export default function MediaViewer({
   const farcasterCred = user?.verifiedCredentials?.find(
     (cred) => cred.oauthProvider === "farcaster"
   );
-
+  const googleCred = user?.verifiedCredentials?.find(
+    (cred) => cred.oauthProvider === "google"
+  );
   const twitterCred = user?.verifiedCredentials?.find(
     (cred) => cred.oauthProvider === "twitter"
   );
 
-  // Prioritize Farcaster over Twitter
-  const primarySocialCred = farcasterCred || twitterCred;
+  // Prioritize Farcaster > Google > Twitter
+  const primarySocialCred = farcasterCred || googleCred || twitterCred;
 
   // Get social identity from event first, user's verified credentials as fallback
   const displayName =
@@ -86,6 +88,7 @@ export default function MediaViewer({
     if (username?.includes("farcaster.xyz")) return "Farcaster";
     if (username?.includes("twitter.com")) return "X / Twitter";
     if (farcasterCred) return "Farcaster";
+    if (googleCred) return "Google";
     if (twitterCred) return "X / Twitter";
     return null;
   })();

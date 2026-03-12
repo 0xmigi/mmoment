@@ -138,32 +138,32 @@ export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps)
       <div className="fixed inset-0 flex items-end sm:items-center justify-center p-2 sm:p-0">
         <Dialog.Panel className="mx-auto w-full sm:w-[360px] rounded-xl bg-white shadow-xl">
           {/* Header with close button */}
-          <div className="flex items-center justify-between p-3 border-b border-gray-100">
+          <div className="flex items-center justify-between p-3 border-b border-neutral-100">
             <Dialog.Title className="text-base font-medium">
               Wallet
             </Dialog.Title>
             <button
               onClick={onClose}
-              className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
+              className="p-1 rounded-lg hover:bg-neutral-100 transition-colors"
             >
-              <X className="w-4 h-4 text-gray-500" />
+              <X className="w-4 h-4 text-neutral-400" />
             </button>
           </div>
 
           {/* Content */}
           <div className="p-4">
             {/* Simple Address Display */}
-            <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-200">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-neutral-200">
               <div className="flex-1">
-                <div className="text-xs text-gray-500 mb-1">Address</div>
-                <div className="text-sm font-mono text-gray-700">
+                <div className="text-xs text-neutral-400 mb-1">Address</div>
+                <div className="text-sm font-mono text-neutral-600">
                   {primaryWallet?.address ? formatAddress(primaryWallet.address, 6, 6) : 'Not connected'}
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleCopyAddress}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  className="text-neutral-400 hover:text-neutral-600 transition-colors"
                   title="Copy address"
                 >
                   {copied ? (
@@ -174,7 +174,7 @@ export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps)
                 </button>
                 <button
                   onClick={handleExplorerClick}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  className="text-neutral-400 hover:text-neutral-600 transition-colors"
                   title="View on explorer"
                 >
                   <ExternalLink className="w-4 h-4" />
@@ -183,7 +183,7 @@ export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps)
             </div>
 
             {/* Sponsored Gas Banner */}
-            <div className="mb-4 pb-3 border-b border-gray-200">
+            <div className="mb-4 pb-3 border-b border-neutral-200">
               <div className="bg-gradient-to-r from-primary-light to-purple-50 rounded-lg p-3 border border-primary-light">
                 <div className="flex justify-between items-start mb-2">
                   <div className="flex-1">
@@ -226,7 +226,7 @@ export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps)
 
             {/* Token List */}
             <div className="space-y-3">
-              <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">Tokens</div>
+              <div className="text-xs text-neutral-400 uppercase tracking-wider mb-2">Tokens</div>
 
               {/* SOL Token */}
               <div className="flex items-center justify-between py-2">
@@ -235,19 +235,19 @@ export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps)
                     <span className="text-white text-xs font-bold">SOL</span>
                   </div>
                   <div>
-                    <div className="font-medium text-gray-900">Solana</div>
-                    <div className="text-xs text-gray-500">SOL</div>
+                    <div className="font-medium text-neutral-900">Solana</div>
+                    <div className="text-xs text-neutral-400">SOL</div>
                   </div>
                 </div>
                 <div className="text-right">
                   {balanceData.loading ? (
-                    <div className="text-sm text-gray-400">...</div>
+                    <div className="text-sm text-neutral-400">...</div>
                   ) : (
                     <>
-                      <div className="font-medium text-gray-900">
+                      <div className="font-medium text-neutral-900">
                         {balanceData.sol.toFixed(4)}
                       </div>
-                      <div className="text-xs text-gray-500">
+                      <div className="text-xs text-neutral-400">
                         ${(balanceData.sol * 150).toFixed(2)}
                       </div>
                     </>
@@ -262,20 +262,20 @@ export function WalletBalanceModal({ isOpen, onClose }: WalletBalanceModalProps)
                     <span className="text-white text-sm font-bold">$</span>
                   </div>
                   <div>
-                    <div className="font-medium text-gray-600">USD Coin</div>
-                    <div className="text-xs text-gray-400">USDC</div>
+                    <div className="font-medium text-neutral-600">USD Coin</div>
+                    <div className="text-xs text-neutral-400">USDC</div>
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="font-medium text-gray-400">--</div>
-                  <div className="text-xs text-gray-400">Coming soon</div>
+                  <div className="font-medium text-neutral-400">--</div>
+                  <div className="text-xs text-neutral-400">Coming soon</div>
                 </div>
               </div>
             </div>
 
             {/* Network Badge */}
-            <div className="mt-6 pt-3 border-t border-gray-200">
-              <div className="flex items-center justify-between text-xs text-gray-500">
+            <div className="mt-6 pt-3 border-t border-neutral-200">
+              <div className="flex items-center justify-between text-xs text-neutral-400">
                 <span>Network</span>
                 <div className="flex items-center">
                   <div className="w-2 h-2 bg-orange-500 rounded-full mr-1.5"></div>

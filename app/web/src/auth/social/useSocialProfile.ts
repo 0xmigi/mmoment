@@ -56,8 +56,9 @@ export function useSocialProfile() {
         if (enhancedProfiles.length > 0) {
           if (!primaryProfile || !enhancedProfiles.find(p => p.id === primaryProfile.id)) {
             const farcasterProfile = enhancedProfiles.find(p => p.provider === 'farcaster');
+            const googleProfile = enhancedProfiles.find(p => p.provider === 'google');
             const twitterProfile = enhancedProfiles.find(p => p.provider === 'twitter');
-            setPrimaryProfile(farcasterProfile || twitterProfile || enhancedProfiles[0]);
+            setPrimaryProfile(farcasterProfile || googleProfile || twitterProfile || enhancedProfiles[0]);
           }
         } else {
           setPrimaryProfile(null);

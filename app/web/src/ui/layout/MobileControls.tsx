@@ -1,6 +1,5 @@
-import { Camera, Video } from 'lucide-react';
+import { useState, useCallback } from 'react';
 
-// Renamed from MobileControls to CameraControls
 interface CameraControlsProps {
   onTakePicture: () => void;
   onRecordVideo: () => void;
@@ -11,39 +10,47 @@ interface CameraControlsProps {
 }
 
 export function CameraControls({ onTakePicture, onRecordVideo, isLoading, isRecording }: CameraControlsProps) {
+  const [isBlinking, setIsBlinking] = useState(false);
+
+  const handlePhoto = useCallback(() => {
+    if (isLoading) return;
+    setIsBlinking(true);
+    onTakePicture();
+    // Reset after animation completes
+    setTimeout(() => setIsBlinking(false), 300);
+  }, [isLoading, onTakePicture]);
+
   return (
     <>
-      {/* TikTok-style vertical controls for mobile - positioned in bottom right to match hamburger menu */}
-      <div className="md:hidden fixed right-4 bottom-20 z-40 flex flex-col gap-2">
+      {/* Shape-based controls — bottom right, thumb-friendly */}
+      <div className="md:hidden fixed right-4 bottom-20 z-40 flex flex-col gap-3.5 items-center">
+        {/* Photo: circle — blinks like an eye on tap */}
         <button
-          onClick={onTakePicture}
+          onClick={handlePhoto}
           disabled={isLoading}
-          className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
-            isLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-500 hover:bg-gray-400'
+          className={`w-[42px] h-[42px] rounded-full transition-all duration-150 ${
+            isLoading
+              ? 'bg-white/50 cursor-not-allowed'
+              : isBlinking
+                ? 'animate-blink'
+                : 'bg-white shadow-[0_0_8px_rgba(0,0,0,0.3)] active:scale-90'
           }`}
           aria-label="Take Picture"
-        >
-          <Camera className={`w-5 h-5 ${isLoading ? 'text-gray-600' : 'text-gray-50'}`} />
-        </button>
+        />
 
+        {/* Video: rounded-square — turns red when recording */}
         <button
           onClick={onRecordVideo}
           disabled={isLoading}
-          className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-200 ${
+          className={`w-[42px] h-[42px] rounded-xl transition-all duration-200 ${
             isLoading
-              ? 'bg-gray-400 cursor-not-allowed'
+              ? 'bg-white/50 cursor-not-allowed'
               : isRecording
-                ? 'bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/30'
-                : 'bg-gray-500 hover:bg-gray-400'
+                ? 'bg-red-500 scale-[0.9] shadow-lg shadow-red-500/30'
+                : 'bg-white shadow-[0_0_8px_rgba(0,0,0,0.3)] active:scale-90'
           }`}
           aria-label={isRecording ? "Stop Recording" : "Record Video"}
-        >
-          {isRecording ? (
-            <span className="w-3 h-3 bg-white rounded-[3px]" />
-          ) : (
-            <Video className={`w-5 h-5 ${isLoading ? 'text-gray-600' : 'text-gray-50'}`} />
-          )}
-        </button>
+        />
       </div>
     </>
   );

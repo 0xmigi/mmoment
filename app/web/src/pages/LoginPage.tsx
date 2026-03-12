@@ -1,12 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useWalletOptions, WalletOption, useConnectWithOtp, useEmbeddedWallet, useIsLoggedIn } from '@dynamic-labs/sdk-react-core';
-import { WalletIcon } from '@dynamic-labs/wallet-book';
+import { useConnectWithOtp, useEmbeddedWallet, useIsLoggedIn } from '@dynamic-labs/sdk-react-core';
 import { HeadlessSocialLogin } from '../auth/components/HeadlessSocialLogin';
 import Logo from '../ui/common/Logo';
 
 export default function LoginPage() {
-    const { walletOptions, selectWalletOption } = useWalletOptions();
     const { connectWithEmail, verifyOneTimePassword } = useConnectWithOtp();
     const { createEmbeddedWallet, userHasEmbeddedWallet } = useEmbeddedWallet();
     const navigate = useNavigate();
@@ -34,20 +32,6 @@ export default function LoginPage() {
 
     const handleSuccessfulAuth = () => {
         navigate(redirectTo);
-    };
-
-    const handleWalletSelect = async (wallet: WalletOption) => {
-        try {
-            setIsLoading(true);
-            setError('');
-            await selectWalletOption(wallet.key);
-            handleSuccessfulAuth();
-        } catch (error) {
-            console.error('Failed to connect wallet:', error);
-            setError('Failed to connect wallet. Please try again.');
-        } finally {
-            setIsLoading(false);
-        }
     };
 
     const handleEmailSubmit = async (e: React.FormEvent) => {
@@ -85,11 +69,6 @@ export default function LoginPage() {
         }
     };
 
-    // Filter to show only Phantom wallet
-    const phantomWallet = walletOptions.find(wallet =>
-        wallet.name.toLowerCase() === 'phantom'
-    ) as WalletOption | undefined;
-
     return (
         <div className="min-h-screen flex flex-col bg-white">
             {/* Header */}
@@ -106,7 +85,7 @@ export default function LoginPage() {
             <div className="flex-1 flex items-center justify-center p-4">
                 <div className="w-full max-w-[360px] space-y-6">
                     {/* Header */}
-                    <h1 className="text-xl font-medium text-gray-900">Log in</h1>
+                    <h1 className="text-xl font-medium text-neutral-900">Log in or sign up</h1>
 
                     {error && (
                         <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">
@@ -123,18 +102,18 @@ export default function LoginPage() {
                                     value={otp}
                                     onChange={(e) => setOtp(e.target.value)}
                                     disabled={isLoading}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-primary focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="w-full px-3 py-2 border border-neutral-200 rounded-lg shadow-sm focus:ring-primary focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
                                     placeholder="Enter verification code"
                                     required
                                 />
-                                <p className="mt-2 text-xs text-gray-500">
+                                <p className="mt-2 text-xs text-neutral-400">
                                     We sent a code to your email address
                                 </p>
                             </div>
                             <button
                                 type="submit"
                                 disabled={isLoading}
-                                className="w-full bg-primary text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full bg-neutral-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-neutral-600/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {isLoading ? 'Verifying...' : 'Verify'}
                             </button>
@@ -145,7 +124,7 @@ export default function LoginPage() {
                                     setOtp('');
                                     setError('');
                                 }}
-                                className="w-full text-sm text-gray-500 hover:text-gray-700"
+                                className="w-full text-sm text-neutral-400 hover:text-neutral-600"
                             >
                                 Back to log in
                             </button>
@@ -160,14 +139,14 @@ export default function LoginPage() {
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
                                     disabled={isLoading}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-primary focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="w-full px-3 py-2 border border-neutral-200 rounded-lg shadow-sm focus:ring-primary focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
                                     placeholder="name@example.com"
                                     required
                                 />
                                 <button
                                     type="submit"
                                     disabled={isLoading}
-                                    className="w-full mt-2 bg-primary text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="w-full mt-2 bg-neutral-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-neutral-600/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     {isLoading ? 'Please wait...' : 'Continue with Email'}
                                 </button>
@@ -175,34 +154,20 @@ export default function LoginPage() {
 
                             <div className="relative my-6">
                                 <div className="absolute inset-0 flex items-center">
-                                    <div className="w-full border-t border-gray-200"></div>
+                                    <div className="w-full border-t border-neutral-200"></div>
                                 </div>
                                 <div className="relative flex justify-center text-xs">
-                                    <span className="px-2 bg-white text-gray-500">or continue with</span>
+                                    <span className="px-2 bg-white text-neutral-400">or continue with</span>
                                 </div>
                             </div>
 
-                            {/* Other login options */}
-                            {phantomWallet && (
-                                <button
-                                    onClick={() => handleWalletSelect(phantomWallet)}
-                                    disabled={isLoading}
-                                    className="w-full flex items-center p-3 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    <div className="w-6 h-6 mr-3">
-                                        <WalletIcon walletKey={phantomWallet.key} />
-                                    </div>
-                                    <span className="flex-1 text-left text-sm font-medium">Phantom</span>
-                                </button>
-                            )}
-
-                            {/* Social logins */}
+                            {/* Social logins (Google, Farcaster, X) */}
                             <HeadlessSocialLogin onSuccess={handleSuccessfulAuth} />
                         </div>
                     )}
 
                     {/* Footer text */}
-                    <p className="text-center text-sm text-gray-500 mt-6">
+                    <p className="text-center text-sm text-neutral-400 mt-6">
                         Capture moments and their context instantly
                     </p>
                 </div>

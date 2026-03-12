@@ -186,19 +186,19 @@ export function PipeStorageSection() {
 
   if (loading) {
     return (
-      <div className="bg-gray-50 rounded-xl p-4 sm:p-6 mb-6">
+      <div className="bg-neutral-100 rounded-xl p-4 sm:p-6 mb-6">
         <div className="flex items-center justify-center py-8">
-          <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
-          <span className="ml-2 text-gray-600">Loading storage info...</span>
+          <Loader2 className="w-6 h-6 animate-spin text-neutral-400" />
+          <span className="ml-2 text-neutral-600">Loading storage info...</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-gray-50 rounded-xl p-4 sm:p-6 mb-6">
+    <div className="bg-neutral-100 rounded-xl p-4 sm:p-6 mb-6">
       <div className="flex items-center gap-2 mb-4">
-        <HardDrive className="w-5 h-5 text-gray-700" />
+        <HardDrive className="w-5 h-5 text-neutral-600" />
         <h2 className="text-lg font-medium">Pipe Storage</h2>
       </div>
 
@@ -230,12 +230,12 @@ export function PipeStorageSection() {
           {/* Storage Usage */}
           <div className="mb-6">
             <div className="flex justify-between items-center mb-2">
-              <span className="text-sm text-gray-600">Storage Used</span>
+              <span className="text-sm text-neutral-600">Storage Used</span>
               <span className="text-sm font-medium">
                 {pipeInfo.storageUsed}MB / {pipeInfo.storageLimit}MB
               </span>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className="w-full bg-neutral-200 rounded-full h-2">
               <div
                 className="bg-primary h-2 rounded-full transition-all duration-300"
                 style={{ width: `${Math.min(storageUsedPercent, 100)}%` }}
@@ -245,7 +245,7 @@ export function PipeStorageSection() {
 
           {/* Balance Info */}
           <div className="grid grid-cols-2 gap-4 mb-6">
-            <div className="bg-white rounded-lg p-3 border">
+            <div className="bg-white rounded-lg p-3 border border-neutral-200">
               <div className="flex items-center gap-2 mb-1">
                 <Coins className="w-4 h-4 text-yellow-600" />
                 <span className="text-sm font-medium">SOL</span>
@@ -254,7 +254,7 @@ export function PipeStorageSection() {
                 {pipeInfo.solBalance.toFixed(3)}
               </div>
             </div>
-            <div className="bg-white rounded-lg p-3 border">
+            <div className="bg-white rounded-lg p-3 border border-neutral-200">
               <div className="flex items-center gap-2 mb-1">
                 <HardDrive className="w-4 h-4 text-primary" />
                 <span className="text-sm font-medium">PIPE</span>
@@ -267,11 +267,11 @@ export function PipeStorageSection() {
 
           {/* Debug Account Info - Temporary for development */}
           {pipeCredentials && (
-            <div className="mb-6 p-3 bg-gray-50 rounded-lg border border-gray-200">
-              <h4 className="text-sm font-medium text-gray-700 mb-2">
+            <div className="mb-6 p-3 bg-neutral-100 rounded-lg border border-neutral-200">
+              <h4 className="text-sm font-medium text-neutral-600 mb-2">
                 🔧 Pipe Account Debug Info
               </h4>
-              <div className="space-y-1 text-xs text-gray-600">
+              <div className="space-y-1 text-xs text-neutral-600">
                 <div>
                   <span className="font-medium">Username:</span> {pipeCredentials.username}
                 </div>
@@ -304,7 +304,7 @@ export function PipeStorageSection() {
                     className={`w-full p-3 rounded-lg border text-left transition-all ${
                       option.recommended
                         ? "border-primary-light bg-primary-light hover:bg-primary-muted"
-                        : "border-gray-200 bg-white hover:bg-gray-50"
+                        : "border-neutral-200 bg-white hover:bg-neutral-100"
                     } ${purchasing ? "opacity-50 cursor-not-allowed" : ""}`}
                   >
                     <div className="flex justify-between items-center">
@@ -317,7 +317,7 @@ export function PipeStorageSection() {
                             </span>
                           )}
                         </div>
-                        <div className="text-sm text-gray-600">
+                        <div className="text-sm text-neutral-600">
                           {option.priceSol} SOL (
                           {(option.priceSol / option.sizeGB).toFixed(3)} SOL/GB)
                         </div>
@@ -347,15 +347,15 @@ export function PipeStorageSection() {
       ) : (
         /* Pipe Not Available */
         <div className="text-center py-6">
-          <HardDrive className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-          <h3 className="font-medium text-gray-700 mb-2">
+          <HardDrive className="w-12 h-12 text-neutral-400 mx-auto mb-3" />
+          <h3 className="font-medium text-neutral-600 mb-2">
             Pipe Storage Not Available
           </h3>
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-neutral-600 mb-4">
             Pipe Network provides decentralized storage for your camera
             captures.
           </p>
-          <div className="text-xs text-gray-500 bg-gray-100 rounded-lg p-3">
+          <div className="text-xs text-neutral-400 bg-neutral-100 rounded-lg p-3">
             To enable: Camera system needs Pipe credentials configured.
           </div>
         </div>

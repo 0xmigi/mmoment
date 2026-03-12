@@ -317,16 +317,18 @@ export function CameraView() {
         console.warn("Error checking for duplicate events:", e);
       }
 
-      // Get the user's social credentials - prioritize Farcaster over Twitter
+      // Get the user's social credentials - prioritize Farcaster > Google > Twitter
       const farcasterCred = user?.verifiedCredentials?.find(
         (cred) => cred.oauthProvider === "farcaster"
+      );
+      const googleCred = user?.verifiedCredentials?.find(
+        (cred) => cred.oauthProvider === "google"
       );
       const twitterCred = user?.verifiedCredentials?.find(
         (cred) => cred.oauthProvider === "twitter"
       );
 
-      // Use Farcaster if available, otherwise Twitter
-      const socialCred = farcasterCred || twitterCred;
+      const socialCred = farcasterCred || googleCred || twitterCred;
 
       // Create the timeline event with enriched user info
       // Try social accounts first, then fallback to Dynamic user profile

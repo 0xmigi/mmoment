@@ -96,6 +96,7 @@ function ParticipantStack({ participants, currentUserAddress, maxShow = 3 }: Par
             <img
               src={participant.pfpUrl}
               alt={participant.displayName || participant.username || 'User'}
+              referrerPolicy="no-referrer"
               className="w-full h-full object-cover"
             />
           ) : (
