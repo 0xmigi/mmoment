@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState, forwardRef, useRef, useCallback, useMemo } from 'react';
-import { Camera, Video, Power, User, Radio, Activity } from 'lucide-react';
+import { Camera, Video, Power, User, Radio, Activity, Users } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { ProfileModal } from '../profile/ProfileModal';
 import MediaViewer from '../media/MediaViewer';
@@ -537,7 +537,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                       onClick={() => event.mediaUrl && handleMediaClick(event)}
                     >
                       <p className={`text-xs md:text-sm ${mobileOverlay ? 'text-white' : 'text-gray-800'}`}>
-                        <span 
+                        <span
                           onClick={(e) => {
                             e.stopPropagation();
                             handleProfileClick(event);
@@ -546,11 +546,20 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
                             mobileOverlay ? 'hover:text-gray-300' : 'hover:text-primary'
                           }`}
                         >
-                          {event.user.displayName || event.user.username || 
+                          {event.user.displayName || event.user.username ||
                            `${event.user.address.slice(0, 6)}...${event.user.address.slice(-4)}`}
                         </span>
                         {' '}
                         {getEventText(event.type, event.cvActivity)}
+                        {(event.type === 'photo_captured' || event.type === 'video_recorded') &&
+                         event.shared && (
+                          <span className={`inline-flex items-center gap-0.5 ml-1.5 text-[10px] px-1.5 py-0.5 rounded ${
+                            mobileOverlay ? 'bg-white/20 text-white/80' : 'bg-gray-100 text-gray-500'
+                          }`}>
+                            <Users className="w-2.5 h-2.5" />
+                            Shared
+                          </span>
+                        )}
                       </p>
                       <p className={`${mobileOverlay ? 'text-[10px]' : 'text-xs'} ${mobileOverlay ? 'text-gray-300' : 'text-gray-500'}`}>
                         {showAbsoluteTime

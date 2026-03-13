@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
-import { Camera, Video } from 'lucide-react';
+import { Camera, Video, Users } from 'lucide-react';
 import MediaGallery from '../../media/Gallery';
 import { useCamera } from '../../camera/CameraProvider';
 
 type MediaTypeFilter = 'all' | 'photos' | 'videos';
+type OwnerFilter = 'all' | 'mine' | 'shared';
 
 export function GalleryView() {
   const { selectedCamera } = useCamera();
   const [cameraFilter, setCameraFilter] = useState<string | null>(null);
   const [mediaTypeFilter, setMediaTypeFilter] = useState<MediaTypeFilter>('all');
+  const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>('all');
 
   // Get connected camera ID from context
   const connectedCameraId = selectedCamera?.publicKey || localStorage.getItem('directCameraId');
@@ -66,6 +68,33 @@ export function GalleryView() {
             <Video className="w-3 h-3" />
             Videos
           </button>
+
+          {/* Divider */}
+          <div className="w-px h-5 bg-gray-200" />
+
+          {/* Ownership filters */}
+          <button
+            onClick={() => setOwnerFilter(ownerFilter === 'mine' ? 'all' : 'mine')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap
+              ${ownerFilter === 'mine'
+                ? 'bg-gray-700 text-white'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+          >
+            Mine
+          </button>
+
+          <button
+            onClick={() => setOwnerFilter(ownerFilter === 'shared' ? 'all' : 'shared')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1
+              ${ownerFilter === 'shared'
+                ? 'bg-gray-700 text-white'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+          >
+            <Users className="w-3 h-3" />
+            Shared
+          </button>
         </div>
       </div>
 
@@ -76,6 +105,7 @@ export function GalleryView() {
           cameraId={activeCameraFilter || undefined}
           hideTitle={true}
           mediaType={mediaTypeFilter}
+          ownerFilter={ownerFilter}
         />
       </div>
     </div>

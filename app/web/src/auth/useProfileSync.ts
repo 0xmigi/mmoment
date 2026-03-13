@@ -25,10 +25,11 @@ export function useProfileSync() {
           ? socialService.getProfileFromVerifiedCredentials(user.verifiedCredentials)
           : [];
 
-        // Prioritize Farcaster over Twitter
+        // Prioritize Farcaster > Google > Twitter
         const farcasterProfile = socialProfiles.find(p => p.provider === 'farcaster');
+        const googleProfile = socialProfiles.find(p => p.provider === 'google');
         const twitterProfile = socialProfiles.find(p => p.provider === 'twitter');
-        const primarySocialProfile = farcasterProfile || twitterProfile;
+        const primarySocialProfile = farcasterProfile || googleProfile || twitterProfile;
 
         // Build profile data
         const profileData = {

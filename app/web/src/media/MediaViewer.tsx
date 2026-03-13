@@ -4,9 +4,10 @@ import { PipeGalleryItem } from "../storage/pipe/pipe-gallery-service";
 import { WalrusGalleryItem, walrusGalleryService } from "../storage/walrus/walrus-gallery-service";
 import { pipeService } from "../storage/pipe/pipe-service";
 import { TimelineEvent } from "../timeline/timeline-types";
+import { CONFIG } from "../core/config";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { Dialog } from "@headlessui/react";
-import { ArrowUpRight, Download, Share2, Trash2, X } from "lucide-react";
+import { ArrowUpRight, Download, Share2, Trash2, X, Users } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 
 interface MediaViewerProps {
@@ -28,6 +29,49 @@ export default function MediaViewer({
   const [deleting, setDeleting] = useState(false);
   const [sharing, setSharing] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [ownerProfile, setOwnerProfile] = useState<{
+    displayName?: string;
+    username?: string;
+    pfpUrl?: string;
+    provider?: string;
+  } | null>(null);
+
+  // Determine if this is a shared item
+  const isSharedItem = media && 'isOwned' in media && media.isOwned === false;
+  const ownerWalletAddress = media && 'ownerWallet' in media ? (media as WalrusGalleryItem).ownerWallet : undefined;
+
+  // Fetch owner profile for shared items
+  useEffect(() => {
+    if (!isOpen || !isSharedItem || !ownerWalletAddress) {
+      setOwnerProfile(null);
+      return;
+    }
+
+    const fetchOwnerProfile = async () => {
+      try {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/profile/batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ walletAddresses: [ownerWalletAddress] }),
+        });
+        if (!response.ok) return;
+        const data = await response.json();
+        const profile = data.profiles?.[ownerWalletAddress];
+        if (profile) {
+          setOwnerProfile({
+            displayName: profile.displayName,
+            username: profile.username,
+            pfpUrl: profile.profileImage,
+            provider: profile.provider,
+          });
+        }
+      } catch (err) {
+        console.error('[MediaViewer] Failed to fetch owner profile:', err);
+      }
+    };
+
+    fetchOwnerProfile();
+  }, [isOpen, isSharedItem, ownerWalletAddress]);
 
   // Load Pipe credentials when modal opens and wallet is available
   useEffect(() => {
@@ -76,15 +120,26 @@ export default function MediaViewer({
   // Prioritize Farcaster > Google > Twitter
   const primarySocialCred = farcasterCred || googleCred || twitterCred;
 
-  // Get social identity from event first, user's verified credentials as fallback
-  const displayName =
-    event?.user.displayName || primarySocialCred?.oauthDisplayName;
-  const username = event?.user.username || primarySocialCred?.oauthUsername;
-  const profileImage =
-    event?.user.pfpUrl || primarySocialCred?.oauthAccountPhotos?.[0];
+  // For shared items, ONLY use the owner's profile — never fall back to current user's credentials
+  const displayName = isSharedItem
+    ? ownerProfile?.displayName
+    : event?.user.displayName || primarySocialCred?.oauthDisplayName;
+  const username = isSharedItem
+    ? ownerProfile?.username
+    : event?.user.username || primarySocialCred?.oauthUsername;
+  const profileImage = isSharedItem
+    ? ownerProfile?.pfpUrl
+    : event?.user.pfpUrl || primarySocialCred?.oauthAccountPhotos?.[0];
 
-  // Determine social provider from event data or current user credentials
+  // Determine social provider
   const socialProvider = (() => {
+    if (isSharedItem) {
+      if (!ownerProfile?.provider) return null;
+      if (ownerProfile.provider === 'farcaster') return 'Farcaster';
+      if (ownerProfile.provider === 'google') return 'Google';
+      if (ownerProfile.provider === 'twitter') return 'X / Twitter';
+      return ownerProfile.provider;
+    }
     if (username?.includes("farcaster.xyz")) return "Farcaster";
     if (username?.includes("twitter.com")) return "X / Twitter";
     if (farcasterCred) return "Farcaster";
@@ -93,10 +148,11 @@ export default function MediaViewer({
     return null;
   })();
 
-  // Only use wallet address as fallback if no social identity
+  // For shared items, show owner's wallet as fallback — never the current user's identity
+  const fallbackWallet = isSharedItem ? ownerWalletAddress : media.walletAddress;
   const displayIdentity =
     displayName ||
-    (media.walletAddress ? `${media.walletAddress.slice(0, 4)}...${media.walletAddress.slice(-4)}` : 'Unknown');
+    (fallbackWallet ? `${fallbackWallet.slice(0, 4)}...${fallbackWallet.slice(-4)}` : 'Unknown');
 
   // Use event's transaction ID if available, fallback to media's transaction ID
   const transactionId = event?.transactionId || (media as IPFSMedia).transactionId;
@@ -351,6 +407,12 @@ export default function MediaViewer({
                     </div>
                   )}
                 </div>
+                {isSharedItem && (
+                  <div className="flex items-center gap-1 text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-lg">
+                    <Users className="w-3 h-3" />
+                    <span>Shared with you</span>
+                  </div>
+                )}
               </div>
 
               {/* Action Details */}

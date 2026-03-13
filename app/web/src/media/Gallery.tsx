@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { Image, Video } from 'lucide-react';
+import { Image, Video, Users } from 'lucide-react';
 import MediaViewer from './MediaViewer';
 import { unifiedIpfsService } from '../storage/ipfs/unified-ipfs-service';
 import { IPFSMedia } from '../storage/ipfs/ipfs-service';
@@ -14,6 +14,7 @@ interface MediaGalleryProps {
   cameraId?: string;
   hideTitle?: boolean;
   mediaType?: "all" | "photos" | "videos";
+  ownerFilter?: "all" | "mine" | "shared";
 }
 
 export default function MediaGallery({
@@ -22,6 +23,7 @@ export default function MediaGallery({
   cameraId,
   hideTitle = false,
   mediaType = "all",
+  ownerFilter = "all",
 }: MediaGalleryProps) {
   const { primaryWallet } = useDynamicContext();
   const [media, setMedia] = useState<(IPFSMedia | PipeGalleryItem | WalrusGalleryItem)[]>([]);
@@ -122,7 +124,8 @@ export default function MediaGallery({
             primaryWallet.address
           );
           const walrusFiles = await walrusGalleryService.getUserFiles(
-            primaryWallet.address
+            primaryWallet.address,
+            true
           );
 
           // Decrypt encrypted files
@@ -323,11 +326,16 @@ export default function MediaGallery({
     );
   }
 
-  // Filter media by type
+  // Filter media by type and ownership
   const filteredMedia = media.filter(item => {
-    if (mediaType === "all") return true;
-    if (mediaType === "photos") return item.type === "image";
-    if (mediaType === "videos") return item.type === "video";
+    // Media type filter
+    if (mediaType === "photos" && item.type !== "image") return false;
+    if (mediaType === "videos" && item.type !== "video") return false;
+    // Ownership filter (only applies to Walrus items)
+    if (ownerFilter !== "all" && "isOwned" in item) {
+      if (ownerFilter === "mine" && !item.isOwned) return false;
+      if (ownerFilter === "shared" && item.isOwned) return false;
+    }
     return true;
   });
 
@@ -437,6 +445,11 @@ export default function MediaGallery({
                     <Image className="w-4 h-4 text-white drop-shadow" />
                   )}
                 </div>
+                {"isOwned" in item && !item.isOwned && (
+                  <div className="absolute top-2 right-2">
+                    <Users className="w-3.5 h-3.5 text-white drop-shadow" />
+                  </div>
+                )}
               </div>
             </div>
           ))}

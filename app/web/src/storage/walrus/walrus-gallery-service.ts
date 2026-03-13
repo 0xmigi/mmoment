@@ -38,6 +38,9 @@ export interface WalrusGalleryItem {
     camera?: string;
     location?: string;
   };
+  // Ownership tracking
+  isOwned: boolean;        // true = captured by this user, false = shared with them
+  ownerWallet?: string;    // Wallet of the actual capturer (only set when isOwned=false)
   // Upload tracking (from Jetson's SQLite queue)
   backedUp: boolean;       // true = stored in Walrus, false = local only
   jobId?: number;          // Upload job ID from Jetson
@@ -91,6 +94,7 @@ class WalrusGalleryService {
       provider: 'walrus',
       cameraId: photo.cameraId,
       encrypted: false,  // Local photos not encrypted yet
+      isOwned: true,
       backedUp: false,
       jobId: photo.jobId,
       localUrl: photo.localUrl,
@@ -344,6 +348,8 @@ class WalrusGalleryService {
             url: pending.decryptedUrl || pending.localUrl || walrusUrl,
             encrypted: item.encrypted !== false,
             backedUp: true,
+            isOwned: item.isOwned !== false,
+            ownerWallet: item.ownerWallet,
             nonce: item.nonce,
             suiOwner: item.suiOwner,
             accessGrants: item.accessGrants,
@@ -365,7 +371,7 @@ class WalrusGalleryService {
             mimeType: isVideo ? 'video/mp4' : 'image/jpeg',
             timestamp: item.timestamp || Date.now(),
             backupUrls: [],
-            walletAddress: item.walletAddress || walletAddress,
+            walletAddress: item.ownerWallet || item.walletAddress || walletAddress,
             provider: 'walrus',
             cameraId: item.cameraId,
             encrypted: item.encrypted !== false,
@@ -374,6 +380,8 @@ class WalrusGalleryService {
             encryptedSize: item.encryptedSize,
             accessGrants: item.accessGrants,
             suiOwner: item.suiOwner,
+            isOwned: item.isOwned !== false,
+            ownerWallet: item.ownerWallet,
             backedUp: true,
             metadata: { camera: item.cameraId },
           };
@@ -390,7 +398,7 @@ class WalrusGalleryService {
 
   private getCachedItemsForWallet(walletAddress: string): WalrusGalleryItem[] {
     return Array.from(this.mediaCache.values())
-      .filter(item => item.walletAddress === walletAddress)
+      .filter(item => item.walletAddress === walletAddress || (item.isOwned === false))
       .sort((a, b) => b.timestamp - a.timestamp);
   }
 
@@ -437,6 +445,8 @@ class WalrusGalleryService {
         accessGrants: item.accessGrants,
         suiOwner: item.suiOwner,
         walletAddress: item.walletAddress,
+        isOwned: item.walletAddress === walletAddress,
+        ownerWallet: item.walletAddress !== walletAddress ? item.walletAddress : undefined,
         backedUp: true,
       };
 

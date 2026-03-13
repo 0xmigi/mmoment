@@ -96,6 +96,8 @@ export interface TimelineEvent {
   transactionId?: string;
   mediaUrl?: string;
   cameraId?: string;
+  /** Whether this content was shared with session participants (access_grants > 1) */
+  shared?: boolean;
   /** CV activity metadata (only present for cv_activity events) */
   cvActivity?: CVActivityMetadata;
 }

@@ -3393,14 +3393,35 @@ app.post("/api/session/activity", async (req, res) => {
       await saveSessionActivity(activity);
       console.log(`✅ Saved ${eventType} to database for session ${sessionId.slice(0, 8)}...`);
 
+      // Enrich with stored profile if Jetson didn't send displayName
+      let ciDisplayName = displayName;
+      let ciUsername = username;
+      let ciPfpUrl: string | undefined;
+      let ciProvider: string | undefined;
+      if (!displayName) {
+        try {
+          const storedProfile = await getUserProfile(userPubkey);
+          if (storedProfile) {
+            ciDisplayName = storedProfile.displayName;
+            ciUsername = storedProfile.username;
+            ciPfpUrl = storedProfile.profileImage;
+            ciProvider = storedProfile.provider;
+          }
+        } catch (e) {
+          // Non-critical, continue without enrichment
+        }
+      }
+
       // Create timeline event for real-time display
       const timelineEvent: Record<string, any> = {
         id: `activity-${sessionId}-${normalizedTimestamp}`,
         type: eventType,
         user: {
           address: userPubkey,
-          displayName: displayName || undefined,
-          username: username || userPubkey.slice(0, 8) + '...'
+          displayName: ciDisplayName || undefined,
+          username: ciUsername || userPubkey.slice(0, 8) + '...',
+          pfpUrl: ciPfpUrl || undefined,
+          provider: ciProvider || undefined
         },
         timestamp: normalizedTimestamp,
         cameraId: cameraId
@@ -3417,8 +3438,10 @@ app.post("/api/session/activity", async (req, res) => {
         type: eventType,
         user: {
           address: userPubkey,
-          username: username || undefined,
-          displayName: displayName || undefined
+          username: ciUsername || undefined,
+          displayName: ciDisplayName || undefined,
+          pfpUrl: ciPfpUrl || undefined,
+          provider: ciProvider || undefined
         },
         timestamp: normalizedTimestamp,
         cameraId: cameraId
@@ -3479,17 +3502,42 @@ app.post("/api/session/activity", async (req, res) => {
 
     console.log(`✅ Buffered encrypted activity for session ${sessionId.slice(0, 8)}... (type: ${activityType})`);
 
+    // Determine if content was shared (more than 1 access grant = shared with session)
+    const isShared = Array.isArray(accessGrants) && accessGrants.length > 1;
+
+    // Enrich with stored profile if Jetson didn't send displayName
+    let enrichedDisplayName = displayName;
+    let enrichedUsername = username;
+    let enrichedPfpUrl: string | undefined;
+    let enrichedProvider: string | undefined;
+    if (!displayName) {
+      try {
+        const storedProfile = await getUserProfile(userPubkey);
+        if (storedProfile) {
+          enrichedDisplayName = storedProfile.displayName;
+          enrichedUsername = storedProfile.username;
+          enrichedPfpUrl = storedProfile.profileImage;
+          enrichedProvider = storedProfile.provider;
+        }
+      } catch (e) {
+        // Non-critical, continue without enrichment
+      }
+    }
+
     // Create timeline event for real-time display
     const timelineEvent: Record<string, any> = {
       id: `activity-${sessionId}-${normalizedTimestamp}`,
       type: eventType,
       user: {
         address: userPubkey,
-        displayName: displayName || undefined,
-        username: username || userPubkey.slice(0, 8) + '...'
+        displayName: enrichedDisplayName || undefined,
+        username: enrichedUsername || userPubkey.slice(0, 8) + '...',
+        pfpUrl: enrichedPfpUrl || undefined,
+        provider: enrichedProvider || undefined
       },
       timestamp: normalizedTimestamp,
       cameraId: cameraId,
+      shared: isShared,
       // Include encrypted data reference for decryption
       encryptedActivity: {
         encryptedContent,

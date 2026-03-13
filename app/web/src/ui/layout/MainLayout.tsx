@@ -173,15 +173,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
 
           {/* Right side - Profile pill or close button */}
           <div className="flex items-center gap-2">
-            {activeTab === 'account' ? (
-              <button
-                type='button'
-                onClick={() => navigate('/app')}
-                className="p-2 rounded-lg bg-neutral-100 hover:bg-neutral-200 transition-colors"
-              >
-                <X className="w-5 h-5 text-neutral-600" />
-              </button>
-            ) : !primaryWallet?.address ? (
+            {!primaryWallet?.address ? (
               <>
                 <button
                   onClick={() => setShowAuthModal(true)}
@@ -215,7 +207,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
       </div>
 
       {/* Unified Dropdown Menu */}
-      {isLoggedIn && isOpen && activeTab !== 'account' && (
+      {isLoggedIn && isOpen && (
         <div className="fixed inset-0 z-[80]" ref={dropdownRef}>
           {/* Scrim overlay */}
           <div
