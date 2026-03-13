@@ -13,7 +13,8 @@ import {
   CameraActionResponse,
   CameraMediaResponse,
   CameraGestureResponse,
-  CameraSession
+  CameraSession,
+  CaptureOptions
 } from '../camera-interface';
 import { DeviceSignedResponse } from '../camera-types';
 import { hasValidDeviceSignature, logDeviceSignature } from '../device-signature-utils';
@@ -388,7 +389,7 @@ export class JetsonCamera implements ICamera {
     }
   }
 
-  async takePhoto(): Promise<CameraActionResponse<CameraMediaResponse>> {
+  async takePhoto(options?: CaptureOptions): Promise<CameraActionResponse<CameraMediaResponse>> {
     if (!this.currentSession) {
       return {
         success: false,
@@ -398,10 +399,11 @@ export class JetsonCamera implements ICamera {
 
     try {
       this.log('Taking photo with session:', this.currentSession);
-      
+
       const response = await this.makeApiCall('/api/capture', 'POST', {
         wallet_address: this.currentSession.walletAddress,
-        session_id: this.currentSession.sessionId
+        session_id: this.currentSession.sessionId,
+        share_with_session: options?.shareWithSession ?? false
       });
       
       this.log('Capture API response status:', response.status, response.statusText);
@@ -482,7 +484,7 @@ export class JetsonCamera implements ICamera {
     }
   }
 
-  async startVideoRecording(): Promise<CameraActionResponse<CameraMediaResponse>> {
+  async startVideoRecording(options?: CaptureOptions): Promise<CameraActionResponse<CameraMediaResponse>> {
     if (!this.currentSession) {
       return {
         success: false,
@@ -492,7 +494,7 @@ export class JetsonCamera implements ICamera {
 
     try {
       this.log('Starting video recording with session:', this.currentSession);
-      
+
       // Ensure we're still connected by testing the session
       const isConnected = this.isConnected();
       if (!isConnected) {
@@ -505,7 +507,7 @@ export class JetsonCamera implements ICamera {
           };
         }
       }
-      
+
       // Check if already recording and stop if needed
       const currentlyRecording = await this.isCurrentlyRecording();
       if (currentlyRecording) {
@@ -519,12 +521,13 @@ export class JetsonCamera implements ICamera {
           // Continue anyway - might be a stuck state
         }
       }
-      
+
       // Use the standardized /api/record endpoint with action parameter
       const response = await this.makeApiCall('/api/record', 'POST', {
         action: 'start',
         wallet_address: this.currentSession.walletAddress,
-        session_id: this.currentSession.sessionId
+        session_id: this.currentSession.sessionId,
+        share_with_session: options?.shareWithSession ?? false
       });
       
       this.log('Start recording API response status:', response.status, response.statusText);

@@ -1033,8 +1033,10 @@ export function CameraView() {
 
     try {
       // Note: Session is already set during check-in (Phase 3)
+      // Read share preference from localStorage (set in CameraModal)
+      const shareWithSession = localStorage.getItem(`share_with_session_${currentCameraId}`) === 'true';
       // Take photo immediately for instant feedback
-      const photoPromise = unifiedCameraService.takePhoto(currentCameraId);
+      const photoPromise = unifiedCameraService.takePhoto(currentCameraId, { shareWithSession });
 
       // Show toast in parallel - don't block the capture
       updateToast("info", "Taking photo...");
@@ -1198,8 +1200,10 @@ export function CameraView() {
       setIsRecording(true);
       updateToast("info", "Starting video recording...");
 
+      // Read share preference from localStorage (set in CameraModal)
+      const shareWithSession = localStorage.getItem(`share_with_session_${currentCameraId}`) === 'true';
       // Start recording with duration=0 for indefinite recording (until stopped)
-      const recordResponse = await unifiedCameraService.startVideoRecording(currentCameraId);
+      const recordResponse = await unifiedCameraService.startVideoRecording(currentCameraId, { shareWithSession });
 
       if (!recordResponse.success) {
         throw new Error(`Failed to start recording: ${recordResponse.error}`);

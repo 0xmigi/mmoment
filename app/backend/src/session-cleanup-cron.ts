@@ -308,6 +308,66 @@ export function getCleanupCronStatus() {
   };
 }
 
+/**
+ * Build a createUserSessionChain transaction where the cron bot pays rent + tx fees.
+ * The user must still sign to authorize creation of their chain.
+ *
+ * Returns a base64-encoded partially-signed transaction (signed by cron bot only).
+ * Frontend must add the user's signature before submitting.
+ */
+export async function buildSponsoredCreateChainTx(
+  userPubkey: string
+): Promise<{ transaction: string; feePayer: string } | null> {
+  if (!connection || !cronBotKeypair || !program) {
+    console.error('Session Access Key Service not initialized');
+    return null;
+  }
+
+  const userKey = new PublicKey(userPubkey);
+
+  // Derive the UserSessionChain PDA
+  const [userSessionChainPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from('user-session-chain'), userKey.toBuffer()],
+    PROGRAM_ID
+  );
+
+  // Check if chain already exists
+  const existing = await connection.getAccountInfo(userSessionChainPda);
+  if (existing) {
+    console.log(`   ℹ️ User ${userPubkey.slice(0, 8)}... already has a session chain`);
+    return null;
+  }
+
+  // Build the transaction — cron bot is fee_payer, user is the authorizing signer
+  const tx = await program.methods
+    .createUserSessionChain()
+    .accounts({
+      user: userKey,
+      feePayer: cronBotKeypair.publicKey,
+      authority: cronBotKeypair.publicKey,
+      userSessionChain: userSessionChainPda,
+      systemProgram: SystemProgram.programId,
+    })
+    .transaction();
+
+  const { blockhash } = await connection.getLatestBlockhash();
+  tx.recentBlockhash = blockhash;
+  tx.feePayer = cronBotKeypair.publicKey;
+
+  // Partially sign with cron bot (fee payer)
+  tx.partialSign(cronBotKeypair);
+
+  // Serialize with requireAllSignatures=false since user hasn't signed yet
+  const serialized = tx.serialize({ requireAllSignatures: false }).toString('base64');
+
+  console.log(`📝 Built sponsored createUserSessionChain tx for user ${userPubkey.slice(0, 8)}...`);
+
+  return {
+    transaction: serialized,
+    feePayer: cronBotKeypair.publicKey.toString(),
+  };
+}
+
 // For backwards compatibility and manual trigger
 export async function triggerManualCleanup() {
   console.log('🔧 Manual key processing triggered');

@@ -37,7 +37,8 @@ import {
   stopCleanupCron,
   triggerManualCleanup,
   getCleanupCronStatus,
-  queueAccessKeyForUser
+  queueAccessKeyForUser,
+  buildSponsoredCreateChainTx
 } from './session-cleanup-cron';
 
 // Import database module
@@ -3750,6 +3751,44 @@ app.get("/api/session/buffer-stats", async (_req, res) => {
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to get buffer stats'
+    });
+  }
+});
+
+// Build a sponsored createUserSessionChain transaction.
+// Cron bot pays rent + tx fees; user must still sign to authorize.
+// Returns a partially-signed (by cron bot) transaction for the frontend to co-sign.
+app.post("/api/session/build-create-chain-tx", async (req, res) => {
+  try {
+    const { user_pubkey } = req.body;
+
+    if (!user_pubkey) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required field: user_pubkey'
+      });
+    }
+
+    const result = await buildSponsoredCreateChainTx(user_pubkey);
+
+    if (!result) {
+      // Either service not initialized or chain already exists
+      return res.status(409).json({
+        success: false,
+        error: 'Session chain already exists or service not ready'
+      });
+    }
+
+    res.json({
+      success: true,
+      transaction: result.transaction,
+      feePayer: result.feePayer,
+    });
+  } catch (error) {
+    console.error('Failed to build create-chain tx:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to build transaction'
     });
   }
 });

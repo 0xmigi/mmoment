@@ -196,7 +196,7 @@ export class Pi5Camera implements ICamera {
     }
   }
 
-  async takePhoto(): Promise<CameraActionResponse<CameraMediaResponse>> {
+  async takePhoto(_options?: import('../camera-interface').CaptureOptions): Promise<CameraActionResponse<CameraMediaResponse>> {
     if (!this.currentSession) {
       return {
         success: false,
@@ -320,7 +320,7 @@ export class Pi5Camera implements ICamera {
     }
   }
 
-  async startVideoRecording(): Promise<CameraActionResponse<CameraMediaResponse>> {
+  async startVideoRecording(_options?: import('../camera-interface').CaptureOptions): Promise<CameraActionResponse<CameraMediaResponse>> {
     if (!this.currentSession) {
       return {
         success: false,

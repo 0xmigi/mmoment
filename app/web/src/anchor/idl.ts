@@ -98,6 +98,14 @@ export type CameraNetwork = {
         {
           "name": "activityCount",
           "type": "u8"
+        },
+        {
+          "name": "chunkIndex",
+          "type": "u8"
+        },
+        {
+          "name": "totalChunks",
+          "type": "u8"
         }
       ]
     },
@@ -120,6 +128,17 @@ export type CameraNetwork = {
       "accounts": [
         {
           "name": "user",
+          "docs": [
+            "The user who will own this session chain. Must sign to authorize creation."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "feePayer",
+          "docs": [
+            "The fee payer for account rent. Can be the user themselves or a sponsor (e.g. cron bot)."
+          ],
           "writable": true,
           "signer": true
         },
@@ -1107,9 +1126,23 @@ export type CameraNetwork = {
             "name": "accessGrantsBlob",
             "docs": [
               "Flattened access grants blob.",
-              "Format: [num_grants (2 bytes BE)] + for each grant: [grant_len (2 bytes BE)] + [grant_bytes]"
+              "Format: [num_grants (2 bytes LE)] + for each grant: [32 bytes pubkey] + [2 bytes len LE] + [N bytes sealed-box key]"
             ],
             "type": "bytes"
+          },
+          {
+            "name": "chunkIndex",
+            "docs": [
+              "Chunk index within a multi-chunk session write (0 for single-chunk entries)"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "totalChunks",
+            "docs": [
+              "Total number of chunks in this session write (1 for single-chunk entries)"
+            ],
+            "type": "u8"
           }
         ]
       }

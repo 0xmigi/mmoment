@@ -13,7 +13,8 @@ import {
   CameraStreamInfo,
   CameraStatus,
   CameraSession,
-  CameraGestureResponse
+  CameraGestureResponse,
+  CaptureOptions
 } from './camera-interface';
 import { cameraRegistry } from './camera-registry';
 import { CONFIG } from '../core/config';
@@ -274,10 +275,10 @@ export class UnifiedCameraService {
   /**
    * Take a photo
    */
-  public async takePhoto(cameraId: string): Promise<CameraActionResponse<CameraMediaResponse>> {
+  public async takePhoto(cameraId: string, options?: CaptureOptions): Promise<CameraActionResponse<CameraMediaResponse>> {
     try {
       this.log(`Taking photo with camera: ${cameraId}`);
-      
+
       const camera = await this.getCamera(cameraId);
       if (!camera) {
         this.log(`Camera not found for takePhoto: ${cameraId}`);
@@ -288,10 +289,10 @@ export class UnifiedCameraService {
       }
 
       this.log(`Camera instance created successfully: ${camera.cameraType} at ${camera.apiUrl}`);
-      
-      const result = await camera.takePhoto();
+
+      const result = await camera.takePhoto(options);
       this.log(`Photo result for ${cameraId}:`, result.success ? 'SUCCESS' : `FAILED - ${result.error}`);
-      
+
       return result;
     } catch (error) {
       this.log(`Photo error for ${cameraId}:`, error);
@@ -305,10 +306,10 @@ export class UnifiedCameraService {
   /**
    * Start video recording
    */
-  public async startVideoRecording(cameraId: string): Promise<CameraActionResponse<CameraMediaResponse>> {
+  public async startVideoRecording(cameraId: string, options?: CaptureOptions): Promise<CameraActionResponse<CameraMediaResponse>> {
     try {
       this.log(`Starting video recording with camera: ${cameraId}`);
-      
+
       const camera = await this.getCamera(cameraId);
       if (!camera) {
         return {
@@ -317,7 +318,7 @@ export class UnifiedCameraService {
         };
       }
 
-      const result = await camera.startVideoRecording();
+      const result = await camera.startVideoRecording(options);
       this.log(`Start recording result for ${cameraId}:`, result.success ? 'SUCCESS' : 'FAILED');
       
       return result;

@@ -14,7 +14,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useProgram, findUserSessionChainPDA } from '../anchor/setup';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { isSolanaWallet } from '@dynamic-labs/solana';
-import { PublicKey, SystemProgram, Connection } from '@solana/web3.js';
+import { PublicKey, Connection, Transaction } from '@solana/web3.js';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { Program } from '@coral-xyz/anchor';
 import { CONFIG } from '../core/config';
@@ -83,55 +83,57 @@ export async function checkUserHasSessionChain(
 
 /**
  * Create a user's session chain (standalone function).
- * Use this during check-in flow when user doesn't have a chain yet.
+ * Uses a sponsored flow: backend (cron bot) pays rent + tx fees,
+ * user only signs to authorize creation of their chain.
+ *
+ * Flow:
+ * 1. Frontend requests a partially-signed tx from backend (cron bot signs as fee_payer)
+ * 2. User signs the tx (authorizes chain creation)
+ * 3. Frontend submits the fully-signed tx
  *
  * @param userPubkey - User's wallet public key
  * @param wallet - Dynamic wallet object (must be Solana wallet with getSigner)
- * @param program - Anchor program instance
  * @param connection - Solana connection
  * @returns Transaction signature on success, null on failure
  */
 export async function createUserSessionChain(
   userPubkey: PublicKey,
   wallet: any,
-  program: Program<any>,
+  _program: Program<any>,
   connection: Connection
 ): Promise<string | null> {
   try {
-    const [sessionChainPda] = findUserSessionChainPDA(userPubkey);
+    console.log('[SessionChain] Creating session chain (sponsored)...');
+    console.log('[SessionChain] User:', userPubkey.toString());
 
-    // Fetch the authority public key from the backend
-    const authority = await fetchAuthorityPublicKey();
-    if (!authority) {
-      throw new Error('Could not fetch authority public key from backend');
+    // Step 1: Request a sponsored, partially-signed tx from backend
+    const response = await fetch(`${CONFIG.BACKEND_URL}/api/session/build-create-chain-tx`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_pubkey: userPubkey.toString() }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      if (response.status === 409) {
+        // Chain already exists — not an error
+        console.log('[SessionChain] Session chain already exists');
+        return 'already_exists';
+      }
+      throw new Error(errorData.error || `Backend returned ${response.status}`);
     }
 
-    console.log('[SessionChain] Creating session chain...');
-    console.log('[SessionChain] User:', userPubkey.toString());
-    console.log('[SessionChain] Authority:', authority.toString());
+    const { transaction: txBase64 } = await response.json();
 
-    // Build the transaction
-    const tx = await (program.methods as any)
-      .createUserSessionChain()
-      .accounts({
-        user: userPubkey,
-        authority: authority,
-        userSessionChain: sessionChainPda,
-        systemProgram: SystemProgram.programId,
-      })
-      .transaction();
+    // Step 2: Deserialize and have user co-sign
+    const txBuffer = Buffer.from(txBase64, 'base64');
+    const tx = Transaction.from(txBuffer);
 
-    // Get recent blockhash
-    const { blockhash } = await connection.getLatestBlockhash();
-    tx.recentBlockhash = blockhash;
-    tx.feePayer = userPubkey;
-
-    // Sign using Dynamic's getSigner()
     console.log('[SessionChain] Requesting wallet signature...');
     const signer = await wallet.getSigner();
     const signedTx = await signer.signTransaction(tx);
 
-    // Send and confirm
+    // Step 3: Submit the fully-signed tx
     console.log('[SessionChain] Sending transaction...');
     const signature = await connection.sendRawTransaction(signedTx.serialize());
     await connection.confirmTransaction(signature, 'confirmed');

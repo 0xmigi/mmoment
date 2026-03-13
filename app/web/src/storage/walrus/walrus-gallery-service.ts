@@ -290,7 +290,7 @@ class WalrusGalleryService {
   /**
    * Fetch user's files from backend and merge with local cache
    */
-  async getUserFiles(walletAddress: string, includeShared: boolean = true): Promise<WalrusGalleryItem[]> {
+  async getUserFiles(walletAddress: string, includeShared: boolean = false): Promise<WalrusGalleryItem[]> {
     try {
       console.log(`📦 [Walrus] Fetching gallery for wallet: ${walletAddress.slice(0, 8)}...`);
 

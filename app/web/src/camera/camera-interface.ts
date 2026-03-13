@@ -78,6 +78,11 @@ export interface CameraSession {
   isActive: boolean;
 }
 
+export interface CaptureOptions {
+  /** When true, content is shared with all session participants. Default: false (private). */
+  shareWithSession?: boolean;
+}
+
 /**
  * Base Camera Interface
  * All camera implementations must implement this interface
@@ -101,8 +106,8 @@ export interface ICamera {
   getStatus(): Promise<CameraActionResponse<CameraStatus>>;
   
   // Media capture
-  takePhoto(): Promise<CameraActionResponse<CameraMediaResponse>>;
-  startVideoRecording(): Promise<CameraActionResponse<CameraMediaResponse>>;
+  takePhoto(options?: CaptureOptions): Promise<CameraActionResponse<CameraMediaResponse>>;
+  startVideoRecording(options?: CaptureOptions): Promise<CameraActionResponse<CameraMediaResponse>>;
   stopVideoRecording(): Promise<CameraActionResponse<CameraMediaResponse>>;
   getRecordedVideo(filename: string): Promise<CameraActionResponse<CameraMediaResponse>>;
   getMostRecentVideo?(): Promise<CameraActionResponse<CameraMediaResponse>>;

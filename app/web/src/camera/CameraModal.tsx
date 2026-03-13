@@ -50,6 +50,9 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
   const [cvOverlayEnabled, setCvOverlayEnabled] = useState(false);
   const [configLoading, setConfigLoading] = useState(false);
 
+  // Share with session toggle — when ON, photos/videos are visible to all session participants
+  const [shareWithSession, setShareWithSession] = useState(false);
+
   // State for active users analytics
   const [activeUsersCount, setActiveUsersCount] = useState<number>(0);
   const [loadingActiveUsers, setLoadingActiveUsers] = useState(false);
@@ -124,6 +127,10 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
 
             setCvOverlayEnabled(storedCvOverlay);
             console.log('[CameraModal] Loaded CV overlay state:', storedCvOverlay);
+
+            // Load share-with-session state
+            const storedShare = localStorage.getItem(`share_with_session_${camera.id}`) === 'true';
+            setShareWithSession(storedShare);
 
             console.log('[CameraModal] Computer vision configuration loaded successfully');
           } catch (error) {
@@ -272,6 +279,14 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
     } finally {
       setConfigLoading(false);
     }
+  };
+
+  // Handle share-with-session toggle
+  const handleShareToggle = () => {
+    const newState = !shareWithSession;
+    setShareWithSession(newState);
+    localStorage.setItem(`share_with_session_${camera.id}`, newState.toString());
+    console.log('[CameraModal] Share with session toggled to:', newState);
   };
 
   // Check-in handler using unified context (Phase 3 Privacy Architecture)
@@ -549,6 +564,28 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                         <span
                           className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                             cvOverlayEnabled ? 'translate-x-5' : 'translate-x-0.5'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {/* Share with Session Toggle */}
+                    <div className="flex items-center justify-between py-1 mt-2">
+                      <div className="flex-1">
+                        <div className="text-sm font-medium">Share with Session</div>
+                        <div className="text-xs text-gray-500">Photos and videos you capture will appear in other participants' galleries</div>
+                      </div>
+                      <button
+                        onClick={handleShareToggle}
+                        className={`ml-3 relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${
+                          shareWithSession
+                            ? 'bg-primary hover:bg-primary-hover'
+                            : 'bg-gray-200 hover:bg-gray-300'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                            shareWithSession ? 'translate-x-5' : 'translate-x-0.5'
                           }`}
                         />
                       </button>

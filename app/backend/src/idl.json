@@ -118,6 +118,17 @@
       "accounts": [
         {
           "name": "user",
+          "docs": [
+            "The user who will own this session chain. Must sign to authorize creation."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "fee_payer",
+          "docs": [
+            "The fee payer for account rent. Can be the user themselves or a sponsor (e.g. cron bot)."
+          ],
           "writable": true,
           "signer": true
         },
