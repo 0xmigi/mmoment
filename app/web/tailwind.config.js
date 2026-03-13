@@ -48,10 +48,21 @@ export default {
           '40%':  { transform: 'scaleY(0.12)', backgroundColor: '#D97706' },
           '100%': { transform: 'scaleY(1)', backgroundColor: '#FFFFFF' },
         },
+        'photo-shutter': {
+          '0%':   { transform: 'scale(1)', opacity: '1' },
+          '30%':  { transform: 'scale(0.85)', opacity: '0.6' },
+          '100%': { transform: 'scale(1)', opacity: '1' },
+        },
+        'record-pulse': {
+          '0%, 100%': { opacity: '1' },
+          '50%':      { opacity: '0.7' },
+        },
       },
       animation: {
         'slide-up': 'slideUp 0.3s ease-out',
         'blink': 'blink 0.3s ease-in-out',
+        'photo-shutter': 'photo-shutter 0.3s ease-in-out',
+        'record-pulse': 'record-pulse 1.2s ease-in-out infinite',
       },
       colors: {
         // ============================================
