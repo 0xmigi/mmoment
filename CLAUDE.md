@@ -81,14 +81,14 @@ The system uses a **three-container Docker architecture** on NVIDIA Jetson devic
 
 ### 2. Biometric Security Container (Port 5003)
 - AES-256 encryption of facial embeddings
-- NFT package generation for Solana
+- Encrypted embedding package generation for on-chain storage
 - Secure data purging with cryptographic deletion
 - No persistent storage of raw biometric data
 
 ### 3. Solana Middleware Container (Port 5001)
 - Blockchain integration for Solana devnet
 - Wallet session management
-- Face NFT minting with encrypted embeddings
+- On-chain identity verification with encrypted embeddings
 - Transaction building for frontend consumption
 
 ### Web Application Architecture

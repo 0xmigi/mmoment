@@ -77,7 +77,7 @@ export function CameraRegisterPage() {
           <div className="space-y-3">
             <button
               onClick={() => navigate(`/app/camera/${registeredCamera.device.deviceId}`)}
-              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700"
+              className="w-full bg-primary text-white py-2 px-4 rounded-md hover:bg-primary-hover"
             >
               Go to Camera View
             </button>
@@ -100,8 +100,8 @@ export function CameraRegisterPage() {
             </button>
           </div>
 
-          <div className="mt-6 p-3 bg-blue-50 rounded-lg">
-            <p className="text-xs text-blue-800">
+          <div className="mt-6 p-3 bg-primary-light rounded-lg">
+            <p className="text-xs text-primary">
               Your camera is now configuring its public API endpoint. 
               It will be available for remote access shortly.
             </p>
@@ -170,18 +170,18 @@ export function CameraRegisterPage() {
 
         {/* Security Notice */}
         <div className="mt-12 max-w-2xl mx-auto">
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="bg-primary-light border border-primary-light rounded-lg p-4">
             <div className="flex items-start">
               <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-blue-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="h-5 w-5 text-primary mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                 </svg>
               </div>
               <div className="ml-3">
-                <h3 className="text-sm font-medium text-blue-800">
+                <h3 className="text-sm font-medium text-primary">
                   Local Network Security
                 </h3>
-                <div className="mt-1 text-sm text-blue-700">
+                <div className="mt-1 text-sm text-primary">
                   <p>
                     • Device setup requires local network access for security<br/>
                     • Your camera will only work on your home network initially<br/>

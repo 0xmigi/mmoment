@@ -23,6 +23,7 @@ export interface CameraStatus {
   lastSeen: number;
   owner?: string;
   error?: string;
+  activeSessionCount?: number;
 }
 
 export interface CameraStreamInfo {
@@ -48,6 +49,19 @@ export interface CameraMediaResponse {
   size?: number;
   width?: number;
   height?: number;
+  // Upload tracking from Jetson's SQLite queue
+  storage_upload?: {
+    job_id?: number;
+    local_url?: string;
+    upload_status?: string;
+    storage_provider?: string;
+    device_signature?: string;
+  };
+  pipe_upload?: {
+    job_id?: number;
+    local_url?: string;
+    upload_status?: string;
+  };
 }
 
 export interface CameraGestureResponse {
@@ -62,6 +76,11 @@ export interface CameraSession {
   cameraPda: string;
   timestamp: number;
   isActive: boolean;
+}
+
+export interface CaptureOptions {
+  /** When true, content is shared with all session participants. Default: false (private). */
+  shareWithSession?: boolean;
 }
 
 /**
@@ -87,8 +106,8 @@ export interface ICamera {
   getStatus(): Promise<CameraActionResponse<CameraStatus>>;
   
   // Media capture
-  takePhoto(): Promise<CameraActionResponse<CameraMediaResponse>>;
-  startVideoRecording(): Promise<CameraActionResponse<CameraMediaResponse>>;
+  takePhoto(options?: CaptureOptions): Promise<CameraActionResponse<CameraMediaResponse>>;
+  startVideoRecording(options?: CaptureOptions): Promise<CameraActionResponse<CameraMediaResponse>>;
   stopVideoRecording(): Promise<CameraActionResponse<CameraMediaResponse>>;
   getRecordedVideo(filename: string): Promise<CameraActionResponse<CameraMediaResponse>>;
   getMostRecentVideo?(): Promise<CameraActionResponse<CameraMediaResponse>>;
@@ -105,6 +124,7 @@ export interface ICamera {
   toggleGestureControls?(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>>;
   toggleFaceVisualization?(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>>;
   toggleGestureVisualization?(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>>;
+  togglePoseVisualization?(enabled: boolean): Promise<CameraActionResponse<{ enabled: boolean }>>;
   checkForGestureTrigger?(): Promise<{
     shouldCapture: boolean;
     gestureType: 'photo' | 'video' | null;
@@ -119,10 +139,29 @@ export interface ICamera {
   // Face enrollment transaction flow (two-phase for user wallet payment)
   prepareFaceEnrollmentTransaction?(walletAddress: string): Promise<CameraActionResponse<{ transactionBuffer: string; faceId: string; metadata?: any }>>;
   confirmFaceEnrollmentTransaction?(walletAddress: string, confirmationData: { signedTransaction: string; faceId: string; biometricSessionId?: string }): Promise<CameraActionResponse<{ enrolled: boolean; faceId: string; transactionId?: string }>>;
-  
+
+  // Face recognition
+  recognizeFaces?(): Promise<CameraActionResponse<{ recognized_data: Record<string, any> }>>;
+
+  // CV Apps (Jetson-specific)
+  loadApp?(appName: string): Promise<CameraActionResponse<{ message: string }>>;
+  activateApp?(appName: string): Promise<CameraActionResponse<{ active_app: string }>>;
+  deactivateApp?(): Promise<CameraActionResponse>;
+  getAppStatus?(): Promise<CameraActionResponse<{ active_app: string | null; loaded_apps: string[]; state: any }>>;
+
+  // Competition support (for CompetitionApp types)
+  startCompetition?(competitors: Array<{ wallet_address: string; display_name: string }>, durationLimit?: number): Promise<CameraActionResponse<{ message: string }>>;
+  endCompetition?(competition?: {
+    mode: string;
+    escrow_pda?: string;
+    stake_amount_sol?: number;
+    target_reps?: number;
+  }): Promise<CameraActionResponse<{ result: any }>>;
+
   // Session management
   getCurrentSession(): CameraSession | null;
-  
+  setSession?(session: CameraSession): void;
+
   // Recording state
   isCurrentlyRecording(): Promise<boolean> | boolean;
 }

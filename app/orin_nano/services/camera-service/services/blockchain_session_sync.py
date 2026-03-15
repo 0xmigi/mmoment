@@ -1,9 +1,16 @@
 """
 Blockchain Session Sync Service
 
-Automatically syncs on-chain check-in/check-out state with camera sessions.
-Enables visual effects for users who are checked in via the blockchain.
-The camera becomes a stateless PDA validator.
+Phase 3 Privacy Architecture:
+- Check-ins are now fully OFF-CHAIN (no blockchain polling for sessions)
+- Still loads recognition tokens from blockchain when users check in
+- Provides trigger_checkin() and trigger_checkout() for the new flow
+- Maintains face-based auto-checkout monitoring
+
+Key methods:
+- trigger_checkin(wallet, profile): Load recognition token, enable face boxes
+- trigger_checkout(wallet): Clean up face data, disable boxes if no users
+- update_user_seen(wallet): Track when user's face is seen for auto-checkout
 """
 
 import time
@@ -13,35 +20,59 @@ import requests
 import os
 from typing import Dict, Set, Optional
 
+from .identity_store import get_identity_store
+from .native_identity_service import get_native_identity_service
+
 logger = logging.getLogger(__name__)
 
 class BlockchainSessionSync:
     """
-    Service that syncs blockchain check-in state with camera sessions.
-    Automatically enables/disables visual effects based on on-chain state.
+    Service that manages camera sessions and recognition token fetching.
+
+    Phase 3 Privacy Architecture:
+    - Check-ins are fully OFF-CHAIN (via /api/checkin with Ed25519 signature)
+    - Fetches recognition tokens (encrypted face embeddings) from blockchain
+    - Monitors for face-based auto-checkout
     """
-    
+
     def __init__(self, solana_middleware_url: str = None):
         # Camera service uses host networking, so connect via localhost
         self.solana_middleware_url = solana_middleware_url or os.environ.get('SOLANA_MIDDLEWARE_URL', 'http://localhost:5001')
         logger.info(f"🔧 BlockchainSessionSync initialized with URL: {self.solana_middleware_url}")
         self.is_running = False
         self.sync_thread = None
-        self.sync_interval = 10  # Check blockchain state every 10 seconds for faster recognition token activation
+        self.sync_interval = 10  # Check for face-based auto-checkout every 10 seconds
         self.stop_event = threading.Event()
-        
-        # Track current state
-        self.checked_in_wallets: Set[str] = set()
-        self.last_sync = 0
 
-        # ✅ NEW: Track when users were last seen in frame (for face-based auto-checkout)
+        # Track current state (populated via trigger_checkin/trigger_checkout API calls)
+        self.checked_in_wallets: Set[str] = set()
+
+        # Track when users were last seen in frame (for face-based auto-checkout)
         self.last_seen_at: Dict[str, float] = {}  # wallet_address -> timestamp
-        self.auto_checkout_threshold = 1800  # 30 minutes in seconds
+
+        # Auto-checkout thresholds (configurable via env for testing)
+        # Use FACE_TIMEOUT_SECONDS and ACTIVITY_TIMEOUT_SECONDS to override defaults
+        self.face_timeout_threshold = int(os.environ.get('FACE_TIMEOUT_SECONDS', 1800))    # Default: 30 minutes
+        self.activity_timeout_threshold = int(os.environ.get('ACTIVITY_TIMEOUT_SECONDS', 3600))  # Default: 1 hour
+        logger.info(f"[AUTO-CHECKOUT] Thresholds: face={self.face_timeout_threshold}s ({self.face_timeout_threshold/60:.1f}min), activity={self.activity_timeout_threshold}s ({self.activity_timeout_threshold/60:.1f}min)")
+        # Legacy alias for backwards compatibility
+        self.auto_checkout_threshold = self.face_timeout_threshold
+
+        # Track when users checked in via API
+        self._api_checkin_times: Dict[str, float] = {}  # wallet_address -> timestamp
+        self._api_checkin_grace_period = 30  # seconds grace period
+
+        # Track when checkout activity was already buffered via API (to prevent duplicate checkout events)
+        self._api_checkout_buffered: Dict[str, float] = {}  # wallet_address -> timestamp
+        self._api_checkout_grace_period = 60  # seconds to skip re-buffering checkout activity
 
         # Services (will be injected)
         self.session_service = None
         self.face_service = None
-        
+
+        # Get reference to unified IdentityStore
+        self.identity_store = get_identity_store()
+
     def set_services(self, session_service, face_service):
         """Inject required services"""
         self.session_service = session_service
@@ -78,155 +109,40 @@ class BlockchainSessionSync:
         logger.info("🔗 Blockchain session sync stopped")
         
     def _sync_loop(self):
-        """Main sync loop that checks blockchain state and monitors face-based auto-checkout"""
+        """Main sync loop that monitors both face and activity-based auto-checkout"""
         while self.is_running and not self.stop_event.is_set():
             try:
-                self._sync_blockchain_state()
-                # ✅ NEW: Monitor for face-based auto-checkout
+                # Face-based timeout (30 min) - for users WITH face enrollment
                 self._monitor_face_based_checkout()
+
+                # Activity-based timeout (1 hour) - for users WITHOUT face enrollment
+                self._monitor_activity_based_checkout()
+
                 time.sleep(self.sync_interval)
             except Exception as e:
-                logger.error(f"Error in blockchain sync loop: {e}")
+                logger.error(f"Error in sync loop: {e}")
                 time.sleep(self.sync_interval)
                 
-    def _sync_blockchain_state(self):
-        """Sync current blockchain state with camera sessions"""
-        try:
-            # Get current checked-in wallets from blockchain via Solana middleware
-            checked_in_wallets = self._get_checked_in_wallets()
-
-            if checked_in_wallets is None:
-                return  # Error getting blockchain state
-
-            # Compare with current state
-            newly_checked_in = checked_in_wallets - self.checked_in_wallets
-            newly_checked_out = self.checked_in_wallets - checked_in_wallets
-
-            # Handle new check-ins
-            for wallet in newly_checked_in:
-                self._handle_check_in(wallet)
-
-            # Handle check-outs
-            for wallet in newly_checked_out:
-                self._handle_check_out(wallet)
-
-            # ✅ FIX: On first sync (startup/restart), fetch recognition tokens for all already-checked-in users
-            # This ensures users who were already checked-in before camera restart get their tokens loaded
-            is_first_sync = (self.last_sync == 0)
-            if is_first_sync and len(checked_in_wallets) > 0:
-                logger.info(f"🔄 First sync detected - fetching recognition tokens for {len(checked_in_wallets)} already checked-in users")
-                for wallet in checked_in_wallets:
-                    # Only fetch token, don't re-create session (already handled by newly_checked_in)
-                    if wallet not in newly_checked_in:
-                        logger.info(f"🔐 Fetching recognition token for existing user: {wallet[:8]}...")
-                        self._fetch_and_decrypt_recognition_token(wallet)
-                        # Initialize last_seen tracking
-                        self.last_seen_at[wallet] = time.time()
-
-            # Update current state
-            self.checked_in_wallets = checked_in_wallets
-            self.last_sync = time.time()
-
-            # Log status periodically
-            if len(checked_in_wallets) > 0:
-                logger.debug(f"🔗 {len(checked_in_wallets)} wallets checked in on-chain: {list(checked_in_wallets)}")
-                
-        except Exception as e:
-            logger.error(f"Error syncing blockchain state: {e}")
-            
-    def _get_checked_in_wallets(self) -> Optional[Set[str]]:
-        """Get list of currently checked-in wallets from blockchain"""
-        try:
-            # Query the Solana middleware for checked-in users
-            response = requests.get(
-                f"{self.solana_middleware_url}/api/blockchain/checked-in-users",
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('success'):
-                    checked_in_users = data.get('checked_in_users', [])
-                    
-                    # Extract wallet addresses from the response
-                    checked_in_wallets = set()
-                    for user_info in checked_in_users:
-                        wallet_address = user_info.get('user')
-                        if wallet_address:
-                            checked_in_wallets.add(wallet_address)
-            
-                    logger.info(f"🔗 Blockchain sync: Found {len(checked_in_wallets)} checked-in wallets from blockchain")
-                    if len(checked_in_wallets) > 0:
-                        logger.info(f"🔗 Checked-in wallets: {list(checked_in_wallets)}")
-                    
-                    return checked_in_wallets
-                else:
-                    error_msg = data.get('error', 'Unknown error from Solana middleware')
-                    logger.error(f"🔗 Solana middleware returned error: {error_msg}")
-                    return set()  # Return empty set on error, no fallbacks
-                    
-            else:
-                logger.error(f"🔗 Failed to get checked-in users from Solana middleware: HTTP {response.status_code}")
-                return set()  # Return empty set on error, no fallbacks
-                
-        except requests.exceptions.RequestException as e:
-            logger.error(f"🔗 Network error connecting to Solana middleware: {e}")
-            return set()  # Return empty set on error, no fallbacks
-        except Exception as e:
-            logger.error(f"Error getting checked-in wallets from blockchain: {e}")
-            return set()  # Return empty set on error, no fallbacks
-            
-    def _get_hardcoded_wallets(self) -> Set[str]:
-        """REMOVED - No more hardcoded fallbacks"""
-        return set()
-            
-    def _handle_check_in(self, wallet_address: str):
-        """Handle a wallet checking in on-chain"""
-        try:
-            logger.info(f"🎉 Wallet {wallet_address} checked in on-chain - enabling camera session")
-
-            # Create camera session automatically
-            if self.session_service:
-                session_info = self.session_service.create_session(wallet_address)
-                logger.info(f"✅ Created camera session {session_info['session_id']} for {wallet_address}")
-
-            # Enable face boxes automatically
-            if self.face_service:
-                self.face_service.enable_boxes(True)
-                logger.info(f"✅ Face boxes enabled for checked-in user: {wallet_address}")
-
-            # ✅ NEW: Fetch and decrypt recognition token from on-chain
-            self._fetch_and_decrypt_recognition_token(wallet_address)
-
-            # ✅ NEW: Initialize last_seen tracking for face-based auto-checkout
-            self.last_seen_at[wallet_address] = time.time()
-
-            # Log for monitoring
-            logger.info(f"📹 Camera now active for user: {wallet_address}")
-
-        except Exception as e:
-            logger.error(f"Error handling check-in for {wallet_address}: {e}")
-            
     def _handle_check_out(self, wallet_address: str):
-        """Handle a wallet checking out on-chain"""
+        """Handle wallet checkout - clean up session and identity data"""
         try:
-            logger.info(f"👋 Wallet {wallet_address} checked out on-chain - disabling camera session")
+            # Check if this wallet just checked in via API - prevent race condition
+            api_checkin_time = self._api_checkin_times.get(wallet_address, 0)
+            if time.time() - api_checkin_time < self._api_checkin_grace_period:
+                logger.info(f"⏳ Ignoring checkout for {wallet_address[:8]}... (within {self._api_checkin_grace_period}s grace period after API check-in)")
+                return
 
-            # CRITICAL: Clear facial embedding data for security
-            if self.face_service:
-                try:
-                    # Remove this user's facial embedding from memory and disk
-                    if hasattr(self.face_service, 'remove_face_embedding'):
-                        success = self.face_service.remove_face_embedding(wallet_address)
-                        if success:
-                            logger.info(f"🗑️  Cleared facial embedding for {wallet_address[:8]}...")
-                        else:
-                            logger.warning(f"⚠️  Failed to clear facial embedding for {wallet_address[:8]}...")
-                    else:
-                        logger.warning("⚠️  Face service doesn't support individual face removal")
+            logger.info(f"👋 Wallet {wallet_address} checked out - disabling camera session")
 
-                except Exception as face_error:
-                    logger.error(f"❌ Error clearing facial data for {wallet_address}: {face_error}")
+            # Clear API check-in time tracking
+            self._api_checkin_times.pop(wallet_address, None)
+
+            # CRITICAL: Clear ALL identity data atomically via IdentityStore
+            stats = self.identity_store.check_out(wallet_address)
+            if stats:
+                logger.info(f"✅ Checkout complete for {wallet_address[:8]}... (duration: {stats['duration']:.1f}s)")
+            else:
+                logger.warning(f"⚠️  User {wallet_address[:8]}... was not in IdentityStore")
 
             # End camera session automatically
             if self.session_service:
@@ -234,6 +150,35 @@ class BlockchainSessionSync:
                 session = self.session_service.get_session_by_wallet(wallet_address)
                 if session:
                     session_id = session['session_id']
+
+                    # Buffer CHECK_OUT activity BEFORE ending the session
+                    # BUT skip if already buffered via API (prevents duplicate checkout events)
+                    api_checkout_time = self._api_checkout_buffered.get(wallet_address, 0)
+                    if time.time() - api_checkout_time < self._api_checkout_grace_period:
+                        logger.info(f"⏭️  Skipping checkout activity buffer for {wallet_address[:8]}... (already buffered via API)")
+                        # Clean up the tracking
+                        self._api_checkout_buffered.pop(wallet_address, None)
+                    else:
+                        # This creates an encrypted activity for the privacy-preserving timeline
+                        try:
+                            from services.timeline_activity_service import (
+                                get_timeline_activity_service,
+                            )
+
+                            timeline_service = get_timeline_activity_service()
+                            duration_seconds = stats.get('duration') if stats else None
+                            timeline_service.buffer_checkout_activity(
+                                wallet_address=wallet_address,
+                                session_id=session_id,
+                                duration_seconds=duration_seconds,
+                                metadata={
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                            )
+                        except Exception as e:
+                            # Non-fatal - checkout continues even if activity buffering fails
+                            logger.warning(f"⚠️  Failed to buffer check-out activity: {e}")
+
                     success = self.session_service.end_session(session_id, wallet_address)
                     if success:
                         logger.info(f"✅ Ended camera session for {wallet_address}")
@@ -266,10 +211,14 @@ class BlockchainSessionSync:
         except Exception as e:
             logger.error(f"Error handling check-out for {wallet_address}: {e}")
 
-    def _fetch_and_decrypt_recognition_token(self, wallet_address: str):
+    def _fetch_and_decrypt_recognition_token(self, wallet_address: str, profile: dict = None):
         """
         Fetch the user's recognition token (encrypted facial embedding) from on-chain
         and decrypt it for local recognition use.
+
+        Args:
+            wallet_address: User's wallet address
+            profile: Optional profile dict with display_name, username (passed from /api/checkin)
         """
         try:
             logger.info(f"🔐 Fetching recognition token for {wallet_address} from blockchain...")
@@ -284,12 +233,20 @@ class BlockchainSessionSync:
             if response.status_code != 200:
                 logger.warning(f"⚠️  No recognition token found on-chain for {wallet_address} (HTTP {response.status_code})")
                 logger.info(f"ℹ️  User can still use camera without face recognition")
+                # Still store the profile so display_name is preserved for when they enroll
+                if profile and (profile.get('display_name') or profile.get('username')):
+                    self.identity_store.check_in(wallet_address, face_embedding=None, profile=profile)
+                    logger.info(f"✅ Stored profile for {wallet_address[:8]}... (display_name={profile.get('display_name')})")
                 return
 
             token_data = response.json()
             if not token_data.get('success'):
                 logger.warning(f"⚠️  No recognition token found for {wallet_address}: {token_data.get('error')}")
                 logger.info(f"ℹ️  User can still use camera without face recognition")
+                # Still store the profile so display_name is preserved for when they enroll
+                if profile and (profile.get('display_name') or profile.get('username')):
+                    self.identity_store.check_in(wallet_address, face_embedding=None, profile=profile)
+                    logger.info(f"✅ Stored profile for {wallet_address[:8]}... (display_name={profile.get('display_name')})")
                 return
 
             encrypted_token_package = token_data.get('token_package')
@@ -347,39 +304,31 @@ class BlockchainSessionSync:
 
             logger.info(f"✅ Successfully decrypted recognition token for {wallet_address}, embedding size: {len(embedding)}")
 
-            # Step 3: Store the embedding locally for recognition
+            # Step 3: Store the embedding via IdentityStore (single source of truth)
             import numpy as np
             embedding_array = np.array(embedding, dtype=np.float32)
 
-            if self.face_service:
-                with self.face_service._faces_lock:
-                    self.face_service._face_embeddings[wallet_address] = embedding_array
+            # ALWAYS preserve existing profile data if not provided in this call
+            existing_identity = self.identity_store.get_identity(wallet_address)
+            if existing_identity:
+                # Merge: use passed values if present, otherwise keep existing
+                if not profile:
+                    profile = {}
+                profile = {
+                    'display_name': profile.get('display_name') or existing_identity.display_name,
+                    'username': profile.get('username') or existing_identity.username
+                }
+                logger.info(f"🔍 [DEBUG] Merged profile (preserving existing): {profile}")
+            elif not profile:
+                profile = {}
 
-                    # ✅ FIX: Use existing display name if available (from unified check-in), don't overwrite!
-                    # Only set fallback wallet address if no profile was provided
-                    if wallet_address not in self.face_service._face_names:
-                        # No profile set yet - use get_user_display_name helper which checks user_profiles
-                        display_name = self.face_service.get_user_display_name(wallet_address)
-                        self.face_service._face_names[wallet_address] = display_name
-                        logger.info(f"📝 Set display name for {wallet_address[:8]}...: {display_name}")
-                    else:
-                        existing_name = self.face_service._face_names[wallet_address]
-                        logger.info(f"✓ Keeping existing display name for {wallet_address[:8]}...: {existing_name}")
+            logger.info(f"🔍 [DEBUG] check_in profile: {profile}")
 
-                    self.face_service._face_metadata[wallet_address] = {
-                        'source': 'on_chain_recognition_token',
-                        'timestamp': int(time.time()),
-                        'decrypted_on_check_in': True
-                    }
+            # Check user in via IdentityStore with profile
+            identity = self.identity_store.check_in(wallet_address, embedding_array, profile)
 
-                # Save to disk for persistence
-                self.face_service.save_face_embedding(wallet_address, embedding_array, {
-                    'source': 'on_chain_recognition_token',
-                    'timestamp': int(time.time())
-                })
-
-                final_display_name = self.face_service._face_names.get(wallet_address, wallet_address[:8])
-                logger.info(f"✅ Recognition token activated for {wallet_address[:8]}... ({final_display_name}) - face recognition enabled!")
+            logger.info(f"✅ Recognition token activated for {wallet_address[:8]}... ({identity.get_display_name()}) - face recognition enabled!")
+            logger.info(f"🔍 [DEBUG] Identity display_name={identity.display_name}, username={identity.username}")
 
             # Clean up biometric session after successful decryption
             requests.post(
@@ -409,82 +358,232 @@ class BlockchainSessionSync:
         If a user hasn't been seen in frame for 30 minutes, auto check them out.
         """
         try:
-            if not self.face_service:
-                return  # Can't monitor without face service
-
+            # Note: We use identity_store to check for face embeddings, not face_service
             now = time.time()
 
             for wallet_address in list(self.checked_in_wallets):
                 # Only auto-checkout users who have a local face embedding
                 # (users with recognition tokens)
                 if not self._has_local_face_embedding(wallet_address):
-                    continue  # Skip, will rely on on-chain timeout
+                    continue  # Skip users without recognition tokens
 
                 last_seen = self.last_seen_at.get(wallet_address, now)
                 time_not_seen = now - last_seen
 
-                # Check if user hasn't been seen for the threshold (30 minutes = 1800 seconds)
-                if time_not_seen > self.auto_checkout_threshold:
-                    logger.info(f"👋 User {wallet_address[:8]}... not seen for {int(time_not_seen/60)} minutes - initiating auto check-out")
-                    self._send_checkout_transaction(wallet_address)
+                # Check if user hasn't been seen for the threshold (30 minutes)
+                if time_not_seen > self.face_timeout_threshold:
+                    logger.info(f"[AUTO-CHECKOUT] User {wallet_address[:8]}... not seen for "
+                               f"{int(time_not_seen/60)} minutes - initiating face timeout checkout")
+                    self._send_checkout_transaction(wallet_address, reason="face_timeout")
 
         except Exception as e:
             logger.error(f"❌ Error monitoring face-based checkout: {e}")
 
     def _has_local_face_embedding(self, wallet_address: str) -> bool:
         """Check if a user has a face embedding stored locally"""
-        if not self.face_service:
-            return False
+        # Check IdentityStore (unified storage for all identities)
+        identity = self.identity_store.get_identity(wallet_address)
+        if identity and identity.face_embedding is not None:
+            return True
 
-        return wallet_address in self.face_service._face_embeddings
+        return False
 
-    def _send_checkout_transaction(self, wallet_address: str):
+    def _monitor_activity_based_checkout(self):
         """
-        Send a check-out transaction to the blockchain for a user.
-        This is called when auto-checkout is triggered.
+        Monitor users WITHOUT face embeddings for activity-based auto-checkout.
+        If no activity (photos, videos, etc.) for 1 hour, auto check them out.
+
+        This complements _monitor_face_based_checkout() which handles users WITH
+        face embeddings using face presence detection.
         """
         try:
-            # For now, just call the existing check-out handler
-            # The actual blockchain transaction is handled by the frontend
-            # But we can still clean up the local session
-            self._handle_check_out(wallet_address)
+            if not self.session_service:
+                return  # Can't monitor without session service
 
-            # TODO: In the future, we might want to send an actual blockchain transaction here
-            # This would require the Jetson to have a wallet/keypair to sign transactions
-            # For now, rely on the 2-hour on-chain timeout as a fallback
+            now = time.time()
+
+            for wallet_address in list(self.checked_in_wallets):
+                # Skip users WITH face embeddings - they're handled by face timeout
+                if self._has_local_face_embedding(wallet_address):
+                    continue
+
+                # Get session to check last activity time
+                session = self.session_service.get_session_object_by_wallet(wallet_address)
+                if not session:
+                    continue
+
+                # Check how long since last activity (photo, video, etc.)
+                inactivity_seconds = now - session.last_active
+
+                if inactivity_seconds > self.activity_timeout_threshold:
+                    logger.info(f"[AUTO-CHECKOUT] User {wallet_address[:8]}... inactive for "
+                               f"{int(inactivity_seconds/60)} minutes (no face enrollment) - initiating checkout")
+                    self._send_checkout_transaction(wallet_address, reason="inactivity")
 
         except Exception as e:
-            logger.error(f"❌ Error sending checkout transaction for {wallet_address}: {e}")
+            logger.error(f"[AUTO-CHECKOUT] Error monitoring activity-based checkout: {e}")
 
-    def force_sync(self):
-        """Force an immediate sync with blockchain state"""
-        logger.info("🔄 Force syncing blockchain state...")
-        self._sync_blockchain_state()
-        
+    def _send_checkout_transaction(self, wallet_address: str, reason: str = "face_timeout"):
+        """
+        Trigger full auto-checkout with on-chain publishing.
+        Uses the shared checkout function for consistent behavior.
+
+        Args:
+            wallet_address: User's wallet address
+            reason: Auto-checkout reason ("face_timeout", "inactivity", "session_expired")
+        """
+        try:
+            logger.info(f"[AUTO-CHECKOUT] Initiating for {wallet_address[:8]}... (reason: {reason})")
+
+            from services.checkout_service import execute_full_checkout
+
+            result = execute_full_checkout(
+                wallet_address=wallet_address,
+                session_service=self.session_service,
+                auto_checkout=True,
+                auto_checkout_reason=reason
+            )
+
+            if result.get("success"):
+                tx = result.get('timeline_tx')
+                tx_display = f"{tx[:16]}..." if tx else "None"
+                logger.info(f"[AUTO-CHECKOUT] Complete for {wallet_address[:8]}...: "
+                           f"tx={tx_display}, activities={result.get('activities_committed', 0)}, "
+                           f"key_sent={result.get('access_key_sent', False)}")
+            else:
+                logger.error(f"[AUTO-CHECKOUT] Failed for {wallet_address[:8]}...: {result.get('error')}")
+
+        except Exception as e:
+            logger.error(f"[AUTO-CHECKOUT] Error for {wallet_address}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+    def trigger_checkin(self, wallet_address: str, profile: dict = None):
+        """
+        Trigger check-in for a specific wallet with profile data.
+        Called directly by /api/checkin endpoint to ensure profile is passed through.
+
+        Args:
+            wallet_address: User's wallet address
+            profile: Profile dict with display_name, username, etc.
+        """
+        logger.info(f"🎯 Triggered check-in for {wallet_address[:8]}... with profile: {profile}")
+
+        # Add to tracked wallets
+        self.checked_in_wallets.add(wallet_address)
+        self.last_seen_at[wallet_address] = time.time()
+
+        # Record API check-in time
+        self._api_checkin_times[wallet_address] = time.time()
+
+        # Create session if not already done
+        if self.session_service:
+            existing = self.session_service.get_session_by_wallet(wallet_address)
+            if not existing:
+                self.session_service.create_session(wallet_address, profile)
+
+        # Enable face boxes
+        if self.face_service:
+            self.face_service.enable_boxes(True)
+
+        # Buffer check-in activity for CameraTimeline
+        try:
+            from services.timeline_activity_service import get_timeline_activity_service
+            timeline_service = get_timeline_activity_service()
+            session = self.session_service.get_session_by_wallet(wallet_address) if self.session_service else None
+            sid = session["session_id"] if session else f"{wallet_address[:8]}-{int(time.time())}"
+            timeline_service.buffer_checkin_activity(
+                wallet_address=wallet_address,
+                session_id=sid,
+                metadata={"timestamp": int(time.time() * 1000)},
+            )
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to buffer check-in activity: {e}")
+
+        # Fetch and decrypt recognition token with profile
+        self._fetch_and_decrypt_recognition_token(wallet_address, profile)
+
+    def mark_checkout_activity_buffered(self, wallet_address: str):
+        """
+        Mark that a checkout activity was already buffered via API.
+        This prevents duplicate checkout events when blockchain sync runs.
+
+        Called from /api/checkout-notify after buffering the checkout activity.
+        """
+        self._api_checkout_buffered[wallet_address] = time.time()
+        logger.info(f"[CHECKOUT] Marked checkout activity as buffered for {wallet_address[:8]}...")
+
+    def trigger_checkout(self, wallet_address: str):
+        """
+        Trigger checkout cleanup for a specific wallet.
+        Phase 3 Privacy Architecture: Called from /api/checkout endpoint.
+
+        This handles:
+        - Removing face recognition data from IdentityStore
+        - Clearing tracking state
+        - Disabling face boxes if no users remain
+
+        Args:
+            wallet_address: User's wallet address
+        """
+        logger.info(f"[CHECKOUT] Triggered cleanup for {wallet_address[:8]}...")
+
+        # Remove from tracked wallets
+        self.checked_in_wallets.discard(wallet_address)
+        self.last_seen_at.pop(wallet_address, None)
+        self._api_checkin_times.pop(wallet_address, None)
+        self._api_checkout_buffered.pop(wallet_address, None)
+
+        # Remove face data from IdentityStore
+        if self.identity_store:
+            try:
+                stats = self.identity_store.check_out(wallet_address)
+                if stats:
+                    logger.info(f"[CHECKOUT] Removed identity data for {wallet_address[:8]}... (session duration: {stats.get('duration', 'unknown')}s)")
+                else:
+                    logger.debug(f"[CHECKOUT] No identity data found for {wallet_address[:8]}...")
+            except Exception as e:
+                logger.warning(f"[CHECKOUT] Error removing identity data: {e}")
+
+        # Clear track associations from NativeIdentityService
+        # This ensures the user is no longer recognized after checkout
+        try:
+            native_identity_service = get_native_identity_service()
+            native_identity_service.clear_wallet_tracks(wallet_address)
+            logger.info(f"[CHECKOUT] Cleared track associations for {wallet_address[:8]}...")
+        except Exception as e:
+            logger.warning(f"[CHECKOUT] Error clearing track associations: {e}")
+
+        # Check if this was the last user - disable face boxes if so
+        if self.session_service and self.face_service:
+            active_sessions = self.session_service.get_all_sessions()
+            if len(active_sessions) == 0:
+                self.face_service.enable_boxes(False)
+                logger.info("[CHECKOUT] Face boxes disabled - no users checked in")
+
+                # Clear all facial embeddings for security when no users present
+                try:
+                    if hasattr(self.face_service, 'clear_enrolled_faces'):
+                        self.face_service.clear_enrolled_faces()
+                        logger.info("[CHECKOUT] Cleared all facial embeddings")
+                except Exception as e:
+                    logger.warning(f"[CHECKOUT] Error clearing facial data: {e}")
+
     def get_status(self) -> Dict:
-        """Get current sync status"""
+        """Get current session status"""
         return {
             'running': self.is_running,
             'sync_interval': self.sync_interval,
-            'last_sync': self.last_sync,
             'checked_in_wallets': list(self.checked_in_wallets),
             'total_checked_in': len(self.checked_in_wallets)
         }
 
     def is_wallet_checked_in(self, wallet_address: str) -> bool:
         """
-        Check if a specific wallet is currently checked in on-chain.
-        Uses cached data with optimistic assumption - if we haven't synced recently,
-        assume the user is still checked in to avoid blocking actions.
+        Check if a specific wallet is currently checked in (local state).
+        Phase 3: Check-ins are off-chain, so we use local tracked wallets.
         """
-        # If we have recent data, use it
-        if time.time() - self.last_sync < 300:  # 5 minutes grace period
-            return wallet_address in self.checked_in_wallets
-        
-        # If data is stale, be optimistic - assume user is still checked in
-        # This prevents blocking actions due to network issues or sync delays
-        logger.info(f"🔄 Blockchain data is stale ({time.time() - self.last_sync:.0f}s old), being optimistic for {wallet_address}")
-        return True
+        return wallet_address in self.checked_in_wallets
 
 # Global service instance
 _blockchain_session_sync = None

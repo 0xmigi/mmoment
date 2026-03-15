@@ -65,8 +65,8 @@ Direct RESTful API for connecting camera systems to web applications:
 Decentralized authentication and content ownership:
 
 - Wallet connection management
-- NFT-based identity verification
-- Moment minting (creating NFTs from captured content)
+- On-chain identity verification via encrypted facial embeddings
+- Recording moments on-chain with verifiable attribution
 - Secure content authorization
 
 ### 5. Web Application (app/web)
@@ -93,8 +93,8 @@ The Solana program is built on the Anchor framework and implements:
 
 1. **Camera Registry** - A global PDA that tracks all cameras in the network
 2. **User Registry** - Stores user identities and their associated face embeddings (encrypted)
-3. **Moment NFTs** - Content ownership with metadata linking to captured moments
-4. **Access Control** - Permission system for camera access based on NFT ownership
+3. **Moment Records** - On-chain content ownership with metadata linking to captured moments
+4. **Access Control** - Permission system for camera access and session management
 5. **Social Graph** - On-chain representation of real-world interactions
 
 Example of registering a new camera:
@@ -117,7 +117,7 @@ The system recognizes users through:
 
 - Facial recognition (privacy-preserving with on-device processing)
 - Solana wallet authentication
-- NFT-based access control
+- On-chain session management and access control
 
 ### Gesture Detection
 
@@ -139,8 +139,8 @@ Automatic content recording based on:
 
 All captured content is:
 
-- Verifiably owned by the user
-- Optionally mintable as NFTs
+- Verifiably attributed to the user on-chain
+- Cryptographically linked to wallet identity
 - Securely shareable with privacy controls
 
 ## Real-World Applications
@@ -193,8 +193,8 @@ The system creates a privacy-preserving social graph by:
 
 ### Phase 4: Decentralized Identity ✅
 - Solana wallet integration
-- NFT-based authentication
-- On-chain content verification
+- On-chain identity verification via encrypted embeddings
+- Blockchain-verified content attribution
 
 ### Phase 5: Livepeer Streaming Integration ✅
 - Migrated from MJPEG to Livepeer streaming for improved performance
@@ -216,8 +216,8 @@ The system creates a privacy-preserving social graph by:
 
 ### Decentralized Camera Network
 
-- **Tokenized Camera Access**: Economic model for commercial camera deployments
-- **Content Monetization**: Creator revenue sharing for venue-captured content
+- **Token-Incentivized Hardware**: Economic model for commercial camera deployments
+- **Revenue Sharing**: Venue and creator revenue models for captured content
 
 ### Privacy Innovations
 

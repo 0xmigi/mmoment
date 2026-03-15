@@ -167,32 +167,19 @@ const getCameraHardwareUrl = () => {
   return centralCameraUrl;
 };
 
-// Function to get the Jetson Orin Nano camera URL (legacy - now uses PDA-based URLs)
-const getJetsonCameraUrl = () => {
-  // Override Jetson URL if specified in environment
-  const overrideUrl = import.meta.env.VITE_JETSON_CAMERA_URL;
-  if (overrideUrl) {
-    return overrideUrl;
-  }
-
-  // For local development, check if we should use localhost
-  const forceLocal = import.meta.env.VITE_FORCE_LOCAL === 'true';
-  if (forceLocal && window.location.hostname === 'localhost') {
-    console.log('Using local Jetson camera API (forced by VITE_FORCE_LOCAL)');
-    return "http://localhost:5002";
-  }
-
-  // Default to the Jetson camera service URL (legacy)
-  // This maintains backward compatibility
-  return "https://jetson.mmoment.xyz";
-};
-
 // Get WebSocket URL for timeline updates from Railway backend
 const getTimelineWebSocketUrl = () => {
+  // Check for environment variable override first
+  const envBackendUrl = import.meta.env.VITE_BACKEND_URL;
+  if (envBackendUrl) {
+    // Convert HTTP URL to WS URL
+    return envBackendUrl.replace('https://', 'wss://').replace('http://', 'ws://');
+  }
+
   // In development, try to connect to the local server first
   if (window.location.hostname.includes('localhost')) {
-    // Use HTTP for health check and WS for socket connection
-    return "ws://192.168.1.232:3001";
+    // Use localhost for local development
+    return "ws://localhost:3001";
   }
   return "wss://mmoment-production.up.railway.app";
 };
@@ -215,16 +202,14 @@ export const CONFIG = {
   // Camera API is your Pi5 device with the Python/Flask server
   CAMERA_API_URL: getCameraApiUrl(),
   CAMERA_HARDWARE_URL: getCameraHardwareUrl(),
-  // Jetson Orin Nano camera service (legacy)
-  JETSON_CAMERA_URL: getJetsonCameraUrl(),
-  // New PDA-based URL generation functions
+  // PDA-based URL generation functions (all cameras use PDA-based URLs)
   getCameraApiUrlByPda,
   pdaToSubdomain,
   getCameraUrlWithFallback,
   // Timeline backend is your Railway service
-  BACKEND_URL: isProduction
+  BACKEND_URL: import.meta.env.VITE_BACKEND_URL || (isProduction
     ? "https://mmoment-production.up.railway.app"
-    : "http://localhost:3001",
+    : "http://localhost:3001"),
   isProduction,
   isCloudflareProxy: isCloudflareProxy(),
   isMobileBrowser: isMobileBrowser(),
@@ -232,25 +217,22 @@ export const CONFIG = {
   TIMELINE_WS_URL: getTimelineWebSocketUrl(),
   CAMERA_PDA: import.meta.env.VITE_CAMERA_PDA || 'EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA',
   // Jetson camera PDA
-  JETSON_CAMERA_PDA: 'FZ4DgqxLCNpLp1vyvvSZ5A24uyBEUdavvkm5qFE6D54t',
+  JETSON_CAMERA_PDA: 'ArQxL9kzhZ8QhJtNodnuMvkd3HGdkwSsTzbD4qD9QqKv',
   isUsingDifferentLocalPorts: isUsingDifferentLocalPorts(),
   
-  // Known camera configurations with PDA-based URLs
+  // Known camera configurations (URLs are generated from PDA)
   KNOWN_CAMERAS: {
     // Jetson Orin Nano
-    'H1WoNBkWJgNcePeyr65xEEwjFgGDboSpL5UbJan5VyhG': {
+    'ArQxL9kzhZ8QhJtNodnuMvkd3HGdkwSsTzbD4qD9QqKv': {
       type: 'jetson',
       name: 'Jetson Orin Nano Camera',
-      description: 'NVIDIA Jetson Orin Nano with advanced computer vision',
-      // Legacy URL for backward compatibility
-      legacyUrl: 'https://jetson.mmoment.xyz'
+      description: 'NVIDIA Jetson Orin Nano with advanced computer vision'
     },
     // Pi5 Camera
     'EugmfUyT8oZuP9QnCpBicrxjt1RMnavaAQaPW6YecYeA': {
       type: 'pi5',
       name: 'Raspberry Pi 5 Camera',
-      description: 'Raspberry Pi 5 with camera module',
-      legacyUrl: 'https://pi5-middleware.mmoment.xyz'
+      description: 'Raspberry Pi 5 with camera module'
     }
   }
 };

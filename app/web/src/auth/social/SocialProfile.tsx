@@ -46,6 +46,7 @@ export function SocialProfile() {
             <img
               src={primaryProfile.pfpUrl}
               alt={primaryProfile.displayName || primaryProfile.username || 'Profile'}
+              referrerPolicy="no-referrer"
               className="w-10 h-10 rounded-full"
             />
           ) : (
@@ -78,16 +79,17 @@ export function SocialProfile() {
               <div 
                 key={`${profile.provider}-${profile.id}`}
                 className={`flex items-center justify-between p-2 rounded-lg cursor-pointer hover:bg-gray-50 ${
-                  primaryProfile.id === profile.id ? 'bg-blue-50 border border-blue-100' : ''
+                  primaryProfile.id === profile.id ? 'bg-primary-light border border-primary-light' : ''
                 }`}
                 onClick={() => setPrimaryProfile(profile.id)}
               >
                 <div className="flex items-center space-x-3">
                   <div className="relative">
                     {profile.pfpUrl ? (
-                      <img 
-                        src={profile.pfpUrl} 
+                      <img
+                        src={profile.pfpUrl}
                         alt={profile.displayName || profile.username || 'Profile'}
+                        referrerPolicy="no-referrer"
                         className="w-8 h-8 rounded-full" 
                       />
                     ) : (
@@ -111,7 +113,7 @@ export function SocialProfile() {
                   </div>
                 </div>
                 {primaryProfile.id === profile.id && (
-                  <span className="text-xs font-medium text-blue-600">Primary</span>
+                  <span className="text-xs font-medium text-primary">Primary</span>
                 )}
               </div>
             ))}

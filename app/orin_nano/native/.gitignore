@@ -1,0 +1,8 @@
+# TensorRT engine files (platform-specific, generated at build time)
+*.engine
+
+# Build directory
+build/
+
+# ONNX models (should be downloaded, not committed)
+*.onnx

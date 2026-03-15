@@ -1,26 +1,26 @@
 # Mmoment Jetson Camera System Architecture
 
 ## Overview
-The Mmoment camera system is a **three-container Docker application** running on NVIDIA Jetson that provides AI-powered camera functionality with blockchain integration. The system is designed for real-time computer vision processing with Livepeer streaming and Solana blockchain integration.
+The Mmoment camera system is a **four-container Docker application** running on NVIDIA Jetson that provides AI-powered camera functionality with blockchain integration. The system is designed for real-time computer vision processing with Livepeer streaming and Solana blockchain integration.
 
 ## Container Architecture
 
-The system consists of three Docker containers that communicate via localhost:
+The system consists of four Docker containers that communicate via localhost:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        JETSON HOST SYSTEM                          │
 │                                                                     │
-│  ┌─────────────────┬─────────────────┬─────────────────────────────┐ │
-│  │   CAMERA        │   BIOMETRIC     │      SOLANA                 │ │
-│  │   SERVICE       │   SECURITY      │   MIDDLEWARE                │ │
-│  │   (Port 5002)   │   (Port 5003)   │   (Port 5001)               │ │
-│  │                 │                 │                             │ │
-│  │ • Main API      │ • Encryption    │ • Blockchain API            │ │
-│  │ • Computer Vision│ • NFT Packaging │ • Wallet Sessions           │ │
-│  │ • Livepeer RTMP │ • Secure Storage│ • Transaction Building      │ │
-│  │ • GPU Processing│ • Data Purging  │ • Face NFT Minting          │ │
-│  └─────────────────┴─────────────────┴─────────────────────────────┘ │
+│  ┌──────────────┬──────────────┬─────────────┬──────────────────┐  │
+│  │   CAMERA     │  BIOMETRIC   │   SOLANA    │    CV APPS       │  │
+│  │   SERVICE    │  SECURITY    │ MIDDLEWARE  │    SERVICE       │  │
+│  │ (Port 5002)  │ (Port 5003)  │ (Port 5001) │  (Port 5004)     │  │
+│  │              │              │             │                  │  │
+│  │ • Main API   │ • Encryption │ • Blockchain│ • Push-up App    │  │
+│  │ • CV Core    │ • NFT Package│ • Sessions  │ • Basketball App │  │
+│  │ • Streaming  │ • Purging    │ • Tx Build  │ • Pose Est.      │  │
+│  │ • GPU/AI     │ • Storage    │ • NFT Mint  │ • Competitions   │  │
+│  └──────────────┴──────────────┴─────────────┴──────────────────┘  │
 │                                                                     │
 │  External Access: Cloudflare Tunnel → jetson.mmoment.xyz → :5002   │
 └─────────────────────────────────────────────────────────────────────┘
@@ -94,6 +94,46 @@ The camera service uses a **service-oriented architecture** with the following c
 - **Face NFT Minting**: Encrypted facial embeddings as blockchain NFTs
 - **Transaction Building**: Frontend-ready transaction serialization
 - **PDA Management**: Program Derived Address calculations
+
+## CV Apps Container (Port 5004)
+**Computer vision applications container** - Runs competition and tracking apps independently from core camera service.
+
+### Purpose
+Isolates CV applications from core camera functionality to provide:
+- **Fault Isolation**: App crashes don't affect camera/face recognition
+- **Independent Scaling**: Apps can be updated without touching core services
+- **Resource Management**: GPU/CPU allocation per app
+- **Hot-swapping**: Load/unload apps dynamically
+
+### Architecture
+```
+CV Apps Service (5004)
+├── App Loader (main.py)
+│   └── Dynamic app loading
+├── Process API (/api/process)
+│   └── Frame + detections → stats
+└── Loaded Apps
+    ├── Push-up Competition
+    ├── Basketball Tracking
+    └── Future apps...
+```
+
+### Communication Flow
+```
+Camera Service → HTTP POST /api/process → CV Apps Service
+   (frame + detections)              (MediaPipe, pose estimation)
+                                               ↓
+                                     Competition state/stats
+                                               ↓
+Camera Service ← HTTP Response ← overlay data, rep counts, etc.
+```
+
+### Features
+- **MediaPipe Pose Estimation**: 17-point body tracking
+- **Competition Management**: Start/end, scoring, winners
+- **Form Validation**: Biomechanical analysis
+- **Real-time Overlays**: Stats, timers, leaderboards
+- **Betting Integration**: Crypto wagering (future)
 
 ## Data Flow Architecture
 
@@ -261,4 +301,91 @@ Based on `main.py`, the system starts up as follows:
 - **Load Balancing**: Traffic distribution
 - **DDoS Protection**: Network security
 
-This architecture provides a robust, scalable foundation for AI-powered camera applications with blockchain integration while maintaining security and performance on edge devices. 
+This architecture provides a robust, scalable foundation for AI-powered camera applications with blockchain integration while maintaining security and performance on edge devices.
+
+## File System Structure
+
+### Top-Level Organization
+```
+/mnt/nvme/mmoment/app/orin_nano/
+├── data/                      # ALL persistent data (single source of truth)
+│   ├── images/               # Camera captures
+│   ├── videos/               # Recorded videos
+│   ├── recordings/           # Recording sessions
+│   ├── face_embeddings/      # Face recognition data
+│   ├── faces/                # Face photos
+│   ├── config/               # Configuration files
+│   └── device/               # Device keypair
+│
+├── services/                 # Docker service implementations
+│   ├── camera-service/       # Core camera + face recognition (Port 5002)
+│   ├── biometric-security/   # Encryption service (Port 5003)
+│   ├── solana-middleware/    # Blockchain ops (Port 5001)
+│   └── cv-apps/              # CV competition apps runner (Port 5004)
+│
+├── apps/                     # CV app definitions (plugins)
+│   ├── base_competition_app.py  # Reusable base class
+│   ├── pushup/               # Push-up competition
+│   └── basketball/           # Basketball tracking
+│
+├── docs/                     # Documentation
+├── docker-compose.yml        # Service orchestration
+└── test_pushup_app.py        # Integration tests
+```
+
+### Service Structure (Example: camera-service)
+```
+services/camera-service/
+├── main.py                   # Service entry point
+├── routes.py                 # API routes
+├── Dockerfile                # Container build
+├── requirements.txt          # Python dependencies
+│
+├── services/                 # Internal modules (organized!)
+│   ├── gpu_face_service.py
+│   ├── identity_tracker.py
+│   ├── cv_apps_client.py
+│   ├── routes_cv_apps.py
+│   ├── pipe_integration.py
+│   └── ...
+│
+└── templates/                # HTML templates
+```
+
+### Key Principles
+
+1. **Single Data Directory**: All persistent data lives in `/data`
+   - Docker volumes mount from `/data` → container paths
+   - No data stored in service directories
+   - Prevents duplicate/empty folders
+
+2. **Service Isolation**: Each service is self-contained
+   - Only `main.py`, `routes.py`, `Dockerfile`, `requirements.txt` at root
+   - Everything else in subdirectories (`services/`, `templates/`)
+   - Clean, navigable structure
+
+3. **Apps as Plugins**: CV apps are separate from core services
+   - `/apps` = app definitions (the logic)
+   - `/services/cv-apps` = app runner (the loader)
+   - Hot-swappable without touching camera service
+
+4. **No Empty Folders**: Docker volume mounts can create empty directories
+   - Fixed by proper volume paths in docker-compose
+   - `.gitignore` patterns prevent commits
+   - Delete any empty `config/`, `faces/`, etc. in service dirs
+
+### Docker Volume Mapping
+```yaml
+camera-service:
+  volumes:
+    - ./data/images:/app/photos              # Host → Container
+    - ./data/face_embeddings:/app/face_embeddings
+    - ./services/camera-service:/app         # Dev: live code reload
+
+cv-apps:
+  volumes:
+    - ./apps:/app/apps                       # Apps loaded dynamically
+    - ./services/cv-apps:/app                # Dev: live code reload
+```
+
+This structure ensures clean organization, prevents clutter, and makes the system easy to navigate and maintain. 

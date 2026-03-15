@@ -1,0 +1,1264 @@
+{
+  "address": "E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL",
+  "metadata": {
+    "name": "camera_network",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Solana program for camera device network with check-in/check-out functionality"
+  },
+  "instructions": [
+    {
+      "name": "create_timeline_entry",
+      "docs": [
+        "Create a compressed timeline entry for a camera session",
+        "Called at checkout — device signs, backend pays gas"
+      ],
+      "discriminator": [
+        243,
+        124,
+        212,
+        170,
+        45,
+        118,
+        145,
+        86
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Fee payer — backend pays gas"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "device",
+          "docs": [
+            "Device authenticator — must be camera's device key or owner"
+          ],
+          "signer": true
+        },
+        {
+          "name": "camera",
+          "docs": [
+            "Camera account — verified against device signer"
+          ],
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "proof",
+          "type": {
+            "defined": {
+              "name": "ValidityProof"
+            }
+          }
+        },
+        {
+          "name": "address_tree_info",
+          "type": {
+            "defined": {
+              "name": "PackedAddressTreeInfo"
+            }
+          }
+        },
+        {
+          "name": "output_merkle_tree_index",
+          "type": "u8"
+        },
+        {
+          "name": "encrypted_payload",
+          "type": "bytes"
+        },
+        {
+          "name": "nonce",
+          "type": {
+            "array": [
+              "u8",
+              12
+            ]
+          }
+        },
+        {
+          "name": "access_grants_blob",
+          "type": "bytes"
+        },
+        {
+          "name": "activity_count",
+          "type": "u8"
+        },
+        {
+          "name": "chunk_index",
+          "type": "u8"
+        },
+        {
+          "name": "total_chunks",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "create_user_session_chain",
+      "docs": [
+        "Create a user's session chain for storing encrypted access keys",
+        "This is the user's \"keychain\" for accessing their session history"
+      ],
+      "discriminator": [
+        81,
+        239,
+        227,
+        141,
+        244,
+        52,
+        171,
+        164
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "docs": [
+            "The user who will own this session chain. Must sign to authorize creation."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "fee_payer",
+          "docs": [
+            "The fee payer for account rent. Can be the user themselves or a sponsor (e.g. cron bot)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "The mmoment authority (cron bot) that can also write to this chain"
+          ]
+        },
+        {
+          "name": "user_session_chain",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "delete_recognition_token",
+      "docs": [
+        "Delete recognition token and reclaim rent"
+      ],
+      "discriminator": [
+        169,
+        195,
+        239,
+        113,
+        254,
+        207,
+        130,
+        37
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "recognition_token",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "deregister_camera",
+      "docs": [
+        "Deregister a camera from the network"
+      ],
+      "discriminator": [
+        191,
+        154,
+        78,
+        182,
+        249,
+        72,
+        207,
+        113
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "camera_registry",
+          "writable": true
+        },
+        {
+          "name": "camera",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize",
+      "docs": [
+        "Initialize the camera registry (admin only)"
+      ],
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "camera_registry",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "register_camera",
+      "docs": [
+        "Register a new camera to the network"
+      ],
+      "discriminator": [
+        169,
+        161,
+        144,
+        207,
+        102,
+        130,
+        86,
+        62
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "camera_registry",
+          "writable": true
+        },
+        {
+          "name": "camera",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "RegisterCameraArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_camera_active",
+      "docs": [
+        "Set camera active or inactive status"
+      ],
+      "discriminator": [
+        157,
+        63,
+        1,
+        132,
+        85,
+        176,
+        156,
+        74
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "camera",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "is_active",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "store_session_access_keys",
+      "docs": [
+        "Store encrypted session access keys in a user's chain",
+        "Can be called by the user OR the mmoment authority (cron bot fallback)"
+      ],
+      "discriminator": [
+        15,
+        128,
+        124,
+        30,
+        182,
+        222,
+        223,
+        68
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "The signer - must be either the user or the authority"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "user",
+          "docs": [
+            "The user whose session chain is being updated"
+          ]
+        },
+        {
+          "name": "user_session_chain",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "keys",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "EncryptedSessionKey"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_camera",
+      "docs": [
+        "Update camera information"
+      ],
+      "discriminator": [
+        240,
+        86,
+        145,
+        90,
+        6,
+        185,
+        101,
+        7
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "camera",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "UpdateCameraArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "upsert_recognition_token",
+      "docs": [
+        "Create or regenerate a recognition token (stores encrypted facial embedding)"
+      ],
+      "discriminator": [
+        217,
+        76,
+        1,
+        248,
+        153,
+        88,
+        20,
+        188
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "recognition_token",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "encrypted_embedding",
+          "type": "bytes"
+        },
+        {
+          "name": "display_name",
+          "type": {
+            "option": "string"
+          }
+        },
+        {
+          "name": "source",
+          "type": "u8"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "CameraAccount",
+      "discriminator": [
+        53,
+        116,
+        8,
+        174,
+        44,
+        148,
+        166,
+        34
+      ]
+    },
+    {
+      "name": "CameraRegistry",
+      "discriminator": [
+        242,
+        46,
+        247,
+        175,
+        239,
+        58,
+        125,
+        173
+      ]
+    },
+    {
+      "name": "RecognitionToken",
+      "discriminator": [
+        185,
+        14,
+        93,
+        76,
+        58,
+        215,
+        68,
+        167
+      ]
+    },
+    {
+      "name": "UserSessionChain",
+      "discriminator": [
+        94,
+        45,
+        77,
+        120,
+        236,
+        160,
+        216,
+        102
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "CameraRegistered",
+      "discriminator": [
+        32,
+        240,
+        203,
+        222,
+        43,
+        16,
+        54,
+        81
+      ]
+    },
+    {
+      "name": "RecognitionTokenCreated",
+      "discriminator": [
+        24,
+        33,
+        66,
+        21,
+        97,
+        67,
+        214,
+        111
+      ]
+    },
+    {
+      "name": "RecognitionTokenDeleted",
+      "discriminator": [
+        134,
+        32,
+        116,
+        193,
+        89,
+        244,
+        183,
+        153
+      ]
+    },
+    {
+      "name": "TimelineEntry",
+      "discriminator": [
+        66,
+        96,
+        15,
+        175,
+        192,
+        119,
+        138,
+        5
+      ]
+    },
+    {
+      "name": "TimelineEntryCreated",
+      "discriminator": [
+        36,
+        131,
+        182,
+        89,
+        193,
+        86,
+        126,
+        30
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "You are not authorized to perform this action"
+    },
+    {
+      "code": 6001,
+      "name": "CameraInactive",
+      "msg": "Camera is currently inactive"
+    },
+    {
+      "code": 6002,
+      "name": "CameraNotFound",
+      "msg": "Camera not found in registry"
+    },
+    {
+      "code": 6003,
+      "name": "CameraNameExists",
+      "msg": "Camera name already exists"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidCameraData",
+      "msg": "Invalid camera data provided"
+    },
+    {
+      "code": 6005,
+      "name": "NoActiveSession",
+      "msg": "No active session found"
+    },
+    {
+      "code": 6006,
+      "name": "SessionExists",
+      "msg": "Session already exists"
+    },
+    {
+      "code": 6007,
+      "name": "AccessDenied",
+      "msg": "Access denied to this camera"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidFaceData",
+      "msg": "Face data invalid or not properly formatted"
+    },
+    {
+      "code": 6009,
+      "name": "FaceDataExists",
+      "msg": "Face data already registered for this user"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidGestureData",
+      "msg": "Gesture data invalid or improperly formatted"
+    },
+    {
+      "code": 6011,
+      "name": "CameraAlreadyAuthorized",
+      "msg": "Camera is already authorized for face recognition"
+    },
+    {
+      "code": 6012,
+      "name": "InvalidAccessDuration",
+      "msg": "Invalid temporary access duration"
+    },
+    {
+      "code": 6013,
+      "name": "AccessGrantExpired",
+      "msg": "Access grant has expired"
+    },
+    {
+      "code": 6014,
+      "name": "SessionExpired",
+      "msg": "Session has expired"
+    },
+    {
+      "code": 6015,
+      "name": "NoRecognitionToken",
+      "msg": "No recognition token found - please create one first"
+    },
+    {
+      "code": 6016,
+      "name": "FeatureNotAvailable",
+      "msg": "Feature not available on this camera"
+    },
+    {
+      "code": 6017,
+      "name": "RecognitionTokenTooLarge",
+      "msg": "Recognition token data too large (max 1024 bytes)"
+    }
+  ],
+  "types": [
+    {
+      "name": "CameraAccount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "metadata",
+            "type": {
+              "defined": {
+                "name": "CameraMetadata"
+              }
+            }
+          },
+          {
+            "name": "is_active",
+            "type": "bool"
+          },
+          {
+            "name": "activity_counter",
+            "type": "u64"
+          },
+          {
+            "name": "last_activity_at",
+            "type": "i64"
+          },
+          {
+            "name": "last_activity_type",
+            "type": "u8"
+          },
+          {
+            "name": "access_count",
+            "type": "u64"
+          },
+          {
+            "name": "features",
+            "type": {
+              "defined": {
+                "name": "CameraFeatures"
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "device_pubkey",
+            "type": {
+              "option": "pubkey"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "CameraFeatures",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "face_recognition",
+            "type": "bool"
+          },
+          {
+            "name": "gesture_control",
+            "type": "bool"
+          },
+          {
+            "name": "video_recording",
+            "type": "bool"
+          },
+          {
+            "name": "live_streaming",
+            "type": "bool"
+          },
+          {
+            "name": "messaging",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CameraMetadata",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "model",
+            "type": "string"
+          },
+          {
+            "name": "location",
+            "type": {
+              "option": {
+                "array": [
+                  "i64",
+                  2
+                ]
+              }
+            }
+          },
+          {
+            "name": "registration_date",
+            "type": "i64"
+          },
+          {
+            "name": "description",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CameraRegistered",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "camera",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "model",
+            "type": "string"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CameraRegistry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "camera_count",
+            "type": "u64"
+          },
+          {
+            "name": "fee_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CompressedProof",
+      "repr": {
+        "kind": "c"
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "a",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "b",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          },
+          {
+            "name": "c",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "EncryptedSessionKey",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "key_ciphertext",
+            "type": "bytes"
+          },
+          {
+            "name": "nonce",
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PackedAddressTreeInfo",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "address_merkle_tree_pubkey_index",
+            "type": "u8"
+          },
+          {
+            "name": "address_queue_pubkey_index",
+            "type": "u8"
+          },
+          {
+            "name": "root_index",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RecognitionToken",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "encrypted_embedding",
+            "type": "bytes"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "display_name",
+            "type": {
+              "option": "string"
+            }
+          },
+          {
+            "name": "source",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RecognitionTokenCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "token",
+            "type": "pubkey"
+          },
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "source",
+            "type": "u8"
+          },
+          {
+            "name": "display_name",
+            "type": {
+              "option": "string"
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RecognitionTokenDeleted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "token",
+            "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RegisterCameraArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "model",
+            "type": "string"
+          },
+          {
+            "name": "location",
+            "type": {
+              "option": {
+                "array": [
+                  "i64",
+                  2
+                ]
+              }
+            }
+          },
+          {
+            "name": "description",
+            "type": "string"
+          },
+          {
+            "name": "features",
+            "type": {
+              "defined": {
+                "name": "CameraFeatures"
+              }
+            }
+          },
+          {
+            "name": "device_pubkey",
+            "type": {
+              "option": "pubkey"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TimelineEntry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "camera",
+            "docs": [
+              "Which camera this entry belongs to (for querying all entries by camera)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "entry_index",
+            "docs": [
+              "Sequential index (camera.activity_counter at time of write)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "docs": [
+              "When this checkout occurred"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "activity_count",
+            "docs": [
+              "Number of activities in this entry"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "encrypted_payload",
+            "docs": [
+              "All activities from this session, serialized and encrypted together.",
+              "Format: AES-256-GCM encrypted JSON array of activities."
+            ],
+            "type": "bytes"
+          },
+          {
+            "name": "nonce",
+            "docs": [
+              "AES-GCM nonce for decrypting encrypted_payload"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
+          },
+          {
+            "name": "access_grants_blob",
+            "docs": [
+              "Flattened access grants blob.",
+              "Format: [num_grants (2 bytes LE)] + for each grant: [32 bytes pubkey] + [2 bytes len LE] + [N bytes sealed-box key]"
+            ],
+            "type": "bytes"
+          },
+          {
+            "name": "chunk_index",
+            "docs": [
+              "Chunk index within a multi-chunk session write (0 for single-chunk entries)"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "total_chunks",
+            "docs": [
+              "Total number of chunks in this session write (1 for single-chunk entries)"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TimelineEntryCreated",
+      "docs": [
+        "Event emitted when a timeline entry is created (no user info)"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "camera",
+            "type": "pubkey"
+          },
+          {
+            "name": "entry_index",
+            "type": "u64"
+          },
+          {
+            "name": "activity_count",
+            "type": "u8"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UpdateCameraArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "name",
+            "type": {
+              "option": "string"
+            }
+          },
+          {
+            "name": "location",
+            "type": {
+              "option": {
+                "array": [
+                  "i64",
+                  2
+                ]
+              }
+            }
+          },
+          {
+            "name": "description",
+            "type": {
+              "option": "string"
+            }
+          },
+          {
+            "name": "features",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "CameraFeatures"
+                }
+              }
+            }
+          },
+          {
+            "name": "device_pubkey",
+            "type": {
+              "option": "pubkey"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserSessionChain",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "encrypted_keys",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "EncryptedSessionKey"
+                }
+              }
+            }
+          },
+          {
+            "name": "session_count",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ValidityProof",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "option": {
+              "defined": {
+                "name": "CompressedProof"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

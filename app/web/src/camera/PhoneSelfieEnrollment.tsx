@@ -479,7 +479,7 @@ export function PhoneSelfieEnrollment({
         <div className="p-4 bg-white">
           <button
             onClick={findUserCurrentSession}
-            className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+            className="w-full bg-primary text-white px-4 py-3 rounded-lg hover:bg-primary-hover transition-colors font-medium"
           >
             Retry Connection
           </button>
@@ -542,7 +542,7 @@ export function PhoneSelfieEnrollment({
           <button
             onClick={capturePhoto}
             disabled={isCapturing}
-            className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center justify-center text-sm font-medium shadow-lg pointer-events-auto"
+            className="w-full bg-primary text-white px-4 py-3 rounded-lg hover:bg-primary-hover disabled:bg-gray-400 transition-colors flex items-center justify-center text-sm font-medium shadow-lg pointer-events-auto"
           >
             {isCapturing ? (
               <div className="flex items-center space-x-2">
@@ -584,7 +584,7 @@ export function PhoneSelfieEnrollment({
               <div className="bg-black/30 backdrop-blur-sm rounded-full px-3 py-1 flex items-center justify-center">
                 <div className={`w-2 h-2 rounded-full mr-2 ${
                   qualityRating === 'excellent' ? 'bg-green-400' :
-                  qualityRating === 'good' ? 'bg-blue-400' :
+                  qualityRating === 'good' ? 'bg-primary-muted' :
                   qualityRating === 'acceptable' ? 'bg-yellow-400' :
                   qualityRating === 'poor' ? 'bg-orange-400' :
                   'bg-red-400'
@@ -642,7 +642,7 @@ export function PhoneSelfieEnrollment({
             <button
               onClick={processFaceEnrollment}
               disabled={!!error}
-              className="flex-1 bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center justify-center text-sm font-medium shadow-lg"
+              className="flex-1 bg-primary text-white px-4 py-3 rounded-lg hover:bg-primary-hover disabled:bg-gray-400 transition-colors flex items-center justify-center text-sm font-medium shadow-lg"
             >
               <Check className="h-4 w-4 mr-2" />
               Create Token

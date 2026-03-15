@@ -1,4 +1,4 @@
-import { PipeStorageSection } from "./PipeStorageSection";
+import { WalrusStorageSection } from "./WalrusStorageSection";
 import { RecognitionTokenModal } from "./RecognitionTokenModal";
 import { WalletBalanceModal } from "./WalletBalanceModal";
 import {
@@ -17,10 +17,12 @@ import {
   AlertCircle,
   Loader2,
   ChevronRight,
+  Camera,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFacialEmbeddingStatus } from "../../hooks/useFacialEmbeddingStatus";
+import { useUserSessionChain } from "../../hooks/useUserSessionChain";
 
 // Define interfaces
 interface SocialCredential {
@@ -53,6 +55,9 @@ export function AccountPage() {
 
   // Get facial embedding status from blockchain
   const facialEmbeddingStatus = useFacialEmbeddingStatus();
+
+  // Get session keychain status from blockchain
+  const sessionChainStatus = useUserSessionChain();
 
   // Fetch SOL balance
   useEffect(() => {
@@ -110,7 +115,7 @@ export function AccountPage() {
   if (!primaryWallet?.address) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-gray-600">Loading...</div>
+        <div className="text-neutral-600">Loading...</div>
       </div>
     );
   }
@@ -128,13 +133,19 @@ export function AccountPage() {
   const farcasterCred = socialCreds.find(
     (cred) => cred.oauthProvider === "farcaster"
   );
+  const googleCred = socialCreds.find(
+    (cred) => cred.oauthProvider === "google"
+  );
 
-  // Prioritize credentials (Farcaster > Twitter > none)
-  const primarySocialCred = farcasterCred || twitterCred;
-  const primarySocialProvider = farcasterCred
-    ? "Farcaster"
-    : twitterCred
-    ? "X / Twitter"
+  // Prioritize credentials (Farcaster > Google > Twitter > none)
+  const primarySocialCred = farcasterCred || googleCred || twitterCred;
+  const providerLabels: Record<string, string> = {
+    farcaster: 'Farcaster',
+    google: 'Google',
+    twitter: 'X / Twitter',
+  };
+  const primarySocialProvider = primarySocialCred?.oauthProvider
+    ? (providerLabels[primarySocialCred.oauthProvider] || null)
     : null;
 
   // Prepare the profile image and display name
@@ -149,6 +160,14 @@ export function AccountPage() {
 
   // Define identity items for the branching display
   const identities = [
+    {
+      id: "google",
+      label: "Google",
+      value: googleCred?.oauthDisplayName || googleCred?.oauthUsername,
+      connected: !!googleCred,
+      isPublic: false,
+      icon: <Globe className="w-3 h-3 mr-1" />,
+    },
     {
       id: "twitter",
       label: "X / Twitter",
@@ -182,7 +201,7 @@ export function AccountPage() {
       isRecognition: true,
       status: facialEmbeddingStatus,
       icon: facialEmbeddingStatus.isLoading
-        ? <Loader2 className="w-3 h-3 mr-1 animate-spin text-blue-500" />
+        ? <Loader2 className="w-3 h-3 mr-1 animate-spin text-primary" />
         : facialEmbeddingStatus.hasEmbedding
         ? <CheckCircle className="w-3 h-3 mr-1 text-green-500" />
         : <AlertCircle className="w-3 h-3 mr-1 text-orange-500" />,
@@ -200,9 +219,25 @@ export function AccountPage() {
       isWallet: true,
       icon: <Globe className="w-3 h-3 mr-1" />,
     },
+    {
+      id: "sessionKeychain",
+      label: "Session Keychain",
+      value: sessionChainStatus.hasSessionChain
+        ? `${sessionChainStatus.sessionCount} key${sessionChainStatus.sessionCount !== 1 ? 's' : ''} stored`
+        : "Not set up",
+      connected: sessionChainStatus.hasSessionChain,
+      isPublic: false,
+      isSessionKeychain: true,
+      status: sessionChainStatus,
+      icon: sessionChainStatus.isLoading
+        ? <Loader2 className="w-3 h-3 mr-1 animate-spin text-primary" />
+        : sessionChainStatus.hasSessionChain
+        ? <CheckCircle className="w-3 h-3 mr-1 text-green-500" />
+        : <AlertCircle className="w-3 h-3 mr-1 text-orange-500" />,
+    },
   ].filter(
     (item) =>
-      item.connected || ["farcaster", "email", "twitter", "recognition"].includes(item.id)
+      item.connected || ["farcaster", "email", "twitter", "recognition", "sessionKeychain"].includes(item.id)
   );
 
   return (
@@ -220,7 +255,7 @@ export function AccountPage() {
                 ? "bg-green-50 text-green-700"
                 : statusMessage.type === "error"
                 ? "bg-red-50 text-red-700"
-                : "bg-blue-50 text-blue-700"
+                : "bg-primary-light text-primary"
             }`}
           >
             <p>{statusMessage.message}</p>
@@ -228,13 +263,13 @@ export function AccountPage() {
         )}
 
         {/* Identity Section */}
-        <div className="bg-gray-50 rounded-xl p-4 sm:p-6 mb-6">
+        <div className="bg-neutral-100 rounded-xl p-4 sm:p-6 mb-6">
           <div className="flex items-baseline justify-between mb-6">
             <h2 className="text-lg font-medium">Identity</h2>
             {solBalance !== null && (
-              <div className="text-sm font-medium text-gray-700">
+              <div className="text-sm font-medium text-neutral-600">
                 {solBalance.toFixed(2)} SOL
-                <span className="text-xs text-gray-500 ml-2">
+                <span className="text-xs text-neutral-400 ml-2">
                   ${(solBalance * 150).toFixed(0)}
                 </span>
               </div>
@@ -249,18 +284,19 @@ export function AccountPage() {
                 <img
                   src={profileImageUrl}
                   alt={displayName}
-                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-gray-200"
+                  referrerPolicy="no-referrer"
+                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-neutral-200"
                 />
               ) : (
-                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gray-200 flex items-center justify-center">
-                  <User className="w-8 h-8 sm:w-10 sm:h-10 text-gray-400" />
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-neutral-200 flex items-center justify-center">
+                  <User className="w-8 h-8 sm:w-10 sm:h-10 text-neutral-400" />
                 </div>
               )}
 
               {/* Profile name */}
               <div className="ml-4">
-                <div className="font-medium text-gray-800">{displayName}</div>
-                <div className="text-sm text-gray-600">
+                <div className="font-medium text-neutral-900">{displayName}</div>
+                <div className="text-sm text-neutral-600">
                   {primarySocialProvider || "Wallet Address"}
                 </div>
               </div>
@@ -294,10 +330,10 @@ export function AccountPage() {
                         {identity.icon}
                       </div>
                       <div className="flex-1">
-                        <div className="font-medium text-gray-800 text-sm">
+                        <div className="font-medium text-neutral-900 text-sm">
                           {identity.label}
                         </div>
-                        <div className="text-xs text-gray-500 mt-0.5">
+                        <div className="text-xs text-neutral-400 mt-0.5">
                           {identity.connected ? (
                             identity.isWallet ? (
                               <span className="font-mono">{identity.shortValue}</span>
@@ -305,16 +341,22 @@ export function AccountPage() {
                               <span className={identity.status.hasEmbedding ? 'text-green-600' : 'text-orange-600'}>
                                 {identity.value}
                               </span>
+                            ) : identity.isSessionKeychain ? (
+                              <span className={identity.status.hasSessionChain ? 'text-green-600' : 'text-orange-600'}>
+                                {identity.value}
+                              </span>
                             ) : (
                               <>
                                 {identity.id === "twitter" && "@"}
                                 {identity.value}
-                                {identity.isPublic && <span className="ml-2 text-gray-400">• Public</span>}
-                                {!identity.isPublic && identity.value && <span className="ml-2 text-gray-400">• Private</span>}
+                                {identity.isPublic && <span className="ml-2 text-neutral-400">• Public</span>}
+                                {!identity.isPublic && identity.value && <span className="ml-2 text-neutral-400">• Private</span>}
                               </>
                             )
+                          ) : identity.isSessionKeychain ? (
+                            <span className="text-neutral-400">Created on first check-in</span>
                           ) : (
-                            <span className="text-gray-400">Not connected</span>
+                            <span className="text-neutral-400">Not connected</span>
                           )}
                         </div>
                       </div>
@@ -322,7 +364,7 @@ export function AccountPage() {
 
                     {/* Action Indicator */}
                     {isClickable && (
-                      <ChevronRight className="w-4 h-4 text-gray-400 ml-2" />
+                      <ChevronRight className="w-4 h-4 text-neutral-400 ml-2" />
                     )}
                   </div>
                 );
@@ -331,18 +373,17 @@ export function AccountPage() {
           </div>
         </div>
 
-        {/* Pipe Storage Section */}
-        <PipeStorageSection />
-
+        {/* Walrus Storage Section */}
+        <WalrusStorageSection />
 
         {/* Wallet Backup Section - responsive padding */}
         {isEmbeddedWallet && (
-          <div className="bg-gray-50 rounded-xl px-4 py-4 mb-4">
+          <div className="bg-neutral-100 rounded-xl px-4 py-4 mb-4">
             <div className="text-sm">
               <div className="font-medium mb-3">Wallet Backup</div>
               <button
                 onClick={() => setShowBackupOptions(!showBackupOptions)}
-                className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-neutral-600 text-white rounded-lg text-sm font-medium hover:bg-neutral-600/90 transition-colors"
               >
                 <KeyRound className="w-4 h-4" />
                 Back up Wallet
@@ -352,14 +393,14 @@ export function AccountPage() {
                   <button
                     onClick={() => handleExportWallet("recoveryPhrase")}
                     disabled={isExporting}
-                    className="w-full px-3 sm:px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+                    className="w-full px-3 sm:px-4 py-2 bg-white border border-neutral-200 text-neutral-600 rounded-lg text-sm font-medium hover:bg-neutral-100 transition-colors disabled:opacity-50"
                   >
                     Show Recovery Phrase
                   </button>
                   <button
                     onClick={() => handleExportWallet("privateKey")}
                     disabled={isExporting}
-                    className="w-full px-3 sm:px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+                    className="w-full px-3 sm:px-4 py-2 bg-white border border-neutral-200 text-neutral-600 rounded-lg text-sm font-medium hover:bg-neutral-100 transition-colors disabled:opacity-50"
                   >
                     Show Private Key
                   </button>
@@ -370,14 +411,25 @@ export function AccountPage() {
               )}
               <div
                 id="wallet-export-container"
-                className="mt-2 p-3 sm:p-4 bg-gray-100 rounded-lg font-mono text-xs break-all"
+                className="mt-2 p-3 sm:p-4 bg-neutral-100 rounded-lg font-mono text-xs break-all"
               />
             </div>
           </div>
         )}
 
+        {/* Register Camera Link */}
+        <div className="bg-neutral-100 rounded-xl px-4 py-4 mb-4">
+          <button
+            onClick={() => navigate('/app/register')}
+            className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-neutral-600 text-white rounded-lg text-sm font-medium hover:bg-neutral-600/90 transition-colors"
+          >
+            <Camera className="w-4 h-4" />
+            Register New Camera
+          </button>
+        </div>
+
         {/* Sign Out Button - responsive padding */}
-        <div className="bg-gray-50 rounded-xl px-4 py-4 mb-8">
+        <div className="bg-neutral-100 rounded-xl px-4 py-4 mb-8">
           <button
             onClick={handleSignOut}
             className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"

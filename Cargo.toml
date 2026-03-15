@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "programs/camera-network",
+    "programs/competition-escrow",
 ]
 resolver = "2"
 
@@ -13,3 +14,10 @@ codegen-units = 1
 opt-level = 3
 incremental = false
 codegen-units = 1
+
+# Pin blake3 to version compatible with platform-tools rustc 1.84.1
+# blake3 1.8.x requires edition2024 (Cargo 1.85+)
+[workspace.dependencies]
+blake3 = "=1.5.5"
+
+

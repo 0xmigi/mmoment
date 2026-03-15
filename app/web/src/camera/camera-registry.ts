@@ -15,6 +15,7 @@ export class CameraRegistry {
   private static instance: CameraRegistry | null = null;
   private cameras: Map<string, CameraRegistryEntry> = new Map();
   private debugMode = true;
+  private currentWallet: any = null; // Dynamic Labs wallet for request signing
 
   private constructor() {
     this.log('CameraRegistry initialized');
@@ -54,10 +55,6 @@ export class CameraRegistry {
           canRecognizeFaces: true,
           hasLivepeerStreaming: true,
           supportedStreamFormats: ['livepeer', 'mjpeg']
-        },
-        // Store legacy URL for fallback
-        config: {
-          legacyUrl: (CONFIG.KNOWN_CAMERAS as any)[CONFIG.JETSON_CAMERA_PDA]?.legacyUrl
         }
       },
       {
@@ -74,9 +71,6 @@ export class CameraRegistry {
           canRecognizeFaces: false,
           hasLivepeerStreaming: false,
           supportedStreamFormats: ['mjpeg']
-        },
-        config: {
-          legacyUrl: (CONFIG.KNOWN_CAMERAS as any)[CONFIG.CAMERA_PDA]?.legacyUrl
         }
       }
     ];
@@ -207,24 +201,21 @@ export class CameraRegistry {
   }
 
   /**
-   * Create a camera instance based on its type with fallback support
+   * Create a camera instance based on its type
    */
   private createCameraInstance(entry: CameraRegistryEntry): ICamera | undefined {
     try {
-      // Use PDA-based URL by default, with legacy URL as fallback
       const apiUrl = entry.apiUrl;
-      const legacyUrl = entry.config?.legacyUrl;
-      
+
       switch (entry.cameraType.toLowerCase()) {
         case 'jetson':
-          // For Jetson cameras, try PDA-based URL first, then legacy
           const jetsonCamera = new JetsonCamera(entry.cameraId, apiUrl);
-          
-          // Store legacy URL for potential fallback
-          if (legacyUrl) {
-            (jetsonCamera as any).legacyUrl = legacyUrl;
+
+          // Set wallet for request signing if available
+          if (this.currentWallet) {
+            jetsonCamera.setWallet(this.currentWallet);
           }
-          
+
           return jetsonCamera;
           
         case 'pi5':
@@ -233,9 +224,13 @@ export class CameraRegistry {
         default:
           // For unknown camera types, try to determine based on PDA or capabilities
           this.log(`Unknown camera type: ${entry.cameraType}, attempting auto-detection`);
-          
+
           // Default to Jetson for unknown types since they're likely PDA-based advanced cameras
-          return new JetsonCamera(entry.cameraId, apiUrl);
+          const defaultCamera = new JetsonCamera(entry.cameraId, apiUrl);
+          if (this.currentWallet) {
+            defaultCamera.setWallet(this.currentWallet);
+          }
+          return defaultCamera;
       }
     } catch (error) {
       this.log(`Error creating camera instance:`, error);
@@ -255,6 +250,22 @@ export class CameraRegistry {
    */
   public getOnlineCameras(): CameraRegistryEntry[] {
     return this.getAllCameras().filter(camera => camera.isOnline);
+  }
+
+  /**
+   * Set wallet for request signing on all Jetson cameras
+   * This enables ed25519 authentication for secure API calls
+   */
+  public setWallet(wallet: any): void {
+    this.currentWallet = wallet;
+    this.log('Wallet set for request signing:', wallet?.address?.slice(0, 8) + '...');
+
+    // Update all existing JetsonCamera instances
+    for (const entry of this.cameras.values()) {
+      if (entry.instance && entry.instance instanceof JetsonCamera) {
+        (entry.instance as JetsonCamera).setWallet(wallet);
+      }
+    }
   }
 
   /**
@@ -331,37 +342,7 @@ export class CameraRegistry {
         
         results.set(entry.cameraId, isHealthy);
         this.updateCameraStatus(entry.cameraId, isHealthy);
-        
-        // If PDA-based URL fails and we have a legacy URL, try that
-        if (!isHealthy && entry.config?.legacyUrl) {
-          for (const endpoint of healthEndpoints) {
-            try {
-              const legacyResponse = await fetch(`${entry.config.legacyUrl}${endpoint}`, {
-                method: 'GET',
-                timeout: 5000,
-                mode: 'cors',
-                credentials: 'omit'
-              } as any);
-              
-              if (legacyResponse.ok) {
-                this.log(`Camera ${entry.cameraId} responded to legacy URL, updating API URL`);
-                entry.apiUrl = entry.config.legacyUrl;
-                results.set(entry.cameraId, true);
-                this.updateCameraStatus(entry.cameraId, true);
-                isHealthy = true;
-                break;
-              }
-            } catch (legacyError) {
-              // Continue to next endpoint
-              continue;
-            }
-          }
-          
-          if (!isHealthy) {
-            this.log(`Both PDA and legacy URLs failed for ${entry.cameraId}`);
-          }
-        }
-        
+
       } catch (error) {
         this.log(`Health check failed for ${entry.cameraId}:`, error);
         results.set(entry.cameraId, false);

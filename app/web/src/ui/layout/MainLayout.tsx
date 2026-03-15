@@ -1,10 +1,11 @@
-import { HeadlessAuthButton } from '../../auth';
 import { useIsLoggedIn, useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { Menu, X, LogIn } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useConnection } from '@solana/wallet-adapter-react';
+import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { X, User } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import Logo from '../common/Logo';
 import { AuthModal } from '../../auth/components/AuthModal';
+import Logo from '../common/Logo';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -12,20 +13,39 @@ interface MainLayoutProps {
   onTabChange: (tab: 'camera' | 'gallery' | 'activities' | 'account') => void;
 }
 
+interface SocialCredential {
+  oauthProvider: string;
+  oauthUsername: string;
+  oauthDisplayName: string;
+  oauthAccountPhotos: string[];
+}
+
 export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const isLoggedIn = useIsLoggedIn();
-  useDynamicContext();
+  const { sdkHasLoaded, primaryWallet, user } = useDynamicContext();
+  const { connection } = useConnection();
   const navigate = useNavigate();
   const { cameraId } = useParams<{ cameraId?: string }>();
   const location = useLocation();
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [solBalance, setSolBalance] = useState<number | null>(null);
+
+  // Redirect to login if not authenticated (wait for SDK to hydrate first)
+  useEffect(() => {
+    if (!sdkHasLoaded) return;
+    if (!isLoggedIn) {
+      const currentPath = location.pathname + location.search;
+      navigate(`/login?redirect=${encodeURIComponent(currentPath)}`);
+    }
+  }, [sdkHasLoaded, isLoggedIn, navigate, location.pathname, location.search]);
+
   // Debug logging for navigation
   useEffect(() => {
     const pathMatch = location.pathname.match(/\/app\/(camera|gallery|activities)\/([^\/]+)/);
     const localStorageCameraId = localStorage.getItem('directCameraId');
-    
+
     console.log('Navigation Debug:', {
       currentPath: location.pathname,
       activeTab,
@@ -34,22 +54,70 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
       cameraIdFromLocalStorage: localStorageCameraId
     });
   }, [location.pathname, activeTab, cameraId]);
-  
-  // Handle tab navigation with camera ID
+
+  // Fetch SOL balance
+  useEffect(() => {
+    const fetchBalance = async () => {
+      if (!primaryWallet?.address || !connection) return;
+      try {
+        const publicKey = new PublicKey(primaryWallet.address);
+        const balance = await connection.getBalance(publicKey);
+        setSolBalance(balance / LAMPORTS_PER_SOL);
+      } catch (error) {
+        console.error('Error fetching balance:', error);
+      }
+    };
+    fetchBalance();
+    const interval = setInterval(fetchBalance, 30000);
+    return () => clearInterval(interval);
+  }, [primaryWallet?.address, connection]);
+
+  // Handle tab navigation
   const handleTabChange = (tab: 'camera' | 'gallery' | 'activities' | 'account') => {
     onTabChange(tab);
-    
-    // Extract camera ID from current path if available
+
     const matchPath = location.pathname.match(/\/app\/(camera|gallery|activities)\/([^\/]+)/);
     const currentCameraId = cameraId || (matchPath ? matchPath[2] : localStorage.getItem('directCameraId'));
-    
-    if (currentCameraId) {
-      console.log(`Navigating to ${tab} with camera ID: ${currentCameraId}`);
-      navigate(`/app/${tab}/${currentCameraId}`);
+
+    if (tab === 'camera' && currentCameraId) {
+      navigate(`/app/camera/${currentCameraId}`);
+    } else if (tab === 'gallery') {
+      navigate('/app/gallery');
+    } else if (tab === 'activities') {
+      navigate('/app/activities');
     } else {
       navigate('/app');
     }
   };
+
+  // Resolve user display info
+  const farcasterCred = user?.verifiedCredentials?.find(
+    (cred: any): cred is SocialCredential =>
+      cred?.oauthProvider?.toLowerCase() === 'farcaster'
+  );
+  const googleCred = user?.verifiedCredentials?.find(
+    (cred: any): cred is SocialCredential =>
+      cred?.oauthProvider?.toLowerCase() === 'google'
+  );
+  const twitterCred = user?.verifiedCredentials?.find(
+    (cred: any): cred is SocialCredential =>
+      cred?.oauthProvider?.toLowerCase() === 'twitter'
+  );
+  const socialCred = farcasterCred || googleCred || twitterCred;
+
+  const providerLabels: Record<string, string> = {
+    farcaster: 'Farcaster',
+    google: 'Google',
+    twitter: 'X / Twitter',
+  };
+  const displayName = socialCred?.oauthDisplayName
+    || user?.email
+    || primaryWallet?.address?.slice(0, 6) + '...' + primaryWallet?.address?.slice(-4)
+    || 'Account';
+  const socialProvider = socialCred?.oauthProvider
+    ? (providerLabels[socialCred.oauthProvider] || socialCred.oauthProvider)
+    : (user?.email ? 'Email' : 'Wallet');
+  const profilePhoto = socialCred?.oauthAccountPhotos?.[0];
 
   return (
     <div className="flex flex-col min-h-screen bg-white">
@@ -62,8 +130,8 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
               onClick={() => navigate('/')}
               className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
             >
-              <Logo width={30} height={21} className="text-black" />
-              <h1 className="text-2xl text-black font-bold">
+              <Logo width={30} height={21} className="text-neutral-900" />
+              <h1 className="text-2xl text-neutral-900 font-bold">
                 Moment
               </h1>
             </div>
@@ -73,8 +141,8 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                   type='button'
                   onClick={() => handleTabChange('camera')}
                   className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'camera'
-                    ? 'bg-white text-stone-800'
-                    : 'bg-white text-stone-400 hover:text-stone-800'
+                    ? 'bg-white text-neutral-900'
+                    : 'bg-white text-neutral-400 hover:text-neutral-900'
                     }`}
                 >
                   Camera
@@ -83,8 +151,8 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                   type='button'
                   onClick={() => handleTabChange('gallery')}
                   className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'gallery'
-                    ? 'bg-white text-stone-800'
-                    : 'bg-white text-stone-400 hover:text-stone-800'
+                    ? 'bg-white text-neutral-900'
+                    : 'bg-white text-neutral-400 hover:text-neutral-900'
                     }`}
                 >
                   Gallery
@@ -93,196 +161,152 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                   type='button'
                   onClick={() => handleTabChange('activities')}
                   className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'activities'
-                    ? 'bg-white text-stone-800'
-                    : 'bg-white text-stone-400 hover:text-stone-800'
+                    ? 'bg-white text-neutral-900'
+                    : 'bg-white text-neutral-400 hover:text-neutral-900'
                     }`}
                 >
                   Activities
                 </button>
-                {/* <button
-                  type='button'
-                  onClick={() => navigate('/soldevnetdebug')}
-                  className="px-4 py-2 rounded-lg flex items-center gap-2 bg-white text-stone-400 hover:text-stone-800"
-                >
-                  DevNet Debug
-                </button> */}
               </div>
             )}
           </div>
 
-          {/* Right side - Auth button and mobile menu */}
+          {/* Right side - Profile pill or close button */}
           <div className="flex items-center gap-2">
-            {activeTab === 'account' ? (
+            {!primaryWallet?.address ? (
+              <>
+                <button
+                  onClick={() => setShowAuthModal(true)}
+                  className="px-4 py-2 bg-neutral-100 text-neutral-900 rounded-lg hover:bg-neutral-200 transition-colors font-medium text-sm"
+                >
+                  Log in
+                </button>
+                <AuthModal
+                  isOpen={showAuthModal}
+                  onClose={() => setShowAuthModal(false)}
+                />
+              </>
+            ) : (
               <button
                 type='button'
-                onClick={() => navigate('/app')}
-                className="p-2 rounded-lg bg-[#999999] hover:bg-[#d1dfff] transition-colors"
+                onClick={() => setIsOpen(!isOpen)}
+                className="flex items-center gap-2 px-3 py-1.5 bg-neutral-100 rounded-lg hover:bg-neutral-200 transition-colors"
               >
-                <X className="w-5 h-5 text-gray-50" />
-              </button>
-            ) : (
-              <>
-                <HeadlessAuthButton />
-                {isLoggedIn && (
-                  <button
-                    type='button'
-                    onClick={() => setIsOpen(true)}
-                    className="sm:hidden p-2 rounded-lg bg-[#999999] hover:bg-[#d1dfff] transition-colors"
-                  >
-                    <Menu className="w-5 h-5 text-gray-50" />
-                  </button>
+                {profilePhoto ? (
+                  <img src={profilePhoto} alt="" referrerPolicy="no-referrer" className="w-6 h-6 rounded-full" />
+                ) : (
+                  <div className="w-6 h-6 rounded-full bg-neutral-200 flex items-center justify-center">
+                    <User className="w-3.5 h-3.5 text-neutral-400" />
+                  </div>
                 )}
-              </>
+                <span className="text-sm font-medium text-neutral-900">{displayName}</span>
+              </button>
             )}
           </div>
         </div>
       </div>
 
-      {/* Mobile Navigation Menu - Don't show on account page */}
-      {isLoggedIn && isOpen && activeTab !== 'account' && (
-        <div className="fixed inset-x-0 z-[80] sm:hidden">
-          {/* Semi-transparent overlay */}
+      {/* Unified Dropdown Menu */}
+      {isLoggedIn && isOpen && (
+        <div className="fixed inset-0 z-[80]" ref={dropdownRef}>
+          {/* Scrim overlay */}
           <div
-            className="fixed inset-0 bg-black/50"
+            className="fixed inset-0 bg-black/30"
             onClick={() => setIsOpen(false)}
           />
 
           <div className="relative">
-            {/* Keep header visible when menu is open */}
+            {/* Header with logo + close */}
             <div className="bg-white px-4 h-16 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Logo width={30} height={21} className="text-black" />
-                <h1 className="text-2xl text-black font-bold">Moment</h1>
+                <Logo width={30} height={21} className="text-neutral-900" />
+                <h1 className="text-2xl text-neutral-900 font-bold">Moment</h1>
               </div>
               <button
                 type='button'
                 onClick={() => setIsOpen(false)}
-                className="p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
+                className="p-2 rounded-lg bg-neutral-100 hover:bg-neutral-200 transition-colors"
               >
-                <X className="w-5 h-5 text-gray-700" />
+                <X className="w-5 h-5 text-neutral-600" />
               </button>
             </div>
 
-            {/* Navigation Card */}
-            <div className="w-full bg-white shadow-lg rounded-b-xl">
-              {/* Navigation Links */}
-              <div className="p-6 space-y-4">
-                <button
-                  type='button'
-                  onClick={() => {
-                    handleTabChange('camera');
-                    setIsOpen(false);
-                  }}
-                  className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${activeTab === 'camera'
-                    ? 'bg-gray-100 text-black'
-                    : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                >
-                  Camera
-                </button>
-
-                <button
-                  type='button'
-                  onClick={() => {
-                    handleTabChange('gallery');
-                    setIsOpen(false);
-                  }}
-                  className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${activeTab === 'gallery'
-                    ? 'bg-gray-100 text-black'
-                    : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                >
-                  Gallery
-                </button>
-
-                <button
-                  type='button'
-                  onClick={() => {
-                    handleTabChange('activities');
-                    setIsOpen(false);
-                  }}
-                  className={`w-full text-left px-4 py-3 rounded-lg transition-colors ${activeTab === 'activities'
-                    ? 'bg-gray-100 text-black'
-                    : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                >
-                  Activities
-                </button>
-
-                {/* <button
-                  type='button'
-                  onClick={() => {
-                    navigate('/settings');
-                    setIsOpen(false);
-                  }}
-                  className="w-full text-left px-4 py-3 rounded-lg transition-colors text-gray-600 hover:bg-gray-50"
-                >
-                  Settings
-                </button>
-
-                <button
-                  type='button'
-                  onClick={() => {
-                    navigate('/soldevnetdebug');
-                    setIsOpen(false);
-                  }}
-                  className="w-full text-left px-4 py-3 rounded-lg transition-colors text-gray-600 hover:bg-gray-50"
-                >
-                  DevNet Debug
-                </button> */}
-
-                {/* Divider */}
-                <div className="my-4 border-t border-gray-200" />
-
-                {/* Footer Info */}
-                <div className="px-4 flex justify-center py-2">
-                  <p className="text-sm text-gray-500">
-                    social memory and compute for IRL
-                  </p>
+            {/* Dropdown panel */}
+            <div className="bg-white shadow-lg rounded-b-xl px-6 pb-6 pt-2 space-y-4">
+              {/* Account Card */}
+              <button
+                type='button'
+                onClick={() => {
+                  setIsOpen(false);
+                  navigate('/account');
+                }}
+                className="w-full bg-neutral-100 rounded-xl p-4 text-left hover:bg-neutral-200 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  {profilePhoto ? (
+                    <img src={profilePhoto} alt="" referrerPolicy="no-referrer" className="w-10 h-10 rounded-full" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full bg-neutral-200 flex items-center justify-center">
+                      <User className="w-5 h-5 text-neutral-400" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[15px] font-semibold text-neutral-900 truncate">{displayName}</p>
+                    <p className="text-xs text-neutral-400">{socialProvider}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[15px] font-semibold text-neutral-900">
+                      {solBalance !== null ? `${solBalance.toFixed(2)} SOL` : '—'}
+                    </p>
+                  </div>
                 </div>
+                {/* Storage indicator */}
+                <div className="mt-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-neutral-600">Storage</span>
+                    <span className="text-xs text-neutral-400">23.5 MB / 100 MB</span>
+                  </div>
+                  <div className="w-full h-1 bg-neutral-200 rounded-sm">
+                    <div className="h-1 bg-accent rounded-sm" style={{ width: '24%' }} />
+                  </div>
+                </div>
+              </button>
+
+              {/* Nav links */}
+              <div className="space-y-1">
+                {(['camera', 'gallery', 'activities'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type='button'
+                    onClick={() => {
+                      handleTabChange(tab);
+                      setIsOpen(false);
+                    }}
+                    className={`w-full text-left px-4 py-3 rounded-lg text-[15px] transition-colors ${
+                      activeTab === tab
+                        ? 'bg-neutral-100 text-neutral-900 font-medium'
+                        : 'text-neutral-400 hover:bg-neutral-50'
+                    }`}
+                  >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tagline */}
+              <div className="flex justify-center pt-1">
+                <p className="text-xs text-neutral-400">
+                  social memory and compute for IRL
+                </p>
               </div>
             </div>
           </div>
         </div>
       )}
-      
+
       {/* Main Content */}
       <div className="flex-1 relative">
-      {isLoggedIn ? (
-        <div>
-          {children}
-        </div>
-      ) : (
-        <div className="h-full flex flex-col items-center justify-center p-4">
-          <div className="max-w-md w-full bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <div className="text-center mb-6">
-              <Logo width={40} height={32} className="mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-gray-900">Welcome to Moment</h2>
-              <p className="text-gray-600 mt-2">
-                Please sign in to access the app
-              </p>
-            </div>
-            
-            <button
-              onClick={() => setShowAuthModal(true)}
-              className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <LogIn className="w-5 h-5" />
-              <span>Sign In</span>
-            </button>
-            
-            <p className="text-sm text-center mt-4 text-gray-500">
-              Capture moments and their context instantly
-            </p>
-          </div>
-          
-          {/* Auth Modal */}
-          <AuthModal 
-            isOpen={showAuthModal} 
-            onClose={() => setShowAuthModal(false)} 
-          />
-        </div>
-      )}
+        {isLoggedIn && <div>{children}</div>}
       </div>
     </div>
   );

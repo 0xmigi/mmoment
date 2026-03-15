@@ -1,0 +1,27 @@
+[Unit]
+Description=MMOMENT Native Camera Server (TensorRT CV Pipeline)
+After=network.target nvargus-daemon.service display-manager.service
+Wants=nvargus-daemon.service
+
+[Service]
+Type=simple
+User=azuolas
+Group=azuolas
+WorkingDirectory=/mnt/nvme/mmoment/app/orin_nano/native
+ExecStartPre=/bin/rm -f /tmp/native_inference.sock
+ExecStart=/mnt/nvme/mmoment/app/orin_nano/native/build/native_camera_server
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/native-camera-server.log
+StandardError=append:/var/log/native-camera-server.log
+
+# GPU/Camera access
+SupplementaryGroups=video render
+
+# Environment for X11/EGL access
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/azuolas/.Xauthority
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+
+[Install]
+WantedBy=multi-user.target

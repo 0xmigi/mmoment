@@ -10,7 +10,8 @@ export * from './pipe';
 export { getPinataCredentials, updatePinataCredentials } from './config';
 
 // UI Components
-export { PinataSettings } from './PinataSettings';
+export { DeveloperSettings } from './DeveloperSettings';
+export { getCVDevModeEnabled, setCVDevModeEnabled } from './DeveloperSettings';
 
 // Fix for ambiguous exports
 // Export types from walrus/index.ts

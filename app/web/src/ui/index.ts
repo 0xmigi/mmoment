@@ -3,6 +3,7 @@
 // Layout components
 export * from './layout/MainLayout';
 export * from './layout/CameraView';
+export * from './layout/HomeView';
 export * from './layout/GalleryView';
 export * from './layout/ActivitiesView';
 export * from './layout/MobileControls';

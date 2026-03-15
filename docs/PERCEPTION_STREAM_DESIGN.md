@@ -1,0 +1,136 @@
+# Perception Stream Architecture
+
+The MMOMENT camera network produces a structured mathematical representation of physical reality — not video, but identity-resolved perception data. This document describes the architecture of that perception stream, how it flows through the network, and how consumers access it.
+
+## Core Insight
+
+The camera system produces a **mathematical abstraction of the physical world** before any application logic runs. The pushup counter never touches a pixel — it reads keypoint coordinates and computes angles. The basketball tracker works from bounding boxes and trajectories. Every consumer of the system operates on the same structured data:
+
+```python
+frame_data = {
+    'detections': [
+        {
+            'track_id': int,           # Persistent person tracking ID
+            'wallet_address': str,     # Solana wallet (identity-resolved, only if checked in)
+            'x1': float, 'y1': float,
+            'x2': float, 'y2': float,  # Bounding box
+            'confidence': float,
+        }
+    ],
+    'keypoints': [
+        {
+            'track_id': int,           # Matches detection track_id
+            'keypoints': np.ndarray    # (17, 3) COCO format [x, y, conf]
+        }
+    ],
+    'timestamp': float,
+    'frame': np.ndarray               # Optional raw frame
+}
+```
+
+This is not video. It's a **perception stream** — a real-time structured representation of who is where, doing what. The raw pixels are the input to the pipeline, not its output.
+
+## Cryptographic Consent
+
+Identity resolution is gated by a cryptographic act. A user produces an ed25519 signature between their wallet and the camera they're visiting. This signature is local and instant — no blockchain latency, no transaction fees at the moment of check-in. It unlocks identity for their bounding box at that camera. The session data (check-in, activities, checkout) is published to the chain when the user leaves.
+
+This means:
+- **No signature, no identity.** The face embedding match has no wallet to map to without the ed25519 consent signature.
+- **Unconsented bodies are obfuscated.** YOLO detects them, but the network doesn't expose them as identified individuals.
+- **Consent is verifiable.** Every identity-resolved session has a corresponding on-chain record (published at checkout) that anyone can audit.
+- **Privacy is architectural, not policy.** The system physically cannot produce identity-resolved data without the consent event.
+- **One-time enrollment, network-wide recognition.** A user creates a RecognitionToken once. That token works at every camera in the network — no re-enrollment per location.
+
+## What Each Camera Produces
+
+### The Perception Pipeline
+
+1. Native C++ server runs YOLOv8 (person detection + tracking) and computes ArcFace embeddings (512-dim)
+2. NativeIdentityService matches embeddings against enrolled, checked-in users
+3. COCO 17-joint pose estimation runs per detected person
+4. Track continuity + ReID (OSNet x0.25) maintains identity across frames and brief occlusions
+
+Output: `frame_data` dicts at frame rate with identity-resolved detections and pose skeletons.
+
+### What Makes Single-Camera Data Useful
+
+The structured output supports pure geometric analysis without additional CV models:
+
+- **Angle calculation**: Dot product of vectors between keypoints (shoulder-elbow-wrist)
+- **Position validation**: Torso-vertical / shoulder-width ratio (standing vs. push-up position)
+- **View detection**: Keypoint visibility confidence determines front/left/right camera angle
+- **Proximity**: Bounding box distance between identified individuals
+
+No model retraining needed. New analyses are just new geometric functions over the same keypoint stream.
+
+## Network-Level Data
+
+The unit of value is not a single camera's stream — it's the **network**. Individual camera #8282229 seeing a user do push-ups is useful. The network knowing that wallet `7xKp...` checked in at the gym at 6am, did 50 push-ups at camera #8282229, walked past camera #4419102 in the lobby, and checked in at the basketball court camera #7731004 at 7pm — that's an activity graph across physical space.
+
+MMOMENT aggregates perception data across all cameras in the network. The API can answer questions no single camera can:
+
+- "What has this user done across all cameras today?"
+- "Who is at this location right now?"
+- "Show me this user's basketball stats across every court they've played at"
+- Cross-camera co-presence, movement patterns, aggregate activity history
+
+All identity-resolved queries require the user's cryptographic check-in at each camera. The network sees more, but only what users have consented to at each point.
+
+## What's Visible and To Whom
+
+What data a consumer can access is not determined by a pricing tier — it's determined by the **visibility model**. The camera's floor, the user's consent, and the consumer's relationship to the session govern what's available. See `VISIBILITY_MODEL.md` for the full specification.
+
+The perception stream produces everything — detections, keypoints, events, frames. The visibility model determines which of that reaches which party. A co-present user sees what happened while they were in the room. An authorized app sees what the user granted it. An API consumer sees what the venue floor and user escalation have made available.
+
+Unconsented (non-checked-in) individuals are detected but never identity-resolved. Their presence is geometric data without a wallet attached.
+
+## Consumer Patterns
+
+Consumers access the network through MMOMENT's API, not through individual cameras. What they can query depends on what users and venues have made visible:
+
+**Real-time single-camera stream** — A fitness coaching agent subscribes to live pose data from a gym camera. The user has authorized the app (Level 3), so the agent receives identity-resolved keypoints for that user's session.
+
+**Cross-camera user history** — A personal analytics app queries a user's activity across all cameras they've checked into. The user authorized the app, so it can aggregate their sessions network-wide.
+
+**Location intelligence** — A venue analytics service queries real-time occupancy and flow. The venue floor is set to Level 4 (API), so anonymous aggregate counts are available to any API consumer. Individual identities are only visible if users have escalated.
+
+**Content generation** — A social app detects co-presence (two users checked in at the same camera simultaneously). Both users authorized the app, so it can see their overlapping sessions and generate shared content.
+
+## On-Device vs. Remote Processing
+
+The existing on-camera app system (BaseApp/CompetitionApp in `/opt/mmoment/apps/`) serves a narrow use case: **sub-frame-latency overlays on the camera's own stream.** Live competition rep counts appearing on the stream in real-time require on-device execution.
+
+Most consumers will be remote. A coaching agent on a VPS doing trigonometry on keypoints doesn't need to run on the Jetson. The same `frame_data` contract works in both contexts — the only difference is latency and who pays for compute. Remote is the default path. On-device is the exception for latency-critical visualization.
+
+## Camera as Oracle
+
+Each camera PDA is a Solana-verifiable oracle for physical-world events. When the system counts 15 push-up reps for wallet `7xKp...`:
+
+1. Computed on-device from raw sensor data
+2. Encrypted with checked-in users' public keys (AES-256-GCM)
+3. Buffered to the backend
+4. Committed to the blockchain at checkout
+
+The camera PDA signs the attestation. The on-chain program verifies the camera is registered. The count is camera-attested — not self-reported, not from a device the user controls.
+
+## Composability
+
+Because the stream is structured data (not pixels), it composes naturally:
+
+- **Multi-camera**: Merge activity by wallet address across cameras
+- **Temporal**: Query historical activity patterns from buffered events
+- **Cross-domain**: Attestation data feeds into DeFi (escrow settlement), social (content creation), identity (activity reputation)
+
+## File References
+
+| Component | Path |
+|-----------|------|
+| BaseApp / CompetitionApp | `app/orin_nano/apps/sdk/base_app.py` |
+| AppManager (plugin loader) | `app/orin_nano/services/camera-service/services/app_manager.py` |
+| Push-up app (reference impl) | `app/orin_nano/apps/pushup/app.py` |
+| Basketball app (reference impl) | `app/orin_nano/apps/basketball/basketball_app.py` |
+| Identity service | `app/orin_nano/services/camera-service/services/native_identity_service.py` |
+| Activity encryption | `app/orin_nano/services/camera-service/services/activity_encryption_service.py` |
+| Activity buffer client | `app/orin_nano/services/camera-service/services/activity_buffer_client.py` |
+| Native buffer (frame flow) | `app/orin_nano/services/camera-service/services/native_buffer_service.py` |
+| App API endpoints | `app/orin_nano/services/camera-service/routes.py` |

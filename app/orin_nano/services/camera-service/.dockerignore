@@ -1,0 +1,7 @@
+# Exclude stale placeholder directories (real binaries mounted from host)
+native/
+native_bin/
+__pycache__/
+*.pyc
+*.pyo
+.git/

@@ -4,7 +4,6 @@ import { WalletIcon } from '@dynamic-labs/wallet-book';
 import { Dialog } from '@headlessui/react';
 import { X } from 'lucide-react';
 import { HeadlessSocialLogin } from './HeadlessSocialLogin';
-import { useNavigate } from 'react-router-dom';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -15,7 +14,6 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
   const { walletOptions, selectWalletOption } = useWalletOptions();
   const { connectWithEmail, verifyOneTimePassword } = useConnectWithOtp();
   const { createEmbeddedWallet, userHasEmbeddedWallet } = useEmbeddedWallet();
-  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -26,7 +24,6 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
   const handleSuccessfulAuth = () => {
     onClose();
-    navigate('/app');
   };
 
   const handleWalletSelect = async (wallet: WalletOption) => {
@@ -96,15 +93,15 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
       <div className="fixed inset-0 flex items-end sm:items-center justify-center p-2 sm:p-0">
         <Dialog.Panel className="mx-auto w-full sm:w-[360px] rounded-xl bg-white shadow-xl">
           {/* Header with close button */}
-          <div className="flex items-center justify-between p-3 border-b border-gray-100">
+          <div className="flex items-center justify-between p-3 border-b border-neutral-200">
             <Dialog.Title className="text-base font-medium">
               Sign In
             </Dialog.Title>
             <button
               onClick={onClose}
-              className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
+              className="p-1 rounded-lg hover:bg-neutral-100 transition-colors"
             >
-              <X className="w-4 h-4 text-gray-500" />
+              <X className="w-4 h-4 text-neutral-400" />
             </button>
           </div>
 
@@ -125,18 +122,18 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                     value={otp}
                     onChange={(e) => setOtp(e.target.value)}
                     disabled={isLoading}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-3 py-2 border border-neutral-200 rounded-lg shadow-sm focus:ring-primary focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="Enter verification code"
                     required
                   />
-                  <p className="mt-2 text-xs text-gray-500">
+                  <p className="mt-2 text-xs text-neutral-400">
                     We sent a code to your email address
                   </p>
                 </div>
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-neutral-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-neutral-600/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isLoading ? 'Verifying...' : 'Verify'}
                 </button>
@@ -151,14 +148,14 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     disabled={isLoading}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-3 py-2 border border-neutral-200 rounded-lg shadow-sm focus:ring-primary focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="name@example.com"
                     required
                   />
                   <button
                     type="submit"
                     disabled={isLoading}
-                    className="w-full mt-2 bg-blue-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full mt-2 bg-neutral-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-neutral-600/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isLoading ? 'Please wait...' : 'Continue with Email'}
                   </button>
@@ -166,10 +163,10 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
                 <div className="relative my-6">
                   <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-gray-200"></div>
+                    <div className="w-full border-t border-neutral-200"></div>
                   </div>
                   <div className="relative flex justify-center text-xs">
-                    <span className="px-2 bg-white text-gray-500">or continue with</span>
+                    <span className="px-2 bg-white text-neutral-400">or continue with</span>
                   </div>
                 </div>
 
@@ -178,7 +175,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                   <button
                     onClick={() => handleWalletSelect(phantomWallet)}
                     disabled={isLoading}
-                    className="w-full flex items-center p-3 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full flex items-center p-3 rounded-lg bg-neutral-100 hover:bg-neutral-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <div className="w-6 h-6 mr-3">
                       <WalletIcon walletKey={phantomWallet.key} />

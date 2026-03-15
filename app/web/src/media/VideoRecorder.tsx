@@ -71,7 +71,7 @@ export const VideoRecorder = forwardRef<{ startRecording: () => Promise<void> },
             onMouseEnter={() => setShowTooltip(true)}
             onMouseLeave={() => setShowTooltip(false)}
             disabled={loading || initLoading || !isInitialized}
-            className="w-16 h-full flex items-center justify-center hover:text-blue-600 text-gray-800 transition-colors rounded-xl"
+            className="w-16 h-full flex items-center justify-center hover:text-primary text-gray-800 transition-colors rounded-xl"
             aria-label="Record video"
           >
             {loading || initLoading ? (

@@ -1,4 +1,4 @@
-import { Program, AnchorProvider, Idl } from '@coral-xyz/anchor';
+import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import { PublicKey, Connection } from '@solana/web3.js';
 import { useConnection, useAnchorWallet } from '@solana/wallet-adapter-react';
 import { useEffect, useState } from 'react';
@@ -9,19 +9,18 @@ import { CAMERA_ACTIVATION_PROGRAM_ID } from '../anchor/setup';
 export { CAMERA_ACTIVATION_PROGRAM_ID };
 
 // Hook to get an Anchor program
-export function useAnchorProgram<IDLType extends Idl = typeof IDL>(
-  programId: PublicKey = CAMERA_ACTIVATION_PROGRAM_ID,
-  idl: IDLType = IDL as unknown as IDLType
+export function useAnchorProgram(
+  idl: any = IDL
 ) {
   const { connection } = useConnection();
   const wallet = useAnchorWallet();
-  const [program, setProgram] = useState<Program<IDLType> | null>(null);
+  const [program, setProgram] = useState<Program | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
     let mounted = true;
-    
+
     const initProgram = async () => {
       try {
         if (!wallet) {
@@ -31,16 +30,16 @@ export function useAnchorProgram<IDLType extends Idl = typeof IDL>(
           }
           return;
         }
-        
+
         setLoading(true);
         const provider = new AnchorProvider(
           connection,
           wallet,
           { commitment: 'confirmed' }
         );
-        
-        const program = new Program(idl, programId, provider);
-        
+
+        const program = new Program(idl as any, provider);
+
         if (mounted) {
           setProgram(program);
           setError(null);
@@ -56,20 +55,19 @@ export function useAnchorProgram<IDLType extends Idl = typeof IDL>(
     };
 
     initProgram();
-    
+
     return () => {
       mounted = false;
     };
-  }, [connection, wallet, programId, idl]);
+  }, [connection, wallet, idl]);
 
   return { program, loading, error };
 }
 
 // Get a read-only program for public access
-export function getReadOnlyProgram<IDLType extends Idl = typeof IDL>(
+export function getReadOnlyProgram(
   connection: Connection,
-  programId: PublicKey = CAMERA_ACTIVATION_PROGRAM_ID,
-  idl: IDLType = IDL as unknown as IDLType
+  idl: any = IDL
 ) {
   // Create a provider without a wallet (read-only)
   const provider = new AnchorProvider(
@@ -81,7 +79,7 @@ export function getReadOnlyProgram<IDLType extends Idl = typeof IDL>(
     } as any,
     { commitment: 'confirmed' }
   );
-  
+
   // Create a program instance
-  return new Program(idl, programId, provider);
-} 
+  return new Program(idl as any, provider);
+}

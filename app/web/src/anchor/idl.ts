@@ -1,1230 +1,250 @@
-export type CameraNetwork = {
-  "version": "0.1.0",
-  "name": "camera_network",
-  "instructions": [
-    {
-      "name": "initialize",
-      "docs": [
-        "Initialize the camera registry (admin only)"
-      ],
-      "accounts": [
-        {
-          "name": "authority",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "cameraRegistry",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "systemProgram",
-          "isMut": false,
-          "isSigner": false
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "registerCamera",
-      "docs": [
-        "Register a new camera to the network"
-      ],
-      "accounts": [
-        {
-          "name": "owner",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "cameraRegistry",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "type": "string",
-                "value": "camera"
-              },
-              {
-                "kind": "arg",
-                "type": {
-                  "defined": "RegisterCameraArgs"
-                },
-                "path": "args.name"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "path": "owner"
-              }
-            ]
-          }
-        },
-        {
-          "name": "systemProgram",
-          "isMut": false,
-          "isSigner": false
-        }
-      ],
-      "args": [
-        {
-          "name": "args",
-          "type": {
-            "defined": "RegisterCameraArgs"
-          }
-        }
-      ]
-    },
-    {
-      "name": "updateCamera",
-      "docs": [
-        "Update camera information"
-      ],
-      "accounts": [
-        {
-          "name": "owner",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        }
-      ],
-      "args": [
-        {
-          "name": "args",
-          "type": {
-            "defined": "UpdateCameraArgs"
-          }
-        }
-      ]
-    },
-    {
-      "name": "deregisterCamera",
-      "docs": [
-        "Deregister a camera from the network"
-      ],
-      "accounts": [
-        {
-          "name": "owner",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "cameraRegistry",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "setCameraActive",
-      "docs": [
-        "Set camera active or inactive status"
-      ],
-      "accounts": [
-        {
-          "name": "owner",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        }
-      ],
-      "args": [
-        {
-          "name": "isActive",
-          "type": "bool"
-        }
-      ]
-    },
-    {
-      "name": "checkIn",
-      "docs": [
-        "Check in user to a camera"
-      ],
-      "accounts": [
-        {
-          "name": "user",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "payer",
-          "isMut": true,
-          "isSigner": true,
-          "docs": [
-            "The payer for the session account - usually the user, but can be a sponsor",
-            "This allows gas sponsorship where a third party pays for account rent"
-          ]
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "recognitionToken",
-          "isMut": false,
-          "isSigner": false,
-          "isOptional": true,
-          "docs": [
-            "Optional recognition token - required if use_face_recognition is true"
-          ]
-        },
-        {
-          "name": "session",
-          "isMut": true,
-          "isSigner": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "type": "string",
-                "value": "session"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "path": "user"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "account": "CameraAccount",
-                "path": "camera"
-              }
-            ]
-          }
-        },
-        {
-          "name": "systemProgram",
-          "isMut": false,
-          "isSigner": false
-        }
-      ],
-      "args": [
-        {
-          "name": "useFaceRecognition",
-          "type": "bool"
-        }
-      ]
-    },
-    {
-      "name": "checkOut",
-      "docs": [
-        "Check out user from a camera"
-      ],
-      "accounts": [
-        {
-          "name": "closer",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "session",
-          "isMut": true,
-          "isSigner": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "type": "string",
-                "value": "session"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "account": "UserSession",
-                "path": "session.user"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "account": "CameraAccount",
-                "path": "camera"
-              }
-            ]
-          }
-        },
-        {
-          "name": "sessionUser",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "rentDestination",
-          "isMut": true,
-          "isSigner": false
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "upsertRecognitionToken",
-      "docs": [
-        "Create or regenerate a recognition token (stores encrypted facial embedding)"
-      ],
-      "accounts": [
-        {
-          "name": "user",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "recognitionToken",
-          "isMut": true,
-          "isSigner": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "type": "string",
-                "value": "recognition-token"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "path": "user"
-              }
-            ]
-          }
-        },
-        {
-          "name": "systemProgram",
-          "isMut": false,
-          "isSigner": false
-        }
-      ],
-      "args": [
-        {
-          "name": "encryptedEmbedding",
-          "type": "bytes"
-        },
-        {
-          "name": "displayName",
-          "type": {
-            "option": "string"
-          }
-        },
-        {
-          "name": "source",
-          "type": "u8"
-        }
-      ]
-    },
-    {
-      "name": "deleteRecognitionToken",
-      "docs": [
-        "Delete recognition token and reclaim rent"
-      ],
-      "accounts": [
-        {
-          "name": "user",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "recognitionToken",
-          "isMut": true,
-          "isSigner": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "type": "string",
-                "value": "recognition-token"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "path": "user"
-              }
-            ]
-          }
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "recordActivity",
-      "docs": [
-        "Record a camera activity (photo, video, stream)"
-      ],
-      "accounts": [
-        {
-          "name": "user",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "session",
-          "isMut": false,
-          "isSigner": false
-        }
-      ],
-      "args": [
-        {
-          "name": "args",
-          "type": {
-            "defined": "RecordActivityArgs"
-          }
-        }
-      ]
-    }
-  ],
-  "accounts": [
-    {
-      "name": "cameraRegistry",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "authority",
-            "type": "publicKey"
-          },
-          {
-            "name": "cameraCount",
-            "type": "u64"
-          },
-          {
-            "name": "feeAccount",
-            "type": "publicKey"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "cameraAccount",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "owner",
-            "type": "publicKey"
-          },
-          {
-            "name": "metadata",
-            "type": {
-              "defined": "CameraMetadata"
-            }
-          },
-          {
-            "name": "isActive",
-            "type": "bool"
-          },
-          {
-            "name": "activityCounter",
-            "type": "u64"
-          },
-          {
-            "name": "lastActivityAt",
-            "type": "i64"
-          },
-          {
-            "name": "lastActivityType",
-            "type": "u8"
-          },
-          {
-            "name": "accessCount",
-            "type": "u64"
-          },
-          {
-            "name": "features",
-            "type": {
-              "defined": "CameraFeatures"
-            }
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "devicePubkey",
-            "type": {
-              "option": "publicKey"
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "userSession",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "user",
-            "type": "publicKey"
-          },
-          {
-            "name": "camera",
-            "type": "publicKey"
-          },
-          {
-            "name": "checkInTime",
-            "type": "i64"
-          },
-          {
-            "name": "lastActivity",
-            "type": "i64"
-          },
-          {
-            "name": "autoCheckoutAt",
-            "type": "i64"
-          },
-          {
-            "name": "enabledFeatures",
-            "type": {
-              "defined": "SessionFeatures"
-            }
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "recognitionToken",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "user",
-            "type": "publicKey"
-          },
-          {
-            "name": "encryptedEmbedding",
-            "type": "bytes"
-          },
-          {
-            "name": "createdAt",
-            "type": "i64"
-          },
-          {
-            "name": "version",
-            "type": "u8"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "displayName",
-            "type": {
-              "option": "string"
-            }
-          },
-          {
-            "name": "source",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "gestureConfig",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "user",
-            "type": "publicKey"
-          },
-          {
-            "name": "gestureType",
-            "type": "u8"
-          },
-          {
-            "name": "dataHash",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "createdAt",
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "cameraMessage",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "user",
-            "type": "publicKey"
-          },
-          {
-            "name": "camera",
-            "type": "publicKey"
-          },
-          {
-            "name": "message",
-            "type": "string"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "accessGrant",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "camera",
-            "type": "publicKey"
-          },
-          {
-            "name": "grantor",
-            "type": "publicKey"
-          },
-          {
-            "name": "grantee",
-            "type": "publicKey"
-          },
-          {
-            "name": "expiresAt",
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    }
-  ],
-  "types": [
-    {
-      "name": "RecordActivityArgs",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "actionType",
-            "type": {
-              "defined": "CameraActionType"
-            }
-          },
-          {
-            "name": "metadata",
-            "type": "string"
-          }
-        ]
-      }
-    },
-    {
-      "name": "CameraMetadata",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "name",
-            "type": "string"
-          },
-          {
-            "name": "model",
-            "type": "string"
-          },
-          {
-            "name": "location",
-            "type": {
-              "option": {
-                "array": [
-                  "i64",
-                  2
-                ]
-              }
-            }
-          },
-          {
-            "name": "registrationDate",
-            "type": "i64"
-          },
-          {
-            "name": "description",
-            "type": "string"
-          }
-        ]
-      }
-    },
-    {
-      "name": "CameraFeatures",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "faceRecognition",
-            "type": "bool"
-          },
-          {
-            "name": "gestureControl",
-            "type": "bool"
-          },
-          {
-            "name": "videoRecording",
-            "type": "bool"
-          },
-          {
-            "name": "liveStreaming",
-            "type": "bool"
-          },
-          {
-            "name": "messaging",
-            "type": "bool"
-          }
-        ]
-      }
-    },
-    {
-      "name": "SessionFeatures",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "faceRecognition",
-            "type": "bool"
-          },
-          {
-            "name": "gestureControl",
-            "type": "bool"
-          },
-          {
-            "name": "videoRecording",
-            "type": "bool"
-          },
-          {
-            "name": "liveStreaming",
-            "type": "bool"
-          },
-          {
-            "name": "messaging",
-            "type": "bool"
-          }
-        ]
-      }
-    },
-    {
-      "name": "RegisterCameraArgs",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "name",
-            "type": "string"
-          },
-          {
-            "name": "model",
-            "type": "string"
-          },
-          {
-            "name": "location",
-            "type": {
-              "option": {
-                "array": [
-                  "i64",
-                  2
-                ]
-              }
-            }
-          },
-          {
-            "name": "description",
-            "type": "string"
-          },
-          {
-            "name": "features",
-            "type": {
-              "defined": "CameraFeatures"
-            }
-          },
-          {
-            "name": "devicePubkey",
-            "type": {
-              "option": "publicKey"
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "UpdateCameraArgs",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "name",
-            "type": {
-              "option": "string"
-            }
-          },
-          {
-            "name": "location",
-            "type": {
-              "option": {
-                "array": [
-                  "i64",
-                  2
-                ]
-              }
-            }
-          },
-          {
-            "name": "description",
-            "type": {
-              "option": "string"
-            }
-          },
-          {
-            "name": "features",
-            "type": {
-              "option": {
-                "defined": "CameraFeatures"
-              }
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "ActivityArgs",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "activityType",
-            "type": "u8"
-          },
-          {
-            "name": "metadata",
-            "type": "string"
-          }
-        ]
-      }
-    },
-    {
-      "name": "CameraActionType",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "PhotoCapture"
-          },
-          {
-            "name": "VideoRecord"
-          },
-          {
-            "name": "StreamStart"
-          },
-          {
-            "name": "StreamStop"
-          },
-          {
-            "name": "Custom"
-          }
-        ]
-      }
-    },
-    {
-      "name": "ActivityType",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "CheckIn"
-          },
-          {
-            "name": "CheckOut"
-          },
-          {
-            "name": "PhotoCapture"
-          },
-          {
-            "name": "VideoRecord"
-          },
-          {
-            "name": "LiveStream"
-          },
-          {
-            "name": "FaceRecognition"
-          },
-          {
-            "name": "Other"
-          }
-        ]
-      }
-    }
-  ],
-  "events": [
-    {
-      "name": "CameraRegistered",
-      "fields": [
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "owner",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "index": false
-        },
-        {
-          "name": "model",
-          "type": "string",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "UserCheckedIn",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "session",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "UserCheckedOut",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "session",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "duration",
-          "type": "i64",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "ActivityRecorded",
-      "fields": [
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "activityType",
-          "type": "u8",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "RecognitionTokenCreated",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "token",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "version",
-          "type": "u8",
-          "index": false
-        },
-        {
-          "name": "source",
-          "type": "u8",
-          "index": false
-        },
-        {
-          "name": "displayName",
-          "type": {
-            "option": "string"
-          },
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "RecognitionTokenDeleted",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "token",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "SessionAutoCheckout",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "session",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "reason",
-          "type": "string",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    }
-  ],
-  "errors": [
-    {
-      "code": 6000,
-      "name": "Unauthorized",
-      "msg": "You are not authorized to perform this action"
-    },
-    {
-      "code": 6001,
-      "name": "CameraInactive",
-      "msg": "Camera is currently inactive"
-    },
-    {
-      "code": 6002,
-      "name": "CameraNotFound",
-      "msg": "Camera not found in registry"
-    },
-    {
-      "code": 6003,
-      "name": "CameraNameExists",
-      "msg": "Camera name already exists"
-    },
-    {
-      "code": 6004,
-      "name": "InvalidCameraData",
-      "msg": "Invalid camera data provided"
-    },
-    {
-      "code": 6005,
-      "name": "NoActiveSession",
-      "msg": "No active session found"
-    },
-    {
-      "code": 6006,
-      "name": "SessionExists",
-      "msg": "Session already exists"
-    },
-    {
-      "code": 6007,
-      "name": "AccessDenied",
-      "msg": "Access denied to this camera"
-    },
-    {
-      "code": 6008,
-      "name": "InvalidFaceData",
-      "msg": "Face data invalid or not properly formatted"
-    },
-    {
-      "code": 6009,
-      "name": "FaceDataExists",
-      "msg": "Face data already registered for this user"
-    },
-    {
-      "code": 6010,
-      "name": "InvalidGestureData",
-      "msg": "Gesture data invalid or improperly formatted"
-    },
-    {
-      "code": 6011,
-      "name": "CameraAlreadyAuthorized",
-      "msg": "Camera is already authorized for face recognition"
-    },
-    {
-      "code": 6012,
-      "name": "InvalidAccessDuration",
-      "msg": "Invalid temporary access duration"
-    },
-    {
-      "code": 6013,
-      "name": "AccessGrantExpired",
-      "msg": "Access grant has expired"
-    },
-    {
-      "code": 6014,
-      "name": "SessionExpired",
-      "msg": "Session has expired"
-    },
-    {
-      "code": 6015,
-      "name": "NoRecognitionToken",
-      "msg": "No recognition token found - please create one first"
-    },
-    {
-      "code": 6016,
-      "name": "FeatureNotAvailable",
-      "msg": "Feature not available on this camera"
-    },
-    {
-      "code": 6017,
-      "name": "RecognitionTokenTooLarge",
-      "msg": "Recognition token data too large (max 1024 bytes)"
-    }
-  ]
-};
+import IDL_JSON from "./idl.json";
 
-export const IDL: CameraNetwork = {
-  "version": "0.1.0",
-  "name": "camera_network",
+export const IDL = IDL_JSON;
+
+/**
+ * Program IDL in camelCase format in order to be used in JS/TS.
+ *
+ * Note that this is only a type helper and is not the actual IDL. The original
+ * IDL can be found at `target/idl/camera_network.json`.
+ */
+export type CameraNetwork = {
+  "address": "E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL",
+  "metadata": {
+    "name": "cameraNetwork",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Solana program for camera device network with check-in/check-out functionality"
+  },
   "instructions": [
+    {
+      "name": "createTimelineEntry",
+      "docs": [
+        "Create a compressed timeline entry for a camera session",
+        "Called at checkout — device signs, backend pays gas"
+      ],
+      "discriminator": [
+        243,
+        124,
+        212,
+        170,
+        45,
+        118,
+        145,
+        86
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Fee payer — backend pays gas"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "device",
+          "docs": [
+            "Device authenticator — must be camera's device key or owner"
+          ],
+          "signer": true
+        },
+        {
+          "name": "camera",
+          "docs": [
+            "Camera account — verified against device signer"
+          ],
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "proof",
+          "type": {
+            "defined": {
+              "name": "validityProof"
+            }
+          }
+        },
+        {
+          "name": "addressTreeInfo",
+          "type": {
+            "defined": {
+              "name": "packedAddressTreeInfo"
+            }
+          }
+        },
+        {
+          "name": "outputMerkleTreeIndex",
+          "type": "u8"
+        },
+        {
+          "name": "encryptedPayload",
+          "type": "bytes"
+        },
+        {
+          "name": "nonce",
+          "type": {
+            "array": [
+              "u8",
+              12
+            ]
+          }
+        },
+        {
+          "name": "accessGrantsBlob",
+          "type": "bytes"
+        },
+        {
+          "name": "activityCount",
+          "type": "u8"
+        },
+        {
+          "name": "chunkIndex",
+          "type": "u8"
+        },
+        {
+          "name": "totalChunks",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "createUserSessionChain",
+      "docs": [
+        "Create a user's session chain for storing encrypted access keys",
+        "This is the user's \"keychain\" for accessing their session history"
+      ],
+      "discriminator": [
+        81,
+        239,
+        227,
+        141,
+        244,
+        52,
+        171,
+        164
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "docs": [
+            "The user who will own this session chain. Must sign to authorize creation."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "feePayer",
+          "docs": [
+            "The fee payer for account rent. Can be the user themselves or a sponsor (e.g. cron bot)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "The mmoment authority (cron bot) that can also write to this chain"
+          ]
+        },
+        {
+          "name": "userSessionChain",
+          "writable": true
+        },
+        {
+          "name": "systemProgram"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "deleteRecognitionToken",
+      "docs": [
+        "Delete recognition token and reclaim rent"
+      ],
+      "discriminator": [
+        169,
+        195,
+        239,
+        113,
+        254,
+        207,
+        130,
+        37
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "recognitionToken",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "deregisterCamera",
+      "docs": [
+        "Deregister a camera from the network"
+      ],
+      "discriminator": [
+        191,
+        154,
+        78,
+        182,
+        249,
+        72,
+        207,
+        113
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "cameraRegistry",
+          "writable": true
+        },
+        {
+          "name": "camera",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
     {
       "name": "initialize",
       "docs": [
         "Initialize the camera registry (admin only)"
       ],
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
       "accounts": [
         {
           "name": "authority",
-          "isMut": true,
-          "isSigner": true
+          "writable": true,
+          "signer": true
         },
         {
           "name": "cameraRegistry",
-          "isMut": true,
-          "isSigner": false
+          "writable": true
         },
         {
-          "name": "systemProgram",
-          "isMut": false,
-          "isSigner": false
+          "name": "systemProgram"
         }
       ],
       "args": []
@@ -1234,123 +254,69 @@ export const IDL: CameraNetwork = {
       "docs": [
         "Register a new camera to the network"
       ],
+      "discriminator": [
+        169,
+        161,
+        144,
+        207,
+        102,
+        130,
+        86,
+        62
+      ],
       "accounts": [
         {
           "name": "owner",
-          "isMut": true,
-          "isSigner": true
+          "writable": true,
+          "signer": true
         },
         {
           "name": "cameraRegistry",
-          "isMut": true,
-          "isSigner": false
+          "writable": true
         },
         {
           "name": "camera",
-          "isMut": true,
-          "isSigner": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "type": "string",
-                "value": "camera"
-              },
-              {
-                "kind": "arg",
-                "type": {
-                  "defined": "RegisterCameraArgs"
-                },
-                "path": "args.name"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "path": "owner"
-              }
-            ]
-          }
+          "writable": true
         },
         {
-          "name": "systemProgram",
-          "isMut": false,
-          "isSigner": false
+          "name": "systemProgram"
         }
       ],
       "args": [
         {
           "name": "args",
           "type": {
-            "defined": "RegisterCameraArgs"
+            "defined": {
+              "name": "registerCameraArgs"
+            }
           }
         }
       ]
-    },
-    {
-      "name": "updateCamera",
-      "docs": [
-        "Update camera information"
-      ],
-      "accounts": [
-        {
-          "name": "owner",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        }
-      ],
-      "args": [
-        {
-          "name": "args",
-          "type": {
-            "defined": "UpdateCameraArgs"
-          }
-        }
-      ]
-    },
-    {
-      "name": "deregisterCamera",
-      "docs": [
-        "Deregister a camera from the network"
-      ],
-      "accounts": [
-        {
-          "name": "owner",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "cameraRegistry",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        }
-      ],
-      "args": []
     },
     {
       "name": "setCameraActive",
       "docs": [
         "Set camera active or inactive status"
       ],
+      "discriminator": [
+        157,
+        63,
+        1,
+        132,
+        85,
+        176,
+        156,
+        74
+      ],
       "accounts": [
         {
           "name": "owner",
-          "isMut": true,
-          "isSigner": true
+          "writable": true,
+          "signer": true
         },
         {
           "name": "camera",
-          "isMut": true,
-          "isSigner": false
+          "writable": true
         }
       ],
       "args": [
@@ -1361,166 +327,121 @@ export const IDL: CameraNetwork = {
       ]
     },
     {
-      "name": "checkIn",
+      "name": "storeSessionAccessKeys",
       "docs": [
-        "Check in user to a camera"
+        "Store encrypted session access keys in a user's chain",
+        "Can be called by the user OR the mmoment authority (cron bot fallback)"
+      ],
+      "discriminator": [
+        15,
+        128,
+        124,
+        30,
+        182,
+        222,
+        223,
+        68
       ],
       "accounts": [
         {
+          "name": "signer",
+          "docs": [
+            "The signer - must be either the user or the authority"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
           "name": "user",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "payer",
-          "isMut": true,
-          "isSigner": true,
           "docs": [
-            "The payer for the session account - usually the user, but can be a sponsor",
-            "This allows gas sponsorship where a third party pays for account rent"
+            "The user whose session chain is being updated"
           ]
         },
         {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
+          "name": "userSessionChain",
+          "writable": true
         },
         {
-          "name": "recognitionToken",
-          "isMut": false,
-          "isSigner": false,
-          "isOptional": true,
-          "docs": [
-            "Optional recognition token - required if use_face_recognition is true"
-          ]
-        },
-        {
-          "name": "session",
-          "isMut": true,
-          "isSigner": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "type": "string",
-                "value": "session"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "path": "user"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "account": "CameraAccount",
-                "path": "camera"
-              }
-            ]
-          }
-        },
-        {
-          "name": "systemProgram",
-          "isMut": false,
-          "isSigner": false
+          "name": "systemProgram"
         }
       ],
       "args": [
         {
-          "name": "useFaceRecognition",
-          "type": "bool"
+          "name": "keys",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "encryptedSessionKey"
+              }
+            }
+          }
         }
       ]
     },
     {
-      "name": "checkOut",
+      "name": "updateCamera",
       "docs": [
-        "Check out user from a camera"
+        "Update camera information"
+      ],
+      "discriminator": [
+        240,
+        86,
+        145,
+        90,
+        6,
+        185,
+        101,
+        7
       ],
       "accounts": [
         {
-          "name": "closer",
-          "isMut": true,
-          "isSigner": true
+          "name": "owner",
+          "writable": true,
+          "signer": true
         },
         {
           "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "session",
-          "isMut": true,
-          "isSigner": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "type": "string",
-                "value": "session"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "account": "UserSession",
-                "path": "session.user"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "account": "CameraAccount",
-                "path": "camera"
-              }
-            ]
-          }
-        },
-        {
-          "name": "sessionUser",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "rentDestination",
-          "isMut": true,
-          "isSigner": false
+          "writable": true
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "updateCameraArgs"
+            }
+          }
+        }
+      ]
     },
     {
       "name": "upsertRecognitionToken",
       "docs": [
         "Create or regenerate a recognition token (stores encrypted facial embedding)"
       ],
+      "discriminator": [
+        217,
+        76,
+        1,
+        248,
+        153,
+        88,
+        20,
+        188
+      ],
       "accounts": [
         {
           "name": "user",
-          "isMut": true,
-          "isSigner": true
+          "writable": true,
+          "signer": true
         },
         {
           "name": "recognitionToken",
-          "isMut": true,
-          "isSigner": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "type": "string",
-                "value": "recognition-token"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "path": "user"
-              }
-            ]
-          }
+          "writable": true
         },
         {
-          "name": "systemProgram",
-          "isMut": false,
-          "isSigner": false
+          "name": "systemProgram"
         }
       ],
       "args": [
@@ -1539,97 +460,222 @@ export const IDL: CameraNetwork = {
           "type": "u8"
         }
       ]
-    },
-    {
-      "name": "deleteRecognitionToken",
-      "docs": [
-        "Delete recognition token and reclaim rent"
-      ],
-      "accounts": [
-        {
-          "name": "user",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "recognitionToken",
-          "isMut": true,
-          "isSigner": false,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "type": "string",
-                "value": "recognition-token"
-              },
-              {
-                "kind": "account",
-                "type": "publicKey",
-                "path": "user"
-              }
-            ]
-          }
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "recordActivity",
-      "docs": [
-        "Record a camera activity (photo, video, stream)"
-      ],
-      "accounts": [
-        {
-          "name": "user",
-          "isMut": true,
-          "isSigner": true
-        },
-        {
-          "name": "camera",
-          "isMut": true,
-          "isSigner": false
-        },
-        {
-          "name": "session",
-          "isMut": false,
-          "isSigner": false
-        }
-      ],
-      "args": [
-        {
-          "name": "args",
-          "type": {
-            "defined": "RecordActivityArgs"
-          }
-        }
-      ]
     }
   ],
   "accounts": [
     {
-      "name": "cameraRegistry",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "authority",
-            "type": "publicKey"
-          },
-          {
-            "name": "cameraCount",
-            "type": "u64"
-          },
-          {
-            "name": "feeAccount",
-            "type": "publicKey"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
+      "name": "cameraAccount",
+      "discriminator": [
+        53,
+        116,
+        8,
+        174,
+        44,
+        148,
+        166,
+        34
+      ]
     },
+    {
+      "name": "cameraRegistry",
+      "discriminator": [
+        242,
+        46,
+        247,
+        175,
+        239,
+        58,
+        125,
+        173
+      ]
+    },
+    {
+      "name": "recognitionToken",
+      "discriminator": [
+        185,
+        14,
+        93,
+        76,
+        58,
+        215,
+        68,
+        167
+      ]
+    },
+    {
+      "name": "userSessionChain",
+      "discriminator": [
+        94,
+        45,
+        77,
+        120,
+        236,
+        160,
+        216,
+        102
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "cameraRegistered",
+      "discriminator": [
+        32,
+        240,
+        203,
+        222,
+        43,
+        16,
+        54,
+        81
+      ]
+    },
+    {
+      "name": "recognitionTokenCreated",
+      "discriminator": [
+        24,
+        33,
+        66,
+        21,
+        97,
+        67,
+        214,
+        111
+      ]
+    },
+    {
+      "name": "recognitionTokenDeleted",
+      "discriminator": [
+        134,
+        32,
+        116,
+        193,
+        89,
+        244,
+        183,
+        153
+      ]
+    },
+    {
+      "name": "timelineEntry",
+      "discriminator": [
+        66,
+        96,
+        15,
+        175,
+        192,
+        119,
+        138,
+        5
+      ]
+    },
+    {
+      "name": "timelineEntryCreated",
+      "discriminator": [
+        36,
+        131,
+        182,
+        89,
+        193,
+        86,
+        126,
+        30
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "unauthorized",
+      "msg": "You are not authorized to perform this action"
+    },
+    {
+      "code": 6001,
+      "name": "cameraInactive",
+      "msg": "Camera is currently inactive"
+    },
+    {
+      "code": 6002,
+      "name": "cameraNotFound",
+      "msg": "Camera not found in registry"
+    },
+    {
+      "code": 6003,
+      "name": "cameraNameExists",
+      "msg": "Camera name already exists"
+    },
+    {
+      "code": 6004,
+      "name": "invalidCameraData",
+      "msg": "Invalid camera data provided"
+    },
+    {
+      "code": 6005,
+      "name": "noActiveSession",
+      "msg": "No active session found"
+    },
+    {
+      "code": 6006,
+      "name": "sessionExists",
+      "msg": "Session already exists"
+    },
+    {
+      "code": 6007,
+      "name": "accessDenied",
+      "msg": "Access denied to this camera"
+    },
+    {
+      "code": 6008,
+      "name": "invalidFaceData",
+      "msg": "Face data invalid or not properly formatted"
+    },
+    {
+      "code": 6009,
+      "name": "faceDataExists",
+      "msg": "Face data already registered for this user"
+    },
+    {
+      "code": 6010,
+      "name": "invalidGestureData",
+      "msg": "Gesture data invalid or improperly formatted"
+    },
+    {
+      "code": 6011,
+      "name": "cameraAlreadyAuthorized",
+      "msg": "Camera is already authorized for face recognition"
+    },
+    {
+      "code": 6012,
+      "name": "invalidAccessDuration",
+      "msg": "Invalid temporary access duration"
+    },
+    {
+      "code": 6013,
+      "name": "accessGrantExpired",
+      "msg": "Access grant has expired"
+    },
+    {
+      "code": 6014,
+      "name": "sessionExpired",
+      "msg": "Session has expired"
+    },
+    {
+      "code": 6015,
+      "name": "noRecognitionToken",
+      "msg": "No recognition token found - please create one first"
+    },
+    {
+      "code": 6016,
+      "name": "featureNotAvailable",
+      "msg": "Feature not available on this camera"
+    },
+    {
+      "code": 6017,
+      "name": "recognitionTokenTooLarge",
+      "msg": "Recognition token data too large (max 1024 bytes)"
+    }
+  ],
+  "types": [
     {
       "name": "cameraAccount",
       "type": {
@@ -1637,12 +683,14 @@ export const IDL: CameraNetwork = {
         "fields": [
           {
             "name": "owner",
-            "type": "publicKey"
+            "type": "pubkey"
           },
           {
             "name": "metadata",
             "type": {
-              "defined": "CameraMetadata"
+              "defined": {
+                "name": "cameraMetadata"
+              }
             }
           },
           {
@@ -1668,7 +716,9 @@ export const IDL: CameraNetwork = {
           {
             "name": "features",
             "type": {
-              "defined": "CameraFeatures"
+              "defined": {
+                "name": "cameraFeatures"
+              }
             }
           },
           {
@@ -1678,199 +728,42 @@ export const IDL: CameraNetwork = {
           {
             "name": "devicePubkey",
             "type": {
-              "option": "publicKey"
+              "option": "pubkey"
             }
           }
         ]
       }
     },
     {
-      "name": "userSession",
+      "name": "cameraFeatures",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "user",
-            "type": "publicKey"
+            "name": "faceRecognition",
+            "type": "bool"
           },
           {
-            "name": "camera",
-            "type": "publicKey"
+            "name": "gestureControl",
+            "type": "bool"
           },
           {
-            "name": "checkInTime",
-            "type": "i64"
+            "name": "videoRecording",
+            "type": "bool"
           },
           {
-            "name": "lastActivity",
-            "type": "i64"
+            "name": "liveStreaming",
+            "type": "bool"
           },
           {
-            "name": "autoCheckoutAt",
-            "type": "i64"
-          },
-          {
-            "name": "enabledFeatures",
-            "type": {
-              "defined": "SessionFeatures"
-            }
-          },
-          {
-            "name": "bump",
-            "type": "u8"
+            "name": "messaging",
+            "type": "bool"
           }
         ]
       }
     },
     {
-      "name": "recognitionToken",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "user",
-            "type": "publicKey"
-          },
-          {
-            "name": "encryptedEmbedding",
-            "type": "bytes"
-          },
-          {
-            "name": "createdAt",
-            "type": "i64"
-          },
-          {
-            "name": "version",
-            "type": "u8"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "displayName",
-            "type": {
-              "option": "string"
-            }
-          },
-          {
-            "name": "source",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "gestureConfig",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "user",
-            "type": "publicKey"
-          },
-          {
-            "name": "gestureType",
-            "type": "u8"
-          },
-          {
-            "name": "dataHash",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "createdAt",
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "cameraMessage",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "user",
-            "type": "publicKey"
-          },
-          {
-            "name": "camera",
-            "type": "publicKey"
-          },
-          {
-            "name": "message",
-            "type": "string"
-          },
-          {
-            "name": "timestamp",
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
-      "name": "accessGrant",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "camera",
-            "type": "publicKey"
-          },
-          {
-            "name": "grantor",
-            "type": "publicKey"
-          },
-          {
-            "name": "grantee",
-            "type": "publicKey"
-          },
-          {
-            "name": "expiresAt",
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    }
-  ],
-  "types": [
-    {
-      "name": "RecordActivityArgs",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "actionType",
-            "type": {
-              "defined": "CameraActionType"
-            }
-          },
-          {
-            "name": "metadata",
-            "type": "string"
-          }
-        ]
-      }
-    },
-    {
-      "name": "CameraMetadata",
+      "name": "cameraMetadata",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1905,63 +798,234 @@ export const IDL: CameraNetwork = {
       }
     },
     {
-      "name": "CameraFeatures",
+      "name": "cameraRegistered",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "faceRecognition",
-            "type": "bool"
+            "name": "camera",
+            "type": "pubkey"
           },
           {
-            "name": "gestureControl",
-            "type": "bool"
+            "name": "owner",
+            "type": "pubkey"
           },
           {
-            "name": "videoRecording",
-            "type": "bool"
+            "name": "name",
+            "type": "string"
           },
           {
-            "name": "liveStreaming",
-            "type": "bool"
+            "name": "model",
+            "type": "string"
           },
           {
-            "name": "messaging",
-            "type": "bool"
+            "name": "timestamp",
+            "type": "i64"
           }
         ]
       }
     },
     {
-      "name": "SessionFeatures",
+      "name": "cameraRegistry",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "faceRecognition",
-            "type": "bool"
+            "name": "authority",
+            "type": "pubkey"
           },
           {
-            "name": "gestureControl",
-            "type": "bool"
+            "name": "cameraCount",
+            "type": "u64"
           },
           {
-            "name": "videoRecording",
-            "type": "bool"
+            "name": "feeAccount",
+            "type": "pubkey"
           },
           {
-            "name": "liveStreaming",
-            "type": "bool"
-          },
-          {
-            "name": "messaging",
-            "type": "bool"
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }
     },
     {
-      "name": "RegisterCameraArgs",
+      "name": "compressedProof",
+      "repr": {
+        "kind": "c"
+      },
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "a",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "b",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          },
+          {
+            "name": "c",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "encryptedSessionKey",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "keyCiphertext",
+            "type": "bytes"
+          },
+          {
+            "name": "nonce",
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "packedAddressTreeInfo",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "addressMerkleTreePubkeyIndex",
+            "type": "u8"
+          },
+          {
+            "name": "addressQueuePubkeyIndex",
+            "type": "u8"
+          },
+          {
+            "name": "rootIndex",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "recognitionToken",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "encryptedEmbedding",
+            "type": "bytes"
+          },
+          {
+            "name": "createdAt",
+            "type": "i64"
+          },
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "displayName",
+            "type": {
+              "option": "string"
+            }
+          },
+          {
+            "name": "source",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "recognitionTokenCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "token",
+            "type": "pubkey"
+          },
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "source",
+            "type": "u8"
+          },
+          {
+            "name": "displayName",
+            "type": {
+              "option": "string"
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "recognitionTokenDeleted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "token",
+            "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "registerCameraArgs",
       "type": {
         "kind": "struct",
         "fields": [
@@ -1991,20 +1055,127 @@ export const IDL: CameraNetwork = {
           {
             "name": "features",
             "type": {
-              "defined": "CameraFeatures"
+              "defined": {
+                "name": "cameraFeatures"
+              }
             }
           },
           {
             "name": "devicePubkey",
             "type": {
-              "option": "publicKey"
+              "option": "pubkey"
             }
           }
         ]
       }
     },
     {
-      "name": "UpdateCameraArgs",
+      "name": "timelineEntry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "camera",
+            "docs": [
+              "Which camera this entry belongs to (for querying all entries by camera)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "entryIndex",
+            "docs": [
+              "Sequential index (camera.activity_counter at time of write)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "docs": [
+              "When this checkout occurred"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "activityCount",
+            "docs": [
+              "Number of activities in this entry"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "encryptedPayload",
+            "docs": [
+              "All activities from this session, serialized and encrypted together.",
+              "Format: AES-256-GCM encrypted JSON array of activities."
+            ],
+            "type": "bytes"
+          },
+          {
+            "name": "nonce",
+            "docs": [
+              "AES-GCM nonce for decrypting encrypted_payload"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                12
+              ]
+            }
+          },
+          {
+            "name": "accessGrantsBlob",
+            "docs": [
+              "Flattened access grants blob.",
+              "Format: [num_grants (2 bytes LE)] + for each grant: [32 bytes pubkey] + [2 bytes len LE] + [N bytes sealed-box key]"
+            ],
+            "type": "bytes"
+          },
+          {
+            "name": "chunkIndex",
+            "docs": [
+              "Chunk index within a multi-chunk session write (0 for single-chunk entries)"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "totalChunks",
+            "docs": [
+              "Total number of chunks in this session write (1 for single-chunk entries)"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "timelineEntryCreated",
+      "docs": [
+        "Event emitted when a timeline entry is created (no user info)"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "camera",
+            "type": "pubkey"
+          },
+          {
+            "name": "entryIndex",
+            "type": "u64"
+          },
+          {
+            "name": "activityCount",
+            "type": "u8"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "updateCameraArgs",
       "type": {
         "kind": "struct",
         "fields": [
@@ -2035,371 +1206,69 @@ export const IDL: CameraNetwork = {
             "name": "features",
             "type": {
               "option": {
-                "defined": "CameraFeatures"
+                "defined": {
+                  "name": "cameraFeatures"
+                }
               }
+            }
+          },
+          {
+            "name": "devicePubkey",
+            "type": {
+              "option": "pubkey"
             }
           }
         ]
       }
     },
     {
-      "name": "ActivityArgs",
+      "name": "userSessionChain",
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "activityType",
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "encryptedKeys",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "encryptedSessionKey"
+                }
+              }
+            }
+          },
+          {
+            "name": "sessionCount",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
             "type": "u8"
-          },
-          {
-            "name": "metadata",
-            "type": "string"
           }
         ]
       }
     },
     {
-      "name": "CameraActionType",
+      "name": "validityProof",
       "type": {
-        "kind": "enum",
-        "variants": [
+        "kind": "struct",
+        "fields": [
           {
-            "name": "PhotoCapture"
-          },
-          {
-            "name": "VideoRecord"
-          },
-          {
-            "name": "StreamStart"
-          },
-          {
-            "name": "StreamStop"
-          },
-          {
-            "name": "Custom"
+            "option": {
+              "defined": {
+                "name": "compressedProof"
+              }
+            }
           }
         ]
       }
-    },
-    {
-      "name": "ActivityType",
-      "type": {
-        "kind": "enum",
-        "variants": [
-          {
-            "name": "CheckIn"
-          },
-          {
-            "name": "CheckOut"
-          },
-          {
-            "name": "PhotoCapture"
-          },
-          {
-            "name": "VideoRecord"
-          },
-          {
-            "name": "LiveStream"
-          },
-          {
-            "name": "FaceRecognition"
-          },
-          {
-            "name": "Other"
-          }
-        ]
-      }
-    }
-  ],
-  "events": [
-    {
-      "name": "CameraRegistered",
-      "fields": [
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "owner",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "name",
-          "type": "string",
-          "index": false
-        },
-        {
-          "name": "model",
-          "type": "string",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "UserCheckedIn",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "session",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "UserCheckedOut",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "session",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "duration",
-          "type": "i64",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "ActivityRecorded",
-      "fields": [
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "activityType",
-          "type": "u8",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "RecognitionTokenCreated",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "token",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "version",
-          "type": "u8",
-          "index": false
-        },
-        {
-          "name": "source",
-          "type": "u8",
-          "index": false
-        },
-        {
-          "name": "displayName",
-          "type": {
-            "option": "string"
-          },
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "RecognitionTokenDeleted",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "token",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    },
-    {
-      "name": "SessionAutoCheckout",
-      "fields": [
-        {
-          "name": "user",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "camera",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "session",
-          "type": "publicKey",
-          "index": false
-        },
-        {
-          "name": "reason",
-          "type": "string",
-          "index": false
-        },
-        {
-          "name": "timestamp",
-          "type": "i64",
-          "index": false
-        }
-      ]
-    }
-  ],
-  "errors": [
-    {
-      "code": 6000,
-      "name": "Unauthorized",
-      "msg": "You are not authorized to perform this action"
-    },
-    {
-      "code": 6001,
-      "name": "CameraInactive",
-      "msg": "Camera is currently inactive"
-    },
-    {
-      "code": 6002,
-      "name": "CameraNotFound",
-      "msg": "Camera not found in registry"
-    },
-    {
-      "code": 6003,
-      "name": "CameraNameExists",
-      "msg": "Camera name already exists"
-    },
-    {
-      "code": 6004,
-      "name": "InvalidCameraData",
-      "msg": "Invalid camera data provided"
-    },
-    {
-      "code": 6005,
-      "name": "NoActiveSession",
-      "msg": "No active session found"
-    },
-    {
-      "code": 6006,
-      "name": "SessionExists",
-      "msg": "Session already exists"
-    },
-    {
-      "code": 6007,
-      "name": "AccessDenied",
-      "msg": "Access denied to this camera"
-    },
-    {
-      "code": 6008,
-      "name": "InvalidFaceData",
-      "msg": "Face data invalid or not properly formatted"
-    },
-    {
-      "code": 6009,
-      "name": "FaceDataExists",
-      "msg": "Face data already registered for this user"
-    },
-    {
-      "code": 6010,
-      "name": "InvalidGestureData",
-      "msg": "Gesture data invalid or improperly formatted"
-    },
-    {
-      "code": 6011,
-      "name": "CameraAlreadyAuthorized",
-      "msg": "Camera is already authorized for face recognition"
-    },
-    {
-      "code": 6012,
-      "name": "InvalidAccessDuration",
-      "msg": "Invalid temporary access duration"
-    },
-    {
-      "code": 6013,
-      "name": "AccessGrantExpired",
-      "msg": "Access grant has expired"
-    },
-    {
-      "code": 6014,
-      "name": "SessionExpired",
-      "msg": "Session has expired"
-    },
-    {
-      "code": 6015,
-      "name": "NoRecognitionToken",
-      "msg": "No recognition token found - please create one first"
-    },
-    {
-      "code": 6016,
-      "name": "FeatureNotAvailable",
-      "msg": "Feature not available on this camera"
-    },
-    {
-      "code": 6017,
-      "name": "RecognitionTokenTooLarge",
-      "msg": "Recognition token data too large (max 1024 bytes)"
     }
   ]
 };

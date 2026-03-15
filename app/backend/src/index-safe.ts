@@ -172,7 +172,16 @@ io.on("connection", (socket) => {
     cameraRooms.get(cameraId)?.delete(socket.id);
   });
 
+  // NOTE: check_in, check_out, and auto_check_out events are BLOCKED from this shortcut
+  // They MUST come from the Jetson camera via /api/session/activity with proper encryption
   socket.on("newTimelineEvent", (event: any) => {
+    // Block check-in/check-out events - these must go through Jetson for proper encryption
+    const blockedEventTypes = ['check_in', 'check_out', 'auto_check_out'];
+    if (blockedEventTypes.includes(event?.type)) {
+      console.warn(`⚠️  BLOCKED ${event.type} event via WebSocket shortcut - must go through Jetson`);
+      return;
+    }
+
     const newEvent = {
       ...event,
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,

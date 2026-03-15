@@ -3,8 +3,10 @@ import { unifiedIpfsService } from './ipfs/unified-ipfs-service';
 import { pinataService } from './ipfs/pinata-service';
 import { filebaseService } from './ipfs/filebase-service';
 import { walrusService } from './walrus';
+import { pipeService } from './pipe';
+import { CONFIG } from '../core/config';
 
-console.log('Storage provider initializing with IPFS services');
+console.log('Storage provider initializing with Pipe Network as default');
 
 // Common interfaces for storage operations
 export interface UploadOptions {
@@ -31,7 +33,7 @@ export interface StorageService {
 }
 
 // All available storage providers
-export type StorageProvider = 'ipfs' | 'pinata' | 'filebase' | 'walrus';
+export type StorageProvider = 'pipe' | 'ipfs' | 'pinata' | 'filebase' | 'walrus';
 
 // The types of storage providers we can use
 export type StorageProviderType = 'pinata' | 'filebase' | 'walrus';
@@ -49,10 +51,10 @@ interface StorageContextType {
 export const StorageContext = createContext<StorageContextType | null>(null);
 
 // Storage context provider component
-export function StorageProvider({ 
+export function StorageProvider({
   children,
-  defaultProvider = 'ipfs'
-}: { 
+  defaultProvider = 'pipe'
+}: {
   children: React.ReactNode;
   defaultProvider?: StorageProvider;
 }) {
@@ -108,6 +110,46 @@ export function StorageProvider({
 function getStorageService(provider: StorageProvider): StorageService {
   // Import storage services
   switch(provider) {
+    case 'pipe':
+      return {
+        name: 'Pipe Network',
+        upload: async (file, options) => {
+          const walletAddress = options?.metadata?.walletAddress || 'anonymous';
+          await pipeService.createOrGetAccount(walletAddress);
+          const filename = await pipeService.uploadFile(
+            file,
+            walletAddress,
+            'image',
+            options?.metadata
+          );
+          return {
+            id: filename,
+            url: `${CONFIG.BACKEND_URL}/api/pipe/download/${walletAddress}/${filename}`
+          };
+        },
+        uploadBlob: async (blob, filename, options) => {
+          const walletAddress = options?.metadata?.walletAddress || 'anonymous';
+          await pipeService.createOrGetAccount(walletAddress);
+          const type = filename.endsWith('.mp4') || filename.endsWith('.mov') ? 'video' : 'image';
+          const resultFilename = await pipeService.uploadFile(
+            blob,
+            walletAddress,
+            type,
+            options?.metadata
+          );
+          return {
+            id: resultFilename,
+            url: `${CONFIG.BACKEND_URL}/api/pipe/download/${walletAddress}/${resultFilename}`
+          };
+        },
+        getUrl: (fileId) => fileId, // Pipe URLs are already complete
+        delete: async (_fileId) => {
+          // Would need wallet address context - skip for now
+          return false;
+        },
+        isAvailable: async () => true
+      } as StorageService;
+
     case 'ipfs':
       return {
         name: 'IPFS',
@@ -187,8 +229,8 @@ function getStorageService(provider: StorageProvider): StorageService {
       return walrusService as StorageService;
       
     default:
-      // Default to Walrus
-      return walrusService as StorageService;
+      // Default to Pipe Network
+      return getStorageService('pipe');
   }
 }
 

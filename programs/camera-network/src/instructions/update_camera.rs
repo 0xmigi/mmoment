@@ -40,7 +40,12 @@ pub fn handler(ctx: Context<UpdateCamera>, args: UpdateCameraArgs) -> Result<()>
     if let Some(features) = args.features {
         camera.features = features;
     }
-    
+
+    // Update device pubkey if provided
+    if args.device_pubkey.is_some() {
+        camera.device_pubkey = args.device_pubkey;
+    }
+
     // Update timestamp
     camera.last_activity_at = Clock::get()?.unix_timestamp;
     

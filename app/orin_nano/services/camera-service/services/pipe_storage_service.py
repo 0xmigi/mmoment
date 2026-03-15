@@ -15,9 +15,7 @@ from typing import Optional, Dict, Any, List
 from pathlib import Path
 import logging
 
-# Add the parent directory to Python path to import pipe_integration
-sys.path.append(str(Path(__file__).parent.parent.parent.parent))
-from pipe_integration import handle_camera_capture, on_user_checkin, PipeStorageManager
+from services.pipe_integration import handle_camera_capture, on_user_checkin, PipeStorageManager
 
 # Create pipe manager with host network backend URL
 pipe_manager = PipeStorageManager(backend_url="http://192.168.1.232:3001")

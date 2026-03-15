@@ -27,9 +27,7 @@ class DeviceRegistrationService:
         
     def _get_backend_url(self) -> str:
         """Get backend URL from environment or use default"""
-        backend_host = os.getenv('BACKEND_HOST', '192.168.1.80')
-        backend_port = os.getenv('BACKEND_PORT', '3001')
-        return f"http://{backend_host}:{backend_port}"
+        return os.getenv('BACKEND_URL', 'https://mmoment-production.up.railway.app')
         
     def start_polling(self):
         """Start polling for device configuration"""

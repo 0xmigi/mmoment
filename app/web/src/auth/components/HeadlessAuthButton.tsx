@@ -18,11 +18,6 @@ export function HeadlessAuthButton() {
 
   const handleAuthModalClose = () => {
     setShowAuthModal(false);
-    // Only navigate if we're not already authenticated
-    // This prevents unnecessary navigation when canceling the modal
-    if (primaryWallet?.address) {
-      navigate('/app');
-    }
   };
 
   if (!primaryWallet?.address) {
@@ -68,6 +63,7 @@ export function HeadlessAuthButton() {
           <img
             src={socialCred.oauthAccountPhotos[0]}
             alt="Profile"
+            referrerPolicy="no-referrer"
             className="w-6 h-6 rounded-full"
           />
         )}

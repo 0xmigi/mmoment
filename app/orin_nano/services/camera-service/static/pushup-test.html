@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Push-up Counter Test</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { text-align: center; color: white; margin-bottom: 30px; }
+        .header h1 { font-size: 2.5rem; margin-bottom: 10px; }
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+        button {
+            padding: 12px 24px;
+            font-size: 1rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .btn-primary { background: #667eea; color: white; }
+        .btn-success { background: #48bb78; color: white; }
+        .btn-danger { background: #f56565; color: white; }
+        .competitor-list { list-style: none; margin: 15px 0; }
+        .competitor-list li {
+            padding: 10px;
+            background: #f7fafc;
+            border-radius: 8px;
+            margin: 8px 0;
+            display: flex;
+            justify-content: space-between;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            padding: 20px;
+            color: white;
+            margin: 10px 0;
+        }
+        .rep-count { font-size: 3rem; font-weight: 900; text-align: center; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏋️ Push-up Counter Test</h1>
+            <p>Uses your existing face recognition</p>
+        </div>
+
+        <div class="card">
+            <h2>Controls</h2>
+            <button class="btn-primary" onclick="loadApp()">Load App</button>
+            <button class="btn-primary" onclick="activateApp()">Activate App</button>
+        </div>
+
+        <div class="card">
+            <h3>Recognized Users in Frame</h3>
+            <p style="color: #718096;">Check in via your frontend, then you'll appear here</p>
+            <ul class="competitor-list" id="recognized-list">
+                <li style="text-align: center; color: #a0aec0;">Loading...</li>
+            </ul>
+            <button class="btn-success" onclick="startCompetition()">Start Competition</button>
+            <button class="btn-danger" onclick="endCompetition()">End Competition</button>
+        </div>
+
+        <div id="competitors" style="display:none;"></div>
+        
+        <div class="card">
+            <h3>Log</h3>
+            <div id="log" style="max-height: 200px; overflow-y: auto;"></div>
+        </div>
+    </div>
+
+    <script>
+        const API = window.location.origin;
+        let statusInterval, recognitionInterval;
+
+        function log(msg, type='info') {
+            const colors = {success: '#c6f6d5', error: '#fed7d7', info: '#bee3f8'};
+            document.getElementById('log').innerHTML = 
+                `<div style="background:${colors[type]};padding:8px;margin:5px 0;border-radius:6px">[${new Date().toLocaleTimeString()}] ${msg}</div>` +
+                document.getElementById('log').innerHTML;
+        }
+
+        async function loadApp() {
+            const res = await fetch(`${API}/api/apps/load`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({app_name: 'pushup'})
+            });
+            const data = await res.json();
+            log(data.success ? '✓ App loaded' : '✗ Failed to load app', data.success ? 'success' : 'error');
+        }
+
+        async function activateApp() {
+            const res = await fetch(`${API}/api/apps/activate`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({app_name: 'pushup'})
+            });
+            const data = await res.json();
+            log(data.success ? '✓ App activated' : '✗ Failed to activate', data.success ? 'success' : 'error');
+        }
+
+        async function fetchRecognized() {
+            const res = await fetch(`${API}/api/face/recognize`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({})
+            });
+            const data = await res.json();
+            if (data.success) {
+                const wallets = Object.keys(data.recognized_data || {});
+                const list = document.getElementById('recognized-list');
+                if (wallets.length === 0) {
+                    list.innerHTML = '<li style="text-align:center;color:#a0aec0">No users recognized</li>';
+                } else {
+                    list.innerHTML = wallets.map(w => {
+                        const conf = (data.recognized_data[w].confidence * 100).toFixed(1);
+                        return `<li><strong>${w.substring(0,8)}...${w.substring(w.length-6)}</strong><span style="color:#48bb78">✓ ${conf}%</span></li>`;
+                    }).join('');
+                }
+            }
+        }
+
+        async function startCompetition() {
+            const res = await fetch(`${API}/api/face/recognize`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({})
+            });
+            const data = await res.json();
+            const wallets = Object.keys(data.recognized_data || {});
+            
+            if (wallets.length === 0) {
+                log('✗ No recognized users. Check in first!', 'error');
+                return;
+            }
+
+            const competitors = wallets.map(w => ({
+                wallet_address: w,
+                display_name: w.substring(0,8) + '...'
+            }));
+
+            const startRes = await fetch(`${API}/api/apps/competition/start`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({competitors, duration_limit: 300})
+            });
+            const startData = await startRes.json();
+            
+            if (startData.success) {
+                log(`✓ Competition started with ${competitors.length} user(s)!`, 'success');
+                clearInterval(recognitionInterval);
+                statusInterval = setInterval(updateStatus, 500);
+            } else {
+                log('✗ Failed to start', 'error');
+            }
+        }
+
+        async function endCompetition() {
+            const res = await fetch(`${API}/api/apps/competition/end`, {method: 'POST'});
+            const data = await res.json();
+            log(data.success ? '✓ Competition ended' : '✗ Failed to end', data.success ? 'success' : 'error');
+            clearInterval(statusInterval);
+            recognitionInterval = setInterval(fetchRecognized, 2000);
+        }
+
+        async function updateStatus() {
+            const res = await fetch(`${API}/api/apps/status`);
+            const data = await res.json();
+            if (data.success && data.state && data.state.competitors) {
+                const div = document.getElementById('competitors');
+                div.style.display = 'block';
+                div.innerHTML = data.state.competitors.map(c => {
+                    const s = c.stats || {};
+                    return `<div class="stat-card">
+                        <div style="font-size:1.3rem;font-weight:700">${c.display_name}</div>
+                        <div style="font-size:0.85rem;opacity:0.8">${c.wallet_address}</div>
+                        <div class="rep-count">${s.reps || 0}</div>
+                        <div style="text-align:center">Push-ups</div>
+                        <div style="margin-top:15px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+                            <div style="background:rgba(255,255,255,0.2);padding:10px;border-radius:8px;text-align:center">
+                                <div style="font-size:0.8rem;opacity:0.8">Position</div>
+                                <div style="font-weight:700">${s.in_down_position ? 'DOWN' : 'UP'}</div>
+                            </div>
+                            <div style="background:rgba(255,255,255,0.2);padding:10px;border-radius:8px;text-align:center">
+                                <div style="font-size:0.8rem;opacity:0.8">View</div>
+                                <div style="font-weight:700">${s.view || '?'}</div>
+                            </div>
+                            <div style="background:rgba(255,255,255,0.2);padding:10px;border-radius:8px;text-align:center">
+                                <div style="font-size:0.8rem;opacity:0.8">Angle</div>
+                                <div style="font-weight:700">${s.current_angle ? Math.round(s.current_angle) + '°' : '?'}</div>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+        }
+
+        recognitionInterval = setInterval(fetchRecognized, 2000);
+        fetchRecognized();
+    </script>
+</body>
+</html>

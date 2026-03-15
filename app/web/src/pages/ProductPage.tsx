@@ -1,9 +1,10 @@
 import { useNavigate } from 'react-router-dom';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
+import Logo from '../ui/common/Logo';
 
 const StepIcon = ({ children }: { children: React.ReactNode }) => (
-    <div className="w-16 h-16 flex items-center justify-center rounded-full bg-[#e7eeff] mb-6 mx-auto">
-        <div className="w-8 h-8 text-[#4b5563]">
+    <div className="w-16 h-16 flex items-center justify-center rounded-full bg-primary-light mb-6 mx-auto">
+        <div className="w-8 h-8 text-gray-600">
             {children}
         </div>
     </div>
@@ -65,24 +66,29 @@ const ProductPage = () => {
     return (
         <div className="bg-white min-h-screen overflow-auto">
             {/* Navigation */}
-            <nav className="fixed top-0 right-0 p-4 z-50">
-                <div className="flex items-center gap-4">
-                    <button
-                        onClick={() => navigate('/')}
-                        className="px-2 text-sm py-2 text-gray-600 hover:text-gray-900"
-                    >
-                        Home
-                    </button>
-                    <div className="px-2 text-sm py-2 text-gray-900 relative">
-                        Product
-                        <div className="absolute -bottom-1 left-1/2 w-1 h-1 bg-black rounded-full transform -translate-x-1/2" />
+            <nav className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-sm">
+                <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+                    {/* Left: Logo */}
+                    <a href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+                        <Logo width={30} height={21} className="text-black" />
+                        <span className="text-2xl font-bold text-black">Moment</span>
+                    </a>
+
+                    {/* Right: Nav Items */}
+                    <div className="flex items-center gap-6">
+                        <a
+                            href="/"
+                            className="text-gray-600 hover:text-gray-900 transition-colors text-sm font-medium"
+                        >
+                            Home
+                        </a>
+                        <button
+                            onClick={handleGetStarted}
+                            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
+                        >
+                            Open App
+                        </button>
                     </div>
-                    <button
-                        onClick={handleGetStarted}
-                        className="px-6 py-2 bg-[#e7eeff] text-black rounded-lg hover:bg-[#a5bafc] transition-colors"
-                    >
-                        Open App
-                    </button>
                 </div>
             </nav>
 
