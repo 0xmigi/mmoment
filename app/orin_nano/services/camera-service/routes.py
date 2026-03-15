@@ -52,6 +52,9 @@ device_signer = DeviceSigner()
 # In-memory user profile store (native mode - no gpu_face service)
 _user_profiles: dict = {}
 
+# Stores share_with_session preference set at recording start, keyed by wallet_address
+_recording_share_prefs: dict = {}
+
 # Our simple face recognition is always available
 FACENET_AVAILABLE = True
 
@@ -788,6 +791,7 @@ def register_routes(app):
         wallet_address = request.json.get("wallet_address")
         duration = request.json.get("duration", 0)  # Default to 0 (indefinite until stopped)
         action = request.json.get("action")  # 'start', 'stop', or None
+        share_with_session = request.json.get("share_with_session", False)
 
         # Enforce maximum duration limit to prevent runaway recordings
         # duration=0 means "record until stopped" (valid for action='start')
@@ -811,12 +815,16 @@ def register_routes(app):
             )
 
             if recording_info.get("success"):
-                logger.info(f"🎬 Recording started for {wallet_address[:8]}... (duration: {duration}s)")
+                _recording_share_prefs[wallet_address] = share_with_session
+                logger.info(f"🎬 Recording started for {wallet_address[:8]}... (duration: {duration}s, share_with_session: {share_with_session})")
 
             return jsonify(recording_info)
 
         # ===== ACTION: STOP (with queue-based upload) =====
         if action == 'stop':
+            # Retrieve share preference stored at start time (fall back to False = private)
+            share_with_session = _recording_share_prefs.pop(wallet_address, False)
+
             # Stop recording
             result = capture_service.stop_recording()
 
@@ -915,6 +923,7 @@ def register_routes(app):
                             camera_id=camera_pda,
                             device_signature=device_signature,
                             timestamp=latest_video.get("timestamp", 0),
+                            private=not share_with_session,
                         )
                         logger.info(f"🎥 Video recorded for {wallet_address[:8]}... -> queued as job #{job_id}")
 
@@ -1116,6 +1125,7 @@ def register_routes(app):
                         camera_id=camera_pda,
                         device_signature=device_signature,
                         timestamp=latest_video.get("timestamp", 0),
+                        private=not share_with_session,
                     )
                     logger.info(f"🎥 Video recorded for {wallet_address[:8]}... -> queued as job #{job_id}")
 
@@ -3689,6 +3699,7 @@ def register_routes(app):
         wallet_address = request.json.get("wallet_address")
         annotated = request.json.get("annotated", False)
         event_metadata = request.json.get("event_metadata")
+        share_with_session = request.json.get("share_with_session", False)
 
         # Get services
         buffer_service = get_services()["buffer"]
@@ -3755,6 +3766,7 @@ def register_routes(app):
                 camera_id=camera_pda,
                 device_signature=device_signature,
                 timestamp=photo_info.get("timestamp", 0),
+                private=not share_with_session,
             )
 
             logger.info(f"📸 Photo captured for {wallet_address[:8]}... -> queued as job #{job_id}")

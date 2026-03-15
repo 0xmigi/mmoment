@@ -205,3 +205,4 @@ upload_queue.db
 
 # Device credentials (sensitive)
 device-keypair.enc
+.env.nfc

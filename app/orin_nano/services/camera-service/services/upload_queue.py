@@ -87,10 +87,16 @@ class UploadQueue:
                     download_url TEXT,
                     error TEXT,
                     retry_count INTEGER DEFAULT 0,
-                    created_at INTEGER NOT NULL
+                    created_at INTEGER NOT NULL,
+                    private INTEGER NOT NULL DEFAULT 1
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON uploads(status)")
+            # Migrate: add private column if it doesn't exist yet
+            try:
+                conn.execute("ALTER TABLE uploads ADD COLUMN private INTEGER NOT NULL DEFAULT 1")
+            except Exception:
+                pass  # Column already exists
             conn.commit()
 
     def add(
@@ -101,14 +107,15 @@ class UploadQueue:
         camera_id: str,
         device_signature: str,
         timestamp: int,
+        private: bool = True,
     ) -> int:
         """Add file to upload queue. Returns job ID."""
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.execute(
                 """INSERT INTO uploads
-                   (file_path, file_type, wallet_address, camera_id, device_signature, timestamp, status, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)""",
-                (file_path, file_type, wallet_address, camera_id, device_signature, timestamp, int(time.time() * 1000))
+                   (file_path, file_type, wallet_address, camera_id, device_signature, timestamp, status, created_at, private)
+                   VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+                (file_path, file_type, wallet_address, camera_id, device_signature, timestamp, int(time.time() * 1000), 1 if private else 0)
             )
             conn.commit()
             job_id = cursor.lastrowid
@@ -249,6 +256,7 @@ class UploadQueue:
                 checked_in_users=checked_in_users,
                 file_type=job["file_type"],
                 timestamp=job["timestamp"],
+                private=bool(job.get("private", 1)),
             )
 
             if result.get("success"):

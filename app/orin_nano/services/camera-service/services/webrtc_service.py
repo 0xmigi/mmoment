@@ -103,6 +103,7 @@ class BaseBufferVideoTrack(VideoStreamTrack):
         self.last_frame_time = 0
         self.track_type = track_type
         self._frame_count = 0
+        self._no_frame_since = None  # timestamp when frames first went missing
 
         # Initialize time_base properly for aiortc
         from fractions import Fraction
@@ -138,12 +139,28 @@ class BaseBufferVideoTrack(VideoStreamTrack):
             
             # Check if frame is valid
             if frame is None or (isinstance(frame, np.ndarray) and frame.size == 0):
-                # Create a test pattern frame if no camera frame available
-                frame = np.ones((720, 1280, 3), dtype=np.uint8) * 128  # Gray frame
-                # Add some pattern to verify it's working
-                cv2.rectangle(frame, (100, 100), (200, 200), (255, 0, 0), -1)  # Blue square
-                cv2.putText(frame, f"WebRTC Test {int(current_time) % 100}", (50, 50), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                # Track how long we've had no frames
+                if self._no_frame_since is None:
+                    self._no_frame_since = current_time
+                    logger.warning(f"[{self.track_type}] Camera frames lost, waiting for recovery...")
+
+                elapsed = current_time - self._no_frame_since
+                if elapsed >= 5.0:
+                    # Stop the track — forces viewer to disconnect and retry
+                    # This is cleaner than streaming a placeholder forever
+                    logger.error(f"[{self.track_type}] No camera frames for {elapsed:.0f}s, stopping track")
+                    self.stop()
+                    raise Exception("Camera unavailable — track stopped")
+
+                # Brief dropout: show a clean black frame while waiting
+                frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+                cv2.putText(frame, "Camera reconnecting...", (380, 360),
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (180, 180, 180), 2)
+            else:
+                # Frames are back — reset the no-frame timer
+                if self._no_frame_since is not None:
+                    logger.info(f"[{self.track_type}] Camera frames recovered")
+                    self._no_frame_since = None
             
             # Ensure frame is the right format
             if len(frame.shape) == 3 and frame.shape[2] == 3:

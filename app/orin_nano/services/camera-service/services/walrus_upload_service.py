@@ -490,7 +490,7 @@ class WalrusUploadService:
         file_type: str = "photo",
         timestamp: Optional[int] = None,
         user_sui_address: Optional[str] = None,
-        private: bool = False,
+        private: bool = True,
     ) -> Dict[str, Any]:
         """
         Upload a camera capture to Walrus with encryption.
@@ -745,7 +745,7 @@ class WalrusUploadService:
         checked_in_users: List[str],
         timestamp: Optional[int] = None,
         user_sui_address: Optional[str] = None,
-        private: bool = False,
+        private: bool = True,
     ) -> Dict[str, Any]:
         """
         Convenience method for uploading photos.
@@ -772,7 +772,7 @@ class WalrusUploadService:
         duration: int = 0,
         timestamp: Optional[int] = None,
         user_sui_address: Optional[str] = None,
-        private: bool = False,
+        private: bool = True,
     ) -> Dict[str, Any]:
         """
         Convenience method for uploading videos.
