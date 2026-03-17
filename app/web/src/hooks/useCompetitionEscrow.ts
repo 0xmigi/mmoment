@@ -19,6 +19,7 @@ import {
   solToLamports,
   type CompetitionStatusType,
 } from '../anchor/setup';
+import { buildAndSubmitSponsored } from '../services/kora-client';
 
 export interface CompetitionConfig {
   cameraDevicePubkey: string;
@@ -148,30 +149,28 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
         args,
       });
 
-      // Build transaction
-      const tx = await (program.methods as any)
-        .createCompetition(args, new BN(createdAt))
-        .accounts({
-          initiator: initiatorPubkey,
-          camera: cameraPubkey,
-          escrow: escrowPda,
-          systemProgram: SystemProgram.programId,
-        })
-        .transaction();
+      // Build and submit via Kora (gasless for user)
+      const walletSigner = await primaryWallet.getSigner();
+      const result = await buildAndSubmitSponsored(
+        initiatorPubkey,
+        walletSigner,
+        async () => {
+          return await (program.methods as any)
+            .createCompetition(args, new BN(createdAt))
+            .accounts({
+              initiator: initiatorPubkey,
+              camera: cameraPubkey,
+              escrow: escrowPda,
+              systemProgram: SystemProgram.programId,
+            })
+            .transaction();
+        },
+        connection,
+        'create_competition'
+      );
 
-      // Set recent blockhash and fee payer
-      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-      tx.feePayer = initiatorPubkey;
-
-      // Sign with Dynamic wallet
-      const signer = await primaryWallet.getSigner();
-      const signedTx = await signer.signTransaction(tx);
-
-      // Send transaction
-      const signature = await connection.sendRawTransaction(signedTx.serialize());
-      await connection.confirmTransaction(signature, 'confirmed');
-
-      console.log('[CompetitionEscrow] Competition created:', signature);
+      if (!result.success) throw new Error(result.error || 'Transaction failed');
+      console.log('[CompetitionEscrow] Competition created:', result.signature);
 
       // Fetch and set the active competition
       const account = await (program.account as any).competitionEscrow.fetch(escrowPda);
@@ -207,25 +206,26 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
       const escrowPda = new PublicKey(escrowPdaStr);
       const participantPubkey = new PublicKey(walletAddress);
 
-      const tx = await (program.methods as any)
-        .joinCompetition()
-        .accounts({
-          participant: participantPubkey,
-          escrow: escrowPda,
-          systemProgram: SystemProgram.programId,
-        })
-        .transaction();
+      const walletSigner = await primaryWallet.getSigner();
+      const result = await buildAndSubmitSponsored(
+        participantPubkey,
+        walletSigner,
+        async () => {
+          return await (program.methods as any)
+            .joinCompetition()
+            .accounts({
+              participant: participantPubkey,
+              escrow: escrowPda,
+              systemProgram: SystemProgram.programId,
+            })
+            .transaction();
+        },
+        connection,
+        'join_competition'
+      );
 
-      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-      tx.feePayer = participantPubkey;
-
-      const signer = await primaryWallet.getSigner();
-      const signedTx = await signer.signTransaction(tx);
-
-      const signature = await connection.sendRawTransaction(signedTx.serialize());
-      await connection.confirmTransaction(signature, 'confirmed');
-
-      console.log('[CompetitionEscrow] Joined competition:', signature);
+      if (!result.success) throw new Error(result.error || 'Transaction failed');
+      console.log('[CompetitionEscrow] Joined competition:', result.signature);
 
       // Refresh competition state
       const account = await (program.account as any).competitionEscrow.fetch(escrowPda);
@@ -261,24 +261,25 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
       const escrowPda = new PublicKey(escrowPdaStr);
       const participantPubkey = new PublicKey(walletAddress);
 
-      const tx = await (program.methods as any)
-        .declineCompetition()
-        .accounts({
-          participant: participantPubkey,
-          escrow: escrowPda,
-        })
-        .transaction();
+      const walletSigner = await primaryWallet.getSigner();
+      const result = await buildAndSubmitSponsored(
+        participantPubkey,
+        walletSigner,
+        async () => {
+          return await (program.methods as any)
+            .declineCompetition()
+            .accounts({
+              participant: participantPubkey,
+              escrow: escrowPda,
+            })
+            .transaction();
+        },
+        connection,
+        'decline_competition'
+      );
 
-      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-      tx.feePayer = participantPubkey;
-
-      const signer = await primaryWallet.getSigner();
-      const signedTx = await signer.signTransaction(tx);
-
-      const signature = await connection.sendRawTransaction(signedTx.serialize());
-      await connection.confirmTransaction(signature, 'confirmed');
-
-      console.log('[CompetitionEscrow] Declined competition:', signature);
+      if (!result.success) throw new Error(result.error || 'Transaction failed');
+      console.log('[CompetitionEscrow] Declined competition:', result.signature);
 
       return true;
     } catch (err: any) {
@@ -309,24 +310,25 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
       const escrowPda = new PublicKey(escrowPdaStr);
       const authorityPubkey = new PublicKey(walletAddress);
 
-      const tx = await (program.methods as any)
-        .startCompetition()
-        .accounts({
-          authority: authorityPubkey,
-          escrow: escrowPda,
-        })
-        .transaction();
+      const walletSigner = await primaryWallet.getSigner();
+      const result = await buildAndSubmitSponsored(
+        authorityPubkey,
+        walletSigner,
+        async () => {
+          return await (program.methods as any)
+            .startCompetition()
+            .accounts({
+              authority: authorityPubkey,
+              escrow: escrowPda,
+            })
+            .transaction();
+        },
+        connection,
+        'start_competition'
+      );
 
-      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-      tx.feePayer = authorityPubkey;
-
-      const signer = await primaryWallet.getSigner();
-      const signedTx = await signer.signTransaction(tx);
-
-      const signature = await connection.sendRawTransaction(signedTx.serialize());
-      await connection.confirmTransaction(signature, 'confirmed');
-
-      console.log('[CompetitionEscrow] Started competition:', signature);
+      if (!result.success) throw new Error(result.error || 'Transaction failed');
+      console.log('[CompetitionEscrow] Started competition:', result.signature);
 
       // Refresh competition state
       const account = await (program.account as any).competitionEscrow.fetch(escrowPda);
@@ -366,32 +368,33 @@ export function useCompetitionEscrow(): UseCompetitionEscrowReturn {
       const escrowAccount = await (program.account as any).competitionEscrow.fetch(escrowPda);
       const participants = escrowAccount.participants as PublicKey[];
 
-      const tx = await (program.methods as any)
-        .cancelCompetition(reason)
-        .accounts({
-          initiator: initiatorPubkey,
-          escrow: escrowPda,
-          systemProgram: SystemProgram.programId,
-        })
-        .remainingAccounts(
-          participants.map(p => ({
-            pubkey: p,
-            isWritable: true,
-            isSigner: false,
-          }))
-        )
-        .transaction();
+      const walletSigner = await primaryWallet.getSigner();
+      const result = await buildAndSubmitSponsored(
+        initiatorPubkey,
+        walletSigner,
+        async () => {
+          return await (program.methods as any)
+            .cancelCompetition(reason)
+            .accounts({
+              initiator: initiatorPubkey,
+              escrow: escrowPda,
+              systemProgram: SystemProgram.programId,
+            })
+            .remainingAccounts(
+              participants.map(p => ({
+                pubkey: p,
+                isWritable: true,
+                isSigner: false,
+              }))
+            )
+            .transaction();
+        },
+        connection,
+        'cancel_competition'
+      );
 
-      tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-      tx.feePayer = initiatorPubkey;
-
-      const signer = await primaryWallet.getSigner();
-      const signedTx = await signer.signTransaction(tx);
-
-      const signature = await connection.sendRawTransaction(signedTx.serialize());
-      await connection.confirmTransaction(signature, 'confirmed');
-
-      console.log('[CompetitionEscrow] Cancelled competition:', signature);
+      if (!result.success) throw new Error(result.error || 'Transaction failed');
+      console.log('[CompetitionEscrow] Cancelled competition:', result.signature);
 
       setActiveCompetition(null);
 

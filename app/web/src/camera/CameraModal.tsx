@@ -11,6 +11,7 @@ import { useUserSessionChain, fetchAuthorityPublicKey } from '../hooks/useUserSe
 import { useProgram, findUserSessionChainPDA } from '../anchor/setup';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, SystemProgram } from '@solana/web3.js';
+import { buildAndSubmitSponsored } from '../services/kora-client';
 
 interface CameraModalProps {
   isOpen: boolean;
@@ -358,33 +359,28 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       console.log('[CameraModal] User:', userPublicKey.toString());
       console.log('[CameraModal] Authority:', authority.toString());
 
-      // Build the transaction
-      const tx = await (program.methods as any)
-        .createUserSessionChain()
-        .accounts({
-          user: userPublicKey,
-          authority: authority,
-          userSessionChain: sessionChainPda,
-          systemProgram: SystemProgram.programId,
-        })
-        .transaction();
+      // Build and submit via Kora (gasless for user)
+      const walletSigner = await (primaryWallet as any).getSigner();
+      const result = await buildAndSubmitSponsored(
+        userPublicKey,
+        walletSigner,
+        async () => {
+          return await (program.methods as any)
+            .createUserSessionChain()
+            .accounts({
+              user: userPublicKey,
+              authority: authority,
+              userSessionChain: sessionChainPda,
+              systemProgram: SystemProgram.programId,
+            })
+            .transaction();
+        },
+        connection,
+        'create_session_chain'
+      );
 
-      // Get blockhash
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-      tx.recentBlockhash = blockhash;
-      tx.feePayer = userPublicKey;
-
-      // Sign with Dynamic wallet
-      console.log('[CameraModal] Requesting signature...');
-      const signer = await (primaryWallet as any).getSigner();
-      const signedTx = await signer.signTransaction(tx);
-
-      // Send and confirm
-      console.log('[CameraModal] Sending transaction...');
-      const signature = await connection.sendRawTransaction(signedTx.serialize());
-      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
-
-      console.log('[CameraModal] Session keychain created successfully!');
+      if (!result.success) throw new Error(result.error || 'Transaction failed');
+      console.log('[CameraModal] Session keychain created:', result.signature);
 
       // Refresh the session chain status
       await refetchSessionChain();

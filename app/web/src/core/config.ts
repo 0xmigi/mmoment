@@ -210,6 +210,10 @@ export const CONFIG = {
   BACKEND_URL: import.meta.env.VITE_BACKEND_URL || (isProduction
     ? "https://mmoment-production.up.railway.app"
     : "http://localhost:3001"),
+  // Kora gasless transaction server
+  KORA_URL: import.meta.env.VITE_KORA_URL || (isProduction
+    ? "https://mmoment-production.up.railway.app/kora"  // TODO: set production Kora URL
+    : "http://localhost:8080"),
   isProduction,
   isCloudflareProxy: isCloudflareProxy(),
   isMobileBrowser: isMobileBrowser(),

@@ -1,0 +1,112 @@
+# Kora Configuration for MMOMENT Camera Network
+# Local development - gasless transactions for users
+
+[kora]
+rate_limit = 100
+
+[kora.cache]
+enabled = false
+default_ttl = 300
+account_ttl = 60
+
+[kora.enabled_methods]
+liveness = true
+estimate_transaction_fee = true
+get_supported_tokens = true
+sign_transaction = true
+sign_and_send_transaction = true
+transfer_transaction = true
+get_blockhash = true
+get_config = true
+get_payer_signer = true
+
+[validation]
+max_allowed_lamports = 5000000
+max_signatures = 10
+price_source = "Mock"
+allow_durable_transactions = false
+
+# Programs allowed for sponsored transactions
+allowed_programs = [
+    "11111111111111111111111111111111",                 # System Program
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",    # Token Program
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",   # Associated Token Program
+    "ComputeBudget111111111111111111111111111111",      # Compute Budget Program
+    "E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL",   # MMOMENT Camera Network Program
+]
+
+# USDC on devnet
+allowed_tokens = [
+    "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",   # USDC (Devnet)
+]
+
+# Tokens users can pay fees with (USDC)
+allowed_spl_paid_tokens = [
+    "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",   # USDC (Devnet)
+]
+
+disallowed_accounts = []
+
+# Fee payer protection - what the fee payer wallet is allowed to do
+[validation.fee_payer_policy]
+
+# Locked down: fee payer can only create accounts (rent) for users
+# NOT allowed to transfer SOL arbitrarily (prevents draining)
+[validation.fee_payer_policy.system]
+allow_transfer = false
+allow_assign = false
+allow_create_account = true
+allow_allocate = false
+
+[validation.fee_payer_policy.system.nonce]
+allow_initialize = false
+allow_advance = false
+allow_authorize = false
+allow_withdraw = false
+
+# Fee payer can only initialize token accounts (ATA creation for users)
+# NOT allowed to transfer or close (prevents draining fee payer tokens)
+[validation.fee_payer_policy.spl_token]
+allow_transfer = false
+allow_burn = false
+allow_close_account = false
+allow_approve = false
+allow_revoke = false
+allow_set_authority = false
+allow_mint_to = false
+allow_initialize_mint = false
+allow_initialize_account = true
+allow_initialize_multisig = false
+allow_freeze_account = false
+allow_thaw_account = false
+
+[validation.fee_payer_policy.token_2022]
+allow_transfer = false
+allow_burn = false
+allow_close_account = false
+allow_approve = false
+allow_revoke = false
+allow_set_authority = false
+allow_mint_to = false
+allow_initialize_mint = false
+allow_initialize_account = false
+allow_initialize_multisig = false
+allow_freeze_account = false
+allow_thaw_account = false
+
+# Pricing: fully sponsored for now (free)
+# Switch to "margin" when you want users to pay USDC fees
+[validation.price]
+type = "free"
+
+[validation.token2022]
+blocked_mint_extensions = []
+blocked_account_extensions = []
+
+# Usage limits (disabled for now - your backend handles the gate)
+# Enable this + Redis when you want Kora to enforce limits directly
+[kora.usage_limit]
+enabled = false
+cache_url = "redis://localhost:6379"
+max_transactions = 100
+fallback_if_unavailable = true
