@@ -15,7 +15,7 @@ export const CAMERA_ACTIVATION_PROGRAM_ID = new PublicKey("E67WTa1NpFVoapXwYYQmX
 export const CAMERA_NETWORK_PROGRAM_ID = new PublicKey("E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL");
 
 // Competition Escrow Program ID
-export const COMPETITION_ESCROW_PROGRAM_ID = new PublicKey("32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ");
+export const COMPETITION_ESCROW_PROGRAM_ID = new PublicKey("EpczQBF7WmPcyzTtYJfzrPNXSVxM3YJsND7Vx8zpTLAj");
 
 // Global cache to prevent multiple initializations
 let globalProgramInstance: Program<CameraNetwork> | null = null;

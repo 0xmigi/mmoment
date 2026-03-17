@@ -1479,7 +1479,7 @@ app.post("/api/clear-all-sponsorships", (_req, res) => {
 // COMPETITION SETTLEMENT ENDPOINT
 // ============================================================================
 
-const COMPETITION_ESCROW_PROGRAM_ID = '32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ';
+const COMPETITION_ESCROW_PROGRAM_ID = 'EpczQBF7WmPcyzTtYJfzrPNXSVxM3YJsND7Vx8zpTLAj';
 
 // Settle competition - receives camera-signed transaction, adds payer signature, submits
 app.post("/api/competition/settle", async (req, res) => {
