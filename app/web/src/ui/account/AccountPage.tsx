@@ -18,11 +18,13 @@ import {
   Loader2,
   ChevronRight,
   Camera,
+  Pencil,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFacialEmbeddingStatus } from "../../hooks/useFacialEmbeddingStatus";
 import { useUserSessionChain } from "../../hooks/useUserSessionChain";
+import { profileService } from "../../services/profile-service";
 
 // Define interfaces
 interface SocialCredential {
@@ -52,6 +54,9 @@ export function AccountPage() {
   const [showRecognitionModal, setShowRecognitionModal] = useState(false);
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [solBalance, setSolBalance] = useState<number | null>(null);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editNameValue, setEditNameValue] = useState('');
+  const [isSavingName, setIsSavingName] = useState(false);
 
   // Get facial embedding status from blockchain
   const facialEmbeddingStatus = useFacialEmbeddingStatus();
@@ -163,7 +168,7 @@ export function AccountPage() {
     {
       id: "google",
       label: "Google",
-      value: googleCred?.oauthDisplayName || googleCred?.oauthUsername,
+      value: googleCred?.oauthDisplayName || 'Connected',
       connected: !!googleCred,
       isPublic: false,
       icon: <Globe className="w-3 h-3 mr-1" />,
@@ -293,12 +298,75 @@ export function AccountPage() {
                 </div>
               )}
 
-              {/* Profile name */}
-              <div className="ml-4">
-                <div className="font-medium text-neutral-900">{displayName}</div>
-                <div className="text-sm text-neutral-600">
-                  {primarySocialProvider || "Wallet Address"}
-                </div>
+              {/* Profile name — editable if no social provider set it */}
+              <div className="ml-4 flex-1">
+                {isEditingName ? (
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!editNameValue.trim() || !primaryWallet?.address) return;
+                      setIsSavingName(true);
+                      try {
+                        await profileService.saveProfile({
+                          walletAddress: primaryWallet.address,
+                          displayName: editNameValue.trim(),
+                        });
+                        setIsEditingName(false);
+                        setStatusMessage({ type: 'success', message: 'Display name saved!' });
+                      } catch {
+                        setStatusMessage({ type: 'error', message: 'Failed to save name' });
+                      } finally {
+                        setIsSavingName(false);
+                      }
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <input
+                      type="text"
+                      value={editNameValue}
+                      onChange={(e) => setEditNameValue(e.target.value)}
+                      placeholder="Enter your name"
+                      autoFocus
+                      maxLength={50}
+                      className="flex-1 text-sm border border-neutral-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSavingName || !editNameValue.trim()}
+                      className="text-xs bg-primary text-white px-3 py-1.5 rounded-lg disabled:opacity-50"
+                    >
+                      {isSavingName ? '...' : 'Save'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingName(false)}
+                      className="text-xs text-neutral-500 px-2 py-1.5"
+                    >
+                      Cancel
+                    </button>
+                  </form>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <div>
+                      <div className="font-medium text-neutral-900">{displayName}</div>
+                      <div className="text-sm text-neutral-600">
+                        {primarySocialProvider || "Wallet Address"}
+                      </div>
+                    </div>
+                    {!primarySocialCred && (
+                      <button
+                        onClick={() => {
+                          setEditNameValue(displayName.includes('...') ? '' : displayName);
+                          setIsEditingName(true);
+                        }}
+                        className="p-1 text-neutral-400 hover:text-neutral-600 transition-colors"
+                        title="Edit display name"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 

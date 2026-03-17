@@ -196,37 +196,3 @@ export async function buildAndSubmitSponsored(
   }
 }
 
-// ─── Backward compatibility with old gas-sponsorship API ─────────
-// These preserve the same interface so existing UI (WalletBalanceModal) still works.
-
-export interface SponsorshipStatus {
-  eligible: boolean;
-  count: number;
-  remaining: number;
-  message: string;
-}
-
-/**
- * Check sponsorship status. Falls back to backend API if available,
- * otherwise returns "eligible" if Kora is reachable.
- */
-export async function checkSponsorshipStatus(_userWallet: string): Promise<SponsorshipStatus> {
-  // Try the backend API first (it tracks usage counts)
-  try {
-    const response = await fetch(`${CONFIG.BACKEND_URL}/api/sponsorship-status/${_userWallet}`);
-    if (response.ok) {
-      return await response.json();
-    }
-  } catch {
-    // Backend not available, fall through
-  }
-
-  // Fallback: if Kora is up, user is eligible
-  const available = await isKoraAvailable();
-  return {
-    eligible: available,
-    count: 0,
-    remaining: available ? 999 : 0,
-    message: available ? 'Sponsored via Kora' : 'Sponsorship service unavailable',
-  };
-}

@@ -20,16 +20,8 @@ const connection = new Connection(
   "confirmed"
 );
 
-// Import gas sponsorship service
-import {
-  initializeGasSponsorshipService,
-  sponsorTransaction,
-  getUserSponsorshipStatus,
-  getSponsorshipStats,
-  resetUserSponsorship,
-  clearAllSponsorships,
-  checkFeePayerBalance
-} from './gas-sponsorship';
+// Gas sponsorship now handled by Kora (separate service)
+import { initializeGasSponsorshipService } from './gas-sponsorship';
 
 // Import session cleanup cron service
 import {
@@ -1347,133 +1339,8 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
   }
 });
 
-// ========================================
-// GAS SPONSORSHIP ENDPOINTS
-// ========================================
-
-// Sponsor a transaction for a user
-app.post("/api/sponsor-transaction", async (req, res) => {
-  try {
-    const { userWallet, transaction, action } = req.body;
-
-    if (!userWallet || !transaction || !action) {
-      return res.status(400).json({
-        success: false,
-        error: 'userWallet, transaction, and action are required'
-      });
-    }
-
-    console.log(`📝 Sponsorship request from ${userWallet.slice(0, 8)}... for action: ${action}`);
-
-    const result = await sponsorTransaction(userWallet, transaction, action);
-
-    if (result.success) {
-      res.json({
-        success: true,
-        transaction: result.transaction,
-        remaining: result.remaining,
-        message: `Transaction sponsored! ${result.remaining} free interactions remaining.`
-      });
-    } else {
-      res.status(400).json({
-        success: false,
-        error: result.error,
-        requiresUserPayment: result.error?.includes('used all')
-      });
-    }
-  } catch (error) {
-    console.error('Sponsor transaction error:', error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to sponsor transaction'
-    });
-  }
-});
-
-// Check user's sponsorship status
-app.get("/api/sponsorship-status/:userWallet", (req, res) => {
-  try {
-    const { userWallet } = req.params;
-
-    if (!userWallet) {
-      return res.status(400).json({ error: 'userWallet is required' });
-    }
-
-    const status = getUserSponsorshipStatus(userWallet);
-    res.json(status);
-  } catch (error) {
-    console.error('Get sponsorship status error:', error);
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Failed to get sponsorship status'
-    });
-  }
-});
-
-// Get sponsorship statistics (for monitoring)
-app.get("/api/sponsorship-stats", (_req, res) => {
-  try {
-    const stats = getSponsorshipStats();
-    res.json(stats);
-  } catch (error) {
-    console.error('Get sponsorship stats error:', error);
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Failed to get sponsorship stats'
-    });
-  }
-});
-
-// Check fee payer balance
-app.get("/api/fee-payer-balance", async (_req, res) => {
-  try {
-    const balance = await checkFeePayerBalance();
-    res.json({
-      balance,
-      publicKey: process.env.FEE_PAYER_SECRET_KEY
-        ? '9k5MGiM9Xqx8f2362M1B2rH5uMKFFVNuXaCDKyTsFXep'
-        : 'Not configured'
-    });
-  } catch (error) {
-    console.error('Check fee payer balance error:', error);
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Failed to check balance'
-    });
-  }
-});
-
-// Reset user sponsorship (for testing only - should be protected in production)
-app.post("/api/reset-sponsorship/:userWallet", (req, res) => {
-  try {
-    const { userWallet } = req.params;
-    const existed = resetUserSponsorship(userWallet);
-    res.json({
-      success: true,
-      message: existed
-        ? `Reset sponsorship for ${userWallet.slice(0, 8)}...`
-        : `No sponsorship data found for ${userWallet.slice(0, 8)}...`
-    });
-  } catch (error) {
-    console.error('Reset sponsorship error:', error);
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Failed to reset sponsorship'
-    });
-  }
-});
-
-// Clear all sponsorships (for testing only - should be protected in production)
-app.post("/api/clear-all-sponsorships", (_req, res) => {
-  try {
-    const count = clearAllSponsorships();
-    res.json({
-      success: true,
-      message: `Cleared sponsorship data for ${count} users`
-    });
-  } catch (error) {
-    console.error('Clear sponsorships error:', error);
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Failed to clear sponsorships'
-    });
-  }
-});
+// Gas sponsorship is now handled by Kora (app/backend/kora/)
+// Old sponsorship endpoints removed — all user transactions go through Kora
 
 // ============================================================================
 // COMPETITION SETTLEMENT ENDPOINT
@@ -1929,13 +1796,14 @@ async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: 
     }
 
     // Enrich user data with profile if found - preserve all fields from event
-    if (profile) {
+    const safeProfile = sanitizeProfile(profile);
+    if (safeProfile) {
       enrichedUser = {
         address: event.user.address,
-        displayName: profile.displayName || incomingUser.displayName,
-        username: profile.username || incomingUser.username,
-        pfpUrl: profile.profileImage || incomingUser.pfpUrl,
-        provider: profile.provider || incomingUser.provider,
+        displayName: safeProfile.displayName || incomingUser.displayName,
+        username: safeProfile.username || incomingUser.username,
+        pfpUrl: safeProfile.profileImage || incomingUser.pfpUrl,
+        provider: safeProfile.provider || incomingUser.provider,
         // Pass through any additional fields from the original event
         ...(event.user as any)
       };
@@ -3152,7 +3020,7 @@ app.get("/api/database/debug", async (_req, res) => {
 // USER PROFILE ENDPOINTS (for Camera Service)
 // ============================================================================
 
-// Save or update user profile (called by camera service when users check in)
+// Save or update user profile (progressive enrichment: fill gaps, never overwrite)
 app.post("/api/profile/save", async (req, res) => {
   try {
     const { walletAddress, displayName, username, profileImage, provider } = req.body;
@@ -3164,12 +3032,18 @@ app.post("/api/profile/save", async (req, res) => {
       });
     }
 
+    // Fetch existing profile to merge (progressive enrichment)
+    const existing = await getUserProfile(walletAddress);
+
+    // Never store email addresses as username (Google oauthUsername = email)
+    const safeUsername = username?.includes('@') ? undefined : username;
+
     const profile: DBUserProfile = {
       walletAddress,
-      displayName,
-      username,
-      profileImage,
-      provider,
+      displayName: existing?.displayName || displayName,
+      username: existing?.username || safeUsername,
+      profileImage: existing?.profileImage || profileImage,
+      provider: existing?.provider || provider,
       lastUpdated: new Date()
     };
 
@@ -3179,7 +3053,7 @@ app.post("/api/profile/save", async (req, res) => {
     // Update cache
     userProfilesCache.set(walletAddress, profile);
 
-    console.log(`✅ Saved user profile for ${walletAddress.slice(0, 8)}... (${displayName || username || 'no name'})`);
+    console.log(`✅ Saved user profile for ${walletAddress.slice(0, 8)}... (${profile.displayName || profile.username || 'no name'})`);
 
     res.json({
       success: true,
@@ -3195,6 +3069,16 @@ app.post("/api/profile/save", async (req, res) => {
 });
 
 // Get user profile by wallet address
+// Strip email addresses from profile data before returning to clients.
+// Google OAuth sets oauthUsername = email, which must never be exposed publicly.
+function sanitizeProfile(profile: DBUserProfile | null | undefined): typeof profile {
+  if (!profile) return profile;
+  if (profile.provider === 'google' && profile.username?.includes('@')) {
+    return { ...profile, username: undefined as any };
+  }
+  return profile;
+}
+
 app.get("/api/profile/:walletAddress", async (req, res) => {
   try {
     const { walletAddress } = req.params;
@@ -3214,7 +3098,7 @@ app.get("/api/profile/:walletAddress", async (req, res) => {
     if (profile) {
       res.json({
         success: true,
-        profile
+        profile: sanitizeProfile(profile)
       });
     } else {
       res.status(404).json({
@@ -3251,10 +3135,10 @@ app.post("/api/profile/batch", async (req, res) => {
       userProfilesCache.set(address, profile);
     }
 
-    // Convert map to object for JSON response
+    // Convert map to object for JSON response, sanitizing email leaks
     const profiles: Record<string, DBUserProfile> = {};
     for (const [address, profile] of profilesMap.entries()) {
-      profiles[address] = profile;
+      profiles[address] = sanitizeProfile(profile)!;
     }
 
     res.json({
@@ -3400,7 +3284,7 @@ app.post("/api/session/activity", async (req, res) => {
       let ciProvider: string | undefined;
       if (!displayName) {
         try {
-          const storedProfile = await getUserProfile(userPubkey);
+          const storedProfile = sanitizeProfile(await getUserProfile(userPubkey));
           if (storedProfile) {
             ciDisplayName = storedProfile.displayName;
             ciUsername = storedProfile.username;
@@ -3512,7 +3396,7 @@ app.post("/api/session/activity", async (req, res) => {
     let enrichedProvider: string | undefined;
     if (!displayName) {
       try {
-        const storedProfile = await getUserProfile(userPubkey);
+        const storedProfile = sanitizeProfile(await getUserProfile(userPubkey));
         if (storedProfile) {
           enrichedDisplayName = storedProfile.displayName;
           enrichedUsername = storedProfile.username;

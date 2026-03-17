@@ -161,7 +161,7 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
 
             {/* Connected Accounts */}
             <div className="space-y-2">
-              {/* Google Account */}
+              {/* Google Account — only show display name, never email/username */}
               {(googleCred || (hasBackendProfile && backendProvider === 'google')) && (
                 <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
                   <div>
@@ -172,7 +172,7 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
                       )}
                     </div>
                     <div className="text-xs text-gray-500">
-                      {googleCred?.oauthDisplayName || user.username}
+                      {googleCred?.oauthDisplayName || user.displayName || 'Connected'}
                     </div>
                   </div>
                 </div>

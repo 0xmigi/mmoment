@@ -138,9 +138,10 @@ export class SocialService {
     );
 
     if (googleCred) {
+      // Google's oauthUsername is the email address — never store or expose it
       profiles.push({
         id: googleCred.oauthAccountId || googleCred.id,
-        username: googleCred.oauthUsername,
+        username: undefined,
         displayName: googleCred.oauthDisplayName,
         pfpUrl: googleCred.oauthAccountPhotos?.[0],
         provider: 'google',
