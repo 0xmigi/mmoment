@@ -6,6 +6,7 @@ import { pipeService } from "../storage/pipe/pipe-service";
 import { TimelineEvent } from "../timeline/timeline-types";
 import { CONFIG } from "../core/config";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
+import { useDisplayProfile } from "../auth/useDisplayProfile";
 import { Dialog } from "@headlessui/react";
 import { ArrowUpRight, Download, Share2, Trash2, X, Users } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
@@ -26,6 +27,7 @@ export default function MediaViewer({
   onDelete,
 }: MediaViewerProps) {
   const { user, primaryWallet } = useDynamicContext();
+  const displayProfile = useDisplayProfile();
   const [deleting, setDeleting] = useState(false);
   const [sharing, setSharing] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -106,30 +108,16 @@ export default function MediaViewer({
 
   if (!media) return null;
 
-  // Get social identity from user's verified credentials
-  const farcasterCred = user?.verifiedCredentials?.find(
-    (cred) => cred.oauthProvider === "farcaster"
-  );
-  const googleCred = user?.verifiedCredentials?.find(
-    (cred) => cred.oauthProvider === "google"
-  );
-  const twitterCred = user?.verifiedCredentials?.find(
-    (cred) => cred.oauthProvider === "twitter"
-  );
-
-  // Prioritize Farcaster > Google > Twitter
-  const primarySocialCred = farcasterCred || googleCred || twitterCred;
-
-  // For shared items, ONLY use the owner's profile — never fall back to current user's credentials
+  // Use resolved display profile — never contains email
   const displayName = isSharedItem
     ? ownerProfile?.displayName
-    : event?.user.displayName || primarySocialCred?.oauthDisplayName;
+    : event?.user.displayName || displayProfile?.displayName;
   const username = isSharedItem
     ? ownerProfile?.username
-    : event?.user.username || primarySocialCred?.oauthUsername;
+    : event?.user.username || displayProfile?.username;
   const profileImage = isSharedItem
     ? ownerProfile?.pfpUrl
-    : event?.user.pfpUrl || primarySocialCred?.oauthAccountPhotos?.[0];
+    : event?.user.pfpUrl || displayProfile?.profileImage;
 
   // Determine social provider
   const socialProvider = (() => {
@@ -140,12 +128,7 @@ export default function MediaViewer({
       if (ownerProfile.provider === 'twitter') return 'X / Twitter';
       return ownerProfile.provider;
     }
-    if (username?.includes("farcaster.xyz")) return "Farcaster";
-    if (username?.includes("twitter.com")) return "X / Twitter";
-    if (farcasterCred) return "Farcaster";
-    if (googleCred) return "Google";
-    if (twitterCred) return "X / Twitter";
-    return null;
+    return displayProfile?.providerLabel || null;
   })();
 
   // For shared items, show owner's wallet as fallback — never the current user's identity

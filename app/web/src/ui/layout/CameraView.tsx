@@ -32,6 +32,7 @@ import {
   useEmbeddedWallet,
 } from "@dynamic-labs/sdk-react-core";
 import { useConnection } from "@solana/wallet-adapter-react";
+import { useDisplayProfile } from "../../auth/useDisplayProfile";
 import {
   Connection,
   PublicKey,
@@ -160,6 +161,7 @@ const CameraIdDisplay = ({
 
 export function CameraView() {
   const { primaryWallet, user } = useDynamicContext();
+  const displayProfile = useDisplayProfile();
   const { cameraId } = useParams<{ cameraId: string }>();
   useEmbeddedWallet();
   // Use unified check-in state from CameraProvider (Phase 3 Privacy Architecture)
@@ -317,30 +319,15 @@ export function CameraView() {
         console.warn("Error checking for duplicate events:", e);
       }
 
-      // Get the user's social credentials - prioritize Farcaster > Google > Twitter
-      const farcasterCred = user?.verifiedCredentials?.find(
-        (cred) => cred.oauthProvider === "farcaster"
-      );
-      const googleCred = user?.verifiedCredentials?.find(
-        (cred) => cred.oauthProvider === "google"
-      );
-      const twitterCred = user?.verifiedCredentials?.find(
-        (cred) => cred.oauthProvider === "twitter"
-      );
-
-      const socialCred = farcasterCred || googleCred || twitterCred;
-
-      // Create the timeline event with enriched user info
-      // Try social accounts first, then fallback to Dynamic user profile
+      // Create the timeline event using resolved display profile (never contains email)
       const event: Omit<TimelineEvent, "id"> = {
         type: eventType,
         user: {
           address: primaryWallet.address,
-          // Include profile info - prioritize social accounts, fallback to Dynamic user (NEVER use email)
-          displayName: socialCred?.oauthDisplayName || user?.alias || undefined,
-          username: socialCred?.oauthUsername || user?.username || undefined,
-          pfpUrl: socialCred?.oauthAccountPhotos?.[0] || undefined,
-          provider: socialCred?.oauthProvider,
+          displayName: displayProfile?.displayName,
+          username: displayProfile?.username,
+          pfpUrl: displayProfile?.profileImage,
+          provider: displayProfile?.provider,
         },
         timestamp: Date.now(),
         transactionId,

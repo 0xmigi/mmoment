@@ -6,18 +6,12 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { AuthModal } from '../../auth/components/AuthModal';
 import Logo from '../common/Logo';
+import { useDisplayProfile } from '../../auth/useDisplayProfile';
 
 interface MainLayoutProps {
   children: React.ReactNode;
   activeTab: 'camera' | 'gallery' | 'activities' | 'account';
   onTabChange: (tab: 'camera' | 'gallery' | 'activities' | 'account') => void;
-}
-
-interface SocialCredential {
-  oauthProvider: string;
-  oauthUsername: string;
-  oauthDisplayName: string;
-  oauthAccountPhotos: string[];
 }
 
 export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps) {
@@ -90,34 +84,11 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
     }
   };
 
-  // Resolve user display info
-  const farcasterCred = user?.verifiedCredentials?.find(
-    (cred: any): cred is SocialCredential =>
-      cred?.oauthProvider?.toLowerCase() === 'farcaster'
-  );
-  const googleCred = user?.verifiedCredentials?.find(
-    (cred: any): cred is SocialCredential =>
-      cred?.oauthProvider?.toLowerCase() === 'google'
-  );
-  const twitterCred = user?.verifiedCredentials?.find(
-    (cred: any): cred is SocialCredential =>
-      cred?.oauthProvider?.toLowerCase() === 'twitter'
-  );
-  const socialCred = farcasterCred || googleCred || twitterCred;
-
-  const providerLabels: Record<string, string> = {
-    farcaster: 'Farcaster',
-    google: 'Google',
-    twitter: 'X / Twitter',
-  };
-  // Never show email as display name — use wallet address as fallback
-  const displayName = socialCred?.oauthDisplayName
-    || primaryWallet?.address?.slice(0, 6) + '...' + primaryWallet?.address?.slice(-4)
-    || 'Account';
-  const socialProvider = socialCred?.oauthProvider
-    ? (providerLabels[socialCred.oauthProvider] || socialCred.oauthProvider)
-    : (user?.email ? 'Email' : 'Wallet');
-  const profilePhoto = socialCred?.oauthAccountPhotos?.[0];
+  // Resolved display profile — single source of truth, never contains email
+  const displayProfile = useDisplayProfile();
+  const displayName = displayProfile?.name || 'Account';
+  const socialProvider = displayProfile?.providerLabel || 'Wallet';
+  const profilePhoto = displayProfile?.profileImage;
 
   return (
     <div className="flex flex-col min-h-screen bg-white">

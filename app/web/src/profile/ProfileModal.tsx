@@ -13,12 +13,6 @@ interface ProfileModalProps {
     farcasterUsername?: string;
     bio?: string;
     provider?: string; // From backend profile (e.g., 'farcaster', 'twitter')
-    verifiedCredentials?: {
-      oauthProvider: string;
-      oauthDisplayName?: string;
-      oauthUsername?: string;
-      oauthAccountPhotos?: string[];
-    }[];
     walletAddress?: string;
   };
   action?: {
@@ -37,30 +31,13 @@ interface ProfileModalProps {
 }
 
 export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProps) {
-  // Debug: Log what data we're receiving
-  console.log('[ProfileModal] Opened with action:', action);
-  console.log('[ProfileModal] cvActivity:', action?.cvActivity);
-  console.log('[ProfileModal] competition:', action?.cvActivity?.competition);
-
   if (!isOpen) return null;
 
-  // Get social identity credentials (from current user's verifiedCredentials)
-  const farcasterCred = user?.verifiedCredentials?.find(cred => cred.oauthProvider === 'farcaster');
-  const googleCred = user?.verifiedCredentials?.find(cred => cred.oauthProvider === 'google');
-  const twitterCred = user?.verifiedCredentials?.find(cred => cred.oauthProvider === 'twitter');
+  const provider = user.provider?.toLowerCase();
 
-  // Check if we have backend profile data (for other users)
-  const hasBackendProfile = user.provider && user.username;
-  const backendProvider = user.provider?.toLowerCase();
-
-  // Prioritize Farcaster > Google > Twitter (from verifiedCredentials)
-  const primarySocialCred = farcasterCred || googleCred || twitterCred;
-  
-  // Get display information
-  const displayName = user.displayName || primarySocialCred?.oauthDisplayName || primarySocialCred?.oauthUsername;
-  const profileImage = user.pfpUrl || primarySocialCred?.oauthAccountPhotos?.[0];
-  
-  // Only use wallet as fallback
+  // Display info — only use safe fields, never raw credentials
+  const displayName = user.displayName;
+  const profileImage = user.pfpUrl;
   const displayIdentity = displayName || `${user.address.slice(0, 4)}...${user.address.slice(-4)}`;
 
   const handleExplorerClick = () => {
@@ -159,81 +136,45 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
               </div>
             </div>
 
-            {/* Connected Accounts */}
-            <div className="space-y-2">
-              {/* Google Account — only show display name, never email/username */}
-              {(googleCred || (hasBackendProfile && backendProvider === 'google')) && (
+            {/* Connected Account — show provider info from backend (already sanitized) */}
+            {provider && (
+              <div className="space-y-2">
                 <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-gray-700">Google</span>
-                      {(googleCred === primarySocialCred || (hasBackendProfile && backendProvider === 'google')) && (
-                        <span className="text-[10px] text-primary bg-primary-light px-1.5 py-0.5 rounded">source</span>
-                      )}
+                      <span className="text-xs font-medium text-gray-700">
+                        {provider === 'google' ? 'Google' : provider === 'farcaster' ? 'Farcaster' : provider === 'twitter' ? 'X / Twitter' : provider}
+                      </span>
+                      <span className="text-[10px] text-primary bg-primary-light px-1.5 py-0.5 rounded">source</span>
                     </div>
-                    <div className="text-xs text-gray-500">
-                      {googleCred?.oauthDisplayName || user.displayName || 'Connected'}
-                    </div>
+                    {user.username && (provider === 'farcaster' || provider === 'twitter') && (
+                      <div className="text-xs text-gray-500">
+                        @{user.username.replace('@', '')}
+                      </div>
+                    )}
+                    {provider === 'google' && (
+                      <div className="text-xs text-gray-500">
+                        {user.displayName || 'Connected'}
+                      </div>
+                    )}
                   </div>
+                  {(provider === 'farcaster' || provider === 'twitter') && user.username && (
+                    <button
+                      onClick={() => {
+                        const handle = user.username!.replace('@', '');
+                        const url = provider === 'farcaster'
+                          ? `https://farcaster.xyz/${handle}`
+                          : `https://twitter.com/${handle}`;
+                        window.open(url, '_blank');
+                      }}
+                      className="text-xs text-primary hover:text-primary-hover transition-colors flex items-center gap-1"
+                    >
+                      View <ExternalLink className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
-              )}
-
-              {/* Farcaster Account - from verifiedCredentials OR backend */}
-              {(farcasterCred || (hasBackendProfile && backendProvider === 'farcaster')) && (
-                <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-gray-700">Farcaster</span>
-                      {(farcasterCred === primarySocialCred || (hasBackendProfile && backendProvider === 'farcaster')) && (
-                        <span className="text-[10px] text-primary bg-primary-light px-1.5 py-0.5 rounded">source</span>
-                      )}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      @{farcasterCred?.oauthUsername?.replace('@', '') || user.username?.replace('@', '')}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      const username = farcasterCred?.oauthUsername || user.username;
-                      if (username) {
-                        window.open(`https://farcaster.xyz/${username.replace('@', '')}`, '_blank');
-                      }
-                    }}
-                    className="text-xs text-primary hover:text-primary-hover transition-colors flex items-center gap-1"
-                  >
-                    View <ExternalLink className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
-
-              {/* Twitter Account - from verifiedCredentials OR backend */}
-              {(twitterCred || (hasBackendProfile && backendProvider === 'twitter')) && (
-                <div className="flex items-center justify-between py-1.5 bg-gray-50 px-2 rounded-lg">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-gray-700">X / Twitter</span>
-                      {(primarySocialCred === twitterCred || (hasBackendProfile && backendProvider === 'twitter')) && (
-                        <span className="text-[10px] text-primary bg-primary-light px-1.5 py-0.5 rounded">source</span>
-                      )}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      @{twitterCred?.oauthUsername?.replace('@', '') || user.username?.replace('@', '')}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      const username = twitterCred?.oauthUsername || user.username;
-                      if (username) {
-                        window.open(`https://twitter.com/${username.replace('@', '')}`, '_blank');
-                      }
-                    }}
-                    className="text-xs text-primary hover:text-primary-hover transition-colors flex items-center gap-1"
-                  >
-                    View <ExternalLink className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
-            </div>
+              </div>
+            )}
 
             {/* Action Details */}
             {action && (

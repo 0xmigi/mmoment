@@ -3,22 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { User } from 'lucide-react';
 import { AuthModal } from './AuthModal';
-
-interface SocialCredential {
-  oauthProvider: string;
-  oauthUsername: string;
-  oauthDisplayName: string;
-  oauthAccountPhotos: string[];
-}
+import { useDisplayProfile } from '../useDisplayProfile';
 
 export function HeadlessAuthButton() {
-  const { primaryWallet, user } = useDynamicContext();
+  const { primaryWallet } = useDynamicContext();
+  const displayProfile = useDisplayProfile();
   const navigate = useNavigate();
   const [showAuthModal, setShowAuthModal] = useState(false);
-
-  const handleAuthModalClose = () => {
-    setShowAuthModal(false);
-  };
 
   if (!primaryWallet?.address) {
     return (
@@ -29,57 +20,30 @@ export function HeadlessAuthButton() {
         >
           Log in
         </button>
-        <AuthModal 
-          isOpen={showAuthModal} 
-          onClose={handleAuthModalClose} 
+        <AuthModal
+          isOpen={showAuthModal}
+          onClose={() => setShowAuthModal(false)}
         />
       </>
     );
   }
 
-  // Find Farcaster credentials if they exist
-  const farcasterCred = user?.verifiedCredentials?.find(
-    (cred: any): cred is SocialCredential => 
-      cred?.oauthProvider?.toLowerCase() === 'farcaster'
-  );
-
-  // Find Twitter credentials if they exist
-  const twitterCred = user?.verifiedCredentials?.find(
-    (cred: any): cred is SocialCredential => 
-      cred?.oauthProvider?.toLowerCase() === 'twitter'
-  );
-
-  // Prioritize Farcaster, but fall back to Twitter if available
-  const socialCred = farcasterCred || twitterCred;
-
-  // If user is connected with a social account, show their profile
-  if (socialCred) {
-    return (
-      <button
-        onClick={() => navigate('/account')}
-        className="px-4 py-2 bg-gray-100 text-black rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
-      >
-        {socialCred.oauthAccountPhotos?.[0] && (
-          <img
-            src={socialCred.oauthAccountPhotos[0]}
-            alt="Profile"
-            referrerPolicy="no-referrer"
-            className="w-6 h-6 rounded-full"
-          />
-        )}
-        <span className="font-medium">{socialCred.oauthDisplayName}</span>
-      </button>
-    );
-  }
-
-  // Fallback for wallet-only users without social profiles
   return (
     <button
       onClick={() => navigate('/account')}
       className="px-4 py-2 bg-gray-100 text-black rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
     >
-      <User className="w-5 h-5" />
-      <span className="font-medium">Account</span>
+      {displayProfile?.profileImage ? (
+        <img
+          src={displayProfile.profileImage}
+          alt="Profile"
+          referrerPolicy="no-referrer"
+          className="w-6 h-6 rounded-full"
+        />
+      ) : (
+        <User className="w-5 h-5" />
+      )}
+      <span className="font-medium">{displayProfile?.name || 'Account'}</span>
     </button>
   );
-} 
+}

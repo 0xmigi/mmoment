@@ -25,15 +25,7 @@ import { useNavigate } from "react-router-dom";
 import { useFacialEmbeddingStatus } from "../../hooks/useFacialEmbeddingStatus";
 import { useUserSessionChain } from "../../hooks/useUserSessionChain";
 import { profileService } from "../../services/profile-service";
-
-// Define interfaces
-interface SocialCredential {
-  format: string;
-  oauthProvider: string;
-  oauthUsername: string;
-  oauthDisplayName: string;
-  oauthAccountPhotos: string[];
-}
+import { useDisplayProfile } from "../../auth/useDisplayProfile";
 
 interface StatusMessage {
   message: string;
@@ -125,74 +117,47 @@ export function AccountPage() {
     );
   }
 
-  // Get social credentials
-  const socialCreds =
-    user?.verifiedCredentials?.filter(
-      (cred: any): cred is SocialCredential => cred.format === "oauth"
-    ) || [];
-
-  // Find specific social providers
-  const twitterCred = socialCreds.find(
-    (cred) => cred.oauthProvider === "twitter"
-  );
-  const farcasterCred = socialCreds.find(
-    (cred) => cred.oauthProvider === "farcaster"
-  );
-  const googleCred = socialCreds.find(
-    (cred) => cred.oauthProvider === "google"
-  );
-
-  // Prioritize credentials (Farcaster > Google > Twitter > none)
-  const primarySocialCred = farcasterCred || googleCred || twitterCred;
-  const providerLabels: Record<string, string> = {
-    farcaster: 'Farcaster',
-    google: 'Google',
-    twitter: 'X / Twitter',
-  };
-  const primarySocialProvider = primarySocialCred?.oauthProvider
-    ? (providerLabels[primarySocialCred.oauthProvider] || null)
-    : null;
-
-  // Prepare the profile image and display name
-  const profileImageUrl = primarySocialCred?.oauthAccountPhotos?.[0];
-  const displayName =
-    primarySocialCred?.oauthDisplayName ||
-    primaryWallet.address.slice(0, 6) + "..." + primaryWallet.address.slice(-4);
+  // Resolved display profile — single source of truth, never contains email
+  const displayProfile = useDisplayProfile();
+  const profileImageUrl = displayProfile?.profileImage;
+  const displayName = displayProfile?.name || primaryWallet.address.slice(0, 6) + "..." + primaryWallet.address.slice(-4);
+  const primarySocialProvider = displayProfile?.hasSocialAuth ? displayProfile.providerLabel : null;
 
   // Check if the wallet is an embedded wallet (not Phantom)
   const isEmbeddedWallet =
     primaryWallet.connector?.name.toLowerCase() !== "phantom";
 
-  // Define identity items for the branching display
+  // Define identity items using displayProfile (never leaks email)
+  const socials = displayProfile?.socials || {};
   const identities = [
     {
       id: "google",
       label: "Google",
-      value: googleCred?.oauthDisplayName || 'Connected',
-      connected: !!googleCred,
+      value: socials.google?.displayName || 'Connected',
+      connected: !!socials.google,
       isPublic: false,
       icon: <Globe className="w-3 h-3 mr-1" />,
     },
     {
       id: "twitter",
       label: "X / Twitter",
-      value: twitterCred?.oauthUsername,
-      connected: !!twitterCred,
+      value: socials.twitter?.username,
+      connected: !!socials.twitter,
       isPublic: true,
       icon: <Globe className="w-3 h-3 mr-1" />,
     },
     {
       id: "farcaster",
       label: "Farcaster",
-      value: farcasterCred?.oauthUsername,
-      connected: !!farcasterCred,
+      value: socials.farcaster?.username,
+      connected: !!socials.farcaster,
       isPublic: true,
       icon: <Globe className="w-3 h-3 mr-1" />,
     },
     {
       id: "email",
       label: "Email",
-      value: user?.email,
+      value: user?.email ? 'Connected' : undefined,
       connected: !!user?.email,
       isPublic: false,
       icon: <Lock className="w-3 h-3 mr-1" />,
@@ -353,7 +318,7 @@ export function AccountPage() {
                         {primarySocialProvider || "Wallet Address"}
                       </div>
                     </div>
-                    {!primarySocialCred && (
+                    {!displayProfile?.hasSocialAuth && (
                       <button
                         onClick={() => {
                           setEditNameValue(displayName.includes('...') ? '' : displayName);

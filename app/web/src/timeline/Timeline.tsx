@@ -4,6 +4,7 @@ import { Camera, Video, Power, User, Radio, Activity, Users } from 'lucide-react
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { ProfileModal } from '../profile/ProfileModal';
 import MediaViewer from '../media/MediaViewer';
+import { useDisplayProfile } from '../auth/useDisplayProfile';
 import { timelineService } from './timeline-service';
 import { TimelineEvent, TimelineEventType, TimelineUser, CVActivityMetadata } from './timeline-types';
 import { IPFSMedia } from '../storage/ipfs/ipfs-service';
@@ -117,6 +118,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   const [displayCount, setDisplayCount] = useState(getDisplayCount());
   const [mobileTimelineCount, setMobileTimelineCount] = useState(getMobileTimelineCount());
   const { user } = useDynamicContext();
+  const displayProfile = useDisplayProfile();
   const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
   const [selectedMedia, setSelectedMedia] = useState<IPFSMedia | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
@@ -140,56 +142,22 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       };
     }
     
-    // If not in userProfiles, check current user's credentials as before
-    if (user?.verifiedCredentials) {
-      // Try to determine if this is the current user's event
-      const isCurrentUser = user.verifiedCredentials.some(cred => cred.address === event.user.address);
-      
-      if (isCurrentUser) {
-        // Find matching social credentials - prioritize Farcaster > Google > Twitter
-        const farcasterCred = user.verifiedCredentials.find(
-          cred => cred.oauthProvider === 'farcaster'
-        );
-        const googleCred = user.verifiedCredentials.find(
-          cred => cred.oauthProvider === 'google'
-        );
-        const twitterCred = user.verifiedCredentials.find(
-          cred => cred.oauthProvider === 'twitter'
-        );
-
-        const socialCred = farcasterCred || googleCred || twitterCred;
-        
-        if (socialCred) {
-          // Store this profile for future use
-          const newProfile = {
-            address: event.user.address,
-            displayName: socialCred.oauthDisplayName,
-            username: socialCred.oauthUsername,
-            pfpUrl: socialCred.oauthAccountPhotos?.[0],
-            provider: socialCred.oauthProvider
-          };
-          
-          setUserProfiles(prev => ({
-            ...prev,
-            [event.user.address]: newProfile
-          }));
-          
-          return {
-            ...event,
-            user: {
-              ...event.user,
-              displayName: socialCred.oauthDisplayName || event.user.displayName,
-              username: socialCred.oauthUsername || event.user.username,
-              pfpUrl: socialCred.oauthAccountPhotos?.[0] || event.user.pfpUrl,
-              provider: socialCred.oauthProvider || event.user.provider
-            }
-          };
+    // If this is the current user, use the resolved display profile (never contains email)
+    if (displayProfile && event.user.address === displayProfile.fullWalletAddress) {
+      return {
+        ...event,
+        user: {
+          ...event.user,
+          displayName: displayProfile.displayName || event.user.displayName,
+          username: displayProfile.username || event.user.username,
+          pfpUrl: displayProfile.profileImage || event.user.pfpUrl,
+          provider: displayProfile.provider || event.user.provider
         }
-      }
+      };
     }
-    
+
     return event;
-  }, [user?.verifiedCredentials, userProfiles]);
+  }, [displayProfile, userProfiles]);
 
   // Fetch user profiles for all addresses in the events
   useEffect(() => {
@@ -645,29 +613,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
             username: selectedUser.username,
             displayName: selectedUser.displayName,
             pfpUrl: selectedUser.pfpUrl,
-            provider: selectedUser.provider, // Include provider field from backend
-            verifiedCredentials: 
-              user?.verifiedCredentials?.some(cred => 
-                cred.address === selectedUser.address)
-                ? user?.verifiedCredentials?.filter(cred => 
-                    cred.oauthProvider === 'farcaster' || cred.oauthProvider === 'google' || cred.oauthProvider === 'twitter'
-                  )?.map(cred => ({
-                    oauthProvider: cred.oauthProvider as string,
-                    oauthDisplayName: cred.oauthDisplayName || undefined,
-                    oauthUsername: cred.oauthUsername,
-                    oauthAccountPhotos: cred.oauthAccountPhotos
-                  }))
-                : user?.verifiedCredentials
-                  ?.filter(cred => 
-                    (cred.oauthProvider === 'farcaster' || cred.oauthProvider === 'google' || cred.oauthProvider === 'twitter') && 
-                    cred.address === selectedUser.address
-                  )
-                  ?.map(cred => ({
-                    oauthProvider: cred.oauthProvider as string,
-                    oauthDisplayName: cred.oauthDisplayName || undefined,
-                    oauthUsername: cred.oauthUsername,
-                    oauthAccountPhotos: cred.oauthAccountPhotos
-                  }))
+            provider: selectedUser.provider,
           }}
           action={{
             type: selectedEvent.type,
