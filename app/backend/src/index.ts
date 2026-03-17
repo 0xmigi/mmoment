@@ -1808,7 +1808,7 @@ async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: 
         ...(event.user as any)
       };
 
-      console.log(`✅ Enriched timeline event with profile for ${event.user.address.slice(0, 8)}... (${profile.displayName || profile.username})`);
+      console.log(`✅ Enriched timeline event with profile for ${event.user.address.slice(0, 8)}... (${safeProfile.displayName || safeProfile.username})`);
     } else {
       // No profile in DB, just use incoming event data
       enrichedUser = { ...incomingUser };
