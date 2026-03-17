@@ -110,8 +110,8 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
     google: 'Google',
     twitter: 'X / Twitter',
   };
+  // Never show email as display name — use wallet address as fallback
   const displayName = socialCred?.oauthDisplayName
-    || user?.email
     || primaryWallet?.address?.slice(0, 6) + '...' + primaryWallet?.address?.slice(-4)
     || 'Account';
   const socialProvider = socialCred?.oauthProvider
