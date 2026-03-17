@@ -22,7 +22,8 @@ interface KoraConfig {
 }
 
 interface SignTransactionResult {
-  transaction: string; // base64 encoded signed transaction
+  signed_transaction: string; // base64 encoded signed transaction
+  signer_pubkey: string;
 }
 
 interface SignAndSendResult {
@@ -100,7 +101,7 @@ export async function koraSignTransaction(
     transaction: serialized,
   });
 
-  return Transaction.from(Buffer.from(result.transaction, 'base64'));
+  return Transaction.from(Buffer.from(result.signed_transaction, 'base64'));
 }
 
 /**
@@ -142,7 +143,7 @@ export async function koraSignAndSend(
  * @param action - Description for logging (e.g. 'check_in', 'enroll_face')
  */
 export async function buildAndSubmitSponsored(
-  userWallet: PublicKey,
+  _userWallet: PublicKey,
   walletSigner: { signTransaction: (tx: Transaction) => Promise<Transaction> },
   buildTransaction: () => Promise<Transaction>,
   connection: Connection,
