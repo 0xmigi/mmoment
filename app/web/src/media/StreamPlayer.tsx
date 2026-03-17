@@ -290,40 +290,36 @@ const StreamPlayer = memo(() => {
 
   if (isLoading) {
     return (
-      <div className="px-2">
-        <div className="aspect-[9/16] md:aspect-video bg-gray-900 rounded-lg flex items-center justify-center">
-          <p className="text-gray-400">
-            Loading stream...
-            {isMobile && loadingRetry > 0 && (
-              <span className="block text-xs mt-1">
-                Attempt {loadingRetry}/3
-              </span>
-            )}
-          </p>
-        </div>
+      <div className="aspect-[9/16] bg-gray-900 rounded-lg flex items-center justify-center">
+        <p className="text-gray-400">
+          Loading stream...
+          {isMobile && loadingRetry > 0 && (
+            <span className="block text-xs mt-1">
+              Attempt {loadingRetry}/3
+            </span>
+          )}
+        </p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="px-2">
-        <div className="aspect-[9/16] md:aspect-video w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
-          <div className="text-center">
-            <p className="text-gray-400">Failed to load stream</p>
-            {isMobile && error && (
-              <button
-                className="mt-2 px-3 py-1 text-xs bg-primary text-white rounded"
-                onClick={() => {
-                  setIsLoading(true);
-                  setError(null);
-                  fetchStreamInfo(true);
-                }}
-              >
-                Retry
-              </button>
-            )}
-          </div>
+      <div className="aspect-[9/16] w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-400">Failed to load stream</p>
+          {isMobile && error && (
+            <button
+              className="mt-2 px-3 py-1 text-xs bg-primary text-white rounded"
+              onClick={() => {
+                setIsLoading(true);
+                setError(null);
+                fetchStreamInfo(true);
+              }}
+            >
+              Retry
+            </button>
+          )}
         </div>
       </div>
     );
@@ -349,8 +345,7 @@ const StreamPlayer = memo(() => {
   // because Jetson streams are always available
   if (streamInfo?.playbackId) {
     return (
-      <div className="px-2">
-        <div className="aspect-[9/16] md:aspect-video bg-black rounded-lg overflow-hidden relative">
+      <div className="aspect-[9/16] bg-black rounded-lg overflow-hidden relative">
           <Player
             title="Camera Stream"
             playbackId={streamInfo.playbackId}
@@ -400,22 +395,19 @@ const StreamPlayer = memo(() => {
             </button>
           </div>
         </div>
-      </div>
     );
   }
 
   // Handle MJPEG streams (legacy - keeping for fallback)
   if (streamInfo?.streamType === "mjpeg" && streamInfo.streamUrl) {
     return (
-      <div className="px-2">
-        <div className="aspect-[9/16] md:aspect-video bg-black rounded-lg overflow-hidden">
-          <img
-            src={streamInfo.streamUrl}
-            alt="Camera Stream"
-            className="w-full h-full object-contain"
-            style={{ imageRendering: "auto" }}
-          />
-        </div>
+      <div className="aspect-[9/16] bg-black rounded-lg overflow-hidden">
+        <img
+          src={streamInfo.streamUrl}
+          alt="Camera Stream"
+          className="w-full h-full object-contain"
+          style={{ imageRendering: "auto" }}
+        />
       </div>
     );
   }
@@ -427,11 +419,9 @@ const StreamPlayer = memo(() => {
     !streamInfo?.streamUrl
   ) {
     return (
-      <div className="px-2">
-        <div className="aspect-[9/16] md:aspect-video w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
-          <div className="text-center">
-            <p className="text-gray-400">Stream is offline</p>
-          </div>
+      <div className="aspect-[9/16] w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-400">Stream is offline</p>
         </div>
       </div>
     );
@@ -439,11 +429,9 @@ const StreamPlayer = memo(() => {
 
   // Fallback for unknown stream types
   return (
-    <div className="px-2">
-      <div className="aspect-[9/16] md:aspect-video w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-gray-400">Unsupported stream format</p>
-        </div>
+    <div className="aspect-[9/16] w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
+      <div className="text-center">
+        <p className="text-gray-400">Unsupported stream format</p>
       </div>
     </div>
   );

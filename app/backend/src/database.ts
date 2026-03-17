@@ -233,6 +233,17 @@ export async function initializeDatabase(dbPath: string = './mmoment.db'): Promi
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`);
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_api_keys_wallet ON api_keys(wallet_address)`);
 
+        // Create camera_events table (event info displayed on desktop/TV view)
+        await runQuery(`
+          CREATE TABLE IF NOT EXISTS camera_events (
+            camera_id TEXT PRIMARY KEY,
+            event_name TEXT,
+            event_description TEXT,
+            event_date TEXT,
+            updated_at INTEGER NOT NULL
+          )
+        `);
+
         console.log('✅ Database tables initialized');
         resolve();
       } catch (error) {
@@ -1635,6 +1646,55 @@ export async function updateApiKeyLastUsed(keyHash: string): Promise<void> {
     db.run(
       'UPDATE api_keys SET last_used_at = ? WHERE key_hash = ?',
       [Date.now(), keyHash],
+      (err: Error | null) => {
+        if (err) { reject(err); } else { resolve(); }
+      }
+    );
+  });
+}
+
+// ============================================================================
+// CAMERA EVENTS OPERATIONS
+// ============================================================================
+
+export interface CameraEvent {
+  cameraId: string;
+  eventName?: string;
+  eventDescription?: string;
+  eventDate?: string;
+  updatedAt: number;
+}
+
+export async function getCameraEvent(cameraId: string): Promise<CameraEvent | null> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.get(
+      'SELECT camera_id, event_name, event_description, event_date, updated_at FROM camera_events WHERE camera_id = ?',
+      [cameraId],
+      (err: any, row: any) => {
+        if (err) { reject(err); return; }
+        if (!row) { resolve(null); return; }
+        resolve({
+          cameraId: row.camera_id,
+          eventName: row.event_name,
+          eventDescription: row.event_description,
+          eventDate: row.event_date,
+          updatedAt: row.updated_at,
+        });
+      }
+    );
+  });
+}
+
+export async function saveCameraEvent(event: CameraEvent): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.run(
+      `INSERT OR REPLACE INTO camera_events (camera_id, event_name, event_description, event_date, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [event.cameraId, event.eventName || null, event.eventDescription || null, event.eventDate || null, Date.now()],
       (err: Error | null) => {
         if (err) { reject(err); } else { resolve(); }
       }

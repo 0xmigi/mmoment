@@ -22,6 +22,8 @@ interface TimelineProps {
   showProfileStack?: boolean;
   /** Show absolute timestamps (e.g. "12:34 PM") instead of relative (e.g. "5 minutes ago") */
   showAbsoluteTime?: boolean;
+  /** Fill parent container height (used in desktop phone frame so curve pins to bottom) */
+  fillHeight?: boolean;
 }
 
 // Get the display count based on screen width
@@ -110,7 +112,7 @@ const formatAbsoluteTime = (timestamp: number): string => {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full', cameraId, mobileOverlay = false, initialEvents, showProfileStack, showAbsoluteTime = false }, ref) => {
+export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full', cameraId, mobileOverlay = false, initialEvents, showProfileStack, showAbsoluteTime = false, fillHeight = false }, ref) => {
   const [events, setEvents] = useState<TimelineEvent[]>(initialEvents || []);
   const [selectedUser, setSelectedUser] = useState<TimelineUser | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -438,14 +440,16 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   };
 
   return (
-    <div className="w-full relative" ref={timelineRef}>
+    <div className={`w-full relative ${fillHeight ? 'h-full' : ''}`} ref={timelineRef}>
       {/* Container with fixed height for desktop camera variant */}
       <div
         className="relative"
         style={{
-          height: variant === 'camera' && !mobileOverlay
-            ? '45rem'  // Extends past the gallery on desktop
-            : 'auto'
+          height: fillHeight
+            ? '100%'
+            : variant === 'camera' && !mobileOverlay
+              ? '45rem'  // Extends past the gallery on desktop
+              : 'auto'
         }}
       >
         {/* Vertical timeline line - stops above the profile stack curve */}

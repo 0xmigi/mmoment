@@ -94,7 +94,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
     <div className="flex flex-col min-h-screen bg-white">
       {/* Top Bar */}
       <div className="flex-none z-[40]">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+        <div className="w-full px-6 h-16 flex items-center justify-between">
           {/* Left side - Logo and Desktop Nav */}
           <div className="flex items-center gap-8">
             <div

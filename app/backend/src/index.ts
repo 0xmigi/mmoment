@@ -69,7 +69,10 @@ import {
   getWalrusFilesForWallet,
   getWalrusFilesWithAccess,
   deleteWalrusFile,
-  WalrusFileMapping
+  WalrusFileMapping,
+  // Camera events
+  getCameraEvent,
+  saveCameraEvent,
 } from './database';
 
 // Import Sui storage service for Walrus blob ownership
@@ -3805,6 +3808,38 @@ app.get("/api/user/:walletAddress/sessions", async (req, res) => {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to get user sessions'
     });
+  }
+});
+
+// Get camera event info (public, no auth)
+app.get("/api/camera/:cameraId/event", async (req, res) => {
+  try {
+    const { cameraId } = req.params;
+    const event = await getCameraEvent(cameraId);
+    res.json({ success: true, event: event || null });
+  } catch (error) {
+    console.error('Failed to get camera event:', error);
+    res.status(500).json({ success: false, error: 'Failed to get camera event' });
+  }
+});
+
+// Save/update camera event info
+app.put("/api/camera/:cameraId/event", async (req, res) => {
+  try {
+    const { cameraId } = req.params;
+    const { eventName, eventDescription, eventDate } = req.body;
+    await saveCameraEvent({
+      cameraId,
+      eventName: eventName || undefined,
+      eventDescription: eventDescription || undefined,
+      eventDate: eventDate || undefined,
+      updatedAt: Date.now(),
+    });
+    const saved = await getCameraEvent(cameraId);
+    res.json({ success: true, event: saved });
+  } catch (error) {
+    console.error('Failed to save camera event:', error);
+    res.status(500).json({ success: false, error: 'Failed to save camera event' });
   }
 });
 
