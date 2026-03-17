@@ -157,7 +157,7 @@ export function AccountPage() {
     {
       id: "email",
       label: "Email",
-      value: user?.email ? 'Connected' : undefined,
+      value: user?.email,
       connected: !!user?.email,
       isPublic: false,
       icon: <Lock className="w-3 h-3 mr-1" />,
