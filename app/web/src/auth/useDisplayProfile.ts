@@ -80,17 +80,17 @@ export function useDisplayProfile(): DisplayProfile | null {
 
     if (twitterCred) {
       socials.twitter = {
-        displayName: twitterCred.oauthDisplayName,
-        username: twitterCred.oauthUsername,
-        profileImage: twitterCred.oauthAccountPhotos?.[0],
+        displayName: twitterCred.oauthDisplayName || undefined,
+        username: twitterCred.oauthUsername || '',
+        profileImage: twitterCred.oauthAccountPhotos?.[0] || undefined,
       };
     }
 
     if (farcasterCred) {
       socials.farcaster = {
-        displayName: farcasterCred.oauthDisplayName,
-        username: farcasterCred.oauthUsername,
-        profileImage: farcasterCred.oauthAccountPhotos?.[0],
+        displayName: farcasterCred.oauthDisplayName || undefined,
+        username: farcasterCred.oauthUsername || '',
+        profileImage: farcasterCred.oauthAccountPhotos?.[0] || undefined,
       };
     }
 

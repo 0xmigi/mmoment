@@ -18,7 +18,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
   const [isOpen, setIsOpen] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const isLoggedIn = useIsLoggedIn();
-  const { sdkHasLoaded, primaryWallet, user } = useDynamicContext();
+  const { sdkHasLoaded, primaryWallet } = useDynamicContext();
   const { connection } = useConnection();
   const navigate = useNavigate();
   const { cameraId } = useParams<{ cameraId?: string }>();

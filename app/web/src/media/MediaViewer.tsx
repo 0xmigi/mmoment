@@ -26,7 +26,7 @@ export default function MediaViewer({
   event,
   onDelete,
 }: MediaViewerProps) {
-  const { user, primaryWallet } = useDynamicContext();
+  const { primaryWallet } = useDynamicContext();
   const displayProfile = useDisplayProfile();
   const [deleting, setDeleting] = useState(false);
   const [sharing, setSharing] = useState(false);
