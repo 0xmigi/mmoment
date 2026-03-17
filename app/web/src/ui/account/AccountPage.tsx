@@ -276,6 +276,7 @@ export function AccountPage() {
                           walletAddress: primaryWallet.address,
                           displayName: editNameValue.trim(),
                         });
+                        displayProfile?.refresh();
                         setIsEditingName(false);
                         setStatusMessage({ type: 'success', message: 'Display name saved!' });
                       } catch {

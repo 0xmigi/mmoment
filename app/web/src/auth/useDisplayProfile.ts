@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
+import { profileService } from '../services/profile-service';
 
 /**
  * Resolved display profile — the SINGLE SOURCE OF TRUTH for how
@@ -7,36 +8,29 @@ import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
  *
  * Rules:
  * - Email addresses NEVER appear in any field
- * - Display name comes from social auth or is empty (user can set manually)
+ * - Display name comes from social auth, backend profile, or is empty
  * - Username is only set for providers with real handles (Twitter, Farcaster)
  * - Google's oauthUsername is an email — always excluded
  * - Wallet address (truncated) is the ultimate fallback for display
  */
 export interface DisplayProfile {
-  /** Truncated wallet address (always available) */
   walletAddress: string;
-  /** Full wallet address */
   fullWalletAddress: string;
-  /** Human-readable display name (from social or manual). Never an email. */
   displayName: string | undefined;
-  /** Social handle — only for Twitter/Farcaster, never for Google/email */
   username: string | undefined;
-  /** Profile picture URL from social provider */
   profileImage: string | undefined;
-  /** Which auth provider: 'google' | 'twitter' | 'farcaster' | 'email' | 'wallet' */
   provider: string;
-  /** Provider label for display: 'Google' | 'X / Twitter' | 'Farcaster' | 'Email' | 'Wallet' */
   providerLabel: string;
   /** What to show as the user's name — displayName or truncated wallet. Never email. */
   name: string;
-  /** Whether user has a social credential attached */
   hasSocialAuth: boolean;
-  /** Connected social accounts (safe — no emails) */
   socials: {
     google?: { displayName: string; profileImage?: string };
     twitter?: { displayName?: string; username: string; profileImage?: string };
     farcaster?: { displayName?: string; username: string; profileImage?: string };
   };
+  /** Force refresh from backend (call after manual profile edits) */
+  refresh: () => void;
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -47,35 +41,48 @@ const PROVIDER_LABELS: Record<string, string> = {
   wallet: 'Wallet',
 };
 
-/**
- * Single hook that resolves the current user's display profile.
- * Use this everywhere instead of manually parsing verifiedCredentials.
- */
 export function useDisplayProfile(): DisplayProfile | null {
   const { user, primaryWallet } = useDynamicContext();
+  const [backendDisplayName, setBackendDisplayName] = useState<string | undefined>();
+  const [backendProfileImage, setBackendProfileImage] = useState<string | undefined>();
+  const [refreshCounter, setRefreshCounter] = useState(0);
+
+  const walletAddress = primaryWallet?.address;
+
+  // Fetch backend profile for fields not available from social auth
+  useEffect(() => {
+    if (!walletAddress) return;
+
+    profileService.getProfile(walletAddress).then(profile => {
+      if (profile) {
+        setBackendDisplayName(profile.displayName || undefined);
+        setBackendProfileImage(profile.profileImage || undefined);
+      }
+    }).catch(() => {});
+  }, [walletAddress, refreshCounter]);
+
+  const refresh = useCallback(() => {
+    setRefreshCounter(c => c + 1);
+  }, []);
 
   return useMemo(() => {
-    if (!primaryWallet?.address) return null;
+    if (!walletAddress) return null;
 
-    const walletAddress = primaryWallet.address;
     const truncatedWallet = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`;
 
-    // Parse verified credentials once
     const creds = user?.verifiedCredentials || [];
 
     const farcasterCred = creds.find((c: any) => c.oauthProvider === 'farcaster');
     const googleCred = creds.find((c: any) => c.oauthProvider === 'google');
     const twitterCred = creds.find((c: any) => c.oauthProvider === 'twitter');
 
-    // Build safe social profiles (no emails ever)
     const socials: DisplayProfile['socials'] = {};
 
     if (googleCred) {
       socials.google = {
         displayName: googleCred.oauthDisplayName || 'Connected',
-        profileImage: googleCred.oauthAccountPhotos?.[0],
+        profileImage: googleCred.oauthAccountPhotos?.[0] || undefined,
       };
-      // NOTE: googleCred.oauthUsername is the EMAIL — intentionally excluded
     }
 
     if (twitterCred) {
@@ -94,21 +101,19 @@ export function useDisplayProfile(): DisplayProfile | null {
       };
     }
 
-    // Priority: Farcaster > Google > Twitter
     const primaryCred = farcasterCred || googleCred || twitterCred;
 
-    // Resolve display name — NEVER use email
-    const displayName = primaryCred?.oauthDisplayName || undefined;
+    // Display name: social auth > backend profile > undefined
+    const displayName = primaryCred?.oauthDisplayName || backendDisplayName || undefined;
 
-    // Resolve username — only real handles, never Google (which is email)
+    // Username: only real handles (Farcaster/Twitter), never Google
     const username = farcasterCred?.oauthUsername
       || twitterCred?.oauthUsername
       || undefined;
 
-    // Resolve profile image
-    const profileImage = primaryCred?.oauthAccountPhotos?.[0] || undefined;
+    // Profile image: social auth > backend profile > undefined
+    const profileImage = primaryCred?.oauthAccountPhotos?.[0] || backendProfileImage || undefined;
 
-    // Resolve provider
     const provider = primaryCred?.oauthProvider
       || (user?.email ? 'email' : 'wallet');
 
@@ -123,6 +128,7 @@ export function useDisplayProfile(): DisplayProfile | null {
       name: displayName || truncatedWallet,
       hasSocialAuth: !!primaryCred,
       socials,
+      refresh,
     };
-  }, [user, primaryWallet?.address, user?.verifiedCredentials]);
+  }, [user, walletAddress, user?.verifiedCredentials, backendDisplayName, backendProfileImage, refresh]);
 }
