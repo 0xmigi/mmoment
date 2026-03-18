@@ -24,8 +24,8 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
         body: JSON.stringify({ wallet_address: walletAddress }),
       });
       const data = await res.json();
-      if (data.data?.raw_key) {
-        setApiKey(data.data.raw_key);
+      if (data.data?.key) {
+        setApiKey(data.data.key);
       }
     } catch (err) {
       console.error("[AgentSetup] Failed to generate key:", err);
