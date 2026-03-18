@@ -36,7 +36,7 @@ const getStreamTypeFromToggles = (cameraId: string | null): 'clean' | 'annotated
   return (faceViz || poseViz) ? 'annotated' : 'clean';
 };
 
-const StreamPlayer = memo(() => {
+const StreamPlayer = memo(({ fillContainer = false }: { fillContainer?: boolean }) => {
   const [streamInfo, setStreamInfo] = useState<StreamInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -288,38 +288,39 @@ const StreamPlayer = memo(() => {
     }
   }, [program, selectedCamera, isMobile]);
 
+  const pad = fillContainer ? '' : 'px-2';
+  const round = fillContainer ? '' : 'rounded-lg';
+
   if (isLoading) {
     return (
-      <div className="aspect-[9/16] bg-gray-900 rounded-lg flex items-center justify-center">
-        <p className="text-gray-400">
-          Loading stream...
-          {isMobile && loadingRetry > 0 && (
-            <span className="block text-xs mt-1">
-              Attempt {loadingRetry}/3
-            </span>
-          )}
-        </p>
+      <div className={pad}>
+        <div className={`aspect-[9/16] bg-gray-900 ${round} flex items-center justify-center`}>
+          <p className="text-gray-400">
+            Loading stream...
+            {isMobile && loadingRetry > 0 && (
+              <span className="block text-xs mt-1">Attempt {loadingRetry}/3</span>
+            )}
+          </p>
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="aspect-[9/16] w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-gray-400">Failed to load stream</p>
-          {isMobile && error && (
-            <button
-              className="mt-2 px-3 py-1 text-xs bg-primary text-white rounded"
-              onClick={() => {
-                setIsLoading(true);
-                setError(null);
-                fetchStreamInfo(true);
-              }}
-            >
-              Retry
-            </button>
-          )}
+      <div className={pad}>
+        <div className={`aspect-[9/16] w-full bg-gray-800 ${round} overflow-hidden flex items-center justify-center`}>
+          <div className="text-center">
+            <p className="text-gray-400">Failed to load stream</p>
+            {isMobile && error && (
+              <button
+                className="mt-2 px-3 py-1 text-xs bg-primary text-white rounded"
+                onClick={() => { setIsLoading(true); setError(null); fetchStreamInfo(true); }}
+              >
+                Retry
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -329,33 +330,27 @@ const StreamPlayer = memo(() => {
   if (useWebRTC) {
     return (
       <WebRTCStreamPlayer
-        // Key changes when streamType changes to force reconnection with new stream
         key={`webrtc-${streamType}`}
         streamType={streamType}
+        fillContainer={fillContainer}
         onError={(error) => {
           console.log("[StreamPlayer] WebRTC failed:", error);
-          // Don't fallback during testing
         }}
       />
     );
   }
 
-  // Handle Livepeer streams (Pi5 cameras and Jetson cameras)
-  // Show Livepeer streams if playbackId exists, regardless of isActive status
-  // because Jetson streams are always available
+  // Handle Livepeer streams
   if (streamInfo?.playbackId) {
     return (
-      <div className="aspect-[9/16] bg-black rounded-lg overflow-hidden relative">
+      <div className={pad}>
+        <div className={`aspect-[9/16] bg-black ${round} overflow-hidden relative`}>
           <Player
             title="Camera Stream"
             playbackId={streamInfo.playbackId}
             autoPlay
             muted
-            controls={{
-              autohide: 3000,
-              hotkeys: false,
-              defaultVolume: 0,
-            }}
+            controls={{ autohide: 3000, hotkeys: false, defaultVolume: 0 }}
             aspectRatio="16to9"
             showPipButton={!isMobile}
             objectFit="contain"
@@ -363,74 +358,50 @@ const StreamPlayer = memo(() => {
             showLoadingSpinner={true}
             lowLatency
           />
-          {/* Show helpful message for Jetson cameras - memoized to prevent re-renders */}
           {(() => {
-            const currentCameraId =
-              cameraId ||
-              selectedCamera?.publicKey ||
-              localStorage.getItem("directCameraId");
-            const supportsLivepeer =
-              currentCameraId &&
-              unifiedCameraService.cameraSupports(
-                currentCameraId,
-                "hasLivepeerStreaming"
-              );
-
+            const currentCameraId = cameraId || selectedCamera?.publicKey || localStorage.getItem("directCameraId");
+            const supportsLivepeer = currentCameraId && unifiedCameraService.cameraSupports(currentCameraId, "hasLivepeerStreaming");
             if (!supportsLivepeer) return null;
-
             return (
               <div className="absolute top-2 left-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded">
-                {streamInfo.isActive
-                  ? "Live Stream Active"
-                  : "Stream Available (Click Start to go Live)"}
+                {streamInfo.isActive ? "Live Stream Active" : "Stream Available (Click Start to go Live)"}
               </div>
             );
           })()}
           <div className="absolute top-2 right-2">
-            <button
-              onClick={() => setUseWebRTC(true)}
-              className="bg-primary bg-opacity-80 hover:bg-opacity-100 text-white text-xs px-2 py-1 rounded transition-all"
-            >
+            <button onClick={() => setUseWebRTC(true)} className="bg-primary bg-opacity-80 hover:bg-opacity-100 text-white text-xs px-2 py-1 rounded transition-all">
               Try WebRTC
             </button>
           </div>
         </div>
-    );
-  }
-
-  // Handle MJPEG streams (legacy - keeping for fallback)
-  if (streamInfo?.streamType === "mjpeg" && streamInfo.streamUrl) {
-    return (
-      <div className="aspect-[9/16] bg-black rounded-lg overflow-hidden">
-        <img
-          src={streamInfo.streamUrl}
-          alt="Camera Stream"
-          className="w-full h-full object-contain"
-          style={{ imageRendering: "auto" }}
-        />
       </div>
     );
   }
 
-  // Only show "Stream is offline" if we have no playback ID and no stream URL
-  if (
-    !streamInfo?.isActive &&
-    !streamInfo?.playbackId &&
-    !streamInfo?.streamUrl
-  ) {
+  // Handle MJPEG streams (legacy)
+  if (streamInfo?.streamType === "mjpeg" && streamInfo.streamUrl) {
     return (
-      <div className="aspect-[9/16] w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
-        <div className="text-center">
+      <div className={pad}>
+        <div className={`aspect-[9/16] bg-black ${round} overflow-hidden`}>
+          <img src={streamInfo.streamUrl} alt="Camera Stream" className="w-full h-full object-contain" style={{ imageRendering: "auto" }} />
+        </div>
+      </div>
+    );
+  }
+
+  if (!streamInfo?.isActive && !streamInfo?.playbackId && !streamInfo?.streamUrl) {
+    return (
+      <div className={pad}>
+        <div className={`aspect-[9/16] w-full bg-gray-800 ${round} overflow-hidden flex items-center justify-center`}>
           <p className="text-gray-400">Stream is offline</p>
         </div>
       </div>
     );
   }
 
-  // Fallback for unknown stream types
   return (
-    <div className="aspect-[9/16] w-full bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center">
-      <div className="text-center">
+    <div className={pad}>
+      <div className={`aspect-[9/16] w-full bg-gray-800 ${round} overflow-hidden flex items-center justify-center`}>
         <p className="text-gray-400">Unsupported stream format</p>
       </div>
     </div>

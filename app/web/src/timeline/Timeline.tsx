@@ -372,19 +372,27 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     const enrichedEvents = filteredEvents.map(event => enrichEventWithUserInfo(event));
     
     if (variant === 'camera' && !mobileOverlay) {
-      return enrichedEvents.slice(0, displayCount); // Desktop: use JavaScript count (perfect!)
+      const count = fillHeight ? displayCount - 1 : displayCount;
+      return enrichedEvents.slice(0, count); // Desktop: use JavaScript count (perfect!)
     } else if (variant === 'camera' && mobileOverlay) {
+      if (fillHeight) {
+        // Desktop phone frame: container is overflow-hidden so extra items get clipped.
+        // Use a generous count to fill the height; CSS handles the cutoff.
+        return enrichedEvents.slice(0, 25);
+      }
       // Mobile: Always create array of mobileTimelineCount length
       // Fill with actual events first, then pad with empty slots
-      const result = enrichedEvents.slice(0, mobileTimelineCount);
-      // Pad with null entries to always reach mobileTimelineCount
+      // Slice real events to mobileTimelineCount - 1 so there's always at least one null slot
+      // before the profile stack at bottom-2 (prevents overlap)
+      const result = enrichedEvents.slice(0, mobileTimelineCount - 1);
+      // Pad with null entries to always reach full mobileTimelineCount (keeps timeline same height)
       while (result.length < mobileTimelineCount) {
         result.push(null as any);
       }
       return result;
     }
     return enrichedEvents;
-  }, [filteredEvents, variant, displayCount, mobileTimelineCount, userProfiles]);
+  }, [filteredEvents, variant, displayCount, mobileTimelineCount, userProfiles, fillHeight]);
 
   const getEventIcon = (type: TimelineEventType, isOverlay = false) => {
     const iconClass = `w-4 h-4 ${isOverlay ? 'text-white' : ''}`;
@@ -455,7 +463,10 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
         {/* Vertical timeline line - stops above the profile stack curve */}
         <div className="absolute left-[4px] md:left-[6px] top-0 bottom-14 w-px bg-gray-200" />
 
-        <div className="space-y-4 md:space-y-6 w-full">
+        <div
+          className="space-y-4 md:space-y-6 w-full overflow-hidden"
+          style={fillHeight ? { maxHeight: 'calc(100% - 3.5rem)' } : undefined}
+        >
           {displayEvents.length === 0 ? (
             <p className={`text-sm pl-16 ${mobileOverlay ? 'text-white' : 'text-gray-500'}`}>No activity yet</p>
           ) : (

@@ -26,6 +26,7 @@ import { useFacialEmbeddingStatus } from "../../hooks/useFacialEmbeddingStatus";
 import { useUserSessionChain } from "../../hooks/useUserSessionChain";
 import { profileService } from "../../services/profile-service";
 import { useDisplayProfile } from "../../auth/useDisplayProfile";
+import { AgentSetupSection } from "./AgentSetupSection";
 
 interface StatusMessage {
   message: string;
@@ -449,6 +450,11 @@ export function AccountPage() {
               />
             </div>
           </div>
+        )}
+
+        {/* Agent Access */}
+        {primaryWallet?.address && (
+          <AgentSetupSection walletAddress={primaryWallet.address} />
         )}
 
         {/* Register Camera Link */}

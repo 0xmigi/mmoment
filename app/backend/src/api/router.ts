@@ -13,7 +13,10 @@ import {
   getUserProfile,
   getWalrusFilesForWallet,
   getDatabaseStats,
+  getCameraEvent,
+  computeEventStatus,
 } from '../database';
+import { getActiveUsersForCamera, getRecentTimelineEvents, getCheckedInUsers } from '../camera-state';
 import {
   createRpc,
   bn,
@@ -584,6 +587,268 @@ export function createApiRouter(): Router {
     } catch (err) {
       console.error('[API] Failed to get stats:', err);
       res.status(500).json({ error: 'internal', message: 'Failed to get stats' });
+    }
+  });
+
+  // ============================================================================
+  // DEVELOPER API — CAMERA ENDPOINTS
+  // Physical-first access model:
+  //   - Not present: only aggregate people count (nothing else)
+  //   - Checked in: full access to event, presence, activities, capture
+  //   - Camera owner: full remote access (checked via camera service)
+  // ============================================================================
+
+  // Helper: check if wallet is checked in at a camera
+  function isWalletPresent(cameraId: string, walletAddress: string): boolean {
+    const checkedIn = getCheckedInUsers(cameraId);
+    return checkedIn.some(u => u.address === walletAddress);
+  }
+
+  // Helper: check if wallet is camera owner (via camera service)
+  async function isWalletCameraOwner(cameraId: string, walletAddress: string): Promise<boolean> {
+    try {
+      const cameraUrl = `https://${cameraId.toLowerCase()}.mmoment.xyz`;
+      const res = await fetch(`${cameraUrl}/api/camera/info`, { signal: AbortSignal.timeout(3000) });
+      if (!res.ok) return false;
+      const data = await res.json();
+      // Camera info includes owner wallet from on-chain data
+      return data?.data?.owner === walletAddress || data?.owner === walletAddress;
+    } catch {
+      return false;
+    }
+  }
+
+  // Camera status — physical-first access
+  // Not present: camera_id + people_present count only
+  // Present or owner: full status with event info, streaming, etc.
+  router.get('/v1/cameras/:cameraId/status', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+      const checkedIn = getCheckedInUsers(cameraId);
+      const present = isWalletPresent(cameraId, walletAddress);
+      const owner = !present ? await isWalletCameraOwner(cameraId, walletAddress) : false;
+      const hasAccess = present || owner;
+
+      // Everyone gets aggregate count
+      if (!hasAccess) {
+        return res.json({
+          data: {
+            camera_id: cameraId,
+            people_present: checkedIn.length,
+            access: 'limited',
+            message: 'Check in at the camera for full access',
+          }
+        });
+      }
+
+      // Full access for present users and owners
+      const event = await getCameraEvent(cameraId);
+      let online = false;
+      let streaming = false;
+      try {
+        const cameraUrl = `https://${cameraId.toLowerCase()}.mmoment.xyz`;
+        const healthRes = await fetch(`${cameraUrl}/api/health`, { signal: AbortSignal.timeout(3000) });
+        if (healthRes.ok) {
+          online = true;
+          const streamRes = await fetch(`${cameraUrl}/api/stream/info`, { signal: AbortSignal.timeout(3000) });
+          if (streamRes.ok) {
+            const streamData = await streamRes.json();
+            streaming = streamData?.data?.isActive || false;
+          }
+        }
+      } catch (_) {}
+
+      res.json({
+        data: {
+          camera_id: cameraId,
+          online,
+          streaming,
+          people_present: checkedIn.length,
+          access: 'full',
+          event: event ? {
+            name: event.eventName,
+            status: event.eventStatus,
+            start_time: event.eventStartTime,
+            end_time: event.eventEndTime,
+            type: event.eventType,
+          } : null,
+          checked_at: Date.now(),
+        }
+      });
+    } catch (err) {
+      console.error('[API] Failed to get camera status:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to get camera status' });
+    }
+  });
+
+  // Camera event — requires presence or ownership
+  router.get('/v1/cameras/:cameraId/event', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+      const present = isWalletPresent(cameraId, walletAddress);
+      const owner = !present ? await isWalletCameraOwner(cameraId, walletAddress) : false;
+
+      if (!present && !owner) {
+        return res.status(403).json({
+          error: 'not_present',
+          message: 'You must be checked in at the camera to view event details',
+        });
+      }
+
+      const event = await getCameraEvent(cameraId);
+      if (!event) {
+        return res.json({ data: null });
+      }
+
+      const recentEvents = getRecentTimelineEvents(cameraId, 500);
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayMs = todayStart.getTime();
+      const todayEvents = recentEvents.filter(e => e.timestamp >= todayMs);
+      const checkedIn = getCheckedInUsers(cameraId);
+
+      res.json({
+        data: {
+          camera_id: cameraId,
+          event_name: event.eventName,
+          event_description: event.eventDescription,
+          event_start_time: event.eventStartTime,
+          event_end_time: event.eventEndTime,
+          event_type: event.eventType,
+          event_location: event.eventLocation,
+          event_status: event.eventStatus,
+          stats: {
+            check_ins_today: todayEvents.filter(e => e.type === 'check_in').length,
+            photos_captured: todayEvents.filter(e => e.type === 'photo_captured' || e.type === 'video_recorded').length,
+            active_now: checkedIn.length,
+          },
+        }
+      });
+    } catch (err) {
+      console.error('[API] Failed to get camera event:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to get camera event' });
+    }
+  });
+
+  // Camera presence — requires presence or ownership
+  router.get('/v1/cameras/:cameraId/presence', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+      const checkedIn = getCheckedInUsers(cameraId);
+      const present = isWalletPresent(cameraId, walletAddress);
+      const owner = !present ? await isWalletCameraOwner(cameraId, walletAddress) : false;
+
+      if (!present && !owner) {
+        return res.json({
+          data: {
+            camera_id: cameraId,
+            count: checkedIn.length,
+            users: null,
+            access: 'limited',
+            message: 'Check in at the camera to see who is present',
+          }
+        });
+      }
+
+      res.json({
+        data: {
+          camera_id: cameraId,
+          count: checkedIn.length,
+          access: 'full',
+          users: checkedIn.map(u => ({
+            wallet: u.address,
+            display_name: u.displayName || null,
+            username: u.username || null,
+            profile_image: u.pfpUrl || null,
+          })),
+        }
+      });
+    } catch (err) {
+      console.error('[API] Failed to get camera presence:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to get camera presence' });
+    }
+  });
+
+  // Camera capture — requires presence (no remote capture, even for owner)
+  router.post('/v1/cameras/:cameraId/capture', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+
+      if (!isWalletPresent(cameraId, walletAddress)) {
+        return res.status(403).json({
+          error: 'not_present',
+          message: 'You must be physically checked in at the camera to capture',
+        });
+      }
+
+      const cameraUrl = `https://${cameraId.toLowerCase()}.mmoment.xyz`;
+      const captureRes = await fetch(`${cameraUrl}/api/capture`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet_address: walletAddress }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!captureRes.ok) {
+        const errBody = await captureRes.json().catch(() => ({}));
+        return res.status(captureRes.status).json({
+          error: 'capture_failed',
+          message: (errBody as any).error || 'Camera rejected capture request',
+        });
+      }
+
+      const captureData = await captureRes.json();
+      res.json({ data: captureData });
+    } catch (err: any) {
+      if (err.name === 'TimeoutError') {
+        return res.status(504).json({ error: 'timeout', message: 'Camera did not respond in time' });
+      }
+      console.error('[API] Failed to trigger capture:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to trigger capture' });
+    }
+  });
+
+  // Camera activities — requires presence or ownership
+  router.get('/v1/cameras/:cameraId/activities', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+      const present = isWalletPresent(cameraId, walletAddress);
+      const owner = !present ? await isWalletCameraOwner(cameraId, walletAddress) : false;
+
+      if (!present && !owner) {
+        return res.status(403).json({
+          error: 'not_present',
+          message: 'You must be checked in at the camera to view activities',
+        });
+      }
+
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+      const events = getRecentTimelineEvents(cameraId, limit);
+
+      res.json({
+        data: {
+          camera_id: cameraId,
+          count: events.length,
+          activities: events.map(e => ({
+            id: e.id,
+            type: e.type,
+            timestamp: e.timestamp,
+            user: {
+              display_name: e.user.displayName || null,
+              username: e.user.username || null,
+            },
+            transaction_id: e.transactionId || null,
+          })),
+        }
+      });
+    } catch (err) {
+      console.error('[API] Failed to get camera activities:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to get camera activities' });
     }
   });
 

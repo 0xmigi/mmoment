@@ -3,7 +3,7 @@ import { useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { X, User } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom';
 import { AuthModal } from '../../auth/components/AuthModal';
 import Logo from '../common/Logo';
 import { useDisplayProfile } from '../../auth/useDisplayProfile';
@@ -23,8 +23,15 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
   const navigate = useNavigate();
   const { cameraId } = useParams<{ cameraId?: string }>();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [solBalance, setSolBalance] = useState<number | null>(null);
+
+  // On desktop camera routes, the active tab is driven by the ?panel param
+  const panelParam = searchParams.get('panel');
+  const effectiveActiveTab = panelParam === 'gallery' ? 'gallery'
+    : panelParam === 'activities' ? 'activities'
+    : activeTab;
 
   // Redirect to login if not authenticated (wait for SDK to hydrate first)
   useEffect(() => {
@@ -73,6 +80,17 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
     const matchPath = location.pathname.match(/\/app\/(camera|gallery|activities)\/([^\/]+)/);
     const currentCameraId = cameraId || (matchPath ? matchPath[2] : localStorage.getItem('directCameraId'));
 
+    // On desktop with an active camera, swap the left panel instead of navigating away
+    if (currentCameraId && window.innerWidth >= 1024) {
+      if (tab === 'gallery' || tab === 'activities') {
+        navigate(`/app/camera/${currentCameraId}?panel=${tab}`, { replace: true });
+        return;
+      } else if (tab === 'camera') {
+        navigate(`/app/camera/${currentCameraId}`, { replace: true });
+        return;
+      }
+    }
+
     if (tab === 'camera' && currentCameraId) {
       navigate(`/app/camera/${currentCameraId}`);
     } else if (tab === 'gallery') {
@@ -111,7 +129,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                 <button
                   type='button'
                   onClick={() => handleTabChange('camera')}
-                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'camera'
+                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${effectiveActiveTab === 'camera'
                     ? 'bg-white text-neutral-900'
                     : 'bg-white text-neutral-400 hover:text-neutral-900'
                     }`}
@@ -121,7 +139,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                 <button
                   type='button'
                   onClick={() => handleTabChange('gallery')}
-                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'gallery'
+                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${effectiveActiveTab === 'gallery'
                     ? 'bg-white text-neutral-900'
                     : 'bg-white text-neutral-400 hover:text-neutral-900'
                     }`}
@@ -131,7 +149,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                 <button
                   type='button'
                   onClick={() => handleTabChange('activities')}
-                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'activities'
+                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${effectiveActiveTab === 'activities'
                     ? 'bg-white text-neutral-900'
                     : 'bg-white text-neutral-400 hover:text-neutral-900'
                     }`}
@@ -188,7 +206,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
 
           <div className="relative">
             {/* Header with logo + close */}
-            <div className="bg-white px-4 h-16 flex items-center justify-between">
+            <div className="bg-white px-6 h-16 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Logo width={30} height={21} className="text-neutral-900" />
                 <h1 className="text-2xl text-neutral-900 font-bold">Moment</h1>

@@ -244,6 +244,24 @@ export async function initializeDatabase(dbPath: string = './mmoment.db'): Promi
           )
         `);
 
+        // Migrate camera_events: add new columns (safe to re-run — errors ignored for existing columns)
+        const newColumns = [
+          'event_start_time INTEGER',
+          'event_end_time INTEGER',
+          'event_type TEXT',
+          'event_location TEXT',
+          'event_status TEXT DEFAULT \'upcoming\'',
+          'ical_url TEXT',
+          'ical_last_synced INTEGER',
+        ];
+        for (const col of newColumns) {
+          try {
+            await runQuery(`ALTER TABLE camera_events ADD COLUMN ${col}`);
+          } catch (_) {
+            // Column already exists — safe to ignore
+          }
+        }
+
         console.log('✅ Database tables initialized');
         resolve();
       } catch (error) {
@@ -1662,7 +1680,22 @@ export interface CameraEvent {
   eventName?: string;
   eventDescription?: string;
   eventDate?: string;
+  eventStartTime?: number;
+  eventEndTime?: number;
+  eventType?: string;
+  eventLocation?: string;
+  eventStatus?: string;
+  icalUrl?: string;
+  icalLastSynced?: number;
   updatedAt: number;
+}
+
+export function computeEventStatus(startTime?: number | null, endTime?: number | null): string {
+  if (!startTime) return 'upcoming';
+  const now = Date.now();
+  if (endTime && now > endTime) return 'ended';
+  if (now >= startTime) return 'live';
+  return 'upcoming';
 }
 
 export async function getCameraEvent(cameraId: string): Promise<CameraEvent | null> {
@@ -1670,7 +1703,10 @@ export async function getCameraEvent(cameraId: string): Promise<CameraEvent | nu
     if (!db) { reject(new Error('Database not initialized')); return; }
 
     db.get(
-      'SELECT camera_id, event_name, event_description, event_date, updated_at FROM camera_events WHERE camera_id = ?',
+      `SELECT camera_id, event_name, event_description, event_date,
+              event_start_time, event_end_time, event_type, event_location,
+              event_status, ical_url, ical_last_synced, updated_at
+       FROM camera_events WHERE camera_id = ?`,
       [cameraId],
       (err: any, row: any) => {
         if (err) { reject(err); return; }
@@ -1680,6 +1716,13 @@ export async function getCameraEvent(cameraId: string): Promise<CameraEvent | nu
           eventName: row.event_name,
           eventDescription: row.event_description,
           eventDate: row.event_date,
+          eventStartTime: row.event_start_time,
+          eventEndTime: row.event_end_time,
+          eventType: row.event_type,
+          eventLocation: row.event_location,
+          eventStatus: computeEventStatus(row.event_start_time, row.event_end_time),
+          icalUrl: row.ical_url,
+          icalLastSynced: row.ical_last_synced,
           updatedAt: row.updated_at,
         });
       }
@@ -1692,11 +1735,57 @@ export async function saveCameraEvent(event: CameraEvent): Promise<void> {
     if (!db) { reject(new Error('Database not initialized')); return; }
 
     db.run(
-      `INSERT OR REPLACE INTO camera_events (camera_id, event_name, event_description, event_date, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-      [event.cameraId, event.eventName || null, event.eventDescription || null, event.eventDate || null, Date.now()],
+      `INSERT OR REPLACE INTO camera_events (
+        camera_id, event_name, event_description, event_date,
+        event_start_time, event_end_time, event_type, event_location,
+        event_status, ical_url, ical_last_synced, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        event.cameraId,
+        event.eventName || null,
+        event.eventDescription || null,
+        event.eventDate || null,
+        event.eventStartTime || null,
+        event.eventEndTime || null,
+        event.eventType || null,
+        event.eventLocation || null,
+        event.eventStatus || computeEventStatus(event.eventStartTime, event.eventEndTime),
+        event.icalUrl || null,
+        event.icalLastSynced || null,
+        Date.now(),
+      ],
       (err: Error | null) => {
         if (err) { reject(err); } else { resolve(); }
+      }
+    );
+  });
+}
+
+export async function getAllCameraEventsWithIcal(): Promise<CameraEvent[]> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.all(
+      `SELECT camera_id, event_name, event_description, event_date,
+              event_start_time, event_end_time, event_type, event_location,
+              event_status, ical_url, ical_last_synced, updated_at
+       FROM camera_events WHERE ical_url IS NOT NULL`,
+      (err: any, rows: any[]) => {
+        if (err) { reject(err); return; }
+        resolve((rows || []).map(row => ({
+          cameraId: row.camera_id,
+          eventName: row.event_name,
+          eventDescription: row.event_description,
+          eventDate: row.event_date,
+          eventStartTime: row.event_start_time,
+          eventEndTime: row.event_end_time,
+          eventType: row.event_type,
+          eventLocation: row.event_location,
+          eventStatus: computeEventStatus(row.event_start_time, row.event_end_time),
+          icalUrl: row.ical_url,
+          icalLastSynced: row.ical_last_synced,
+          updatedAt: row.updated_at,
+        })));
       }
     );
   });

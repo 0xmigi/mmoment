@@ -116,6 +116,13 @@
     "@jridgewell/resolve-uri" "^3.0.3"
     "@jridgewell/sourcemap-codec" "^1.4.10"
 
+"@js-temporal/polyfill@^0.5.1":
+  version "0.5.1"
+  resolved "https://registry.yarnpkg.com/@js-temporal/polyfill/-/polyfill-0.5.1.tgz#c9726fdb7fbdbc6419292ba94294b10a08852c32"
+  integrity sha512-hloP58zRVCRSpgDxmqCWJNlizAlUgJFqG2ypq79DCvyv9tHjRYMDOcPFjzfl/A1/YxDvRCZz8wvZvmapQnKwFQ==
+  dependencies:
+    jsbi "^4.3.0"
+
 "@lightprotocol/stateless.js@^0.22.0":
   version "0.22.0"
   resolved "https://registry.yarnpkg.com/@lightprotocol/stateless.js/-/stateless.js-0.22.0.tgz#9574306867060f3fc541728f1ffe18806a52e1d5"
@@ -1493,6 +1500,11 @@ jayson@^4.1.1:
     uuid "^8.3.2"
     ws "^7.5.10"
 
+jsbi@^4.3.0:
+  version "4.3.2"
+  resolved "https://registry.yarnpkg.com/jsbi/-/jsbi-4.3.2.tgz#8a4d05d4e09907d73042135b6aa55a6d161ee955"
+  integrity sha512-9fqMSQbhJykSeii05nxKl4m6Eqn2P6rOlYiS+C5Dr/HPIU/7yZxu5qzbs40tgaFORiw2Amd0mirjxatXYMkIew==
+
 json-stringify-safe@^5.0.1:
   version "5.0.1"
   resolved "https://registry.npmjs.org/json-stringify-safe/-/json-stringify-safe-5.0.1.tgz"
@@ -1720,6 +1732,14 @@ node-gyp@8.x:
     tar "^6.1.2"
     which "^2.0.2"
 
+node-ical@^0.25.6:
+  version "0.25.6"
+  resolved "https://registry.yarnpkg.com/node-ical/-/node-ical-0.25.6.tgz#c0f4258215be07135a428fa185e547bee6703ed5"
+  integrity sha512-Wo3GSBGYUNkcxOjHhevKTGa/+eB7ZwNLCq50h/eTX/YHSDZz1nT4KzXArO455CGHLD68gc5vw3nevqWQpOjjLQ==
+  dependencies:
+    rrule-temporal "^1.4.7"
+    temporal-polyfill "^0.3.0"
+
 nopt@^5.0.0:
   version "5.0.0"
   resolved "https://registry.npmjs.org/nopt/-/nopt-5.0.0.tgz"
@@ -1931,6 +1951,13 @@ rpc-websockets@^9.0.2:
   optionalDependencies:
     bufferutil "^4.0.1"
     utf-8-validate "^6.0.0"
+
+rrule-temporal@^1.4.7:
+  version "1.5.1"
+  resolved "https://registry.yarnpkg.com/rrule-temporal/-/rrule-temporal-1.5.1.tgz#e5198c415056d459a88782dc3fcafe8697555d7f"
+  integrity sha512-mV82lZ7OzMOXX5g+SCR8FWRMSvhTnPSznjQ2Vguezjz1nEPEv/Ap/Z/FsIZ/AxA15M9X99m05911/MCXFY+FsA==
+  dependencies:
+    "@js-temporal/polyfill" "^0.5.1"
 
 safe-buffer@5.2.1, safe-buffer@^5.0.1, safe-buffer@~5.2.0:
   version "5.2.1"
@@ -2207,6 +2234,18 @@ tar@^6.0.2, tar@^6.1.11, tar@^6.1.2:
     minizlib "^2.1.1"
     mkdirp "^1.0.3"
     yallist "^4.0.0"
+
+temporal-polyfill@^0.3.0:
+  version "0.3.2"
+  resolved "https://registry.yarnpkg.com/temporal-polyfill/-/temporal-polyfill-0.3.2.tgz#eb0f4fd36c77eac43d6e5b52851bee3648234b81"
+  integrity sha512-TzHthD/heRK947GNiSu3Y5gSPpeUDH34+LESnfsq8bqpFhsB79HFBX8+Z834IVX68P3EUyRPZK5bL/1fh437Eg==
+  dependencies:
+    temporal-spec "0.3.1"
+
+temporal-spec@0.3.1:
+  version "0.3.1"
+  resolved "https://registry.yarnpkg.com/temporal-spec/-/temporal-spec-0.3.1.tgz#0882cf2954aac683a2484208b5f5cc7366bfdd14"
+  integrity sha512-B4TUhezh9knfSIMwt7RVggApDRJZo73uZdj8AacL2mZ8RP5KtLianh2MXxL06GN9ESYiIsiuoLQhgVfwe55Yhw==
 
 text-encoding-utf-8@^1.0.2:
   version "1.0.2"

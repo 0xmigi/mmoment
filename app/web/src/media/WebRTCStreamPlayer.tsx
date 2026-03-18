@@ -7,7 +7,8 @@ import { io, Socket } from "socket.io-client";
 interface WebRTCStreamPlayerProps {
   fallback?: React.ReactNode;
   onError?: (error: string) => void;
-  streamType?: 'clean' | 'annotated';  // Stream type: clean (default) or annotated (with CV overlays)
+  streamType?: 'clean' | 'annotated';
+  fillContainer?: boolean;
 }
 
 // WHEP fallback configuration
@@ -69,7 +70,7 @@ const detectCellularConnection = (): boolean => {
   return false;
 };
 
-const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError, streamType = 'clean' }) => {
+const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError, streamType = 'clean', fillContainer = false }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const socketRef = useRef<Socket | null>(null);
@@ -986,8 +987,8 @@ const WebRTCStreamPlayer: React.FC<WebRTCStreamPlayerProps> = ({ onError, stream
   };
 
   return (
-    <div>
-      <div className="aspect-[9/16] bg-black overflow-hidden">
+    <div className={fillContainer ? '' : 'px-2'}>
+      <div className={`aspect-[9/16] bg-black overflow-hidden ${fillContainer ? '' : 'rounded-lg'}`}>
         {connectionState === "connecting" && (
           <div className="flex items-center justify-center h-full text-white">
             <div className="text-center">

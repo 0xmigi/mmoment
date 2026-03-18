@@ -47,7 +47,9 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { useRef, useState, useEffect, useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
+import { GalleryView } from "./GalleryView";
+import { ActivitiesView } from "./ActivitiesView";
 import { DesktopEventPanel } from "../../camera/DesktopEventPanel";
 
 // CameraIdDisplay component - uses unified check-in state from CameraProvider
@@ -1276,16 +1278,22 @@ export function CameraView() {
   }, [primaryWallet?.address, selectedCamera?.owner]);
 
   const desktopCameraId = cameraAccount || selectedCamera?.publicKey || cameraId || "";
+  const [searchParams] = useSearchParams();
+  const desktopPanel = searchParams.get('panel') as 'gallery' | 'activities' | null;
 
   return (
     <>
       {/* ====== DESKTOP / TV LAYOUT (lg and above) ====== */}
       <div className="hidden lg:flex h-[calc(100vh-4rem)] bg-neutral-50">
-        {/* Left: Event Panel */}
+        {/* Left: Event / Gallery / Activities Panel */}
         <div className="flex-1 min-w-0 p-4 pr-2">
-          <div className="h-full bg-white rounded-2xl overflow-hidden">
-            {desktopCameraId && (
-              <DesktopEventPanel cameraId={desktopCameraId} isOwner={isOwner} />
+          <div className="h-full bg-white rounded-2xl overflow-hidden overflow-y-auto">
+            {desktopPanel === 'gallery' ? (
+              <GalleryView />
+            ) : desktopPanel === 'activities' ? (
+              <ActivitiesView />
+            ) : (
+              desktopCameraId && <DesktopEventPanel cameraId={desktopCameraId} isOwner={isOwner} />
             )}
           </div>
         </div>
@@ -1370,7 +1378,7 @@ export function CameraView() {
                     />
                   </div>
 
-                  <StreamPlayer />
+                  <StreamPlayer fillContainer />
 
                   {hasCompetitionApp && currentCameraId && (
                     <CompetitionScoreboard

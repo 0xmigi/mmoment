@@ -73,7 +73,12 @@ import {
   // Camera events
   getCameraEvent,
   saveCameraEvent,
+  getAllCameraEventsWithIcal,
+  computeEventStatus,
+  CameraEvent,
 } from './database';
+import { fetchAndParseIcal } from './ical-parser';
+import { initCameraState } from './camera-state';
 
 // Import Sui storage service for Walrus blob ownership
 import {
@@ -1723,6 +1728,9 @@ interface DeviceClaim {
 
 const cameraRooms = new Map<string, Set<string>>();
 const pendingClaims = new Map<string, DeviceClaim>();
+
+// Initialize shared state for developer API (avoids circular imports)
+initCameraState(timelineEvents, cameraRooms);
 
 // Helper function to add timeline events (used by both Socket.IO handlers and cron bot)
 // Now saves to database for persistence and enriches with user profiles
@@ -3811,6 +3819,20 @@ app.get("/api/user/:walletAddress/sessions", async (req, res) => {
   }
 });
 
+// Serve agent skill file (public, no auth)
+app.get("/agent-skill.md", (_req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const skillPath = path.join(__dirname, '..', 'public', 'agent-skill.md');
+  try {
+    const content = fs.readFileSync(skillPath, 'utf-8');
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.send(content);
+  } catch {
+    res.status(404).send('Skill file not found');
+  }
+});
+
 // Get camera event info (public, no auth)
 app.get("/api/camera/:cameraId/event", async (req, res) => {
   try {
@@ -3827,12 +3849,32 @@ app.get("/api/camera/:cameraId/event", async (req, res) => {
 app.put("/api/camera/:cameraId/event", async (req, res) => {
   try {
     const { cameraId } = req.params;
-    const { eventName, eventDescription, eventDate } = req.body;
+    const {
+      eventName, eventDescription, eventDate,
+      eventStartTime, eventEndTime, eventType, eventLocation,
+      icalUrl,
+    } = req.body;
+
+    // If iCal URL provided, fetch and auto-populate fields
+    let icalData: { name?: string; description?: string; startTime?: number; endTime?: number; location?: string } = {};
+    if (icalUrl) {
+      const parsed = await fetchAndParseIcal(icalUrl);
+      if (parsed) {
+        icalData = parsed;
+      }
+    }
+
     await saveCameraEvent({
       cameraId,
-      eventName: eventName || undefined,
-      eventDescription: eventDescription || undefined,
+      eventName: eventName || icalData.name || undefined,
+      eventDescription: eventDescription || icalData.description || undefined,
       eventDate: eventDate || undefined,
+      eventStartTime: eventStartTime || icalData.startTime || undefined,
+      eventEndTime: eventEndTime || icalData.endTime || undefined,
+      eventType: eventType || undefined,
+      eventLocation: eventLocation || icalData.location || undefined,
+      icalUrl: icalUrl || undefined,
+      icalLastSynced: icalUrl ? Date.now() : undefined,
       updatedAt: Date.now(),
     });
     const saved = await getCameraEvent(cameraId);
@@ -4625,6 +4667,32 @@ httpServer.listen(port, "0.0.0.0", async () => {
     });
 
     console.log('✅ Database initialized and data loaded successfully!\n');
+
+    // Periodic iCal re-sync (every 15 minutes)
+    setInterval(async () => {
+      try {
+        const eventsWithIcal = await getAllCameraEventsWithIcal();
+        for (const event of eventsWithIcal) {
+          if (!event.icalUrl) continue;
+          const parsed = await fetchAndParseIcal(event.icalUrl);
+          if (parsed) {
+            await saveCameraEvent({
+              ...event,
+              eventName: parsed.name,
+              eventDescription: parsed.description || event.eventDescription,
+              eventStartTime: parsed.startTime,
+              eventEndTime: parsed.endTime,
+              eventLocation: parsed.location || event.eventLocation,
+              icalLastSynced: Date.now(),
+            });
+            console.log(`[ical-sync] Updated event for camera ${event.cameraId}`);
+          }
+        }
+      } catch (err) {
+        console.error('[ical-sync] Periodic sync failed:', err);
+      }
+    }, 15 * 60 * 1000);
+
   } catch (dbError) {
     console.error('❌ Failed to initialize database:', dbError);
     console.warn('⚠️  Server will continue without persistence');
