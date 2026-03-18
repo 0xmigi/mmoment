@@ -92,6 +92,7 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
     if (!newKey) return;
     navigator.clipboard.writeText(`Set up ${skillUrl} with key ${newKey}`);
     setCopied(true);
+    setNewKey(null);
     setTimeout(() => setCopied(false), 2000);
   };
 
