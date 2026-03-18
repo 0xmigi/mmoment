@@ -86,7 +86,25 @@ export function createApiRouter(): Router {
     }
   });
 
-  // Revoke a key by ID for a wallet (no API key auth needed — wallet ownership is implicit)
+  // Revoke all keys for a wallet
+  router.delete('/v1/keys/wallet/:walletAddress', async (req, res) => {
+    try {
+      const keys = await getApiKeysForWallet(req.params.walletAddress);
+      let count = 0;
+      for (const key of keys) {
+        if (!key.revokedAt) {
+          await revokeApiKey(key.id, req.params.walletAddress);
+          count++;
+        }
+      }
+      res.json({ data: { revoked: count } });
+    } catch (err) {
+      console.error('[API] Failed to revoke all keys:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to revoke keys' });
+    }
+  });
+
+  // Revoke a key by ID for a wallet
   router.delete('/v1/keys/wallet/:walletAddress/:keyId', async (req, res) => {
     try {
       const revoked = await revokeApiKey(req.params.keyId, req.params.walletAddress);

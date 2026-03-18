@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { CONFIG } from "../../core/config";
-import { Bot, Copy, Check, Key, X } from "lucide-react";
+import { Bot, Copy, Check, Key, X, Trash2 } from "lucide-react";
 
 interface AgentKey {
   id: string;
@@ -71,12 +71,20 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
 
   const revokeKey = useCallback(async (keyId: string) => {
     try {
-      await fetch(`${backendUrl}/v1/keys/wallet/${walletAddress}/${keyId}`, {
-        method: "DELETE",
-      });
+      await fetch(`${backendUrl}/v1/keys/wallet/${walletAddress}/${keyId}`, { method: "DELETE" });
       await fetchKeys();
     } catch (err) {
       console.error("[AgentSetup] Failed to revoke key:", err);
+    }
+  }, [backendUrl, walletAddress, fetchKeys]);
+
+  const revokeAll = useCallback(async () => {
+    try {
+      await fetch(`${backendUrl}/v1/keys/wallet/${walletAddress}`, { method: "DELETE" });
+      setNewKey(null);
+      await fetchKeys();
+    } catch (err) {
+      console.error("[AgentSetup] Failed to revoke all:", err);
     }
   }, [backendUrl, walletAddress, fetchKeys]);
 
@@ -88,7 +96,6 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
   };
 
   const activeKeys = keys.filter(k => !k.revoked_at);
-  const revokedKeys = keys.filter(k => k.revoked_at);
 
   return (
     <div className="bg-neutral-100 rounded-xl p-4 sm:p-6 mb-6">
@@ -97,9 +104,11 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
           <Bot className="w-5 h-5 text-neutral-600" />
           <h3 className="text-lg font-medium text-neutral-900">Agent Access</h3>
         </div>
-        <span className="text-xs text-neutral-400">
-          {activeKeys.length} active {activeKeys.length === 1 ? "key" : "keys"}
-        </span>
+        {activeKeys.length > 0 && (
+          <span className="text-xs text-neutral-400">
+            {activeKeys.length} active
+          </span>
+        )}
       </div>
 
       <p className="text-sm text-neutral-500 mb-4">
@@ -130,10 +139,10 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
         </div>
       )}
 
-      {/* Active keys list */}
+      {/* Active keys list — show up to 5 most recent */}
       {activeKeys.length > 0 && (
         <div className="space-y-1.5 mb-3">
-          {activeKeys.map(k => (
+          {activeKeys.slice(0, 5).map(k => (
             <div key={k.id} className="bg-white rounded-lg px-3 py-2 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
@@ -154,25 +163,34 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
               </button>
             </div>
           ))}
+          {activeKeys.length > 5 && (
+            <div className="text-[10px] text-neutral-400 px-1">
+              +{activeKeys.length - 5} more
+            </div>
+          )}
         </div>
       )}
 
-      {/* Revoked keys count */}
-      {revokedKeys.length > 0 && (
-        <div className="text-[10px] text-neutral-400 mb-3">
-          {revokedKeys.length} revoked
-        </div>
-      )}
-
-      {/* Generate button */}
-      <button
-        onClick={generateKey}
-        disabled={isGenerating}
-        className="w-full flex justify-center items-center gap-2 px-4 py-2.5 bg-white border border-neutral-200 text-neutral-700 rounded-lg text-sm font-medium hover:bg-neutral-50 transition-colors disabled:opacity-50"
-      >
-        <Key className="w-4 h-4" />
-        {isGenerating ? "Generating..." : "Generate new key"}
-      </button>
+      {/* Actions */}
+      <div className="flex gap-2">
+        <button
+          onClick={generateKey}
+          disabled={isGenerating}
+          className="flex-1 flex justify-center items-center gap-2 px-4 py-2.5 bg-white border border-neutral-200 text-neutral-700 rounded-lg text-sm font-medium hover:bg-neutral-50 transition-colors disabled:opacity-50"
+        >
+          <Key className="w-4 h-4" />
+          {isGenerating ? "Generating..." : "Generate new key"}
+        </button>
+        {activeKeys.length > 1 && (
+          <button
+            onClick={revokeAll}
+            className="flex items-center gap-1.5 px-3 py-2.5 bg-white border border-neutral-200 text-neutral-400 rounded-lg text-sm hover:text-red-500 hover:border-red-200 transition-colors"
+            title="Revoke all keys"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
