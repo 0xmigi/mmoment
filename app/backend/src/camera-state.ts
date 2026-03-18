@@ -50,6 +50,32 @@ export function getWalletCamera(walletAddress: string): string | null {
   return _walletSessions.get(walletAddress) || null;
 }
 
+// Track recent API-triggered captures: key = "wallet:cameraId", expires after 30s
+const _apiCaptures: Map<string, number> = new Map();
+
+/** Mark a capture as API-triggered */
+export function markApiCapture(walletAddress: string, cameraId: string) {
+  const key = `${walletAddress}:${cameraId}`;
+  _apiCaptures.set(key, Date.now());
+  // Clean up old entries
+  for (const [k, ts] of _apiCaptures) {
+    if (Date.now() - ts > 30000) _apiCaptures.delete(k);
+  }
+}
+
+/** Check if a recent photo from this wallet+camera was API-triggered */
+export function wasApiCapture(walletAddress: string, cameraId: string): boolean {
+  const key = `${walletAddress}:${cameraId}`;
+  const ts = _apiCaptures.get(key);
+  if (!ts) return false;
+  if (Date.now() - ts > 30000) {
+    _apiCaptures.delete(key);
+    return false;
+  }
+  _apiCaptures.delete(key); // consume it
+  return true;
+}
+
 export function getActiveUsersForCamera(cameraId: string): number {
   const sockets = _cameraRooms.get(cameraId);
   return sockets ? sockets.size : 0;

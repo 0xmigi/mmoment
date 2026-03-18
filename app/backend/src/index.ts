@@ -79,7 +79,7 @@ import {
   getActiveCheckIns,
 } from './database';
 import { fetchAndParseIcal } from './ical-parser';
-import { initCameraState, onWalletCheckIn, onWalletCheckOut } from './camera-state';
+import { initCameraState, onWalletCheckIn, onWalletCheckOut, wasApiCapture } from './camera-state';
 
 // Import Sui storage service for Walrus blob ownership
 import {
@@ -3468,6 +3468,12 @@ app.post("/api/session/activity", async (req, res) => {
     if (cvActivityMeta && activityType === 50) {
       timelineEvent.cvActivity = cvActivityMeta;
       console.log(`   🏋️ Including CV activity meta: ${cvActivityMeta.app_name}, ${cvActivityMeta.participant_count} participants`);
+    }
+
+    // Tag API-triggered captures (photos taken via agent/developer API)
+    if (activityType === 2 && wasApiCapture(userPubkey, cameraId)) {
+      timelineEvent.triggeredBy = 'api';
+      console.log(`   🤖 Tagged as API-triggered capture`);
     }
 
     // Broadcast to camera room

@@ -16,7 +16,7 @@ import {
   getCameraEvent,
   computeEventStatus,
 } from '../database';
-import { getActiveUsersForCamera, getRecentTimelineEvents, getCheckedInUsers, getWalletCamera } from '../camera-state';
+import { getActiveUsersForCamera, getRecentTimelineEvents, getCheckedInUsers, getWalletCamera, markApiCapture } from '../camera-state';
 import {
   createRpc,
   bn,
@@ -810,6 +810,9 @@ export function createApiRouter(): Router {
           message: 'You must be physically checked in at the camera to capture',
         });
       }
+
+      // Mark this capture as API-triggered so the timeline event gets tagged
+      markApiCapture(walletAddress, cameraId);
 
       const cameraUrl = `https://${cameraId.toLowerCase()}.mmoment.xyz`;
       const captureRes = await fetch(`${cameraUrl}/api/capture`, {
