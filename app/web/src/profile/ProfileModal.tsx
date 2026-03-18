@@ -1,5 +1,5 @@
 import { Dialog } from '@headlessui/react';
-import { X, ExternalLink, Trophy, Users, Clock, Gift, Target, Coins, CheckCircle, XCircle } from 'lucide-react';
+import { X, ExternalLink, Trophy, Users, Clock, Gift, Target, Coins, CheckCircle, XCircle, Bot } from 'lucide-react';
 import { CVActivityMetadata } from '../timeline/timeline-types';
 
 interface ProfileModalProps {
@@ -21,6 +21,7 @@ interface ProfileModalProps {
     transactionId?: string;
     mediaUrl?: string;
     cvActivity?: CVActivityMetadata;
+    triggeredBy?: string; // 'api' if triggered by an agent
     /** Future: Prize/bounty earned for completing this action */
     prize?: {
       amount: number;
@@ -179,7 +180,15 @@ export function ProfileModal({ isOpen, onClose, user, action }: ProfileModalProp
             {/* Action Details */}
             {action && (
               <div className="space-y-2">
-                <div className="text-xs font-medium text-gray-500">Action</div>
+                <div className="flex items-center gap-2">
+                  <div className="text-xs font-medium text-gray-500">Action</div>
+                  {action.triggeredBy === 'api' && (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-neutral-400 bg-neutral-100 px-1.5 py-0.5 rounded">
+                      <Bot className="w-2.5 h-2.5" />
+                      via agent
+                    </span>
+                  )}
+                </div>
                 <div className="bg-gray-50 px-2 py-2 rounded-lg">
                   <div className="space-y-2">
                     {/* CV Activity - Rich Display */}

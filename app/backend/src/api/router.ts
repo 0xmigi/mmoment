@@ -815,7 +815,10 @@ export function createApiRouter(): Router {
       const captureRes = await fetch(`${cameraUrl}/api/capture`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet_address: walletAddress }),
+        body: JSON.stringify({
+          wallet_address: walletAddress,
+          triggered_by: 'api',
+        }),
         signal: AbortSignal.timeout(10000),
       });
 
@@ -828,7 +831,21 @@ export function createApiRouter(): Router {
       }
 
       const captureData = await captureRes.json();
-      res.json({ data: captureData });
+
+      // Build a direct photo URL the agent can share
+      const filename = captureData.filename;
+      const photoUrl = filename ? `${cameraUrl}/photos/${filename}` : null;
+
+      res.json({
+        data: {
+          success: true,
+          photo_url: photoUrl,
+          filename,
+          timestamp: captureData.timestamp,
+          width: captureData.width,
+          height: captureData.height,
+        }
+      });
     } catch (err: any) {
       if (err.name === 'TimeoutError') {
         return res.status(504).json({ error: 'timeout', message: 'Camera did not respond in time' });
