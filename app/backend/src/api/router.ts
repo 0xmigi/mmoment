@@ -626,8 +626,12 @@ export function createApiRouter(): Router {
 
   // Helper: check if wallet is checked in at a camera
   function isWalletPresent(cameraId: string, walletAddress: string): boolean {
+    // Check both sources: timeline events (real-time) and wallet sessions (survives restarts)
     const checkedIn = getCheckedInUsers(cameraId);
-    return checkedIn.some(u => u.address === walletAddress);
+    if (checkedIn.some(u => u.address === walletAddress)) return true;
+    // Fallback: check wallet sessions map (hydrated from DB on startup)
+    const sessionCamera = getWalletCamera(walletAddress);
+    return sessionCamera === cameraId;
   }
 
   // Helper: check if wallet is camera owner (via camera service)
