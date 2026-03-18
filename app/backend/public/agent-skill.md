@@ -35,6 +35,8 @@ Use the `checked_in_at` value as `{camera_id}` for all other calls. If it's null
 | Event details | GET | `/v1/cameras/{camera_id}/event` |
 | Who's here | GET | `/v1/cameras/{camera_id}/presence` |
 | Take a photo | POST | `/v1/cameras/{camera_id}/capture` (returns `photo_url` you can share) |
+| Start recording | POST | `/v1/cameras/{camera_id}/record/start` (optional `duration` in seconds, 0 = until stopped) |
+| Stop recording | POST | `/v1/cameras/{camera_id}/record/stop` (returns `video_url` you can share) |
 | Recent activity | GET | `/v1/cameras/{camera_id}/activities` |
 
 ## Physical presence required
