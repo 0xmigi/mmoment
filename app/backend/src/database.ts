@@ -1127,6 +1127,31 @@ export async function getUserSessions(walletAddress: string, limit: number = 50)
 }
 
 // Get all activities for a camera (most recent first)
+/** Get wallets currently checked in (checked in but not checked out) from the last 24h */
+export async function getActiveCheckIns(): Promise<Array<{ userPubkey: string; cameraId: string }>> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    const oneDayAgo = Date.now() - 86400000;
+    // Find users whose most recent activity is a check_in (type 0), not a check_out (type 1)
+    db.all(
+      `SELECT user_pubkey, camera_id, activity_type, MAX(timestamp) as latest
+       FROM session_activity_buffers
+       WHERE timestamp > ? AND activity_type IN (0, 1)
+       GROUP BY user_pubkey
+       HAVING activity_type = 0`,
+      [oneDayAgo],
+      (err, rows: any[]) => {
+        if (err) { reject(err); return; }
+        resolve((rows || []).map(row => ({
+          userPubkey: row.user_pubkey,
+          cameraId: row.camera_id,
+        })));
+      }
+    );
+  });
+}
+
 export async function getCameraActivities(cameraId: string, limit: number = 100): Promise<SessionActivityBuffer[]> {
   return new Promise((resolve, reject) => {
     if (!db) {

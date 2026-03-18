@@ -76,6 +76,7 @@ import {
   getAllCameraEventsWithIcal,
   computeEventStatus,
   CameraEvent,
+  getActiveCheckIns,
 } from './database';
 import { fetchAndParseIcal } from './ical-parser';
 import { initCameraState, onWalletCheckIn, onWalletCheckOut } from './camera-state';
@@ -3355,6 +3356,13 @@ app.post("/api/session/activity", async (req, res) => {
         timelineEvents.shift();
       }
 
+      // Update per-wallet session state for agent API
+      if (eventType === 'check_in') {
+        onWalletCheckIn(userPubkey, cameraId);
+      } else if (eventType === 'check_out' || eventType === 'auto_check_out') {
+        onWalletCheckOut(userPubkey);
+      }
+
       // Broadcast to camera room
       const room = io.sockets.adapter.rooms.get(cameraId);
       const socketsInRoom = room ? room.size : 0;
@@ -4664,6 +4672,17 @@ httpServer.listen(port, "0.0.0.0", async () => {
     // The in-memory timelineEvents array is only for real-time WebSocket broadcasting
     // It starts empty on server restart - historical data is queried from session_activity_buffers
     console.log('📥 Timeline events use session_activity_buffers for persistence');
+
+    // Hydrate wallet sessions from database (survive server restarts)
+    try {
+      const activeCheckIns = await getActiveCheckIns();
+      for (const { userPubkey, cameraId } of activeCheckIns) {
+        onWalletCheckIn(userPubkey, cameraId);
+      }
+      console.log(`📥 Hydrated ${activeCheckIns.length} active wallet sessions from database`);
+    } catch (err) {
+      console.error('Failed to hydrate wallet sessions:', err);
+    }
 
     // Get database stats
     const stats = await getDatabaseStats();
