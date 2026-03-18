@@ -635,7 +635,8 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
             timestamp: selectedEvent.timestamp,
             transactionId: selectedEvent.transactionId,
             mediaUrl: selectedEvent.mediaUrl,
-            cvActivity: selectedEvent.cvActivity
+            cvActivity: selectedEvent.cvActivity,
+            triggeredBy: selectedEvent.triggeredBy,
           }}
         />
       )}
