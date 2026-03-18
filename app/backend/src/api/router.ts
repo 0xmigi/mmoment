@@ -66,6 +66,40 @@ export function createApiRouter(): Router {
   // KEY MANAGEMENT (wallet-based, no API key needed to create)
   // ============================================================================
 
+  // List all API keys for a wallet (public — only returns prefixes, not full keys)
+  router.get('/v1/keys/wallet/:walletAddress', async (req, res) => {
+    try {
+      const keys = await getApiKeysForWallet(req.params.walletAddress);
+      res.json({
+        data: keys.map(k => ({
+          id: k.id,
+          key_prefix: k.keyPrefix,
+          name: k.name,
+          created_at: k.createdAt,
+          last_used_at: k.lastUsedAt,
+          revoked_at: k.revokedAt,
+        }))
+      });
+    } catch (err) {
+      console.error('[API] Failed to list keys:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to list keys' });
+    }
+  });
+
+  // Revoke a key by ID for a wallet (no API key auth needed — wallet ownership is implicit)
+  router.delete('/v1/keys/wallet/:walletAddress/:keyId', async (req, res) => {
+    try {
+      const revoked = await revokeApiKey(req.params.keyId, req.params.walletAddress);
+      if (!revoked) {
+        return res.status(404).json({ error: 'not_found', message: 'Key not found' });
+      }
+      res.json({ data: { revoked: true } });
+    } catch (err) {
+      console.error('[API] Failed to revoke key:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to revoke key' });
+    }
+  });
+
   router.post('/v1/keys', async (req, res) => {
     try {
       const { wallet_address, name } = req.body;
