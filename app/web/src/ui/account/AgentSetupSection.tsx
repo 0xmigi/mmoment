@@ -1,6 +1,6 @@
-import { useState, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { CONFIG } from "../../core/config";
-import { Bot, Copy, Check, Key, RefreshCw } from "lucide-react";
+import { Bot, Copy, Check } from "lucide-react";
 
 interface AgentSetupSectionProps {
   walletAddress: string;
@@ -8,34 +8,37 @@ interface AgentSetupSectionProps {
 
 export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
   const [apiKey, setApiKey] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const backendUrl = CONFIG.BACKEND_URL;
   const skillUrl = `${backendUrl}/agent-skill.md`;
 
-  const generateKey = useCallback(async () => {
-    setIsGenerating(true);
-    try {
-      const res = await fetch(`${backendUrl}/v1/keys`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: walletAddress }),
-      });
-      const data = await res.json();
-      if (data.data?.key) {
-        setApiKey(data.data.key);
+  // Generate key immediately on mount
+  useEffect(() => {
+    const generate = async () => {
+      try {
+        const res = await fetch(`${backendUrl}/v1/keys`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: walletAddress }),
+        });
+        const data = await res.json();
+        if (data.data?.key) {
+          setApiKey(data.data.key);
+        }
+      } catch (err) {
+        console.error("[AgentSetup] Failed to generate key:", err);
       }
-    } catch (err) {
-      console.error("[AgentSetup] Failed to generate key:", err);
-    } finally {
-      setIsGenerating(false);
-    }
+    };
+    generate();
   }, [backendUrl, walletAddress]);
 
-  const setupCommand = `Set up ${skillUrl} with key ${apiKey}`;
+  const setupCommand = apiKey
+    ? `Set up ${skillUrl} with key ${apiKey}`
+    : "Generating...";
 
   const copyCommand = () => {
+    if (!apiKey) return;
     navigator.clipboard.writeText(setupCommand);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -52,49 +55,29 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
         Paste this prompt into your agent to connect it to the camera network.
       </p>
 
-      {!apiKey ? (
-        <button
-          onClick={generateKey}
-          disabled={isGenerating}
-          className="w-full flex justify-center items-center gap-2 px-4 py-2.5 bg-neutral-900 text-white rounded-lg text-sm font-medium hover:bg-neutral-800 transition-colors disabled:opacity-50"
-        >
-          {isGenerating ? (
-            <RefreshCw className="w-4 h-4 animate-spin" />
-          ) : (
-            <Key className="w-4 h-4" />
-          )}
-          {isGenerating ? "Generating..." : "Generate API Key"}
-        </button>
-      ) : (
-        <div className="space-y-3">
-          <div className="bg-white border border-neutral-200 rounded-lg p-3.5">
-            <code className="text-sm text-neutral-800 break-all leading-relaxed">
-              {setupCommand}
-            </code>
-          </div>
+      <div className="bg-white border border-neutral-200 rounded-lg p-3.5 mb-3">
+        <code className="text-sm text-neutral-800 break-all leading-relaxed">
+          {setupCommand}
+        </code>
+      </div>
 
-          <button
-            onClick={copyCommand}
-            className="w-full flex justify-center items-center gap-2 px-4 py-2.5 bg-neutral-900 text-white rounded-lg text-sm font-medium hover:bg-neutral-800 transition-colors"
-          >
-            {copied ? (
-              <>
-                <Check className="w-4 h-4" />
-                Copied
-              </>
-            ) : (
-              <>
-                <Copy className="w-4 h-4" />
-                Copy to clipboard
-              </>
-            )}
-          </button>
-
-          <p className="text-xs text-neutral-400 text-center">
-            This key won't be shown again.
-          </p>
-        </div>
-      )}
+      <button
+        onClick={copyCommand}
+        disabled={!apiKey}
+        className="w-full flex justify-center items-center gap-2 px-4 py-2.5 bg-neutral-900 text-white rounded-lg text-sm font-medium hover:bg-neutral-800 transition-colors disabled:opacity-50"
+      >
+        {copied ? (
+          <>
+            <Check className="w-4 h-4" />
+            Copied
+          </>
+        ) : (
+          <>
+            <Copy className="w-4 h-4" />
+            Copy to clipboard
+          </>
+        )}
+      </button>
     </div>
   );
 }
