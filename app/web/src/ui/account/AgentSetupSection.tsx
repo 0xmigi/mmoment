@@ -9,7 +9,7 @@ interface AgentSetupSectionProps {
 export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [copied, setCopied] = useState<"key" | "command" | null>(null);
+  const [copied, setCopied] = useState<"key" | "command" | "url" | null>(null);
 
   const backendUrl = CONFIG.BACKEND_URL;
   const skillUrl = `${backendUrl}/agent-skill.md`;
@@ -34,7 +34,7 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
     }
   }, [backendUrl, walletAddress]);
 
-  const copyToClipboard = (text: string, type: "key" | "command") => {
+  const copyToClipboard = (text: string, type: "key" | "command" | "url") => {
     navigator.clipboard.writeText(text);
     setCopied(type);
     setTimeout(() => setCopied(null), 2000);
@@ -117,6 +117,29 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
             <p className="text-xs text-amber-600 mt-1.5">
               Save this key now — it won't be shown again.
             </p>
+          </div>
+
+          {/* Skill file URL */}
+          <div>
+            <label className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-2 block">
+              Skill file URL
+            </label>
+            <div className="bg-white border border-neutral-200 rounded-lg p-3 flex items-center gap-2">
+              <code className="flex-1 text-xs font-mono text-neutral-600 break-all">
+                {skillUrl}
+              </code>
+              <button
+                onClick={() => copyToClipboard(skillUrl, "url")}
+                className="shrink-0 p-1.5 hover:bg-neutral-100 rounded transition-colors"
+                title="Copy skill URL"
+              >
+                {copied === "url" ? (
+                  <Check className="w-4 h-4 text-emerald-600" />
+                ) : (
+                  <Copy className="w-4 h-4 text-neutral-400" />
+                )}
+              </button>
+            </div>
           </div>
 
           {/* Generate another */}
