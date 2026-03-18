@@ -24,6 +24,14 @@ Authorization: Bearer YOUR_API_KEY
 https://mmoment-production.up.railway.app
 ```
 
+## Getting Started
+
+Always start by checking who you are and where your owner is:
+```
+GET /v1/me
+```
+Returns your wallet address, display name, and the camera ID your owner is currently checked in at. If `checked_in_at` is null, your owner is not at any camera — most actions will be unavailable.
+
 ## Available Actions
 
 ### Check camera status
@@ -61,13 +69,14 @@ Returns 403 if not checked in.
 
 ## Example Workflow
 
-1. Check status: `GET /v1/cameras/{camera_id}/status` — see if anyone is there
-2. If your owner is checked in, you'll have full access automatically
-3. See who's there: `GET /v1/cameras/{camera_id}/presence`
-4. Take a photo: `POST /v1/cameras/{camera_id}/capture`
-5. Check recent activity: `GET /v1/cameras/{camera_id}/activities`
+1. Check who you are: `GET /v1/me` — get your wallet and which camera you're at
+2. If `checked_in_at` has a camera ID, use it for all other calls
+3. Check status: `GET /v1/cameras/{camera_id}/status`
+4. See who's there: `GET /v1/cameras/{camera_id}/presence`
+5. Take a photo: `POST /v1/cameras/{camera_id}/capture`
+6. Check recent activity: `GET /v1/cameras/{camera_id}/activities`
 
-If you get a 403 or `access: "limited"` response, your owner needs to physically check in at the camera first.
+If `checked_in_at` is empty, your owner needs to physically check in at a camera first.
 
 ## Notes
 - Camera IDs are Solana public keys (e.g., `ArQxL9kzhZ8QhJtNodnuMvkd3HGdkwSsTzbD4qD9QqKv`)

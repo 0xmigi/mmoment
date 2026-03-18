@@ -22,12 +22,32 @@ interface TimelineEvent {
 let _timelineEvents: TimelineEvent[] = [];
 let _cameraRooms: Map<string, Set<string>> = new Map();
 
+// Per-wallet session state: wallet → cameraId
+// Written on check-in, cleared on check-out. Persists for session duration.
+// Agents read this via GET /v1/me — no scanning needed.
+const _walletSessions: Map<string, string> = new Map();
+
 export function initCameraState(
   timelineEvents: TimelineEvent[],
   cameraRooms: Map<string, Set<string>>,
 ) {
   _timelineEvents = timelineEvents;
   _cameraRooms = cameraRooms;
+}
+
+/** Called when a user checks in at a camera */
+export function onWalletCheckIn(walletAddress: string, cameraId: string) {
+  _walletSessions.set(walletAddress, cameraId);
+}
+
+/** Called when a user checks out from a camera */
+export function onWalletCheckOut(walletAddress: string) {
+  _walletSessions.delete(walletAddress);
+}
+
+/** Get the camera a wallet is currently checked in at (if any) */
+export function getWalletCamera(walletAddress: string): string | null {
+  return _walletSessions.get(walletAddress) || null;
 }
 
 export function getActiveUsersForCamera(cameraId: string): number {
@@ -66,3 +86,4 @@ export function getCheckedInUsers(cameraId: string): Array<{
     pfpUrl: u.pfpUrl,
   }));
 }
+

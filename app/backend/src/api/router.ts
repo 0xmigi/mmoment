@@ -16,7 +16,7 @@ import {
   getCameraEvent,
   computeEventStatus,
 } from '../database';
-import { getActiveUsersForCamera, getRecentTimelineEvents, getCheckedInUsers } from '../camera-state';
+import { getActiveUsersForCamera, getRecentTimelineEvents, getCheckedInUsers, getWalletCamera } from '../camera-state';
 import {
   createRpc,
   bn,
@@ -587,6 +587,32 @@ export function createApiRouter(): Router {
     } catch (err) {
       console.error('[API] Failed to get stats:', err);
       res.status(500).json({ error: 'internal', message: 'Failed to get stats' });
+    }
+  });
+
+  // ============================================================================
+  // DEVELOPER API — IDENTITY & DISCOVERY
+  // ============================================================================
+
+  // Who am I? Returns wallet address and camera currently checked in at (if any).
+  // This reads from a per-wallet record set by the check-in event — no scanning.
+  router.get('/v1/me', async (req: AuthenticatedRequest, res) => {
+    try {
+      const walletAddress = req.apiKey!.walletAddress;
+      const cameraId = getWalletCamera(walletAddress);
+      const profile = await getUserProfile(walletAddress);
+
+      res.json({
+        data: {
+          wallet: walletAddress,
+          display_name: profile?.displayName || null,
+          username: profile?.username || null,
+          checked_in_at: cameraId,
+        }
+      });
+    } catch (err) {
+      console.error('[API] Failed to get identity:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to get identity' });
     }
   });
 

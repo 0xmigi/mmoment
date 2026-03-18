@@ -78,7 +78,7 @@ import {
   CameraEvent,
 } from './database';
 import { fetchAndParseIcal } from './ical-parser';
-import { initCameraState } from './camera-state';
+import { initCameraState, onWalletCheckIn, onWalletCheckOut } from './camera-state';
 
 // Import Sui storage service for Walrus blob ownership
 import {
@@ -1838,6 +1838,15 @@ async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: 
 
   // Store the event in memory
   timelineEvents.push(newEvent);
+
+  // Update per-wallet session state for agent API
+  if (newEvent.cameraId && newEvent.user.address) {
+    if (newEvent.type === 'check_in') {
+      onWalletCheckIn(newEvent.user.address, newEvent.cameraId);
+    } else if (newEvent.type === 'check_out' || newEvent.type === 'auto_check_out') {
+      onWalletCheckOut(newEvent.user.address);
+    }
+  }
 
   // Save to session_activity_buffers for persistence
   // Map event type to activity_type (matches Solana ActivityType enum)
