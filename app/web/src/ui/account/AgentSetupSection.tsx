@@ -9,12 +9,11 @@ interface AgentSetupSectionProps {
 export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [copied, setCopied] = useState<"key" | "command" | "url" | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const backendUrl = CONFIG.BACKEND_URL;
   const skillUrl = `${backendUrl}/agent-skill.md`;
 
-  // Generate new API key
   const generateKey = useCallback(async () => {
     setIsGenerating(true);
     try {
@@ -34,32 +33,30 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
     }
   }, [backendUrl, walletAddress]);
 
-  const copyToClipboard = (text: string, type: "key" | "command" | "url") => {
-    navigator.clipboard.writeText(text);
-    setCopied(type);
-    setTimeout(() => setCopied(null), 2000);
-  };
+  const setupCommand = `Set up ${skillUrl} with key ${apiKey}`;
 
-  const setupCommand = apiKey
-    ? `Set up ${skillUrl} with key ${apiKey}`
-    : null;
+  const copyCommand = () => {
+    navigator.clipboard.writeText(setupCommand);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <div className="bg-neutral-100 rounded-xl p-4 sm:p-6 mb-6">
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-1">
         <Bot className="w-5 h-5 text-neutral-600" />
         <h3 className="text-lg font-medium text-neutral-900">Agent Access</h3>
       </div>
 
       <p className="text-sm text-neutral-500 mb-4">
-        Connect your AI agent to the MMOMENT camera network. Generate an API key and give your agent the setup command below.
+        Paste this prompt into your agent to connect it to the camera network.
       </p>
 
       {!apiKey ? (
         <button
           onClick={generateKey}
           disabled={isGenerating}
-          className="flex items-center gap-2 px-4 py-2.5 bg-neutral-900 text-white rounded-lg text-sm font-medium hover:bg-neutral-800 transition-colors disabled:opacity-50"
+          className="w-full flex justify-center items-center gap-2 px-4 py-2.5 bg-neutral-900 text-white rounded-lg text-sm font-medium hover:bg-neutral-800 transition-colors disabled:opacity-50"
         >
           {isGenerating ? (
             <RefreshCw className="w-4 h-4 animate-spin" />
@@ -69,88 +66,33 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
           {isGenerating ? "Generating..." : "Generate API Key"}
         </button>
       ) : (
-        <div className="space-y-4">
-          {/* Setup command — the main thing to copy */}
-          <div>
-            <label className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-2 block">
-              Give this to your agent
-            </label>
-            <div className="bg-white border border-neutral-200 rounded-lg p-3 flex items-start gap-2">
-              <code className="flex-1 text-sm text-neutral-800 break-all leading-relaxed">
-                {setupCommand}
-              </code>
-              <button
-                onClick={() => copyToClipboard(setupCommand!, "command")}
-                className="shrink-0 p-1.5 hover:bg-neutral-100 rounded transition-colors"
-                title="Copy setup command"
-              >
-                {copied === "command" ? (
-                  <Check className="w-4 h-4 text-emerald-600" />
-                ) : (
-                  <Copy className="w-4 h-4 text-neutral-400" />
-                )}
-              </button>
-            </div>
+        <div className="space-y-3">
+          <div className="bg-white border border-neutral-200 rounded-lg p-3.5">
+            <code className="text-sm text-neutral-800 break-all leading-relaxed">
+              {setupCommand}
+            </code>
           </div>
 
-          {/* Raw API key (collapsible) */}
-          <div>
-            <label className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-2 block">
-              API Key
-            </label>
-            <div className="bg-white border border-neutral-200 rounded-lg p-3 flex items-center gap-2">
-              <code className="flex-1 text-xs font-mono text-neutral-600 break-all">
-                {apiKey}
-              </code>
-              <button
-                onClick={() => copyToClipboard(apiKey, "key")}
-                className="shrink-0 p-1.5 hover:bg-neutral-100 rounded transition-colors"
-                title="Copy API key"
-              >
-                {copied === "key" ? (
-                  <Check className="w-4 h-4 text-emerald-600" />
-                ) : (
-                  <Copy className="w-4 h-4 text-neutral-400" />
-                )}
-              </button>
-            </div>
-            <p className="text-xs text-amber-600 mt-1.5">
-              Save this key now — it won't be shown again.
-            </p>
-          </div>
-
-          {/* Skill file URL */}
-          <div>
-            <label className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-2 block">
-              Skill file URL
-            </label>
-            <div className="bg-white border border-neutral-200 rounded-lg p-3 flex items-center gap-2">
-              <code className="flex-1 text-xs font-mono text-neutral-600 break-all">
-                {skillUrl}
-              </code>
-              <button
-                onClick={() => copyToClipboard(skillUrl, "url")}
-                className="shrink-0 p-1.5 hover:bg-neutral-100 rounded transition-colors"
-                title="Copy skill URL"
-              >
-                {copied === "url" ? (
-                  <Check className="w-4 h-4 text-emerald-600" />
-                ) : (
-                  <Copy className="w-4 h-4 text-neutral-400" />
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Generate another */}
           <button
-            onClick={generateKey}
-            disabled={isGenerating}
-            className="text-xs text-neutral-500 hover:text-neutral-700 flex items-center gap-1.5 transition-colors"
+            onClick={copyCommand}
+            className="w-full flex justify-center items-center gap-2 px-4 py-2.5 bg-neutral-900 text-white rounded-lg text-sm font-medium hover:bg-neutral-800 transition-colors"
           >
-            <Key className="w-3 h-3" />
-            Generate another key
+            {copied ? (
+              <>
+                <Check className="w-4 h-4" />
+                Copied
+              </>
+            ) : (
+              <>
+                <Copy className="w-4 h-4" />
+                Copy to clipboard
+              </>
+            )}
           </button>
+
+          <p className="text-xs text-neutral-400 text-center">
+            This key won't be shown again.
+          </p>
         </div>
       )}
     </div>
