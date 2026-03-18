@@ -1,14 +1,6 @@
 import { useState, useCallback } from "react";
 import { CONFIG } from "../../core/config";
-import { Bot, Copy, Check, Key, RefreshCw, Trash2 } from "lucide-react";
-
-interface ApiKeyInfo {
-  id: string;
-  key_prefix: string;
-  name: string;
-  created_at: number;
-  last_used_at: number | null;
-}
+import { Bot, Copy, Check, Key, RefreshCw } from "lucide-react";
 
 interface AgentSetupSectionProps {
   walletAddress: string;
@@ -16,32 +8,11 @@ interface AgentSetupSectionProps {
 
 export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
   const [apiKey, setApiKey] = useState<string | null>(null);
-  const [existingKeys, setExistingKeys] = useState<ApiKeyInfo[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [copied, setCopied] = useState<"key" | "command" | null>(null);
-  const [showKeys, setShowKeys] = useState(false);
 
   const backendUrl = CONFIG.BACKEND_URL;
   const skillUrl = `${backendUrl}/agent-skill.md`;
-
-  // Fetch existing keys
-  const fetchKeys = useCallback(async (rawKey: string) => {
-    setIsLoading(true);
-    try {
-      const res = await fetch(`${backendUrl}/v1/keys`, {
-        headers: { Authorization: `Bearer ${rawKey}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setExistingKeys(data.data || []);
-      }
-    } catch (err) {
-      console.error("[AgentSetup] Failed to fetch keys:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [backendUrl]);
 
   // Generate new API key
   const generateKey = useCallback(async () => {
@@ -55,7 +26,6 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
       const data = await res.json();
       if (data.data?.raw_key) {
         setApiKey(data.data.raw_key);
-        setShowKeys(true);
       }
     } catch (err) {
       console.error("[AgentSetup] Failed to generate key:", err);
@@ -63,20 +33,6 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
       setIsGenerating(false);
     }
   }, [backendUrl, walletAddress]);
-
-  // Revoke a key
-  const revokeKey = useCallback(async (keyId: string) => {
-    if (!apiKey) return;
-    try {
-      await fetch(`${backendUrl}/v1/keys/${keyId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${apiKey}` },
-      });
-      setExistingKeys(prev => prev.filter(k => k.id !== keyId));
-    } catch (err) {
-      console.error("[AgentSetup] Failed to revoke key:", err);
-    }
-  }, [backendUrl, apiKey]);
 
   const copyToClipboard = (text: string, type: "key" | "command") => {
     navigator.clipboard.writeText(text);
