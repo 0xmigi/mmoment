@@ -80,6 +80,7 @@ import {
 } from './database';
 import { fetchAndParseIcal } from './ical-parser';
 import { initCameraState, onWalletCheckIn, onWalletCheckOut, wasApiCapture } from './camera-state';
+import { initQueueManager, getQueueState, joinQueue, leaveQueue, skipCurrent, updateConfig as updateQueueConfig } from './queue-manager';
 
 // Import Sui storage service for Walrus blob ownership
 import {
@@ -3951,6 +3952,99 @@ app.get("/api/camera/:cameraId/activities", async (req, res) => {
   }
 });
 
+// ============================================================================
+// QUEUE ENDPOINTS (frontend-facing, no API key)
+// ============================================================================
+
+// Get queue state (public)
+app.get("/api/camera/:cameraId/queue", async (req, res) => {
+  try {
+    const state = await getQueueState(req.params.cameraId);
+    res.json({ success: true, ...state });
+  } catch (error) {
+    console.error('Failed to get queue state:', error);
+    res.status(500).json({ success: false, error: 'Failed to get queue state' });
+  }
+});
+
+// Join queue
+app.post("/api/camera/:cameraId/queue/join", async (req, res) => {
+  try {
+    const { cameraId } = req.params;
+    const { wallet_address, duration, display_name } = req.body;
+
+    if (!wallet_address) {
+      return res.status(400).json({ success: false, error: 'wallet_address is required' });
+    }
+    if (!duration || typeof duration !== 'number') {
+      return res.status(400).json({ success: false, error: 'duration (seconds) is required' });
+    }
+
+    const entry = await joinQueue(cameraId, wallet_address, duration, display_name);
+    res.json({ success: true, entry });
+  } catch (error: any) {
+    if (error.message === 'Already in queue' || error.message?.includes('Duration must be') || error.message === 'Queue is not enabled for this camera') {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    console.error('Failed to join queue:', error);
+    res.status(500).json({ success: false, error: 'Failed to join queue' });
+  }
+});
+
+// Leave queue
+app.delete("/api/camera/:cameraId/queue/leave", async (req, res) => {
+  try {
+    const { cameraId } = req.params;
+    const wallet_address = req.query.wallet_address as string || req.body?.wallet_address;
+
+    if (!wallet_address) {
+      return res.status(400).json({ success: false, error: 'wallet_address is required' });
+    }
+
+    const removed = await leaveQueue(cameraId, wallet_address);
+    if (!removed) {
+      return res.status(404).json({ success: false, error: 'Not in queue' });
+    }
+    res.json({ success: true, left: true });
+  } catch (error) {
+    console.error('Failed to leave queue:', error);
+    res.status(500).json({ success: false, error: 'Failed to leave queue' });
+  }
+});
+
+// Update queue config (owner only — frontend passes wallet, we check ownership)
+app.put("/api/camera/:cameraId/queue/config", async (req, res) => {
+  try {
+    const { cameraId } = req.params;
+    const { max_slot_duration, min_slot_duration, enabled } = req.body;
+
+    const config = await updateQueueConfig(cameraId, {
+      enabled: enabled !== undefined ? !!enabled : undefined,
+      maxSlotDuration: max_slot_duration,
+      minSlotDuration: min_slot_duration,
+    });
+    res.json({ success: true, config });
+  } catch (error) {
+    console.error('Failed to update queue config:', error);
+    res.status(500).json({ success: false, error: 'Failed to update queue config' });
+  }
+});
+
+// Skip current (owner only)
+app.post("/api/camera/:cameraId/queue/skip", async (req, res) => {
+  try {
+    const { cameraId } = req.params;
+    const skipped = await skipCurrent(cameraId);
+    if (!skipped) {
+      return res.status(404).json({ success: false, error: 'No active slot to skip' });
+    }
+    res.json({ success: true, skipped: true });
+  } catch (error) {
+    console.error('Failed to skip queue:', error);
+    res.status(500).json({ success: false, error: 'Failed to skip queue entry' });
+  }
+});
+
 // Get full timeline events for a session (all events at camera during session time window)
 // This returns ALL events from ALL users at the camera during the user's session
 app.get("/api/session/:sessionId/timeline", async (req, res) => {
@@ -4688,6 +4782,13 @@ httpServer.listen(port, "0.0.0.0", async () => {
       console.log(`📥 Hydrated ${activeCheckIns.length} active wallet sessions from database`);
     } catch (err) {
       console.error('Failed to hydrate wallet sessions:', err);
+    }
+
+    // Initialize queue manager (recovers active slots from DB)
+    try {
+      await initQueueManager(io);
+    } catch (err) {
+      console.error('Failed to initialize queue manager:', err);
     }
 
     // Get database stats

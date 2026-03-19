@@ -430,6 +430,18 @@ class TimelineService {
   isSocketConnected(): boolean {
     return this.isConnected && this.socket && this.socket.connected;
   }
+
+  // Subscribe to arbitrary socket events (used by queue system, etc.)
+  onSocketEvent(event: string, callback: (...args: any[]) => void): () => void {
+    if (this.socket) {
+      this.socket.on(event, callback);
+    }
+    return () => {
+      if (this.socket) {
+        this.socket.off(event, callback);
+      }
+    };
+  }
 }
 
 export const timelineService = new TimelineService();

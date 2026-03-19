@@ -5,6 +5,7 @@ import { TimelineEvent } from "../timeline/timeline-types";
 import { walrusGalleryService } from "../storage/walrus/walrus-gallery-service";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { Pencil, Check, X, Calendar, Link2 } from "lucide-react";
+import { QueuePanel } from "./QueuePanel";
 
 interface CameraEventData {
   eventName?: string;
@@ -436,6 +437,11 @@ export function DesktopEventPanel({ cameraId, isOwner }: DesktopEventPanelProps)
             )}
           </div>
         )}
+      </div>
+
+      {/* Queue — display only on desktop/TV */}
+      <div className="mb-6">
+        <QueuePanel cameraId={cameraId} isOwner={isOwner} displayOnly />
       </div>
 
       {/* Bottom: Stats row */}

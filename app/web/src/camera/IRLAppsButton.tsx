@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Lock, Zap, X, Play, ActivitySquare, UserPlus, TrendingUp, Dumbbell } from 'lucide-react';
+import { Lock, Zap, X, Play, ActivitySquare, UserPlus, TrendingUp, Dumbbell, ListOrdered } from 'lucide-react';
 import { useFacialEmbeddingStatus } from '../hooks/useFacialEmbeddingStatus';
 import { PhoneSelfieEnrollment } from './PhoneSelfieEnrollment';
 import { PushupConfigModal } from './PushupConfigModal';
+import { QueuePanel } from './QueuePanel';
 
 interface IRLAppsButtonProps {
   cameraId: string;
@@ -18,6 +19,7 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete, d
   const [showAppsModal, setShowAppsModal] = useState(false);
   const [showEnrollment, setShowEnrollment] = useState(false);
   const [showPushupConfig, setShowPushupConfig] = useState(false);
+  const [showQueueModal, setShowQueueModal] = useState(false);
   const facialEmbeddingStatus = useFacialEmbeddingStatus();
 
   // In dev mode, use fake wallet and assume embedding exists
@@ -32,6 +34,15 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete, d
 
   // Define available CV apps for this camera
   const availableApps = [
+    {
+      id: 'queue',
+      name: 'Queue',
+      description: 'Sign up for your turn',
+      icon: <ListOrdered className="w-5 h-5" />,
+      enabled: true,
+      comingSoon: false,
+      noTokenRequired: true,  // Queue doesn't require recognition token
+    },
     {
       id: 'pushup_competition',
       name: 'Pushup Competition',
@@ -101,8 +112,9 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete, d
               </div>
             <div className="space-y-3 mb-4">
               {availableApps.map((app) => {
-                const isAccessible = effectiveHasEmbedding && app.enabled && !app.comingSoon;
-                const needsToken = !effectiveHasEmbedding && app.enabled && !app.comingSoon;
+                const noTokenNeeded = (app as any).noTokenRequired;
+                const isAccessible = (noTokenNeeded || effectiveHasEmbedding) && app.enabled && !app.comingSoon;
+                const needsToken = !noTokenNeeded && !effectiveHasEmbedding && app.enabled && !app.comingSoon;
                 const isComingSoon = app.comingSoon;
 
                 return (
@@ -110,7 +122,10 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete, d
                     key={app.id}
                     onClick={() => {
                       if (isAccessible) {
-                        if (app.id === 'pushup_competition') {
+                        if (app.id === 'queue') {
+                          setShowAppsModal(false);
+                          setShowQueueModal(true);
+                        } else if (app.id === 'pushup_competition') {
                           setShowAppsModal(false);
                           setShowPushupConfig(true);
                         } else {
@@ -237,6 +252,24 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete, d
             </div>
           </div>
         </>
+      )}
+
+      {/* Queue Modal - Full page */}
+      {showQueueModal && (
+        <div className="fixed inset-0 bg-white z-50">
+          <div className="max-w-md mx-auto pt-8 px-5">
+            <div className="flex items-center justify-between mb-6">
+              <h1 className="text-xl font-semibold text-[#1A1A18]">Queue</h1>
+              <button
+                onClick={() => setShowQueueModal(false)}
+                className="p-2 rounded-lg hover:bg-[#F3F3EF] transition-colors"
+              >
+                <X className="w-5 h-5 text-[#8A8A82]" />
+              </button>
+            </div>
+            <QueuePanel cameraId={cameraId} />
+          </div>
+        </div>
       )}
 
       {/* Pushup Competition Config Modal */}
