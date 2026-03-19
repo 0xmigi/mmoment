@@ -12,7 +12,6 @@ import {
   LogOut,
   KeyRound,
   Globe,
-  Lock,
   CheckCircle,
   AlertCircle,
   Loader2,
