@@ -3971,7 +3971,7 @@ app.get("/api/camera/:cameraId/queue", async (req, res) => {
 app.post("/api/camera/:cameraId/queue/join", async (req, res) => {
   try {
     const { cameraId } = req.params;
-    const { wallet_address, duration, display_name } = req.body;
+    const { wallet_address, duration, display_name, title } = req.body;
 
     if (!wallet_address) {
       return res.status(400).json({ success: false, error: 'wallet_address is required' });
@@ -3980,7 +3980,7 @@ app.post("/api/camera/:cameraId/queue/join", async (req, res) => {
       return res.status(400).json({ success: false, error: 'duration (seconds) is required' });
     }
 
-    const entry = await joinQueue(cameraId, wallet_address, duration, display_name);
+    const entry = await joinQueue(cameraId, wallet_address, duration, display_name, title);
     res.json({ success: true, entry });
   } catch (error: any) {
     if (error.message === 'Already in queue' || error.message?.includes('Duration must be') || error.message === 'Queue is not enabled for this camera') {

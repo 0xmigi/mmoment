@@ -58,7 +58,8 @@ export async function joinQueue(
   cameraId: string,
   walletAddress: string,
   duration: number,
-  displayName?: string
+  displayName?: string,
+  title?: string
 ): Promise<QueueEntry> {
   // Validate against config
   const config = await getQueueConfig(cameraId);
@@ -94,6 +95,7 @@ export async function joinQueue(
     cameraId,
     walletAddress,
     displayName: resolvedName,
+    title: title || null,
     requestedDuration: duration,
     position,
     status: 'waiting',

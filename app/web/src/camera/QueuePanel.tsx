@@ -39,6 +39,10 @@ function entryName(entry: QueueEntry): string {
   return entry.displayName || truncateAddress(entry.walletAddress);
 }
 
+function entryTitle(entry: QueueEntry): string {
+  return entry.title || `${entryName(entry)}'s session`;
+}
+
 function Avatar({ entry, size = 'sm' }: { entry: QueueEntry; size?: 'sm' | 'md' }) {
   const dim = size === 'md' ? 'w-8 h-8' : 'w-6 h-6';
   const textSize = size === 'md' ? 'text-xs' : 'text-[10px]';
@@ -80,6 +84,7 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
   } = useQueue(cameraId);
 
   const [selectedDuration, setSelectedDuration] = useState(3600);
+  const [sessionTitle, setSessionTitle] = useState('');
   const [joining, setJoining] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
 
@@ -111,7 +116,8 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
   const handleJoin = async () => {
     setJoining(true);
     try {
-      await joinQueue(selectedDuration);
+      await joinQueue(selectedDuration, sessionTitle.trim() || undefined);
+      setSessionTitle('');
     } catch {
       // error set by hook
     } finally {
@@ -152,9 +158,14 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
                     <Avatar entry={active} size="md" />
-                    <span className="text-sm font-medium text-[#1A1A18]">
-                      {entryName(active)}
-                    </span>
+                    <div>
+                      <div className="text-sm font-medium text-[#1A1A18]">
+                        {entryTitle(active)}
+                      </div>
+                      <div className="text-xs text-[#8A8A82]">
+                        {entryName(active)} · {formatDurationLabel(active.requestedDuration)}
+                      </div>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-lg font-mono font-bold text-[#1A1A18] tabular-nums">
@@ -170,9 +181,6 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
                       </button>
                     )}
                   </div>
-                </div>
-                <div className="text-xs text-[#8A8A82] mt-1">
-                  {formatDurationLabel(active.requestedDuration)} slot
                 </div>
               </div>
             )}
@@ -239,16 +247,18 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <Avatar entry={active} size="md" />
-                  <span className="text-base font-medium text-[#1A1A18]">
-                    {entryName(active)}
-                  </span>
+                  <div>
+                    <div className="text-base font-medium text-[#1A1A18]">
+                      {entryTitle(active)}
+                    </div>
+                    <div className="text-xs text-[#8A8A82]">
+                      {entryName(active)} · {formatDurationLabel(active.requestedDuration)}
+                    </div>
+                  </div>
                 </div>
                 <span className="text-2xl font-mono font-bold text-[#1A1A18] tabular-nums">
                   {remainingSeconds != null ? formatCountdown(remainingSeconds) : '--:--'}
                 </span>
-              </div>
-              <div className="text-xs text-[#8A8A82] mt-1.5">
-                {formatDurationLabel(active.requestedDuration)} slot
               </div>
               {isActive && (
                 <button
@@ -333,7 +343,14 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
           {/* Join form */}
           {!isInQueue && !isActive && walletAddress && (
             <div>
-              <div className="text-xs font-semibold tracking-[0.1em] uppercase text-[#8A8A82] mb-2">How long do you need?</div>
+              <input
+                type="text"
+                value={sessionTitle}
+                onChange={(e) => setSessionTitle(e.target.value)}
+                placeholder="Name your session (optional)"
+                className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-[#E8E8E3] bg-white text-[#1A1A18] placeholder-[#8A8A82] outline-none focus:border-[#8A8A82] transition-colors mb-3"
+              />
+              <div className="text-xs font-semibold tracking-[0.1em] uppercase text-[#8A8A82] mb-2">How long?</div>
               <div className="flex gap-2 flex-wrap mb-3">
                 {availableDurations.map(opt => (
                   <button
@@ -341,7 +358,7 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
                     onClick={() => setSelectedDuration(opt.value)}
                     className={`px-3.5 py-2 text-sm rounded-lg border transition-colors ${
                       selectedDuration === opt.value
-                        ? 'bg-[#1A1A18] text-white border-[#1A1A18]'
+                        ? 'bg-[#1A1A18] text-[#FAFAF8] border-[#1A1A18]'
                         : 'bg-white text-[#5C5C56] border-[#E8E8E3] hover:border-[#8A8A82]'
                     }`}
                   >
@@ -352,7 +369,7 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
               <button
                 onClick={handleJoin}
                 disabled={joining}
-                className="w-full flex items-center justify-center gap-2 py-3 bg-[#1A1A18] text-white text-sm font-medium rounded-xl hover:bg-[#2a2a28] disabled:opacity-40 transition-colors"
+                className="w-full flex items-center justify-center gap-2 py-3 bg-[#1A1A18] text-[#FAFAF8] text-sm font-medium rounded-xl hover:bg-[#5C5C56] disabled:opacity-40 transition-colors"
               >
                 <UserPlus className="w-4 h-4" />
                 {joining ? 'Joining...' : 'Join Queue'}

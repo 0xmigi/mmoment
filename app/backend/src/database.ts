@@ -290,6 +290,11 @@ export async function initializeDatabase(dbPath: string = './mmoment.db'): Promi
           )
         `);
 
+        // Migration: add title column
+        try {
+          await runQuery(`ALTER TABLE camera_queue_entries ADD COLUMN title TEXT`);
+        } catch { /* already exists */ }
+
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_queue_camera_status ON camera_queue_entries(camera_id, status)`);
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_queue_camera_position ON camera_queue_entries(camera_id, position)`);
 
@@ -1864,6 +1869,7 @@ export interface QueueEntry {
   cameraId: string;
   walletAddress: string;
   displayName: string | null;
+  title: string | null;       // user-chosen session name
   requestedDuration: number;  // seconds
   position: number;
   status: 'waiting' | 'active' | 'completed' | 'left';
@@ -1935,7 +1941,7 @@ export async function getQueueEntries(cameraId: string, status?: string): Promis
     const params = status ? [cameraId, status] : [cameraId];
 
     db.all(
-      `SELECT id, camera_id, wallet_address, display_name, requested_duration,
+      `SELECT id, camera_id, wallet_address, display_name, title, requested_duration,
               position, status, joined_at, started_at, expires_at, completed_at
        FROM camera_queue_entries ${where} ORDER BY position ASC`,
       params,
@@ -1946,6 +1952,7 @@ export async function getQueueEntries(cameraId: string, status?: string): Promis
           cameraId: row.camera_id,
           walletAddress: row.wallet_address,
           displayName: row.display_name,
+          title: row.title || null,
           requestedDuration: row.requested_duration,
           position: row.position,
           status: row.status,
@@ -1964,7 +1971,7 @@ export async function getActiveQueueEntry(cameraId: string): Promise<QueueEntry 
     if (!db) { reject(new Error('Database not initialized')); return; }
 
     db.get(
-      `SELECT id, camera_id, wallet_address, display_name, requested_duration,
+      `SELECT id, camera_id, wallet_address, display_name, title, requested_duration,
               position, status, joined_at, started_at, expires_at, completed_at
        FROM camera_queue_entries WHERE camera_id = ? AND status = 'active' LIMIT 1`,
       [cameraId],
@@ -1976,6 +1983,7 @@ export async function getActiveQueueEntry(cameraId: string): Promise<QueueEntry 
           cameraId: row.camera_id,
           walletAddress: row.wallet_address,
           displayName: row.display_name,
+          title: row.title || null,
           requestedDuration: row.requested_duration,
           position: row.position,
           status: row.status,
@@ -1995,10 +2003,10 @@ export async function insertQueueEntry(entry: QueueEntry): Promise<void> {
 
     db.run(
       `INSERT INTO camera_queue_entries
-       (id, camera_id, wallet_address, display_name, requested_duration, position, status, joined_at, started_at, expires_at, completed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [entry.id, entry.cameraId, entry.walletAddress, entry.displayName, entry.requestedDuration,
-       entry.position, entry.status, entry.joinedAt, entry.startedAt, entry.expiresAt, entry.completedAt],
+       (id, camera_id, wallet_address, display_name, title, requested_duration, position, status, joined_at, started_at, expires_at, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [entry.id, entry.cameraId, entry.walletAddress, entry.displayName, entry.title,
+       entry.requestedDuration, entry.position, entry.status, entry.joinedAt, entry.startedAt, entry.expiresAt, entry.completedAt],
       (err: Error | null) => {
         if (err) { reject(err); } else { resolve(); }
       }
@@ -2083,7 +2091,7 @@ export async function getQueueEntryByWallet(cameraId: string, walletAddress: str
     if (!db) { reject(new Error('Database not initialized')); return; }
 
     db.get(
-      `SELECT id, camera_id, wallet_address, display_name, requested_duration,
+      `SELECT id, camera_id, wallet_address, display_name, title, requested_duration,
               position, status, joined_at, started_at, expires_at, completed_at
        FROM camera_queue_entries
        WHERE camera_id = ? AND wallet_address = ? AND status IN ('waiting', 'active')
@@ -2097,6 +2105,7 @@ export async function getQueueEntryByWallet(cameraId: string, walletAddress: str
           cameraId: row.camera_id,
           walletAddress: row.wallet_address,
           displayName: row.display_name,
+          title: row.title || null,
           requestedDuration: row.requested_duration,
           position: row.position,
           status: row.status,
@@ -2115,7 +2124,7 @@ export async function getAllActiveQueueEntries(): Promise<QueueEntry[]> {
     if (!db) { reject(new Error('Database not initialized')); return; }
 
     db.all(
-      `SELECT id, camera_id, wallet_address, display_name, requested_duration,
+      `SELECT id, camera_id, wallet_address, display_name, title, requested_duration,
               position, status, joined_at, started_at, expires_at, completed_at
        FROM camera_queue_entries WHERE status = 'active'`,
       (err: any, rows: any[]) => {
@@ -2125,6 +2134,7 @@ export async function getAllActiveQueueEntries(): Promise<QueueEntry[]> {
           cameraId: row.camera_id,
           walletAddress: row.wallet_address,
           displayName: row.display_name,
+          title: row.title || null,
           requestedDuration: row.requested_duration,
           position: row.position,
           status: row.status as 'active',

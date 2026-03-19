@@ -1050,13 +1050,13 @@ export function createApiRouter(): Router {
     try {
       const { cameraId } = req.params;
       const walletAddress = req.apiKey!.walletAddress;
-      const { duration, display_name } = req.body || {};
+      const { duration, display_name, title } = req.body || {};
 
       if (!duration || typeof duration !== 'number') {
         return res.status(400).json({ error: 'bad_request', message: 'duration (seconds) is required' });
       }
 
-      const entry = await joinQueue(cameraId, walletAddress, duration, display_name);
+      const entry = await joinQueue(cameraId, walletAddress, duration, display_name, title);
       res.json({ data: entry });
     } catch (err: any) {
       if (err.message === 'Already in queue' || err.message?.includes('Duration must be') || err.message === 'Queue is not enabled for this camera') {

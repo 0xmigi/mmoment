@@ -4,7 +4,7 @@ import { timelineService } from "../timeline/timeline-service";
 import { TimelineEvent } from "../timeline/timeline-types";
 import { walrusGalleryService } from "../storage/walrus/walrus-gallery-service";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
-import { Pencil, Check, X, Calendar, Link2 } from "lucide-react";
+import { Pencil, Check, X, Calendar } from "lucide-react";
 import { QueuePanel } from "./QueuePanel";
 
 interface CameraEventData {
@@ -16,7 +16,6 @@ interface CameraEventData {
   eventType?: string;
   eventLocation?: string;
   eventStatus?: string;
-  icalUrl?: string;
 }
 
 interface DesktopEventPanelProps {
@@ -83,9 +82,6 @@ export function DesktopEventPanel({ cameraId, isOwner }: DesktopEventPanelProps)
   const [editing, setEditing] = useState<"name" | "description" | null>(null);
   const [editValue, setEditValue] = useState("");
   const [stats, setStats] = useState({ checkIns: 0, photos: 0, activeNow: 0 });
-  const [showIcalInput, setShowIcalInput] = useState(false);
-  const [icalUrlInput, setIcalUrlInput] = useState("");
-  const [icalSyncing, setIcalSyncing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -105,11 +101,7 @@ export function DesktopEventPanel({ cameraId, isOwner }: DesktopEventPanelProps)
             eventType: data.event.eventType,
             eventLocation: data.event.eventLocation,
             eventStatus: data.event.eventStatus,
-            icalUrl: data.event.icalUrl,
           });
-          if (data.event.icalUrl) {
-            setIcalUrlInput(data.event.icalUrl);
-          }
         }
       } catch (err) {
         console.error("[DesktopEventPanel] Failed to fetch event:", err);
@@ -134,45 +126,12 @@ export function DesktopEventPanel({ cameraId, isOwner }: DesktopEventPanelProps)
           eventEndTime: updated.eventEndTime,
           eventType: updated.eventType,
           eventLocation: updated.eventLocation,
-          icalUrl: updated.icalUrl,
         }),
       });
     } catch (err) {
       console.error("[DesktopEventPanel] Failed to save event:", err);
     }
   }, [cameraId, eventData]);
-
-  // Sync from iCal URL
-  const syncIcal = useCallback(async () => {
-    if (!icalUrlInput.trim()) return;
-    setIcalSyncing(true);
-    try {
-      const res = await fetch(`${CONFIG.BACKEND_URL}/api/camera/${cameraId}/event`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ icalUrl: icalUrlInput.trim() }),
-      });
-      const data = await res.json();
-      if (data.success && data.event) {
-        setEventData({
-          eventName: data.event.eventName,
-          eventDescription: data.event.eventDescription,
-          eventDate: data.event.eventDate,
-          eventStartTime: data.event.eventStartTime,
-          eventEndTime: data.event.eventEndTime,
-          eventType: data.event.eventType,
-          eventLocation: data.event.eventLocation,
-          eventStatus: data.event.eventStatus,
-          icalUrl: data.event.icalUrl,
-        });
-      }
-      setShowIcalInput(false);
-    } catch (err) {
-      console.error("[DesktopEventPanel] Failed to sync iCal:", err);
-    } finally {
-      setIcalSyncing(false);
-    }
-  }, [cameraId, icalUrlInput]);
 
   // Compute stats from timeline events + gallery
   useEffect(() => {
@@ -387,56 +346,6 @@ export function DesktopEventPanel({ cameraId, isOwner }: DesktopEventPanelProps)
           </div>
         )}
 
-        {/* iCal sync indicator / input (owner only) */}
-        {isOwner && (
-          <div className="mt-4">
-            {eventData.icalUrl && !showIcalInput ? (
-              <button
-                onClick={() => setShowIcalInput(true)}
-                className="text-xs text-neutral-400 hover:text-neutral-600 flex items-center gap-1.5 transition-colors"
-              >
-                <Link2 className="w-3 h-3" />
-                Synced from calendar
-              </button>
-            ) : !showIcalInput ? (
-              <button
-                onClick={() => setShowIcalInput(true)}
-                className="text-xs text-neutral-400 hover:text-neutral-600 flex items-center gap-1.5 transition-colors"
-              >
-                <Calendar className="w-3 h-3" />
-                Sync from calendar
-              </button>
-            ) : (
-              <div className="flex items-center gap-2">
-                <input
-                  type="url"
-                  value={icalUrlInput}
-                  onChange={(e) => setIcalUrlInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") syncIcal();
-                    if (e.key === "Escape") setShowIcalInput(false);
-                  }}
-                  placeholder="Paste iCal/ICS URL..."
-                  className="flex-1 text-xs bg-neutral-50 border border-neutral-200 rounded px-2.5 py-1.5 outline-none focus:border-neutral-400 text-neutral-700"
-                  autoFocus
-                />
-                <button
-                  onClick={syncIcal}
-                  disabled={icalSyncing || !icalUrlInput.trim()}
-                  className="text-xs bg-neutral-900 text-white px-3 py-1.5 rounded hover:bg-neutral-800 disabled:opacity-40 transition-colors"
-                >
-                  {icalSyncing ? "Syncing..." : "Sync"}
-                </button>
-                <button
-                  onClick={() => setShowIcalInput(false)}
-                  className="p-1 hover:bg-gray-100 rounded"
-                >
-                  <X className="w-3.5 h-3.5 text-neutral-400" />
-                </button>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Queue — display only on desktop/TV */}

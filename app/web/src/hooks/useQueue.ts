@@ -20,6 +20,7 @@ export interface QueueEntry {
   walletAddress: string;
   displayName: string | null;
   profileImage: string | null;
+  title: string | null;
   requestedDuration: number;
   position: number;
   status: 'waiting' | 'active' | 'completed' | 'left';
@@ -150,13 +151,13 @@ export function useQueue(cameraId: string | null) {
   const remainingSeconds = queueState?.active?.remainingSeconds ?? null;
 
   // Actions
-  const joinQueue = useCallback(async (duration: number, displayName?: string) => {
+  const joinQueue = useCallback(async (duration: number, title?: string) => {
     if (!cameraId || !walletAddress) return;
     try {
       const res = await fetch(`${CONFIG.BACKEND_URL}/api/camera/${cameraId}/queue/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet_address: walletAddress, duration, display_name: displayName }),
+        body: JSON.stringify({ wallet_address: walletAddress, duration, title: title || undefined }),
       });
       const data = await res.json();
       if (!data.success) {
