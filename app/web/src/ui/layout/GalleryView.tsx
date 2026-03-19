@@ -29,7 +29,7 @@ export function GalleryView() {
         <h2 className="text-xl font-semibold mb-4">Gallery</h2>
 
         {/* Filters */}
-        <div className="flex items-center gap-2 mb-6">
+        <div className="flex items-center gap-2 mb-6 overflow-x-auto -mx-4 px-4 scrollbar-hide">
           {/* Camera filter - only show if camera is connected */}
           {connectedCameraId && (
             <button
