@@ -6,6 +6,7 @@ import { walrusGalleryService } from "../storage/walrus/walrus-gallery-service";
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { Pencil, Check, X, Calendar } from "lucide-react";
 import { QueuePanel } from "./QueuePanel";
+import { useQueue } from "../hooks/useQueue";
 
 interface CameraEventData {
   eventName?: string;
@@ -76,6 +77,16 @@ function StatusBadge({ status }: { status?: string }) {
   );
 }
 
+function formatCountdown(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function truncateAddress(address: string): string {
+  return `${address.slice(0, 4)}...${address.slice(-4)}`;
+}
+
 export function DesktopEventPanel({ cameraId, isOwner }: DesktopEventPanelProps) {
   const { primaryWallet } = useDynamicContext();
   const [eventData, setEventData] = useState<CameraEventData>({});
@@ -84,6 +95,11 @@ export function DesktopEventPanel({ cameraId, isOwner }: DesktopEventPanelProps)
   const [stats, setStats] = useState({ checkIns: 0, photos: 0, activeNow: 0 });
   const inputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { queueState, remainingSeconds } = useQueue(cameraId);
+
+  const activeSlot = queueState?.active || null;
+  const activeTitle = activeSlot?.title || (activeSlot ? `${activeSlot.displayName || truncateAddress(activeSlot.walletAddress)}'s session` : null);
+  const hasActiveSession = !!activeSlot;
 
   // Fetch event data from backend
   useEffect(() => {
@@ -255,95 +271,122 @@ export function DesktopEventPanel({ cameraId, isOwner }: DesktopEventPanelProps)
           {hasEventTimes && <StatusBadge status={eventData.eventStatus} />}
         </div>
 
-        {/* Event Name */}
-        {editing === "name" ? (
-          <div className="flex items-center gap-2 mb-2">
-            <input
-              ref={inputRef}
-              type="text"
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Event name"
-              className="text-4xl lg:text-5xl xl:text-6xl font-bold tracking-tight bg-transparent border-b-2 border-neutral-900 outline-none w-full text-neutral-900"
-            />
-            <button onClick={confirmEdit} className="p-1 hover:bg-gray-100 rounded">
-              <Check className="w-5 h-5" />
-            </button>
-            <button onClick={cancelEdit} className="p-1 hover:bg-gray-100 rounded">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        ) : (
-          <div
-            className={`group mb-2 ${isOwner ? "cursor-pointer" : ""}`}
-            onClick={() => startEdit("name")}
-          >
-            <h1 className="text-4xl lg:text-5xl xl:text-6xl font-bold tracking-tight text-neutral-900 leading-[1.1]">
-              {eventData.eventName || (
-                <span className="text-gray-300">
-                  {isOwner ? "Add event name" : "Live Camera"}
-                </span>
-              )}
-              {isOwner && (
-                <Pencil className="w-4 h-4 inline-block ml-3 opacity-0 group-hover:opacity-40 transition-opacity -translate-y-1" />
-              )}
+        {/* Event Name — active session takes over when present */}
+        {hasActiveSession ? (
+          <>
+            <h1 className="text-4xl lg:text-5xl xl:text-6xl font-bold tracking-tight text-[#1A1A18] leading-[1.1] mb-2">
+              {activeTitle}
             </h1>
-          </div>
-        )}
-
-        {/* Event Description / Date */}
-        {editing === "description" ? (
-          <div className="flex items-start gap-2 mt-1">
-            <textarea
-              ref={textareaRef}
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Event description"
-              rows={2}
-              className="text-base lg:text-lg text-neutral-400 bg-transparent border-b border-neutral-400 outline-none w-full resize-none"
-            />
-            <button onClick={confirmEdit} className="p-1 hover:bg-gray-100 rounded mt-1">
-              <Check className="w-4 h-4" />
-            </button>
-            <button onClick={cancelEdit} className="p-1 hover:bg-gray-100 rounded mt-1">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+            <div className="flex items-center gap-3 mt-1">
+              {activeSlot!.profileImage ? (
+                <img src={activeSlot!.profileImage} alt="" className="w-6 h-6 rounded-full object-cover" />
+              ) : (
+                <div className="w-6 h-6 rounded-full bg-[#E8E8E3] flex items-center justify-center">
+                  <span className="text-[10px] font-medium text-[#5C5C56]">
+                    {(activeSlot!.displayName?.[0] || activeSlot!.walletAddress[0]).toUpperCase()}
+                  </span>
+                </div>
+              )}
+              <span className="text-base text-[#5C5C56]">
+                {activeSlot!.displayName || truncateAddress(activeSlot!.walletAddress)}
+              </span>
+              <span className="text-base text-[#8A8A82]">·</span>
+              <span className="text-base font-mono font-bold text-[#1A1A18] tabular-nums">
+                {remainingSeconds != null ? formatCountdown(remainingSeconds) : '--:--'}
+              </span>
+              <span className="text-sm text-[#8A8A82]">remaining</span>
+            </div>
+          </>
         ) : (
-          <div
-            className={`group mt-1 ${isOwner ? "cursor-pointer" : ""}`}
-            onClick={() => startEdit("description")}
-          >
-            <p className="text-base lg:text-lg text-neutral-400">
-              {eventData.eventDescription || (
-                <span className="text-gray-300">
-                  {isOwner ? "Add description" : ""}
-                </span>
-              )}
-              {isOwner && !eventData.eventDescription && (
-                <Pencil className="w-3.5 h-3.5 inline-block ml-2 opacity-0 group-hover:opacity-40 transition-opacity" />
-              )}
-            </p>
-          </div>
-        )}
+          <>
+            {editing === "name" ? (
+              <div className="flex items-center gap-2 mb-2">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Event name"
+                  className="text-4xl lg:text-5xl xl:text-6xl font-bold tracking-tight bg-transparent border-b-2 border-[#1A1A18] outline-none w-full text-[#1A1A18]"
+                />
+                <button onClick={confirmEdit} className="p-1 hover:bg-[#F3F3EF] rounded">
+                  <Check className="w-5 h-5" />
+                </button>
+                <button onClick={cancelEdit} className="p-1 hover:bg-[#F3F3EF] rounded">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            ) : (
+              <div
+                className={`group mb-2 ${isOwner ? "cursor-pointer" : ""}`}
+                onClick={() => startEdit("name")}
+              >
+                <h1 className="text-4xl lg:text-5xl xl:text-6xl font-bold tracking-tight text-[#1A1A18] leading-[1.1]">
+                  {eventData.eventName || (
+                    <span className="text-[#E8E8E3]">
+                      {isOwner ? "Add event name" : "Live Camera"}
+                    </span>
+                  )}
+                  {isOwner && (
+                    <Pencil className="w-4 h-4 inline-block ml-3 opacity-0 group-hover:opacity-40 transition-opacity -translate-y-1" />
+                  )}
+                </h1>
+              </div>
+            )}
 
-        {/* Event time + location */}
-        {(timeStr || eventData.eventLocation) && (
-          <div className="mt-3 space-y-1">
-            {timeStr && (
-              <p className="text-sm text-neutral-500 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5" />
-                {timeStr}
-              </p>
+            {editing === "description" ? (
+              <div className="flex items-start gap-2 mt-1">
+                <textarea
+                  ref={textareaRef}
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Event description"
+                  rows={2}
+                  className="text-base lg:text-lg text-[#8A8A82] bg-transparent border-b border-[#8A8A82] outline-none w-full resize-none"
+                />
+                <button onClick={confirmEdit} className="p-1 hover:bg-[#F3F3EF] rounded mt-1">
+                  <Check className="w-4 h-4" />
+                </button>
+                <button onClick={cancelEdit} className="p-1 hover:bg-[#F3F3EF] rounded mt-1">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <div
+                className={`group mt-1 ${isOwner ? "cursor-pointer" : ""}`}
+                onClick={() => startEdit("description")}
+              >
+                <p className="text-base lg:text-lg text-[#8A8A82]">
+                  {eventData.eventDescription || (
+                    <span className="text-[#E8E8E3]">
+                      {isOwner ? "Add description" : ""}
+                    </span>
+                  )}
+                  {isOwner && !eventData.eventDescription && (
+                    <Pencil className="w-3.5 h-3.5 inline-block ml-2 opacity-0 group-hover:opacity-40 transition-opacity" />
+                  )}
+                </p>
+              </div>
             )}
-            {eventData.eventLocation && (
-              <p className="text-sm text-neutral-400">
-                {eventData.eventLocation}
-              </p>
+
+            {(timeStr || eventData.eventLocation) && (
+              <div className="mt-3 space-y-1">
+                {timeStr && (
+                  <p className="text-sm text-[#5C5C56] flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5" />
+                    {timeStr}
+                  </p>
+                )}
+                {eventData.eventLocation && (
+                  <p className="text-sm text-[#8A8A82]">
+                    {eventData.eventLocation}
+                  </p>
+                )}
+              </div>
             )}
-          </div>
+          </>
         )}
 
       </div>

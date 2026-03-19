@@ -153,38 +153,7 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
 
         {config.enabled && (
           <>
-            {active && (
-              <div className="bg-[#F3F3EF] rounded-lg p-3 mb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <Avatar entry={active} size="md" />
-                    <div>
-                      <div className="text-sm font-medium text-[#1A1A18]">
-                        {entryTitle(active)}
-                      </div>
-                      <div className="text-xs text-[#8A8A82]">
-                        {entryName(active)} · {formatDurationLabel(active.requestedDuration)}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg font-mono font-bold text-[#1A1A18] tabular-nums">
-                      {remainingSeconds != null ? formatCountdown(remainingSeconds) : '--:--'}
-                    </span>
-                    {isOwner && (
-                      <button
-                        onClick={skipCurrent}
-                        className="p-1 hover:bg-[#E8E8E3] rounded transition-colors"
-                        title="Skip to next"
-                      >
-                        <SkipForward className="w-3.5 h-3.5 text-[#8A8A82]" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
+            {/* Only show waiting entries — active slot is in the event area */}
             {queue.length > 0 && (
               <div className="space-y-1 mb-2">
                 {queue.map((entry, idx) => (
@@ -196,7 +165,7 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
                       <span className="text-xs text-[#8A8A82] w-4 text-right tabular-nums">{idx + 1}</span>
                       <Avatar entry={entry} />
                       <span className="text-sm text-[#5C5C56]">
-                        {entryName(entry)}
+                        {entry.title || entryName(entry)}
                       </span>
                     </div>
                     <span className="text-xs text-[#8A8A82]">
@@ -207,7 +176,7 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
               </div>
             )}
 
-            {isEmpty && (
+            {queue.length === 0 && !active && (
               <div className="text-sm text-[#8A8A82]">
                 No one in line
               </div>
