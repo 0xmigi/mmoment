@@ -1,9 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { CONFIG } from "../core/config";
-import { timelineService } from "../timeline/timeline-service";
-import { TimelineEvent } from "../timeline/timeline-types";
-import { walrusGalleryService } from "../storage/walrus/walrus-gallery-service";
-import { useDynamicContext } from "@dynamic-labs/sdk-react-core";
 import { Pencil, Check, X, Calendar } from "lucide-react";
 import { QueuePanel } from "./QueuePanel";
 import { useQueue } from "../hooks/useQueue";
@@ -88,7 +84,6 @@ function truncateAddress(address: string): string {
 }
 
 export function DesktopEventPanel({ cameraId, isOwner }: DesktopEventPanelProps) {
-  const { primaryWallet } = useDynamicContext();
   const [eventData, setEventData] = useState<CameraEventData>({});
   const [editing, setEditing] = useState<"name" | "description" | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -101,29 +96,37 @@ export function DesktopEventPanel({ cameraId, isOwner }: DesktopEventPanelProps)
   const activeTitle = activeSlot?.title || (activeSlot ? `${activeSlot.displayName || truncateAddress(activeSlot.walletAddress)}'s session` : null);
   const hasActiveSession = !!activeSlot;
 
-  // Fetch event data from backend
+  // Fetch event data + stats from backend
   useEffect(() => {
     const fetchEvent = async () => {
       try {
         const res = await fetch(`${CONFIG.BACKEND_URL}/api/camera/${cameraId}/event`);
         const data = await res.json();
-        if (data.success && data.event) {
-          setEventData({
-            eventName: data.event.eventName,
-            eventDescription: data.event.eventDescription,
-            eventDate: data.event.eventDate,
-            eventStartTime: data.event.eventStartTime,
-            eventEndTime: data.event.eventEndTime,
-            eventType: data.event.eventType,
-            eventLocation: data.event.eventLocation,
-            eventStatus: data.event.eventStatus,
-          });
+        if (data.success) {
+          if (data.event) {
+            setEventData({
+              eventName: data.event.eventName,
+              eventDescription: data.event.eventDescription,
+              eventDate: data.event.eventDate,
+              eventStartTime: data.event.eventStartTime,
+              eventEndTime: data.event.eventEndTime,
+              eventType: data.event.eventType,
+              eventLocation: data.event.eventLocation,
+              eventStatus: data.event.eventStatus,
+            });
+          }
+          if (data.stats) {
+            setStats(data.stats);
+          }
         }
       } catch (err) {
         console.error("[DesktopEventPanel] Failed to fetch event:", err);
       }
     };
     fetchEvent();
+    // Poll every 30s to keep stats fresh
+    const interval = setInterval(fetchEvent, 30000);
+    return () => clearInterval(interval);
   }, [cameraId]);
 
   // Save event data to backend
@@ -149,69 +152,7 @@ export function DesktopEventPanel({ cameraId, isOwner }: DesktopEventPanelProps)
     }
   }, [cameraId, eventData]);
 
-  // Compute stats from timeline events + gallery
-  useEffect(() => {
-    const updateStats = () => {
-      const { events } = timelineService.getState();
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      const todayMs = todayStart.getTime();
-
-      const checkIns = events.filter(
-        (e: TimelineEvent) => e.type === "check_in" && e.timestamp >= todayMs
-      ).length;
-
-      const photos = events.filter(
-        (e: TimelineEvent) =>
-          (e.type === "photo_captured" || e.type === "video_recorded") &&
-          e.timestamp >= todayMs
-      ).length;
-
-      // Active = unique users who checked in but haven't checked out
-      const checkedInUsers = new Set<string>();
-      const checkedOutUsers = new Set<string>();
-      const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp);
-      for (const e of sorted) {
-        if (e.type === "check_in") {
-          checkedInUsers.add(e.user.address);
-          checkedOutUsers.delete(e.user.address);
-        } else if (e.type === "check_out" || e.type === "auto_check_out") {
-          checkedOutUsers.add(e.user.address);
-          checkedInUsers.delete(e.user.address);
-        }
-      }
-
-      setStats({
-        checkIns,
-        photos,
-        activeNow: checkedInUsers.size,
-      });
-    };
-
-    updateStats();
-    const unsub = timelineService.subscribe(() => updateStats());
-    return () => unsub();
-  }, []);
-
-  // Also try to get photo count from gallery
-  useEffect(() => {
-    const fetchGalleryCount = async () => {
-      if (!primaryWallet?.address) return;
-      try {
-        const files = await walrusGalleryService.getUserFiles(primaryWallet.address);
-        const cameraFiles = files.filter((f) => f.cameraId === cameraId);
-        if (cameraFiles.length > 0) {
-          setStats((prev) => ({
-            ...prev,
-            photos: Math.max(prev.photos, cameraFiles.length),
-          }));
-        }
-      } catch {
-        // Gallery stats are supplementary
-      }
-    };
-    fetchGalleryCount();
-  }, [primaryWallet?.address, cameraId]);
+  // Stats are now fetched from backend in the event fetch above
 
   // Focus input when editing starts
   useEffect(() => {

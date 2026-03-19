@@ -79,7 +79,7 @@ import {
   getActiveCheckIns,
 } from './database';
 import { fetchAndParseIcal } from './ical-parser';
-import { initCameraState, onWalletCheckIn, onWalletCheckOut, wasApiCapture } from './camera-state';
+import { initCameraState, onWalletCheckIn, onWalletCheckOut, wasApiCapture, getRecentTimelineEvents, getCheckedInUsers } from './camera-state';
 import { initQueueManager, getQueueState, joinQueue, leaveQueue, skipCurrent, updateConfig as updateQueueConfig } from './queue-manager';
 
 // Import Sui storage service for Walrus blob ownership
@@ -3862,7 +3862,24 @@ app.get("/api/camera/:cameraId/event", async (req, res) => {
   try {
     const { cameraId } = req.params;
     const event = await getCameraEvent(cameraId);
-    res.json({ success: true, event: event || null });
+
+    // Compute accurate stats from in-memory timeline
+    const recentEvents = getRecentTimelineEvents(cameraId, 500);
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayMs = todayStart.getTime();
+    const todayEvents = recentEvents.filter(e => e.timestamp >= todayMs);
+    const checkedIn = getCheckedInUsers(cameraId);
+
+    res.json({
+      success: true,
+      event: event || null,
+      stats: {
+        checkIns: todayEvents.filter(e => e.type === 'check_in').length,
+        photos: todayEvents.filter(e => e.type === 'photo_captured' || e.type === 'video_recorded').length,
+        activeNow: checkedIn.length,
+      },
+    });
   } catch (error) {
     console.error('Failed to get camera event:', error);
     res.status(500).json({ success: false, error: 'Failed to get camera event' });
