@@ -3,6 +3,17 @@ import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { CONFIG } from '../core/config';
 import { timelineService } from '../timeline/timeline-service';
 
+function sendNotification(title: string, body: string) {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'granted') {
+    new Notification(title, { body, icon: '/logo.png' });
+  } else if (Notification.permission !== 'denied') {
+    Notification.requestPermission().then(p => {
+      if (p === 'granted') new Notification(title, { body, icon: '/logo.png' });
+    });
+  }
+}
+
 export interface QueueEntry {
   id: string;
   cameraId: string;
@@ -38,6 +49,7 @@ export function useQueue(cameraId: string | null) {
   const [error, setError] = useState<string | null>(null);
   const { primaryWallet } = useDynamicContext();
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
+  const notifiedAlmostUpRef = useRef(false);
 
   const walletAddress = primaryWallet?.address || null;
 
@@ -74,12 +86,23 @@ export function useQueue(cameraId: string | null) {
     if (!cameraId) return;
 
     const unsubscribe = timelineService.onSocketEvent('queueUpdate', (state: QueueState) => {
-      setQueueState(state);
+      // Notify if my slot just became active
+      if (walletAddress && state.active?.walletAddress === walletAddress) {
+        setQueueState(prev => {
+          const wasActive = prev?.active?.walletAddress === walletAddress;
+          if (!wasActive) {
+            sendNotification("It's your turn!", 'Your queue slot is now active.');
+          }
+          return state;
+        });
+      } else {
+        setQueueState(state);
+      }
       setError(null);
     });
 
     return unsubscribe;
-  }, [cameraId]);
+  }, [cameraId, walletAddress]);
 
   // Local countdown timer for active slot
   useEffect(() => {
@@ -90,11 +113,20 @@ export function useQueue(cameraId: string | null) {
 
     if (!queueState?.active?.expiresAt) return;
 
+    notifiedAlmostUpRef.current = false;
+
     countdownRef.current = setInterval(() => {
       setQueueState(prev => {
         if (!prev?.active?.expiresAt) return prev;
         const remaining = Math.max(0, Math.round((prev.active.expiresAt! - Date.now()) / 1000));
         if (remaining === prev.active.remainingSeconds) return prev;
+
+        // Notify when 5 minutes left on my slot
+        if (walletAddress && prev.active.walletAddress === walletAddress && remaining <= 300 && remaining > 295 && !notifiedAlmostUpRef.current) {
+          notifiedAlmostUpRef.current = true;
+          sendNotification('5 minutes left', 'Your queue slot is almost up.');
+        }
+
         return {
           ...prev,
           active: { ...prev.active, remainingSeconds: remaining },

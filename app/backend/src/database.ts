@@ -1875,8 +1875,8 @@ export interface QueueEntry {
 
 const DEFAULT_QUEUE_CONFIG: Omit<QueueConfig, 'cameraId' | 'updatedAt'> = {
   enabled: true,
-  maxSlotDuration: 1800,
-  minSlotDuration: 60,
+  maxSlotDuration: 7200,   // 2 hours
+  minSlotDuration: 1800,   // 30 minutes
 };
 
 export async function getQueueConfig(cameraId: string): Promise<QueueConfig> {

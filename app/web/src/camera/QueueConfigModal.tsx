@@ -11,12 +11,11 @@ interface QueueConfigModalProps {
 }
 
 const DURATION_PRESETS = [
-  { label: '5 min', value: 300 },
-  { label: '10 min', value: 600 },
-  { label: '15 min', value: 900 },
   { label: '30 min', value: 1800 },
   { label: '1 hour', value: 3600 },
+  { label: '1.5 hours', value: 5400 },
   { label: '2 hours', value: 7200 },
+  { label: '3 hours', value: 10800 },
 ];
 
 export function QueueConfigModal({ isOpen, onClose, config, onSave }: QueueConfigModalProps) {

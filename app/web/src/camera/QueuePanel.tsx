@@ -11,11 +11,10 @@ interface QueuePanelProps {
 }
 
 const DURATION_OPTIONS = [
-  { label: '5 min', value: 300 },
-  { label: '10 min', value: 600 },
-  { label: '15 min', value: 900 },
   { label: '30 min', value: 1800 },
   { label: '1 hour', value: 3600 },
+  { label: '1.5 hours', value: 5400 },
+  { label: '2 hours', value: 7200 },
 ];
 
 function formatCountdown(seconds: number): string {
@@ -80,7 +79,7 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
     error,
   } = useQueue(cameraId);
 
-  const [selectedDuration, setSelectedDuration] = useState(600);
+  const [selectedDuration, setSelectedDuration] = useState(3600);
   const [joining, setJoining] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
 
