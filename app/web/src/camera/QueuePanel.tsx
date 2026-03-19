@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Clock, LogOut, Settings, SkipForward, UserPlus } from 'lucide-react';
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
-import { useQueue } from '../hooks/useQueue';
+import { useQueue, QueueEntry } from '../hooks/useQueue';
 import { QueueConfigModal } from './QueueConfigModal';
 
 interface QueuePanelProps {
@@ -34,6 +34,33 @@ function formatDurationLabel(seconds: number): string {
 
 function truncateAddress(address: string): string {
   return `${address.slice(0, 4)}...${address.slice(-4)}`;
+}
+
+function entryName(entry: QueueEntry): string {
+  return entry.displayName || truncateAddress(entry.walletAddress);
+}
+
+function Avatar({ entry, size = 'sm' }: { entry: QueueEntry; size?: 'sm' | 'md' }) {
+  const dim = size === 'md' ? 'w-8 h-8' : 'w-6 h-6';
+  const textSize = size === 'md' ? 'text-xs' : 'text-[10px]';
+
+  if (entry.profileImage) {
+    return (
+      <img
+        src={entry.profileImage}
+        alt=""
+        className={`${dim} rounded-full object-cover flex-shrink-0`}
+      />
+    );
+  }
+
+  // Fallback: initial circle
+  const initial = (entry.displayName?.[0] || entry.walletAddress[0]).toUpperCase();
+  return (
+    <div className={`${dim} rounded-full bg-[#E8E8E3] flex items-center justify-center flex-shrink-0`}>
+      <span className={`${textSize} font-medium text-[#5C5C56]`}>{initial}</span>
+    </div>
+  );
 }
 
 export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: QueuePanelProps) {
@@ -124,10 +151,10 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
             {active && (
               <div className="bg-[#F3F3EF] rounded-lg p-3 mb-3">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-[#2F7D3E] animate-pulse" />
+                  <div className="flex items-center gap-2.5">
+                    <Avatar entry={active} size="md" />
                     <span className="text-sm font-medium text-[#1A1A18]">
-                      {active.displayName || truncateAddress(active.walletAddress)}
+                      {entryName(active)}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -160,8 +187,9 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
                   >
                     <div className="flex items-center gap-2.5">
                       <span className="text-xs text-[#8A8A82] w-4 text-right tabular-nums">{idx + 1}</span>
+                      <Avatar entry={entry} />
                       <span className="text-sm text-[#5C5C56]">
-                        {entry.displayName || truncateAddress(entry.walletAddress)}
+                        {entryName(entry)}
                       </span>
                     </div>
                     <span className="text-xs text-[#8A8A82]">
@@ -208,12 +236,12 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
           {/* Active slot */}
           {active && (
             <div className="bg-[#F3F3EF] rounded-xl p-4 mb-4">
-              <div className="text-xs font-semibold tracking-[0.1em] uppercase text-[#8A8A82] mb-2">Now</div>
+              <div className="text-xs font-semibold tracking-[0.1em] uppercase text-[#8A8A82] mb-3">Now</div>
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-2.5 h-2.5 rounded-full bg-[#2F7D3E] animate-pulse" />
+                <div className="flex items-center gap-3">
+                  <Avatar entry={active} size="md" />
                   <span className="text-base font-medium text-[#1A1A18]">
-                    {active.displayName || truncateAddress(active.walletAddress)}
+                    {entryName(active)}
                   </span>
                 </div>
                 <span className="text-2xl font-mono font-bold text-[#1A1A18] tabular-nums">
@@ -255,8 +283,9 @@ export function QueuePanel({ cameraId, isOwner = false, displayOnly = false }: Q
                   >
                     <div className="flex items-center gap-3">
                       <span className="text-sm text-[#8A8A82] w-5 text-right tabular-nums">{idx + 1}</span>
+                      <Avatar entry={entry} />
                       <span className="text-sm font-medium text-[#1A1A18]">
-                        {entry.displayName || truncateAddress(entry.walletAddress)}
+                        {entryName(entry)}
                       </span>
                     </div>
                     <div className="flex items-center gap-2.5">

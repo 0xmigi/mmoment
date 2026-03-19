@@ -8,6 +8,7 @@ export interface QueueEntry {
   cameraId: string;
   walletAddress: string;
   displayName: string | null;
+  profileImage: string | null;
   requestedDuration: number;
   position: number;
   status: 'waiting' | 'active' | 'completed' | 'left';

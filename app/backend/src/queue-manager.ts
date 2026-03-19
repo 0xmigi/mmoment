@@ -13,6 +13,8 @@ import {
   reorderQueuePositions,
   getNextQueuePosition,
   getQueueEntryByWallet,
+  getUserProfile,
+  getUserProfiles,
   getAllActiveQueueEntries,
   QueueConfig,
   QueueEntry,
@@ -73,6 +75,17 @@ export async function joinQueue(
     throw new Error('Already in queue');
   }
 
+  // Resolve display name from user profile if not provided
+  let resolvedName = displayName || null;
+  if (!resolvedName) {
+    try {
+      const profile = await getUserProfile(walletAddress);
+      resolvedName = profile?.displayName || profile?.username || null;
+    } catch {
+      // Profile lookup is best-effort
+    }
+  }
+
   const position = await getNextQueuePosition(cameraId);
   const activeSlot = await getActiveQueueEntry(cameraId);
 
@@ -80,7 +93,7 @@ export async function joinQueue(
     id: randomUUID(),
     cameraId,
     walletAddress,
-    displayName: displayName || null,
+    displayName: resolvedName,
     requestedDuration: duration,
     position,
     status: 'waiting',
@@ -142,10 +155,31 @@ export async function getQueueState(cameraId: string): Promise<{
   const active = await getActiveQueueEntry(cameraId);
   const waiting = await getQueueEntries(cameraId, 'waiting');
 
-  let activeWithCountdown: (QueueEntry & { remainingSeconds: number }) | null = null;
+  // Batch-resolve display names from user profiles
+  const allEntries = [...(active ? [active] : []), ...waiting];
+  const wallets = allEntries.map(e => e.walletAddress);
+  let profiles = new Map<string, { displayName?: string; username?: string; profileImage?: string }>();
+  if (wallets.length > 0) {
+    try {
+      profiles = await getUserProfiles(wallets);
+    } catch {
+      // Best-effort
+    }
+  }
+
+  const enrichEntry = (entry: QueueEntry) => {
+    const profile = profiles.get(entry.walletAddress);
+    return {
+      ...entry,
+      displayName: entry.displayName || profile?.displayName || profile?.username || null,
+      profileImage: profile?.profileImage || null,
+    };
+  };
+
+  let activeWithCountdown: (QueueEntry & { remainingSeconds: number; profileImage: string | null }) | null = null;
   if (active && active.expiresAt) {
     activeWithCountdown = {
-      ...active,
+      ...enrichEntry(active),
       remainingSeconds: Math.max(0, Math.round((active.expiresAt - Date.now()) / 1000)),
     };
   }
@@ -157,7 +191,7 @@ export async function getQueueState(cameraId: string): Promise<{
       minSlotDuration: config.minSlotDuration,
     },
     active: activeWithCountdown,
-    queue: waiting,
+    queue: waiting.map(enrichEntry),
     totalWaiting: waiting.length,
   };
 }
