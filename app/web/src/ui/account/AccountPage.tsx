@@ -17,8 +17,10 @@ import {
   AlertCircle,
   Loader2,
   ChevronRight,
+  ChevronDown,
   Camera,
   Pencil,
+  Mail,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -50,6 +52,7 @@ export function AccountPage() {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editNameValue, setEditNameValue] = useState('');
   const [isSavingName, setIsSavingName] = useState(false);
+  const [showConnections, setShowConnections] = useState(false);
 
   // Get facial embedding status from blockchain
   const facialEmbeddingStatus = useFacialEmbeddingStatus();
@@ -128,88 +131,65 @@ export function AccountPage() {
   const isEmbeddedWallet =
     primaryWallet.connector?.name.toLowerCase() !== "phantom";
 
-  // Define identity items using displayProfile (never leaks email)
+  // Social connections
   const socials = displayProfile?.socials || {};
-  const identities = [
+  const socialConnections = [
     {
-      id: "google",
       label: "Google",
-      value: socials.google?.displayName || 'Connected',
+      detail: socials.google?.displayName || "Sign in with Google",
       connected: !!socials.google,
-      isPublic: false,
-      icon: <Globe className="w-3 h-3 mr-1" />,
+      icon: <Globe className="w-4 h-4" />,
     },
     {
-      id: "twitter",
       label: "X / Twitter",
-      value: socials.twitter?.username,
+      detail: socials.twitter?.username ? `@${socials.twitter.username}` : "Connect your X account",
       connected: !!socials.twitter,
-      isPublic: true,
-      icon: <Globe className="w-3 h-3 mr-1" />,
+      icon: <Globe className="w-4 h-4" />,
     },
     {
-      id: "farcaster",
       label: "Farcaster",
-      value: socials.farcaster?.username,
+      detail: socials.farcaster?.username || "Connect your Farcaster",
       connected: !!socials.farcaster,
-      isPublic: true,
-      icon: <Globe className="w-3 h-3 mr-1" />,
+      icon: <Globe className="w-4 h-4" />,
     },
     {
-      id: "email",
       label: "Email",
-      value: user?.email,
+      detail: user?.email || "No email configured",
       connected: !!user?.email,
-      isPublic: false,
-      icon: <Lock className="w-3 h-3 mr-1" />,
+      isPrivate: true,
+      icon: <Mail className="w-4 h-4" />,
     },
+  ];
+  const connectedCount = socialConnections.filter(s => s.connected).length;
+
+  // On-chain / account items — full display
+  const accountItems = [
     {
       id: "recognition",
       label: "Recognition Token",
-      value: facialEmbeddingStatus.hasEmbedding ? "Active" : "Not Enrolled",
-      connected: facialEmbeddingStatus.hasEmbedding,
-      isPublic: false,
-      isRecognition: true,
-      status: facialEmbeddingStatus,
-      icon: facialEmbeddingStatus.isLoading
-        ? <Loader2 className="w-3 h-3 mr-1 animate-spin text-primary" />
-        : facialEmbeddingStatus.hasEmbedding
-        ? <CheckCircle className="w-3 h-3 mr-1 text-green-500" />
-        : <AlertCircle className="w-3 h-3 mr-1 text-orange-500" />,
+      value: facialEmbeddingStatus.hasEmbedding ? "Active" : "Not enrolled",
+      active: facialEmbeddingStatus.hasEmbedding,
+      loading: facialEmbeddingStatus.isLoading,
+      onClick: () => setShowRecognitionModal(true),
     },
     {
       id: "wallet",
       label: "Solana Wallet",
-      value: primaryWallet.address,
-      shortValue: `${primaryWallet.address.slice(
-        0,
-        6
-      )}...${primaryWallet.address.slice(-4)}`,
-      connected: true,
-      isPublic: true,
-      isWallet: true,
-      icon: <Globe className="w-3 h-3 mr-1" />,
+      value: `${primaryWallet.address.slice(0, 6)}...${primaryWallet.address.slice(-4)}`,
+      active: true,
+      loading: false,
+      onClick: () => setShowWalletModal(true),
     },
     {
       id: "sessionKeychain",
       label: "Session Keychain",
       value: sessionChainStatus.hasSessionChain
         ? `${sessionChainStatus.sessionCount} key${sessionChainStatus.sessionCount !== 1 ? 's' : ''} stored`
-        : "Not set up",
-      connected: sessionChainStatus.hasSessionChain,
-      isPublic: false,
-      isSessionKeychain: true,
-      status: sessionChainStatus,
-      icon: sessionChainStatus.isLoading
-        ? <Loader2 className="w-3 h-3 mr-1 animate-spin text-primary" />
-        : sessionChainStatus.hasSessionChain
-        ? <CheckCircle className="w-3 h-3 mr-1 text-green-500" />
-        : <AlertCircle className="w-3 h-3 mr-1 text-orange-500" />,
+        : "Created on first check-in",
+      active: sessionChainStatus.hasSessionChain,
+      loading: sessionChainStatus.isLoading,
     },
-  ].filter(
-    (item) =>
-      item.connected || ["farcaster", "email", "twitter", "recognition", "sessionKeychain"].includes(item.id)
-  );
+  ];
 
   return (
     <div className="min-h-screen bg-white">
@@ -233,192 +213,212 @@ export function AccountPage() {
           </div>
         )}
 
-        {/* Identity Section */}
-        <div className="bg-neutral-100 rounded-xl p-4 sm:p-6 mb-6">
-          <div className="flex items-baseline justify-between mb-6">
-            <h2 className="text-lg font-medium">Identity</h2>
+        {/* Profile Section */}
+        <div className="bg-[#F3F3EF] rounded-xl p-4 sm:p-6 mb-4">
+          <div className="flex items-center">
+            {/* Profile Avatar */}
+            {profileImageUrl ? (
+              <img
+                src={profileImageUrl}
+                alt={displayName}
+                referrerPolicy="no-referrer"
+                className="w-14 h-14 rounded-full border-2 border-[#E8E8E3]"
+              />
+            ) : (
+              <div className="w-14 h-14 rounded-full bg-[#E8E8E3] flex items-center justify-center">
+                <User className="w-7 h-7 text-[#8A8A82]" />
+              </div>
+            )}
+
+            <div className="ml-4 flex-1">
+              {isEditingName ? (
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!editNameValue.trim() || !primaryWallet?.address) return;
+                    setIsSavingName(true);
+                    try {
+                      await profileService.saveProfile({
+                        walletAddress: primaryWallet.address,
+                        displayName: editNameValue.trim(),
+                      });
+                      displayProfile?.refresh();
+                      setIsEditingName(false);
+                      setStatusMessage({ type: 'success', message: 'Display name saved!' });
+                    } catch {
+                      setStatusMessage({ type: 'error', message: 'Failed to save name' });
+                    } finally {
+                      setIsSavingName(false);
+                    }
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <input
+                    type="text"
+                    value={editNameValue}
+                    onChange={(e) => setEditNameValue(e.target.value)}
+                    placeholder="Enter your name"
+                    autoFocus
+                    maxLength={50}
+                    className="flex-1 text-sm border border-[#E8E8E3] rounded-lg px-3 py-1.5 focus:outline-none focus:border-[#D97706] bg-white"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isSavingName || !editNameValue.trim()}
+                    className="text-xs bg-[#1A1A18] text-white px-3 py-1.5 rounded-lg disabled:opacity-50"
+                  >
+                    {isSavingName ? '...' : 'Save'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingName(false)}
+                    className="text-xs text-[#8A8A82] px-2 py-1.5"
+                  >
+                    Cancel
+                  </button>
+                </form>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <div>
+                    <div className="font-medium text-[#1A1A18]">{displayName}</div>
+                    <div className="text-sm text-[#8A8A82]">
+                      {primarySocialProvider || "Wallet Address"}
+                    </div>
+                  </div>
+                  {!displayProfile?.hasSocialAuth && (
+                    <button
+                      onClick={() => {
+                        setEditNameValue(displayName.includes('...') ? '' : displayName);
+                        setIsEditingName(true);
+                      }}
+                      className="p-1 text-[#8A8A82] hover:text-[#5C5C56] transition-colors"
+                      title="Edit display name"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Connections — collapsible */}
+          <div className="mt-4 pt-4 border-t border-[#E8E8E3]">
+            <button
+              onClick={() => setShowConnections(!showConnections)}
+              className="flex items-center justify-between w-full text-left"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-[#1A1A18]">Sign-in methods</span>
+                <span className="text-xs text-[#8A8A82]">
+                  {connectedCount} connected
+                </span>
+              </div>
+              {showConnections ? (
+                <ChevronDown className="w-4 h-4 text-[#8A8A82]" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-[#8A8A82]" />
+              )}
+            </button>
+
+            {showConnections && (
+              <div className="mt-3 space-y-1">
+                {socialConnections.map((s) => (
+                  <div
+                    key={s.label}
+                    className="flex items-center justify-between py-2.5 px-3 -mx-3 rounded-lg"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`${s.connected ? 'text-[#5C5C56]' : 'text-[#8A8A82]'}`}>
+                        {s.icon}
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium text-[#1A1A18]">{s.label}</div>
+                        <div className="text-xs text-[#8A8A82]">
+                          {s.connected ? s.detail : s.detail}
+                          {s.connected && s.isPrivate && (
+                            <span className="ml-1.5">· Private</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <span className={`text-xs font-medium ${
+                      s.connected ? 'text-[#2F7D3E]' : 'text-[#8A8A82]'
+                    }`}>
+                      {s.connected ? 'Connected' : 'Not connected'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* On-chain / Account Section */}
+        <div className="bg-[#F3F3EF] rounded-xl p-4 sm:p-6 mb-4">
+          <div className="flex items-baseline justify-between mb-4">
+            <h2 className="text-xs font-semibold tracking-[0.15em] uppercase text-[#8A8A82]">Account</h2>
             {solBalance !== null && (
-              <div className="text-sm font-medium text-neutral-600">
+              <div className="text-sm font-medium text-[#5C5C56]">
                 {solBalance.toFixed(2)} SOL
-                <span className="text-xs text-neutral-400 ml-2">
+                <span className="text-xs text-[#8A8A82] ml-1.5">
                   ${(solBalance * 150).toFixed(0)}
                 </span>
               </div>
             )}
           </div>
 
-          {/* Profile Container */}
-          <div className="mb-6">
-            <div className="flex items-center mb-6">
-              {/* Profile Avatar */}
-              {profileImageUrl ? (
-                <img
-                  src={profileImageUrl}
-                  alt={displayName}
-                  referrerPolicy="no-referrer"
-                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-neutral-200"
-                />
-              ) : (
-                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-neutral-200 flex items-center justify-center">
-                  <User className="w-8 h-8 sm:w-10 sm:h-10 text-neutral-400" />
-                </div>
-              )}
-
-              {/* Profile name — editable if no social provider set it */}
-              <div className="ml-4 flex-1">
-                {isEditingName ? (
-                  <form
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      if (!editNameValue.trim() || !primaryWallet?.address) return;
-                      setIsSavingName(true);
-                      try {
-                        await profileService.saveProfile({
-                          walletAddress: primaryWallet.address,
-                          displayName: editNameValue.trim(),
-                        });
-                        displayProfile?.refresh();
-                        setIsEditingName(false);
-                        setStatusMessage({ type: 'success', message: 'Display name saved!' });
-                      } catch {
-                        setStatusMessage({ type: 'error', message: 'Failed to save name' });
-                      } finally {
-                        setIsSavingName(false);
-                      }
-                    }}
-                    className="flex items-center gap-2"
-                  >
-                    <input
-                      type="text"
-                      value={editNameValue}
-                      onChange={(e) => setEditNameValue(e.target.value)}
-                      placeholder="Enter your name"
-                      autoFocus
-                      maxLength={50}
-                      className="flex-1 text-sm border border-neutral-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
-                    />
-                    <button
-                      type="submit"
-                      disabled={isSavingName || !editNameValue.trim()}
-                      className="text-xs bg-primary text-white px-3 py-1.5 rounded-lg disabled:opacity-50"
-                    >
-                      {isSavingName ? '...' : 'Save'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingName(false)}
-                      className="text-xs text-neutral-500 px-2 py-1.5"
-                    >
-                      Cancel
-                    </button>
-                  </form>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <div>
-                      <div className="font-medium text-neutral-900">{displayName}</div>
-                      <div className="text-sm text-neutral-600">
-                        {primarySocialProvider || "Wallet Address"}
-                      </div>
-                    </div>
-                    {!displayProfile?.hasSocialAuth && (
-                      <button
-                        onClick={() => {
-                          setEditNameValue(displayName.includes('...') ? '' : displayName);
-                          setIsEditingName(true);
-                        }}
-                        className="p-1 text-neutral-400 hover:text-neutral-600 transition-colors"
-                        title="Edit display name"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
+          <div className="space-y-1">
+            {accountItems.map((item) => (
+              <div
+                key={item.id}
+                className={`flex items-center justify-between py-3 px-3 -mx-3 rounded-lg ${
+                  item.onClick ? 'cursor-pointer hover:bg-white/60 transition-colors' : ''
+                }`}
+                onClick={item.onClick}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-5 flex justify-center">
+                    {item.loading ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#8A8A82]" />
+                    ) : item.active ? (
+                      <CheckCircle className="w-3.5 h-3.5 text-[#2F7D3E]" />
+                    ) : (
+                      <AlertCircle className="w-3.5 h-3.5 text-[#D97706]" />
                     )}
                   </div>
+                  <div>
+                    <div className="text-sm font-medium text-[#1A1A18]">{item.label}</div>
+                    <div className={`text-xs mt-0.5 ${
+                      item.active ? 'text-[#2F7D3E]' : 'text-[#8A8A82]'
+                    }`}>
+                      {item.id === "wallet" ? (
+                        <span className="font-mono">{item.value}</span>
+                      ) : (
+                        item.value
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {item.onClick && (
+                  <ChevronRight className="w-4 h-4 text-[#8A8A82]" />
                 )}
               </div>
-            </div>
-
-            {/* Identity List */}
-            <div className="space-y-3">
-              {identities.map((identity, idx) => {
-                const isClickable = identity.isWallet || identity.isRecognition;
-                const handleClick = () => {
-                  if (identity.isWallet) {
-                    setShowWalletModal(true);
-                  } else if (identity.isRecognition) {
-                    setShowRecognitionModal(true);
-                  }
-                };
-
-                return (
-                  <div
-                    key={idx}
-                    className={`flex justify-between items-center py-3 px-3 -mx-3 rounded-lg ${
-                      isClickable
-                        ? 'cursor-pointer hover:bg-white/60 transition-colors'
-                        : ''
-                    }`}
-                    onClick={isClickable ? handleClick : undefined}
-                  >
-                    {/* Identity Info */}
-                    <div className="flex items-center flex-1">
-                      <div className="flex items-center justify-center w-8 h-8 mr-3">
-                        {identity.icon}
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-medium text-neutral-900 text-sm">
-                          {identity.label}
-                        </div>
-                        <div className="text-xs text-neutral-400 mt-0.5">
-                          {identity.connected ? (
-                            identity.isWallet ? (
-                              <span className="font-mono">{identity.shortValue}</span>
-                            ) : identity.isRecognition ? (
-                              <span className={identity.status.hasEmbedding ? 'text-green-600' : 'text-orange-600'}>
-                                {identity.value}
-                              </span>
-                            ) : identity.isSessionKeychain ? (
-                              <span className={identity.status.hasSessionChain ? 'text-green-600' : 'text-orange-600'}>
-                                {identity.value}
-                              </span>
-                            ) : (
-                              <>
-                                {identity.id === "twitter" && "@"}
-                                {identity.value}
-                                {identity.isPublic && <span className="ml-2 text-neutral-400">• Public</span>}
-                                {!identity.isPublic && identity.value && <span className="ml-2 text-neutral-400">• Private</span>}
-                              </>
-                            )
-                          ) : identity.isSessionKeychain ? (
-                            <span className="text-neutral-400">Created on first check-in</span>
-                          ) : (
-                            <span className="text-neutral-400">Not connected</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Action Indicator */}
-                    {isClickable && (
-                      <ChevronRight className="w-4 h-4 text-neutral-400 ml-2" />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            ))}
           </div>
         </div>
 
         {/* Walrus Storage Section */}
         <WalrusStorageSection />
 
-        {/* Wallet Backup Section - responsive padding */}
+        {/* Wallet Backup Section */}
         {isEmbeddedWallet && (
-          <div className="bg-neutral-100 rounded-xl px-4 py-4 mb-4">
+          <div className="bg-[#F3F3EF] rounded-xl px-4 py-4 mb-4">
             <div className="text-sm">
-              <div className="font-medium mb-3">Wallet Backup</div>
+              <div className="font-medium text-[#1A1A18] mb-3">Wallet Backup</div>
               <button
                 onClick={() => setShowBackupOptions(!showBackupOptions)}
-                className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-neutral-600 text-white rounded-lg text-sm font-medium hover:bg-neutral-600/90 transition-colors"
+                className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-[#1A1A18] text-[#FAFAF8] rounded-lg text-sm font-medium hover:bg-[#1A1A18]/90 transition-colors"
               >
                 <KeyRound className="w-4 h-4" />
                 Back up Wallet
@@ -428,14 +428,14 @@ export function AccountPage() {
                   <button
                     onClick={() => handleExportWallet("recoveryPhrase")}
                     disabled={isExporting}
-                    className="w-full px-3 sm:px-4 py-2 bg-white border border-neutral-200 text-neutral-600 rounded-lg text-sm font-medium hover:bg-neutral-100 transition-colors disabled:opacity-50"
+                    className="w-full px-3 sm:px-4 py-2 bg-white border border-[#E8E8E3] text-[#5C5C56] rounded-lg text-sm font-medium hover:bg-[#F3F3EF] transition-colors disabled:opacity-50"
                   >
                     Show Recovery Phrase
                   </button>
                   <button
                     onClick={() => handleExportWallet("privateKey")}
                     disabled={isExporting}
-                    className="w-full px-3 sm:px-4 py-2 bg-white border border-neutral-200 text-neutral-600 rounded-lg text-sm font-medium hover:bg-neutral-100 transition-colors disabled:opacity-50"
+                    className="w-full px-3 sm:px-4 py-2 bg-white border border-[#E8E8E3] text-[#5C5C56] rounded-lg text-sm font-medium hover:bg-[#F3F3EF] transition-colors disabled:opacity-50"
                   >
                     Show Private Key
                   </button>
@@ -458,21 +458,21 @@ export function AccountPage() {
         )}
 
         {/* Register Camera Link */}
-        <div className="bg-neutral-100 rounded-xl px-4 py-4 mb-4">
+        <div className="bg-[#F3F3EF] rounded-xl px-4 py-4 mb-4">
           <button
             onClick={() => navigate('/app/register')}
-            className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-neutral-600 text-white rounded-lg text-sm font-medium hover:bg-neutral-600/90 transition-colors"
+            className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-[#1A1A18] text-[#FAFAF8] rounded-lg text-sm font-medium hover:bg-[#1A1A18]/90 transition-colors"
           >
             <Camera className="w-4 h-4" />
             Register New Camera
           </button>
         </div>
 
-        {/* Sign Out Button - responsive padding */}
-        <div className="bg-neutral-100 rounded-xl px-4 py-4 mb-8">
+        {/* Sign Out */}
+        <div className="bg-[#F3F3EF] rounded-xl px-4 py-4 mb-8">
           <button
             onClick={handleSignOut}
-            className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
+            className="w-full flex justify-center items-center gap-2 px-3 sm:px-4 py-2 bg-[#C73A3A] text-white rounded-lg text-sm font-medium hover:bg-[#C73A3A]/90 transition-colors"
           >
             <LogOut className="w-4 h-4" />
             Sign Out

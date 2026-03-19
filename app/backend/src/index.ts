@@ -3006,7 +3006,7 @@ app.get("/api/database/debug", async (_req, res) => {
     res.json({
       success: true,
       timestamp: new Date().toISOString(),
-      databasePath: process.env.DATABASE_PATH || '/tmp/mmoment.db',
+      databasePath: process.env.DATABASE_PATH || (process.env.RAILWAY_ENVIRONMENT ? '/app/data/mmoment.db' : './mmoment.db'),
       data: {
         realtimeEvents: {
           count: recentTimeline.length,
@@ -4759,9 +4759,9 @@ httpServer.listen(port, "0.0.0.0", async () => {
   // Initialize SQLite database and load persisted data
   try {
     console.log('\n📦 Initializing SQLite database...');
-    // Use Railway's writable /tmp directory for ephemeral storage
+    // Use Railway's persistent volume at /app/data for data that survives restarts
     const dbPath = process.env.DATABASE_PATH ||
-                   (process.env.RAILWAY_ENVIRONMENT ? '/tmp/mmoment.db' : './mmoment.db');
+                   (process.env.RAILWAY_ENVIRONMENT ? '/app/data/mmoment.db' : './mmoment.db');
     console.log(`📍 Database path: ${dbPath}`);
     await initializeDatabase(dbPath);
 
