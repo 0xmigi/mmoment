@@ -33,7 +33,7 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
   const [copied, setCopied] = useState(false);
 
   const backendUrl = CONFIG.BACKEND_URL;
-  const skillUrl = 'https://api.mmoment.xyz/agent-skill.md';
+  const skillUrl = `${backendUrl}/agent-skill.md`;
 
   const fetchKeys = useCallback(async () => {
     try {
