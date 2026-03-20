@@ -33,25 +33,7 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
   const [copied, setCopied] = useState(false);
 
   const backendUrl = CONFIG.BACKEND_URL;
-
-  // Self-contained prompt — uses custom domain that AI chats can reach
-  const apiDomain = 'https://api.mmoment.xyz';
-  const buildPrompt = (key: string) => `You have access to a physical camera network. Use these API endpoints to interact with it.
-
-Base URL: ${apiDomain}
-Auth: Authorization: Bearer ${key}
-
-Step 1 — call GET /v1/me to find which camera your user is at. Use the checked_in_at value as {camera_id}.
-
-Endpoints:
-- GET /v1/cameras/{camera_id}/status — camera info
-- GET /v1/cameras/{camera_id}/presence — who's checked in
-- POST /v1/cameras/{camera_id}/capture — take a photo (returns photo_url you can display inline)
-- POST /v1/cameras/{camera_id}/record/start — start recording (optional: {"duration": 10})
-- POST /v1/cameras/{camera_id}/record/stop — stop recording
-- GET /v1/cameras/{camera_id}/activities — recent activity
-
-The photo_url from /capture is a public URL — fetch and display it inline.`;
+  const skillUrl = 'https://api.mmoment.xyz/agent-skill.md';
 
   const fetchKeys = useCallback(async () => {
     try {
@@ -108,7 +90,7 @@ The photo_url from /capture is a public URL — fetch and display it inline.`;
 
   const copyCommand = () => {
     if (!newKey) return;
-    navigator.clipboard.writeText(buildPrompt(newKey));
+    navigator.clipboard.writeText(`Set up ${skillUrl} with key ${newKey}`);
     setCopied(true);
     setNewKey(null);
     setTimeout(() => setCopied(false), 2000);
@@ -137,10 +119,10 @@ The photo_url from /capture is a public URL — fetch and display it inline.`;
       {/* Newly generated key — show once to copy */}
       {newKey && (
         <div className="mb-4">
-          <div className="bg-white border border-[#E8E8E3] rounded-lg p-3.5 mb-2 max-h-32 overflow-y-auto">
-            <pre className="text-xs text-[#5C5C56] whitespace-pre-wrap leading-relaxed font-mono">
-              {buildPrompt(newKey)}
-            </pre>
+          <div className="bg-white border border-[#E8E8E3] rounded-lg p-3.5 mb-2">
+            <code className="text-sm text-[#5C5C56] break-all leading-relaxed">
+              Set up {skillUrl} with key {newKey}
+            </code>
           </div>
           <button
             onClick={copyCommand}

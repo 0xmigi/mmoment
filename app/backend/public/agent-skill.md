@@ -4,7 +4,7 @@ You can interact with physical cameras that see, recognize people, and capture p
 
 ## Setup
 
-Base URL: `https://mmoment-production.up.railway.app`
+Base URL: `https://api.mmoment.xyz`
 
 All requests need: `Authorization: Bearer YOUR_API_KEY`
 
