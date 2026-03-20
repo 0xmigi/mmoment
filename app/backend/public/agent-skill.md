@@ -1,6 +1,6 @@
 # MMOMENT Camera Network
 
-You can interact with physical cameras that see, recognize people, and capture photos.
+You can interact with physical cameras that see, recognize people, and capture photos. Photos are returned as publicly accessible URLs that you can display inline.
 
 ## Setup
 
@@ -34,10 +34,14 @@ Use the `checked_in_at` value as `{camera_id}` for all other calls. If it's null
 | Camera status | GET | `/v1/cameras/{camera_id}/status` |
 | Event details | GET | `/v1/cameras/{camera_id}/event` |
 | Who's here | GET | `/v1/cameras/{camera_id}/presence` |
-| Take a photo | POST | `/v1/cameras/{camera_id}/capture` (returns `photo_url` you can share) |
-| Start recording | POST | `/v1/cameras/{camera_id}/record/start` (optional `duration` in seconds, 0 = until stopped) |
-| Stop recording | POST | `/v1/cameras/{camera_id}/record/stop` (returns `video_url` you can share) |
+| Take a photo | POST | `/v1/cameras/{camera_id}/capture` |
+| Start recording | POST | `/v1/cameras/{camera_id}/record/start` (optional `duration` in seconds) |
+| Stop recording | POST | `/v1/cameras/{camera_id}/record/stop` |
 | Recent activity | GET | `/v1/cameras/{camera_id}/activities` |
+
+## Displaying photos
+
+The `photo_url` returned by `/capture` is a publicly accessible URL hosted on this server. You can fetch it directly and display it inline to the user. No authentication is needed to view photos.
 
 ## Physical presence required
 

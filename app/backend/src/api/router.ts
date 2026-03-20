@@ -18,6 +18,19 @@ import {
 } from '../database';
 import { getQueueState, joinQueue, leaveQueue, skipCurrent, updateConfig as updateQueueConfig } from '../queue-manager';
 import { getActiveUsersForCamera, getRecentTimelineEvents, getCheckedInUsers, getWalletCamera, markApiCapture } from '../camera-state';
+
+// In-memory media cache for proxied photos (auto-expires after 1 hour)
+const mediaCache = new Map<string, { data: Buffer; contentType: string; expires: number }>();
+const MEDIA_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+function cleanMediaCache() {
+  const now = Date.now();
+  for (const [key, entry] of mediaCache) {
+    if (now > entry.expires) mediaCache.delete(key);
+  }
+}
+// Clean every 10 minutes
+setInterval(cleanMediaCache, 10 * 60 * 1000);
 import {
   createRpc,
   bn,
@@ -161,6 +174,18 @@ export function createApiRouter(): Router {
       console.error('[API] Failed to get queue state:', err);
       res.status(500).json({ error: 'internal', message: 'Failed to get queue state' });
     }
+  });
+
+  // Public media proxy — serves cached photos without auth (for AI chat inline display)
+  router.get('/v1/media/:mediaId', (req, res) => {
+    const entry = mediaCache.get(req.params.mediaId);
+    if (!entry || Date.now() > entry.expires) {
+      return res.status(404).json({ error: 'not_found', message: 'Media not found or expired' });
+    }
+    res.setHeader('Content-Type', entry.contentType);
+    res.setHeader('Content-Length', entry.data.length);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(entry.data);
   });
 
   // All routes below require API key auth
@@ -902,15 +927,41 @@ export function createApiRouter(): Router {
       }
 
       const captureData = await captureRes.json();
-
-      // Build a direct photo URL the agent can share
       const filename = captureData.filename;
-      const photoUrl = filename ? `${cameraUrl}/photos/${filename}` : null;
+
+      // Proxy the photo through Railway so AI chats can fetch it
+      let proxyUrl: string | null = null;
+      if (filename) {
+        try {
+          const photoRes = await fetch(`${cameraUrl}/photos/${filename}`, {
+            signal: AbortSignal.timeout(8000),
+          });
+          if (photoRes.ok) {
+            const buffer = Buffer.from(await photoRes.arrayBuffer());
+            const contentType = photoRes.headers.get('content-type') || 'image/jpeg';
+            const mediaId = `${cameraId.slice(0, 8)}-${filename}`;
+            mediaCache.set(mediaId, {
+              data: buffer,
+              contentType,
+              expires: Date.now() + MEDIA_CACHE_TTL,
+            });
+            // Build public URL using request host
+            const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+            const host = req.headers['x-forwarded-host'] || req.headers.host;
+            proxyUrl = `${protocol}://${host}/v1/media/${mediaId}`;
+          }
+        } catch (proxyErr) {
+          console.warn('[API] Failed to proxy photo, falling back to direct URL:', proxyErr);
+        }
+      }
+
+      const directUrl = filename ? `${cameraUrl}/photos/${filename}` : null;
 
       res.json({
         data: {
           success: true,
-          photo_url: photoUrl,
+          photo_url: proxyUrl || directUrl,
+          direct_url: directUrl,
           filename,
           timestamp: captureData.timestamp,
           width: captureData.width,
