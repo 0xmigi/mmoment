@@ -355,10 +355,10 @@ const io = new Server(httpServer, {
 // Trust proxy and handle HTTPS
 app.enable("trust proxy");
 
-// Block bots/crawlers from the backend
+// Block bots/crawlers from the backend, but allow agent skill file
 app.get("/robots.txt", (_req, res) => {
   res.type("text/plain");
-  res.send("User-agent: *\nDisallow: /\n");
+  res.send("User-agent: *\nAllow: /agent-skill.md\nDisallow: /\n");
 });
 
 // Mount consumer API (/v1/*)
