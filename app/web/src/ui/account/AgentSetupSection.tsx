@@ -33,7 +33,24 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
   const [copied, setCopied] = useState(false);
 
   const backendUrl = CONFIG.BACKEND_URL;
-  const skillUrl = `${backendUrl}/agent-skill.md`;
+
+  // Self-contained prompt — no URL fetching required by the AI
+  const buildPrompt = (key: string) => `You have access to a physical camera network. Use these API endpoints to interact with it.
+
+Base URL: ${backendUrl}
+Auth: Authorization: Bearer ${key}
+
+Step 1 — call GET /v1/me to find which camera your user is at. Use the checked_in_at value as {camera_id}.
+
+Endpoints:
+- GET /v1/cameras/{camera_id}/status — camera info
+- GET /v1/cameras/{camera_id}/presence — who's checked in
+- POST /v1/cameras/{camera_id}/capture — take a photo (returns photo_url you can display inline)
+- POST /v1/cameras/{camera_id}/record/start — start recording (optional: {"duration": 10})
+- POST /v1/cameras/{camera_id}/record/stop — stop recording
+- GET /v1/cameras/{camera_id}/activities — recent activity
+
+The photo_url from /capture is a public URL — fetch and display it inline.`;
 
   const fetchKeys = useCallback(async () => {
     try {
@@ -90,7 +107,7 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
 
   const copyCommand = () => {
     if (!newKey) return;
-    navigator.clipboard.writeText(`Set up ${skillUrl} with key ${newKey}`);
+    navigator.clipboard.writeText(buildPrompt(newKey));
     setCopied(true);
     setNewKey(null);
     setTimeout(() => setCopied(false), 2000);
@@ -99,42 +116,42 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
   const activeKeys = keys.filter(k => !k.revoked_at);
 
   return (
-    <div className="bg-neutral-100 rounded-xl p-4 sm:p-6 mb-6">
+    <div className="bg-[#F3F3EF] rounded-xl p-4 sm:p-6 mb-4">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
-          <Bot className="w-5 h-5 text-neutral-600" />
-          <h3 className="text-lg font-medium text-neutral-900">Agent Access</h3>
+          <Bot className="w-5 h-5 text-[#5C5C56]" />
+          <h3 className="text-lg font-medium text-[#1A1A18]">Agent Access</h3>
         </div>
         {activeKeys.length > 0 && (
-          <span className="text-xs text-neutral-400">
+          <span className="text-xs text-[#8A8A82]">
             {activeKeys.length} active
           </span>
         )}
       </div>
 
-      <p className="text-sm text-neutral-500 mb-4">
-        Generate a key and paste the setup command into your agent.
+      <p className="text-sm text-[#8A8A82] mb-4">
+        Generate a key, copy the prompt, and paste it into any AI chat.
       </p>
 
       {/* Newly generated key — show once to copy */}
       {newKey && (
         <div className="mb-4">
-          <div className="bg-white border border-neutral-200 rounded-lg p-3.5 mb-2">
-            <code className="text-sm text-neutral-800 break-all leading-relaxed">
-              Set up {skillUrl} with key {newKey}
-            </code>
+          <div className="bg-white border border-[#E8E8E3] rounded-lg p-3.5 mb-2 max-h-32 overflow-y-auto">
+            <pre className="text-xs text-[#5C5C56] whitespace-pre-wrap leading-relaxed font-mono">
+              {buildPrompt(newKey)}
+            </pre>
           </div>
           <button
             onClick={copyCommand}
-            className="w-full flex justify-center items-center gap-2 px-4 py-2.5 bg-neutral-900 text-white rounded-lg text-sm font-medium hover:bg-neutral-800 transition-colors"
+            className="w-full flex justify-center items-center gap-2 px-4 py-2.5 bg-[#1A1A18] text-[#FAFAF8] rounded-lg text-sm font-medium hover:bg-[#1A1A18]/90 transition-colors"
           >
             {copied ? (
               <><Check className="w-4 h-4" /> Copied</>
             ) : (
-              <><Copy className="w-4 h-4" /> Copy to clipboard</>
+              <><Copy className="w-4 h-4" /> Copy prompt</>
             )}
           </button>
-          <p className="text-xs text-amber-600 text-center mt-1.5">
+          <p className="text-xs text-[#D97706] text-center mt-1.5">
             Copy this now — the full key won't be shown again.
           </p>
         </div>
@@ -146,10 +163,10 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
           {activeKeys.slice(0, 5).map(k => (
             <div key={k.id} className="bg-white rounded-lg px-3 py-2 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                <div className="w-1.5 h-1.5 rounded-full bg-[#2F7D3E] shrink-0" />
                 <div>
-                  <span className="text-xs font-mono text-neutral-700">{k.key_prefix}...</span>
-                  <div className="text-[10px] text-neutral-400">
+                  <span className="text-xs font-mono text-[#5C5C56]">{k.key_prefix}...</span>
+                  <div className="text-[10px] text-[#8A8A82]">
                     Created {timeAgo(k.created_at)}
                     {k.last_used_at && <> · Used {timeAgo(k.last_used_at)}</>}
                   </div>
@@ -157,7 +174,7 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
               </div>
               <button
                 onClick={() => revokeKey(k.id)}
-                className="p-1 text-neutral-300 hover:text-red-500 transition-colors"
+                className="p-1 text-[#E8E8E3] hover:text-[#C73A3A] transition-colors"
                 title="Revoke key"
               >
                 <X className="w-3.5 h-3.5" />
@@ -165,7 +182,7 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
             </div>
           ))}
           {activeKeys.length > 5 && (
-            <div className="text-[10px] text-neutral-400 px-1">
+            <div className="text-[10px] text-[#8A8A82] px-1">
               +{activeKeys.length - 5} more
             </div>
           )}
@@ -177,7 +194,7 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
         <button
           onClick={generateKey}
           disabled={isGenerating}
-          className="flex-1 flex justify-center items-center gap-2 px-4 py-2.5 bg-white border border-neutral-200 text-neutral-700 rounded-lg text-sm font-medium hover:bg-neutral-50 transition-colors disabled:opacity-50"
+          className="flex-1 flex justify-center items-center gap-2 px-4 py-2.5 bg-white border border-[#E8E8E3] text-[#5C5C56] rounded-lg text-sm font-medium hover:bg-[#FAFAF8] transition-colors disabled:opacity-50"
         >
           <Key className="w-4 h-4" />
           {isGenerating ? "Generating..." : "Generate new key"}
@@ -185,7 +202,7 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
         {activeKeys.length > 1 && (
           <button
             onClick={revokeAll}
-            className="flex items-center gap-1.5 px-3 py-2.5 bg-white border border-neutral-200 text-neutral-400 rounded-lg text-sm hover:text-red-500 hover:border-red-200 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2.5 bg-white border border-[#E8E8E3] text-[#8A8A82] rounded-lg text-sm hover:text-[#C73A3A] hover:border-[#C73A3A]/30 transition-colors"
             title="Revoke all keys"
           >
             <Trash2 className="w-4 h-4" />
