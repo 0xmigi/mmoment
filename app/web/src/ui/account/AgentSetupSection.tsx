@@ -34,10 +34,11 @@ export function AgentSetupSection({ walletAddress }: AgentSetupSectionProps) {
 
   const backendUrl = CONFIG.BACKEND_URL;
 
-  // Self-contained prompt — no URL fetching required by the AI
+  // Self-contained prompt — uses custom domain that AI chats can reach
+  const apiDomain = 'https://api.mmoment.xyz';
   const buildPrompt = (key: string) => `You have access to a physical camera network. Use these API endpoints to interact with it.
 
-Base URL: ${backendUrl}
+Base URL: ${apiDomain}
 Auth: Authorization: Bearer ${key}
 
 Step 1 — call GET /v1/me to find which camera your user is at. Use the checked_in_at value as {camera_id}.
