@@ -148,7 +148,7 @@ export async function skipCurrent(cameraId: string): Promise<boolean> {
 }
 
 export async function getQueueState(cameraId: string): Promise<{
-  config: { enabled: boolean; maxSlotDuration: number; minSlotDuration: number };
+  config: { enabled: boolean; maxSlotDuration: number; minSlotDuration: number; location: string | null };
   active: (QueueEntry & { remainingSeconds: number }) | null;
   queue: QueueEntry[];
   totalWaiting: number;
