@@ -407,6 +407,11 @@ export function AccountPage() {
           </div>
         </div>
 
+        {/* Agent Access */}
+        {primaryWallet?.address && (
+          <AgentSetupSection walletAddress={primaryWallet.address} />
+        )}
+
         {/* Walrus Storage Section */}
         <WalrusStorageSection />
 
@@ -449,11 +454,6 @@ export function AccountPage() {
               />
             </div>
           </div>
-        )}
-
-        {/* Agent Access */}
-        {primaryWallet?.address && (
-          <AgentSetupSection walletAddress={primaryWallet.address} />
         )}
 
         {/* Register Camera Link */}
