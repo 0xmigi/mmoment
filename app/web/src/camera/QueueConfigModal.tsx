@@ -62,7 +62,7 @@ export function QueueConfigModal({ isOpen, onClose, config, onSave }: QueueConfi
                 type="text"
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
-                placeholder="e.g. Saltoniškių g. 29, Vilnius"
+                placeholder="e.g. 123 Main St, Brooklyn, NY"
                 className="w-full px-3 py-2 text-sm text-[#1A1A18] bg-white border border-[#E8E8E3] rounded-lg outline-none focus:border-[#8A8A82] transition-colors"
               />
             </div>
