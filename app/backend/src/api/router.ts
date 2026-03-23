@@ -13,7 +13,24 @@ import {
   getUserProfile,
   getWalrusFilesForWallet,
   getDatabaseStats,
+  getCameraEvent,
+  computeEventStatus,
 } from '../database';
+import { getQueueState, joinQueue, leaveQueue, skipCurrent, updateConfig as updateQueueConfig } from '../queue-manager';
+import { getActiveUsersForCamera, getRecentTimelineEvents, getCheckedInUsers, getWalletCamera, markApiCapture } from '../camera-state';
+
+// In-memory media cache for proxied photos (auto-expires after 1 hour)
+const mediaCache = new Map<string, { data: Buffer; contentType: string; expires: number }>();
+const MEDIA_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+function cleanMediaCache() {
+  const now = Date.now();
+  for (const [key, entry] of mediaCache) {
+    if (now > entry.expires) mediaCache.delete(key);
+  }
+}
+// Clean every 10 minutes
+setInterval(cleanMediaCache, 10 * 60 * 1000);
 import {
   createRpc,
   bn,
@@ -63,6 +80,58 @@ export function createApiRouter(): Router {
   // KEY MANAGEMENT (wallet-based, no API key needed to create)
   // ============================================================================
 
+  // List all API keys for a wallet (public — only returns prefixes, not full keys)
+  router.get('/v1/keys/wallet/:walletAddress', async (req, res) => {
+    try {
+      const keys = await getApiKeysForWallet(req.params.walletAddress);
+      res.json({
+        data: keys.map(k => ({
+          id: k.id,
+          key_prefix: k.keyPrefix,
+          name: k.name,
+          created_at: k.createdAt,
+          last_used_at: k.lastUsedAt,
+          revoked_at: k.revokedAt,
+        }))
+      });
+    } catch (err) {
+      console.error('[API] Failed to list keys:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to list keys' });
+    }
+  });
+
+  // Revoke all keys for a wallet
+  router.delete('/v1/keys/wallet/:walletAddress', async (req, res) => {
+    try {
+      const keys = await getApiKeysForWallet(req.params.walletAddress);
+      let count = 0;
+      for (const key of keys) {
+        if (!key.revokedAt) {
+          await revokeApiKey(key.id, req.params.walletAddress);
+          count++;
+        }
+      }
+      res.json({ data: { revoked: count } });
+    } catch (err) {
+      console.error('[API] Failed to revoke all keys:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to revoke keys' });
+    }
+  });
+
+  // Revoke a key by ID for a wallet
+  router.delete('/v1/keys/wallet/:walletAddress/:keyId', async (req, res) => {
+    try {
+      const revoked = await revokeApiKey(req.params.keyId, req.params.walletAddress);
+      if (!revoked) {
+        return res.status(404).json({ error: 'not_found', message: 'Key not found' });
+      }
+      res.json({ data: { revoked: true } });
+    } catch (err) {
+      console.error('[API] Failed to revoke key:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to revoke key' });
+    }
+  });
+
   router.post('/v1/keys', async (req, res) => {
     try {
       const { wallet_address, name } = req.body;
@@ -94,6 +163,29 @@ export function createApiRouter(): Router {
       console.error('[API] Failed to create key:', err);
       res.status(500).json({ error: 'internal', message: 'Failed to create API key' });
     }
+  });
+
+  // Queue state — public (displayed on camera TV/desktop view)
+  router.get('/v1/cameras/:cameraId/queue', async (req, res) => {
+    try {
+      const state = await getQueueState(req.params.cameraId);
+      res.json({ data: state });
+    } catch (err) {
+      console.error('[API] Failed to get queue state:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to get queue state' });
+    }
+  });
+
+  // Public media proxy — serves cached photos without auth (for AI chat inline display)
+  router.get('/v1/media/:mediaId', (req, res) => {
+    const entry = mediaCache.get(req.params.mediaId);
+    if (!entry || Date.now() > entry.expires) {
+      return res.status(404).json({ error: 'not_found', message: 'Media not found or expired' });
+    }
+    res.setHeader('Content-Type', entry.contentType);
+    res.setHeader('Content-Length', entry.data.length);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(entry.data);
   });
 
   // All routes below require API key auth
@@ -584,6 +676,508 @@ export function createApiRouter(): Router {
     } catch (err) {
       console.error('[API] Failed to get stats:', err);
       res.status(500).json({ error: 'internal', message: 'Failed to get stats' });
+    }
+  });
+
+  // ============================================================================
+  // DEVELOPER API — IDENTITY & DISCOVERY
+  // ============================================================================
+
+  // Who am I? Returns wallet address and camera currently checked in at (if any).
+  // This reads from a per-wallet record set by the check-in event — no scanning.
+  router.get('/v1/me', async (req: AuthenticatedRequest, res) => {
+    try {
+      const walletAddress = req.apiKey!.walletAddress;
+      const cameraId = getWalletCamera(walletAddress);
+      const profile = await getUserProfile(walletAddress);
+
+      res.json({
+        data: {
+          wallet: walletAddress,
+          display_name: profile?.displayName || null,
+          username: profile?.username || null,
+          checked_in_at: cameraId,
+        }
+      });
+    } catch (err) {
+      console.error('[API] Failed to get identity:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to get identity' });
+    }
+  });
+
+  // ============================================================================
+  // DEVELOPER API — CAMERA ENDPOINTS
+  // Physical-first access model:
+  //   - Not present: only aggregate people count (nothing else)
+  //   - Checked in: full access to event, presence, activities, capture
+  //   - Camera owner: full remote access (checked via camera service)
+  // ============================================================================
+
+  // Helper: check if wallet is checked in at a camera
+  function isWalletPresent(cameraId: string, walletAddress: string): boolean {
+    // Check both sources: timeline events (real-time) and wallet sessions (survives restarts)
+    const checkedIn = getCheckedInUsers(cameraId);
+    if (checkedIn.some(u => u.address === walletAddress)) return true;
+    // Fallback: check wallet sessions map (hydrated from DB on startup)
+    const sessionCamera = getWalletCamera(walletAddress);
+    return sessionCamera === cameraId;
+  }
+
+  // Helper: check if wallet is camera owner (via camera service)
+  async function isWalletCameraOwner(cameraId: string, walletAddress: string): Promise<boolean> {
+    try {
+      const cameraUrl = `https://${cameraId.toLowerCase()}.mmoment.xyz`;
+      const res = await fetch(`${cameraUrl}/api/camera/info`, { signal: AbortSignal.timeout(3000) });
+      if (!res.ok) return false;
+      const data = await res.json();
+      // Camera info includes owner wallet from on-chain data
+      return data?.data?.owner === walletAddress || data?.owner === walletAddress;
+    } catch {
+      return false;
+    }
+  }
+
+  // Camera status — physical-first access
+  // Not present: camera_id + people_present count only
+  // Present or owner: full status with event info, streaming, etc.
+  router.get('/v1/cameras/:cameraId/status', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+      const checkedIn = getCheckedInUsers(cameraId);
+      const present = isWalletPresent(cameraId, walletAddress);
+      const owner = !present ? await isWalletCameraOwner(cameraId, walletAddress) : false;
+      const hasAccess = present || owner;
+
+      // Everyone gets aggregate count
+      if (!hasAccess) {
+        return res.json({
+          data: {
+            camera_id: cameraId,
+            people_present: checkedIn.length,
+            access: 'limited',
+            message: 'Check in at the camera for full access',
+          }
+        });
+      }
+
+      // Full access for present users and owners
+      const event = await getCameraEvent(cameraId);
+      let online = false;
+      let streaming = false;
+      try {
+        const cameraUrl = `https://${cameraId.toLowerCase()}.mmoment.xyz`;
+        const healthRes = await fetch(`${cameraUrl}/api/health`, { signal: AbortSignal.timeout(3000) });
+        if (healthRes.ok) {
+          online = true;
+          const streamRes = await fetch(`${cameraUrl}/api/stream/info`, { signal: AbortSignal.timeout(3000) });
+          if (streamRes.ok) {
+            const streamData = await streamRes.json();
+            streaming = streamData?.data?.isActive || false;
+          }
+        }
+      } catch (_) {}
+
+      res.json({
+        data: {
+          camera_id: cameraId,
+          online,
+          streaming,
+          people_present: checkedIn.length,
+          access: 'full',
+          event: event ? {
+            name: event.eventName,
+            status: event.eventStatus,
+            start_time: event.eventStartTime,
+            end_time: event.eventEndTime,
+            type: event.eventType,
+          } : null,
+          checked_at: Date.now(),
+        }
+      });
+    } catch (err) {
+      console.error('[API] Failed to get camera status:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to get camera status' });
+    }
+  });
+
+  // Camera event — requires presence or ownership
+  router.get('/v1/cameras/:cameraId/event', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+      const present = isWalletPresent(cameraId, walletAddress);
+      const owner = !present ? await isWalletCameraOwner(cameraId, walletAddress) : false;
+
+      if (!present && !owner) {
+        return res.status(403).json({
+          error: 'not_present',
+          message: 'You must be checked in at the camera to view event details',
+        });
+      }
+
+      const event = await getCameraEvent(cameraId);
+      if (!event) {
+        return res.json({ data: null });
+      }
+
+      const recentEvents = getRecentTimelineEvents(cameraId, 500);
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayMs = todayStart.getTime();
+      const todayEvents = recentEvents.filter(e => e.timestamp >= todayMs);
+      const checkedIn = getCheckedInUsers(cameraId);
+
+      res.json({
+        data: {
+          camera_id: cameraId,
+          event_name: event.eventName,
+          event_description: event.eventDescription,
+          event_start_time: event.eventStartTime,
+          event_end_time: event.eventEndTime,
+          event_type: event.eventType,
+          event_location: event.eventLocation,
+          event_status: event.eventStatus,
+          stats: {
+            check_ins_today: todayEvents.filter(e => e.type === 'check_in').length,
+            photos_captured: todayEvents.filter(e => e.type === 'photo_captured' || e.type === 'video_recorded').length,
+            active_now: checkedIn.length,
+          },
+        }
+      });
+    } catch (err) {
+      console.error('[API] Failed to get camera event:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to get camera event' });
+    }
+  });
+
+  // Camera presence — requires presence or ownership
+  router.get('/v1/cameras/:cameraId/presence', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+      const checkedIn = getCheckedInUsers(cameraId);
+      const present = isWalletPresent(cameraId, walletAddress);
+      const owner = !present ? await isWalletCameraOwner(cameraId, walletAddress) : false;
+
+      if (!present && !owner) {
+        return res.json({
+          data: {
+            camera_id: cameraId,
+            count: checkedIn.length,
+            users: null,
+            access: 'limited',
+            message: 'Check in at the camera to see who is present',
+          }
+        });
+      }
+
+      res.json({
+        data: {
+          camera_id: cameraId,
+          count: checkedIn.length,
+          access: 'full',
+          users: checkedIn.map(u => ({
+            wallet: u.address,
+            display_name: u.displayName || null,
+            username: u.username || null,
+            profile_image: u.pfpUrl || null,
+          })),
+        }
+      });
+    } catch (err) {
+      console.error('[API] Failed to get camera presence:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to get camera presence' });
+    }
+  });
+
+  // Camera capture — requires presence (no remote capture, even for owner)
+  router.post('/v1/cameras/:cameraId/capture', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+
+      if (!isWalletPresent(cameraId, walletAddress)) {
+        return res.status(403).json({
+          error: 'not_present',
+          message: 'You must be physically checked in at the camera to capture',
+        });
+      }
+
+      // Mark this capture as API-triggered so the timeline event gets tagged
+      markApiCapture(walletAddress, cameraId);
+
+      const cameraUrl = `https://${cameraId.toLowerCase()}.mmoment.xyz`;
+      const captureRes = await fetch(`${cameraUrl}/api/capture`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wallet_address: walletAddress,
+          triggered_by: 'api',
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!captureRes.ok) {
+        const errBody = await captureRes.json().catch(() => ({}));
+        return res.status(captureRes.status).json({
+          error: 'capture_failed',
+          message: (errBody as any).error || 'Camera rejected capture request',
+        });
+      }
+
+      const captureData = await captureRes.json();
+      const filename = captureData.filename;
+
+      // Proxy the photo through Railway so AI chats can fetch it
+      let proxyUrl: string | null = null;
+      if (filename) {
+        try {
+          const photoRes = await fetch(`${cameraUrl}/photos/${filename}`, {
+            signal: AbortSignal.timeout(8000),
+          });
+          if (photoRes.ok) {
+            const buffer = Buffer.from(await photoRes.arrayBuffer());
+            const contentType = photoRes.headers.get('content-type') || 'image/jpeg';
+            const mediaId = `${cameraId.slice(0, 8)}-${filename}`;
+            mediaCache.set(mediaId, {
+              data: buffer,
+              contentType,
+              expires: Date.now() + MEDIA_CACHE_TTL,
+            });
+            // Build public URL using request host
+            const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+            const host = req.headers['x-forwarded-host'] || req.headers.host;
+            proxyUrl = `${protocol}://${host}/v1/media/${mediaId}`;
+          }
+        } catch (proxyErr) {
+          console.warn('[API] Failed to proxy photo, falling back to direct URL:', proxyErr);
+        }
+      }
+
+      const directUrl = filename ? `${cameraUrl}/photos/${filename}` : null;
+
+      res.json({
+        data: {
+          success: true,
+          photo_url: proxyUrl || directUrl,
+          direct_url: directUrl,
+          filename,
+          timestamp: captureData.timestamp,
+          width: captureData.width,
+          height: captureData.height,
+        }
+      });
+    } catch (err: any) {
+      if (err.name === 'TimeoutError') {
+        return res.status(504).json({ error: 'timeout', message: 'Camera did not respond in time' });
+      }
+      console.error('[API] Failed to trigger capture:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to trigger capture' });
+    }
+  });
+
+  // Video recording — requires presence
+  router.post('/v1/cameras/:cameraId/record/start', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+
+      if (!isWalletPresent(cameraId, walletAddress)) {
+        return res.status(403).json({ error: 'not_present', message: 'You must be physically checked in at the camera to record' });
+      }
+
+      const duration = req.body?.duration || 0; // 0 = until stopped
+      const cameraUrl = `https://${cameraId.toLowerCase()}.mmoment.xyz`;
+      const recordRes = await fetch(`${cameraUrl}/api/record`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet_address: walletAddress, action: 'start', duration }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!recordRes.ok) {
+        const errBody = await recordRes.json().catch(() => ({}));
+        return res.status(recordRes.status).json({ error: 'record_failed', message: (errBody as any).error || 'Camera rejected record request' });
+      }
+
+      const data = await recordRes.json();
+      res.json({ data: { success: true, recording: true, duration: duration || 'until_stopped' } });
+    } catch (err: any) {
+      if (err.name === 'TimeoutError') return res.status(504).json({ error: 'timeout', message: 'Camera did not respond in time' });
+      console.error('[API] Failed to start recording:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to start recording' });
+    }
+  });
+
+  router.post('/v1/cameras/:cameraId/record/stop', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+
+      if (!isWalletPresent(cameraId, walletAddress)) {
+        return res.status(403).json({ error: 'not_present', message: 'You must be physically checked in at the camera to stop recording' });
+      }
+
+      const cameraUrl = `https://${cameraId.toLowerCase()}.mmoment.xyz`;
+      const recordRes = await fetch(`${cameraUrl}/api/record`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet_address: walletAddress, action: 'stop' }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!recordRes.ok) {
+        const errBody = await recordRes.json().catch(() => ({}));
+        return res.status(recordRes.status).json({ error: 'record_failed', message: (errBody as any).error || 'Camera rejected stop request' });
+      }
+
+      const data = await recordRes.json();
+      const filename = data.filename;
+      const videoUrl = filename ? `${cameraUrl}/videos/${filename}` : null;
+
+      res.json({
+        data: {
+          success: true,
+          recording: false,
+          video_url: videoUrl,
+          filename,
+          duration_seconds: data.duration,
+        }
+      });
+    } catch (err: any) {
+      if (err.name === 'TimeoutError') return res.status(504).json({ error: 'timeout', message: 'Camera did not respond in time' });
+      console.error('[API] Failed to stop recording:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to stop recording' });
+    }
+  });
+
+  // Camera activities — requires presence or ownership
+  router.get('/v1/cameras/:cameraId/activities', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+      const present = isWalletPresent(cameraId, walletAddress);
+      const owner = !present ? await isWalletCameraOwner(cameraId, walletAddress) : false;
+
+      if (!present && !owner) {
+        return res.status(403).json({
+          error: 'not_present',
+          message: 'You must be checked in at the camera to view activities',
+        });
+      }
+
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+      const events = getRecentTimelineEvents(cameraId, limit);
+
+      res.json({
+        data: {
+          camera_id: cameraId,
+          count: events.length,
+          activities: events.map(e => ({
+            id: e.id,
+            type: e.type,
+            timestamp: e.timestamp,
+            user: {
+              display_name: e.user.displayName || null,
+              username: e.user.username || null,
+            },
+            transaction_id: e.transactionId || null,
+          })),
+        }
+      });
+    } catch (err) {
+      console.error('[API] Failed to get camera activities:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to get camera activities' });
+    }
+  });
+
+  // ============================================================================
+  // QUEUE OPERATIONS (authenticated)
+  // ============================================================================
+
+  // Join queue — any authenticated user
+  router.post('/v1/cameras/:cameraId/queue/join', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+      const { duration, display_name, title } = req.body || {};
+
+      if (!duration || typeof duration !== 'number') {
+        return res.status(400).json({ error: 'bad_request', message: 'duration (seconds) is required' });
+      }
+
+      const entry = await joinQueue(cameraId, walletAddress, duration, display_name, title);
+      res.json({ data: entry });
+    } catch (err: any) {
+      if (err.message === 'Already in queue' || err.message?.includes('Duration must be') || err.message === 'Queue is not enabled for this camera') {
+        return res.status(400).json({ error: 'bad_request', message: err.message });
+      }
+      console.error('[API] Failed to join queue:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to join queue' });
+    }
+  });
+
+  // Leave queue — own entry only
+  router.delete('/v1/cameras/:cameraId/queue/leave', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+      const removed = await leaveQueue(cameraId, walletAddress);
+
+      if (!removed) {
+        return res.status(404).json({ error: 'not_found', message: 'You are not in this queue' });
+      }
+      res.json({ data: { left: true } });
+    } catch (err) {
+      console.error('[API] Failed to leave queue:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to leave queue' });
+    }
+  });
+
+  // Update queue config — camera owner only
+  router.put('/v1/cameras/:cameraId/queue/config', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+      const owner = await isWalletCameraOwner(cameraId, walletAddress);
+
+      if (!owner) {
+        return res.status(403).json({ error: 'forbidden', message: 'Only the camera owner can configure the queue' });
+      }
+
+      const { max_slot_duration, min_slot_duration, enabled } = req.body || {};
+      const config = await updateQueueConfig(cameraId, {
+        enabled: enabled !== undefined ? !!enabled : undefined,
+        maxSlotDuration: max_slot_duration,
+        minSlotDuration: min_slot_duration,
+      });
+      res.json({ data: config });
+    } catch (err) {
+      console.error('[API] Failed to update queue config:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to update queue config' });
+    }
+  });
+
+  // Skip current — camera owner only
+  router.post('/v1/cameras/:cameraId/queue/skip', async (req: AuthenticatedRequest, res) => {
+    try {
+      const { cameraId } = req.params;
+      const walletAddress = req.apiKey!.walletAddress;
+      const owner = await isWalletCameraOwner(cameraId, walletAddress);
+
+      if (!owner) {
+        return res.status(403).json({ error: 'forbidden', message: 'Only the camera owner can skip the current user' });
+      }
+
+      const skipped = await skipCurrent(cameraId);
+      if (!skipped) {
+        return res.status(404).json({ error: 'not_found', message: 'No active slot to skip' });
+      }
+      res.json({ data: { skipped: true } });
+    } catch (err) {
+      console.error('[API] Failed to skip queue:', err);
+      res.status(500).json({ error: 'internal', message: 'Failed to skip queue entry' });
     }
   });
 

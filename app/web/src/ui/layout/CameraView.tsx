@@ -32,6 +32,7 @@ import {
   useEmbeddedWallet,
 } from "@dynamic-labs/sdk-react-core";
 import { useConnection } from "@solana/wallet-adapter-react";
+import { useDisplayProfile } from "../../auth/useDisplayProfile";
 import {
   Connection,
   PublicKey,
@@ -45,8 +46,11 @@ import {
   Link2,
   CheckCircle,
 } from "lucide-react";
-import { useRef, useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useRef, useState, useEffect, useMemo } from "react";
+import { useParams, useSearchParams } from "react-router-dom";
+import { GalleryView } from "./GalleryView";
+import { ActivitiesView } from "./ActivitiesView";
+import { DesktopEventPanel } from "../../camera/DesktopEventPanel";
 
 // CameraIdDisplay component - uses unified check-in state from CameraProvider
 const CameraIdDisplay = ({
@@ -160,6 +164,7 @@ const CameraIdDisplay = ({
 
 export function CameraView() {
   const { primaryWallet, user } = useDynamicContext();
+  const displayProfile = useDisplayProfile();
   const { cameraId } = useParams<{ cameraId: string }>();
   useEmbeddedWallet();
   // Use unified check-in state from CameraProvider (Phase 3 Privacy Architecture)
@@ -317,30 +322,15 @@ export function CameraView() {
         console.warn("Error checking for duplicate events:", e);
       }
 
-      // Get the user's social credentials - prioritize Farcaster > Google > Twitter
-      const farcasterCred = user?.verifiedCredentials?.find(
-        (cred) => cred.oauthProvider === "farcaster"
-      );
-      const googleCred = user?.verifiedCredentials?.find(
-        (cred) => cred.oauthProvider === "google"
-      );
-      const twitterCred = user?.verifiedCredentials?.find(
-        (cred) => cred.oauthProvider === "twitter"
-      );
-
-      const socialCred = farcasterCred || googleCred || twitterCred;
-
-      // Create the timeline event with enriched user info
-      // Try social accounts first, then fallback to Dynamic user profile
+      // Create the timeline event using resolved display profile (never contains email)
       const event: Omit<TimelineEvent, "id"> = {
         type: eventType,
         user: {
           address: primaryWallet.address,
-          // Include profile info - prioritize social accounts, fallback to Dynamic user (NEVER use email)
-          displayName: socialCred?.oauthDisplayName || user?.alias || undefined,
-          username: socialCred?.oauthUsername || user?.username || undefined,
-          pfpUrl: socialCred?.oauthAccountPhotos?.[0] || undefined,
-          provider: socialCred?.oauthProvider,
+          displayName: displayProfile?.displayName,
+          username: displayProfile?.username,
+          pfpUrl: displayProfile?.profileImage,
+          provider: displayProfile?.provider,
         },
         timestamp: Date.now(),
         transactionId,
@@ -1281,9 +1271,132 @@ export function CameraView() {
     };
   }, []);
 
+  // Determine if current user is the camera owner
+  const isOwner = useMemo(() => {
+    if (!primaryWallet?.address || !selectedCamera?.owner) return false;
+    return primaryWallet.address.toLowerCase() === selectedCamera.owner.toLowerCase();
+  }, [primaryWallet?.address, selectedCamera?.owner]);
+
+  const desktopCameraId = cameraAccount || selectedCamera?.publicKey || cameraId || "";
+  const [searchParams] = useSearchParams();
+  const desktopPanel = searchParams.get('panel') as 'gallery' | 'activities' | null;
+
   return (
     <>
-      <div className="pb-40">
+      {/* ====== DESKTOP / TV LAYOUT (lg and above) ====== */}
+      <div className="hidden lg:flex h-[calc(100vh-4rem)] bg-neutral-50">
+        {/* Left: Event / Gallery / Activities Panel */}
+        <div className="flex-1 min-w-0 p-4 pr-2">
+          <div className="h-full bg-white rounded-2xl overflow-hidden overflow-y-auto">
+            {desktopPanel === 'gallery' ? (
+              <GalleryView />
+            ) : desktopPanel === 'activities' ? (
+              <ActivitiesView />
+            ) : (
+              desktopCameraId && <DesktopEventPanel cameraId={desktopCameraId} isOwner={isOwner} />
+            )}
+          </div>
+        </div>
+        {/* Right: Mobile Camera View in phone frame */}
+        <div className="flex items-center justify-center p-4 pl-2 flex-none">
+          <div className="relative h-full aspect-[9/16] bg-black rounded-2xl overflow-hidden shadow-2xl ring-1 ring-neutral-200">
+            <div className="absolute inset-0 overflow-y-auto overflow-x-hidden">
+              <div className="relative">
+                <ToastContainer message={currentToast} onDismiss={dismissToast} />
+                <TransactionModal
+                  isOpen={showTransactionModal}
+                  onClose={() => setShowTransactionModal(false)}
+                  transactionData={transactionData || undefined}
+                  onSuccess={({ transactionId }) => {
+                    setShowTransactionModal(false);
+                    refreshCheckInStatus().then(() => {
+                      if (transactionData) {
+                        const eventType = getEventType(transactionData.type);
+                        addTimelineEvent(eventType, transactionId);
+                        updateToast(
+                          "success",
+                          `${transactionData.type.charAt(0).toUpperCase() + transactionData.type.slice(1)} action recorded successfully`
+                        );
+                        if (timelineRef.current?.refreshTimeline) {
+                          timelineRef.current?.refreshTimeline();
+                        }
+                      }
+                    });
+                  }}
+                />
+
+                {/* Stream with overlays */}
+                <div className="relative">
+                  {/* Status badge */}
+                  <div className="absolute top-2 left-3 z-40 flex items-center cursor-pointer" onClick={() => setIsMobileCameraModalOpen(true)}>
+                    <div className="flex items-center bg-black bg-opacity-70 rounded overflow-hidden">
+                      {!cameraId && !cameraAccount && !selectedCamera ? (
+                        <div className="bg-gray-600 text-white text-[10px] font-bold px-1.5 py-0.5">DISCONNECTED</div>
+                      ) : !currentCameraStatus.isLive ? (
+                        <div className="bg-gray-500 text-white text-[10px] font-bold px-1.5 py-0.5">OFFLINE</div>
+                      ) : (
+                        <div className="bg-green-500 text-white text-[10px] font-bold px-1.5 py-0.5">ONLINE</div>
+                      )}
+                      {(cameraId || cameraAccount || selectedCamera) && (
+                        <div className="text-white text-[10px] px-1.5 py-0.5 border-l border-white border-opacity-20">
+                          id:{(cameraAccount || selectedCamera?.publicKey || cameraId || "").slice(0, 4)}...{(cameraAccount || selectedCamera?.publicKey || cameraId || "").slice(-4)}
+                        </div>
+                      )}
+                    </div>
+                    {isCheckedIn ? (
+                      <CheckCircle className="w-3 h-3 text-green-400 ml-1.5" />
+                    ) : (
+                      <Link2 className="w-3 h-3 text-primary ml-1.5" />
+                    )}
+                  </div>
+
+                  {/* IRL Apps Button */}
+                  {currentCameraId && unifiedCameraService.hasCamera(currentCameraId) && (
+                    <div className="absolute top-2 right-3 z-50">
+                      <IRLAppsButton
+                        cameraId={currentCameraId}
+                        walletAddress={primaryWallet?.address}
+                        devMode={cvDevModeEnabled}
+                        onEnrollmentComplete={() => {
+                          updateToast("success", "Recognition token created! IRL apps are now unlocked.");
+                          if (timelineRef.current?.refreshEvents) {
+                            timelineRef.current?.refreshEvents();
+                          }
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Timeline overlay */}
+                  <div className="absolute top-14 bottom-0 left-2 z-30 px-1 overflow-hidden">
+                    <Timeline
+                      ref={timelineRef}
+                      variant="camera"
+                      cameraId={cameraAccount || undefined}
+                      mobileOverlay={true}
+                      fillHeight={true}
+                    />
+                  </div>
+
+                  <StreamPlayer fillContainer />
+
+                  {hasCompetitionApp && currentCameraId && (
+                    <CompetitionScoreboard
+                      cameraId={currentCameraId}
+                      walletAddress={primaryWallet?.address}
+                      onClose={handleCompetitionExit}
+                      escrowInfo={competitionEscrowInfo}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ====== MOBILE LAYOUT (below lg) ====== */}
+      <div className="pb-40 lg:hidden">
         <div className="relative max-w-3xl mx-auto pt-0">
           <ToastContainer message={currentToast} onDismiss={dismissToast} />
 

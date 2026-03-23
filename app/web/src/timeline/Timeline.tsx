@@ -4,6 +4,7 @@ import { Camera, Video, Power, User, Radio, Activity, Users } from 'lucide-react
 import { useDynamicContext } from '@dynamic-labs/sdk-react-core';
 import { ProfileModal } from '../profile/ProfileModal';
 import MediaViewer from '../media/MediaViewer';
+import { useDisplayProfile } from '../auth/useDisplayProfile';
 import { timelineService } from './timeline-service';
 import { TimelineEvent, TimelineEventType, TimelineUser, CVActivityMetadata } from './timeline-types';
 import { IPFSMedia } from '../storage/ipfs/ipfs-service';
@@ -21,6 +22,8 @@ interface TimelineProps {
   showProfileStack?: boolean;
   /** Show absolute timestamps (e.g. "12:34 PM") instead of relative (e.g. "5 minutes ago") */
   showAbsoluteTime?: boolean;
+  /** Fill parent container height (used in desktop phone frame so curve pins to bottom) */
+  fillHeight?: boolean;
 }
 
 // Get the display count based on screen width
@@ -109,7 +112,7 @@ const formatAbsoluteTime = (timestamp: number): string => {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full', cameraId, mobileOverlay = false, initialEvents, showProfileStack, showAbsoluteTime = false }, ref) => {
+export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAddress, variant = 'full', cameraId, mobileOverlay = false, initialEvents, showProfileStack, showAbsoluteTime = false, fillHeight = false }, ref) => {
   const [events, setEvents] = useState<TimelineEvent[]>(initialEvents || []);
   const [selectedUser, setSelectedUser] = useState<TimelineUser | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -117,6 +120,7 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   const [displayCount, setDisplayCount] = useState(getDisplayCount());
   const [mobileTimelineCount, setMobileTimelineCount] = useState(getMobileTimelineCount());
   const { user } = useDynamicContext();
+  const displayProfile = useDisplayProfile();
   const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
   const [selectedMedia, setSelectedMedia] = useState<IPFSMedia | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
@@ -140,56 +144,22 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
       };
     }
     
-    // If not in userProfiles, check current user's credentials as before
-    if (user?.verifiedCredentials) {
-      // Try to determine if this is the current user's event
-      const isCurrentUser = user.verifiedCredentials.some(cred => cred.address === event.user.address);
-      
-      if (isCurrentUser) {
-        // Find matching social credentials - prioritize Farcaster > Google > Twitter
-        const farcasterCred = user.verifiedCredentials.find(
-          cred => cred.oauthProvider === 'farcaster'
-        );
-        const googleCred = user.verifiedCredentials.find(
-          cred => cred.oauthProvider === 'google'
-        );
-        const twitterCred = user.verifiedCredentials.find(
-          cred => cred.oauthProvider === 'twitter'
-        );
-
-        const socialCred = farcasterCred || googleCred || twitterCred;
-        
-        if (socialCred) {
-          // Store this profile for future use
-          const newProfile = {
-            address: event.user.address,
-            displayName: socialCred.oauthDisplayName,
-            username: socialCred.oauthUsername,
-            pfpUrl: socialCred.oauthAccountPhotos?.[0],
-            provider: socialCred.oauthProvider
-          };
-          
-          setUserProfiles(prev => ({
-            ...prev,
-            [event.user.address]: newProfile
-          }));
-          
-          return {
-            ...event,
-            user: {
-              ...event.user,
-              displayName: socialCred.oauthDisplayName || event.user.displayName,
-              username: socialCred.oauthUsername || event.user.username,
-              pfpUrl: socialCred.oauthAccountPhotos?.[0] || event.user.pfpUrl,
-              provider: socialCred.oauthProvider || event.user.provider
-            }
-          };
+    // If this is the current user, use the resolved display profile (never contains email)
+    if (displayProfile && event.user.address === displayProfile.fullWalletAddress) {
+      return {
+        ...event,
+        user: {
+          ...event.user,
+          displayName: displayProfile.displayName || event.user.displayName,
+          username: displayProfile.username || event.user.username,
+          pfpUrl: displayProfile.profileImage || event.user.pfpUrl,
+          provider: displayProfile.provider || event.user.provider
         }
-      }
+      };
     }
-    
+
     return event;
-  }, [user?.verifiedCredentials, userProfiles]);
+  }, [displayProfile, userProfiles]);
 
   // Fetch user profiles for all addresses in the events
   useEffect(() => {
@@ -402,19 +372,27 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
     const enrichedEvents = filteredEvents.map(event => enrichEventWithUserInfo(event));
     
     if (variant === 'camera' && !mobileOverlay) {
-      return enrichedEvents.slice(0, displayCount); // Desktop: use JavaScript count (perfect!)
+      const count = fillHeight ? displayCount - 1 : displayCount;
+      return enrichedEvents.slice(0, count); // Desktop: use JavaScript count (perfect!)
     } else if (variant === 'camera' && mobileOverlay) {
+      if (fillHeight) {
+        // Desktop phone frame: container is overflow-hidden so extra items get clipped.
+        // Use a generous count to fill the height; CSS handles the cutoff.
+        return enrichedEvents.slice(0, 25);
+      }
       // Mobile: Always create array of mobileTimelineCount length
       // Fill with actual events first, then pad with empty slots
-      const result = enrichedEvents.slice(0, mobileTimelineCount);
-      // Pad with null entries to always reach mobileTimelineCount
+      // Slice real events to mobileTimelineCount - 1 so there's always at least one null slot
+      // before the profile stack at bottom-2 (prevents overlap)
+      const result = enrichedEvents.slice(0, mobileTimelineCount - 1);
+      // Pad with null entries to always reach full mobileTimelineCount (keeps timeline same height)
       while (result.length < mobileTimelineCount) {
         result.push(null as any);
       }
       return result;
     }
     return enrichedEvents;
-  }, [filteredEvents, variant, displayCount, mobileTimelineCount, userProfiles]);
+  }, [filteredEvents, variant, displayCount, mobileTimelineCount, userProfiles, fillHeight]);
 
   const getEventIcon = (type: TimelineEventType, isOverlay = false) => {
     const iconClass = `w-4 h-4 ${isOverlay ? 'text-white' : ''}`;
@@ -470,20 +448,25 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
   };
 
   return (
-    <div className="w-full relative" ref={timelineRef}>
+    <div className={`w-full relative ${fillHeight ? 'h-full' : ''}`} ref={timelineRef}>
       {/* Container with fixed height for desktop camera variant */}
       <div
         className="relative"
         style={{
-          height: variant === 'camera' && !mobileOverlay
-            ? '45rem'  // Extends past the gallery on desktop
-            : 'auto'
+          height: fillHeight
+            ? '100%'
+            : variant === 'camera' && !mobileOverlay
+              ? '45rem'  // Extends past the gallery on desktop
+              : 'auto'
         }}
       >
         {/* Vertical timeline line - stops above the profile stack curve */}
         <div className="absolute left-[4px] md:left-[6px] top-0 bottom-14 w-px bg-gray-200" />
 
-        <div className="space-y-4 md:space-y-6 w-full">
+        <div
+          className="space-y-4 md:space-y-6 w-full overflow-hidden"
+          style={fillHeight ? { maxHeight: 'calc(100% - 3.5rem)' } : undefined}
+        >
           {displayEvents.length === 0 ? (
             <p className={`text-sm pl-16 ${mobileOverlay ? 'text-white' : 'text-gray-500'}`}>No activity yet</p>
           ) : (
@@ -645,36 +628,15 @@ export const Timeline = forwardRef<any, TimelineProps>(({ filter = 'all', userAd
             username: selectedUser.username,
             displayName: selectedUser.displayName,
             pfpUrl: selectedUser.pfpUrl,
-            provider: selectedUser.provider, // Include provider field from backend
-            verifiedCredentials: 
-              user?.verifiedCredentials?.some(cred => 
-                cred.address === selectedUser.address)
-                ? user?.verifiedCredentials?.filter(cred => 
-                    cred.oauthProvider === 'farcaster' || cred.oauthProvider === 'google' || cred.oauthProvider === 'twitter'
-                  )?.map(cred => ({
-                    oauthProvider: cred.oauthProvider as string,
-                    oauthDisplayName: cred.oauthDisplayName || undefined,
-                    oauthUsername: cred.oauthUsername,
-                    oauthAccountPhotos: cred.oauthAccountPhotos
-                  }))
-                : user?.verifiedCredentials
-                  ?.filter(cred => 
-                    (cred.oauthProvider === 'farcaster' || cred.oauthProvider === 'google' || cred.oauthProvider === 'twitter') && 
-                    cred.address === selectedUser.address
-                  )
-                  ?.map(cred => ({
-                    oauthProvider: cred.oauthProvider as string,
-                    oauthDisplayName: cred.oauthDisplayName || undefined,
-                    oauthUsername: cred.oauthUsername,
-                    oauthAccountPhotos: cred.oauthAccountPhotos
-                  }))
+            provider: selectedUser.provider,
           }}
           action={{
             type: selectedEvent.type,
             timestamp: selectedEvent.timestamp,
             transactionId: selectedEvent.transactionId,
             mediaUrl: selectedEvent.mediaUrl,
-            cvActivity: selectedEvent.cvActivity
+            cvActivity: selectedEvent.cvActivity,
+            triggeredBy: selectedEvent.triggeredBy,
           }}
         />
       )}

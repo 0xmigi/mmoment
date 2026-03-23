@@ -3,9 +3,10 @@ import { useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { X, User } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom';
 import { AuthModal } from '../../auth/components/AuthModal';
 import Logo from '../common/Logo';
+import { useDisplayProfile } from '../../auth/useDisplayProfile';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -13,24 +14,24 @@ interface MainLayoutProps {
   onTabChange: (tab: 'camera' | 'gallery' | 'activities' | 'account') => void;
 }
 
-interface SocialCredential {
-  oauthProvider: string;
-  oauthUsername: string;
-  oauthDisplayName: string;
-  oauthAccountPhotos: string[];
-}
-
 export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const isLoggedIn = useIsLoggedIn();
-  const { sdkHasLoaded, primaryWallet, user } = useDynamicContext();
+  const { sdkHasLoaded, primaryWallet } = useDynamicContext();
   const { connection } = useConnection();
   const navigate = useNavigate();
   const { cameraId } = useParams<{ cameraId?: string }>();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [solBalance, setSolBalance] = useState<number | null>(null);
+
+  // On desktop camera routes, the active tab is driven by the ?panel param
+  const panelParam = searchParams.get('panel');
+  const effectiveActiveTab = panelParam === 'gallery' ? 'gallery'
+    : panelParam === 'activities' ? 'activities'
+    : activeTab;
 
   // Redirect to login if not authenticated (wait for SDK to hydrate first)
   useEffect(() => {
@@ -79,6 +80,17 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
     const matchPath = location.pathname.match(/\/app\/(camera|gallery|activities)\/([^\/]+)/);
     const currentCameraId = cameraId || (matchPath ? matchPath[2] : localStorage.getItem('directCameraId'));
 
+    // On desktop with an active camera, swap the left panel instead of navigating away
+    if (currentCameraId && window.innerWidth >= 1024) {
+      if (tab === 'gallery' || tab === 'activities') {
+        navigate(`/app/camera/${currentCameraId}?panel=${tab}`, { replace: true });
+        return;
+      } else if (tab === 'camera') {
+        navigate(`/app/camera/${currentCameraId}`, { replace: true });
+        return;
+      }
+    }
+
     if (tab === 'camera' && currentCameraId) {
       navigate(`/app/camera/${currentCameraId}`);
     } else if (tab === 'gallery') {
@@ -90,40 +102,17 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
     }
   };
 
-  // Resolve user display info
-  const farcasterCred = user?.verifiedCredentials?.find(
-    (cred: any): cred is SocialCredential =>
-      cred?.oauthProvider?.toLowerCase() === 'farcaster'
-  );
-  const googleCred = user?.verifiedCredentials?.find(
-    (cred: any): cred is SocialCredential =>
-      cred?.oauthProvider?.toLowerCase() === 'google'
-  );
-  const twitterCred = user?.verifiedCredentials?.find(
-    (cred: any): cred is SocialCredential =>
-      cred?.oauthProvider?.toLowerCase() === 'twitter'
-  );
-  const socialCred = farcasterCred || googleCred || twitterCred;
-
-  const providerLabels: Record<string, string> = {
-    farcaster: 'Farcaster',
-    google: 'Google',
-    twitter: 'X / Twitter',
-  };
-  const displayName = socialCred?.oauthDisplayName
-    || user?.email
-    || primaryWallet?.address?.slice(0, 6) + '...' + primaryWallet?.address?.slice(-4)
-    || 'Account';
-  const socialProvider = socialCred?.oauthProvider
-    ? (providerLabels[socialCred.oauthProvider] || socialCred.oauthProvider)
-    : (user?.email ? 'Email' : 'Wallet');
-  const profilePhoto = socialCred?.oauthAccountPhotos?.[0];
+  // Resolved display profile — single source of truth, never contains email
+  const displayProfile = useDisplayProfile();
+  const displayName = displayProfile?.name || 'Account';
+  const socialProvider = displayProfile?.providerLabel || 'Wallet';
+  const profilePhoto = displayProfile?.profileImage;
 
   return (
     <div className="flex flex-col min-h-screen bg-white">
       {/* Top Bar */}
       <div className="flex-none z-[40]">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+        <div className="w-full px-6 h-16 flex items-center justify-between">
           {/* Left side - Logo and Desktop Nav */}
           <div className="flex items-center gap-8">
             <div
@@ -140,7 +129,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                 <button
                   type='button'
                   onClick={() => handleTabChange('camera')}
-                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'camera'
+                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${effectiveActiveTab === 'camera'
                     ? 'bg-white text-neutral-900'
                     : 'bg-white text-neutral-400 hover:text-neutral-900'
                     }`}
@@ -150,7 +139,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                 <button
                   type='button'
                   onClick={() => handleTabChange('gallery')}
-                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'gallery'
+                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${effectiveActiveTab === 'gallery'
                     ? 'bg-white text-neutral-900'
                     : 'bg-white text-neutral-400 hover:text-neutral-900'
                     }`}
@@ -160,7 +149,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
                 <button
                   type='button'
                   onClick={() => handleTabChange('activities')}
-                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${activeTab === 'activities'
+                  className={`px-4 py-2 rounded-lg flex items-center gap-2 ${effectiveActiveTab === 'activities'
                     ? 'bg-white text-neutral-900'
                     : 'bg-white text-neutral-400 hover:text-neutral-900'
                     }`}
@@ -217,7 +206,7 @@ export function MainLayout({ children, activeTab, onTabChange }: MainLayoutProps
 
           <div className="relative">
             {/* Header with logo + close */}
-            <div className="bg-white px-4 h-16 flex items-center justify-between">
+            <div className="bg-white px-6 h-16 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Logo width={30} height={21} className="text-neutral-900" />
                 <h1 className="text-2xl text-neutral-900 font-bold">Moment</h1>

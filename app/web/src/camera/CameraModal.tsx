@@ -11,6 +11,7 @@ import { useUserSessionChain, fetchAuthorityPublicKey } from '../hooks/useUserSe
 import { useProgram, findUserSessionChainPDA } from '../anchor/setup';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, SystemProgram } from '@solana/web3.js';
+import { buildAndSubmitSponsored } from '../services/kora-client';
 
 interface CameraModalProps {
   isOpen: boolean;
@@ -57,6 +58,9 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
   const [activeUsersCount, setActiveUsersCount] = useState<number>(0);
   const [loadingActiveUsers, setLoadingActiveUsers] = useState(false);
 
+  // Camera location from queue config
+  const [cameraLocation, setCameraLocation] = useState<string | null>(null);
+
   // Check if current user is the owner
   const isOwner = primaryWallet?.address === camera.owner;
 
@@ -84,6 +88,16 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
 
     // Always fetch active users (doesn't need wallet)
     fetchActiveUsersForCamera();
+
+    // Fetch camera location from queue config
+    fetch(`${CONFIG.BACKEND_URL}/api/camera/${camera.id}/queue`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.success && data.config?.location) {
+          setCameraLocation(data.config.location);
+        }
+      })
+      .catch(() => {});
 
     // Poll active users only (much less frequently - every 15 seconds)
     const intervalId = setInterval(() => {
@@ -358,33 +372,28 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       console.log('[CameraModal] User:', userPublicKey.toString());
       console.log('[CameraModal] Authority:', authority.toString());
 
-      // Build the transaction
-      const tx = await (program.methods as any)
-        .createUserSessionChain()
-        .accounts({
-          user: userPublicKey,
-          authority: authority,
-          userSessionChain: sessionChainPda,
-          systemProgram: SystemProgram.programId,
-        })
-        .transaction();
+      // Build and submit via Kora (gasless for user)
+      const walletSigner = await (primaryWallet as any).getSigner();
+      const result = await buildAndSubmitSponsored(
+        userPublicKey,
+        walletSigner,
+        async () => {
+          return await (program.methods as any)
+            .createUserSessionChain()
+            .accounts({
+              user: userPublicKey,
+              authority: authority,
+              userSessionChain: sessionChainPda,
+              systemProgram: SystemProgram.programId,
+            })
+            .transaction();
+        },
+        connection,
+        'create_session_chain'
+      );
 
-      // Get blockhash
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-      tx.recentBlockhash = blockhash;
-      tx.feePayer = userPublicKey;
-
-      // Sign with Dynamic wallet
-      console.log('[CameraModal] Requesting signature...');
-      const signer = await (primaryWallet as any).getSigner();
-      const signedTx = await signer.signTransaction(tx);
-
-      // Send and confirm
-      console.log('[CameraModal] Sending transaction...');
-      const signature = await connection.sendRawTransaction(signedTx.serialize());
-      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
-
-      console.log('[CameraModal] Session keychain created successfully!');
+      if (!result.success) throw new Error(result.error || 'Transaction failed');
+      console.log('[CameraModal] Session keychain created:', result.signature);
 
       // Refresh the session chain status
       await refetchSessionChain();
@@ -509,11 +518,11 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                   </button>
                 </div>
 
-                {/* Camera Name */}
-                {camera.ownerDisplayName && (
+                {/* Location — from queue config */}
+                {cameraLocation && (
                   <div className="mb-4">
-                    <div className="text-sm text-gray-700">Camera Name</div>
-                    <div className="text-sm">{camera.ownerDisplayName}</div>
+                    <div className="text-sm text-gray-700">Location</div>
+                    <div className="text-sm">{cameraLocation}</div>
                   </div>
                 )}
 

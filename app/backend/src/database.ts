@@ -233,6 +233,78 @@ export async function initializeDatabase(dbPath: string = './mmoment.db'): Promi
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`);
         await runQuery(`CREATE INDEX IF NOT EXISTS idx_api_keys_wallet ON api_keys(wallet_address)`);
 
+        // Create camera_events table (event info displayed on desktop/TV view)
+        await runQuery(`
+          CREATE TABLE IF NOT EXISTS camera_events (
+            camera_id TEXT PRIMARY KEY,
+            event_name TEXT,
+            event_description TEXT,
+            event_date TEXT,
+            updated_at INTEGER NOT NULL
+          )
+        `);
+
+        // Migrate camera_events: add new columns (safe to re-run — errors ignored for existing columns)
+        const newColumns = [
+          'event_start_time INTEGER',
+          'event_end_time INTEGER',
+          'event_type TEXT',
+          'event_location TEXT',
+          'event_status TEXT DEFAULT \'upcoming\'',
+          'ical_url TEXT',
+          'ical_last_synced INTEGER',
+        ];
+        for (const col of newColumns) {
+          try {
+            await runQuery(`ALTER TABLE camera_events ADD COLUMN ${col}`);
+          } catch (_) {
+            // Column already exists — safe to ignore
+          }
+        }
+
+        // Create camera_queue_config table (owner settings per camera)
+        await runQuery(`
+          CREATE TABLE IF NOT EXISTS camera_queue_config (
+            camera_id TEXT PRIMARY KEY,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            max_slot_duration INTEGER NOT NULL DEFAULT 1800,
+            min_slot_duration INTEGER NOT NULL DEFAULT 60,
+            updated_at INTEGER NOT NULL
+          )
+        `);
+
+        // Add location column to queue config (migration for existing DBs)
+        try {
+          await runQuery(`ALTER TABLE camera_queue_config ADD COLUMN location TEXT`);
+        } catch (_) {
+          // Column already exists
+        }
+
+        // Create camera_queue_entries table
+        await runQuery(`
+          CREATE TABLE IF NOT EXISTS camera_queue_entries (
+            id TEXT PRIMARY KEY,
+            camera_id TEXT NOT NULL,
+            wallet_address TEXT NOT NULL,
+            display_name TEXT,
+            requested_duration INTEGER NOT NULL,
+            position INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'waiting',
+            joined_at INTEGER NOT NULL,
+            started_at INTEGER,
+            expires_at INTEGER,
+            completed_at INTEGER
+          )
+        `);
+
+        // Migration: add title column
+        try {
+          await runQuery(`ALTER TABLE camera_queue_entries ADD COLUMN title TEXT`);
+        } catch { /* already exists */ }
+
+        await runQuery(`CREATE INDEX IF NOT EXISTS idx_queue_camera_status ON camera_queue_entries(camera_id, status)`);
+        await runQuery(`CREATE INDEX IF NOT EXISTS idx_queue_camera_position ON camera_queue_entries(camera_id, position)`);
+
         console.log('✅ Database tables initialized');
         resolve();
       } catch (error) {
@@ -1098,6 +1170,31 @@ export async function getUserSessions(walletAddress: string, limit: number = 50)
 }
 
 // Get all activities for a camera (most recent first)
+/** Get wallets currently checked in (checked in but not checked out) from the last 24h */
+export async function getActiveCheckIns(): Promise<Array<{ userPubkey: string; cameraId: string }>> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    const oneDayAgo = Date.now() - 86400000;
+    // Find users whose most recent activity is a check_in (type 0), not a check_out (type 1)
+    db.all(
+      `SELECT user_pubkey, camera_id, activity_type, MAX(timestamp) as latest
+       FROM session_activity_buffers
+       WHERE timestamp > ? AND activity_type IN (0, 1)
+       GROUP BY user_pubkey
+       HAVING activity_type = 0`,
+      [oneDayAgo],
+      (err, rows: any[]) => {
+        if (err) { reject(err); return; }
+        resolve((rows || []).map(row => ({
+          userPubkey: row.user_pubkey,
+          cameraId: row.camera_id,
+        })));
+      }
+    );
+  });
+}
+
 export async function getCameraActivities(cameraId: string, limit: number = 100): Promise<SessionActivityBuffer[]> {
   return new Promise((resolve, reject) => {
     if (!db) {
@@ -1637,6 +1734,425 @@ export async function updateApiKeyLastUsed(keyHash: string): Promise<void> {
       [Date.now(), keyHash],
       (err: Error | null) => {
         if (err) { reject(err); } else { resolve(); }
+      }
+    );
+  });
+}
+
+// ============================================================================
+// CAMERA EVENTS OPERATIONS
+// ============================================================================
+
+export interface CameraEvent {
+  cameraId: string;
+  eventName?: string;
+  eventDescription?: string;
+  eventDate?: string;
+  eventStartTime?: number;
+  eventEndTime?: number;
+  eventType?: string;
+  eventLocation?: string;
+  eventStatus?: string;
+  icalUrl?: string;
+  icalLastSynced?: number;
+  updatedAt: number;
+}
+
+export function computeEventStatus(startTime?: number | null, endTime?: number | null): string {
+  if (!startTime) return 'upcoming';
+  const now = Date.now();
+  if (endTime && now > endTime) return 'ended';
+  if (now >= startTime) return 'live';
+  return 'upcoming';
+}
+
+export async function getCameraEvent(cameraId: string): Promise<CameraEvent | null> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.get(
+      `SELECT camera_id, event_name, event_description, event_date,
+              event_start_time, event_end_time, event_type, event_location,
+              event_status, ical_url, ical_last_synced, updated_at
+       FROM camera_events WHERE camera_id = ?`,
+      [cameraId],
+      (err: any, row: any) => {
+        if (err) { reject(err); return; }
+        if (!row) { resolve(null); return; }
+        resolve({
+          cameraId: row.camera_id,
+          eventName: row.event_name,
+          eventDescription: row.event_description,
+          eventDate: row.event_date,
+          eventStartTime: row.event_start_time,
+          eventEndTime: row.event_end_time,
+          eventType: row.event_type,
+          eventLocation: row.event_location,
+          eventStatus: computeEventStatus(row.event_start_time, row.event_end_time),
+          icalUrl: row.ical_url,
+          icalLastSynced: row.ical_last_synced,
+          updatedAt: row.updated_at,
+        });
+      }
+    );
+  });
+}
+
+export async function saveCameraEvent(event: CameraEvent): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.run(
+      `INSERT OR REPLACE INTO camera_events (
+        camera_id, event_name, event_description, event_date,
+        event_start_time, event_end_time, event_type, event_location,
+        event_status, ical_url, ical_last_synced, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        event.cameraId,
+        event.eventName || null,
+        event.eventDescription || null,
+        event.eventDate || null,
+        event.eventStartTime || null,
+        event.eventEndTime || null,
+        event.eventType || null,
+        event.eventLocation || null,
+        event.eventStatus || computeEventStatus(event.eventStartTime, event.eventEndTime),
+        event.icalUrl || null,
+        event.icalLastSynced || null,
+        Date.now(),
+      ],
+      (err: Error | null) => {
+        if (err) { reject(err); } else { resolve(); }
+      }
+    );
+  });
+}
+
+export async function getAllCameraEventsWithIcal(): Promise<CameraEvent[]> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.all(
+      `SELECT camera_id, event_name, event_description, event_date,
+              event_start_time, event_end_time, event_type, event_location,
+              event_status, ical_url, ical_last_synced, updated_at
+       FROM camera_events WHERE ical_url IS NOT NULL`,
+      (err: any, rows: any[]) => {
+        if (err) { reject(err); return; }
+        resolve((rows || []).map(row => ({
+          cameraId: row.camera_id,
+          eventName: row.event_name,
+          eventDescription: row.event_description,
+          eventDate: row.event_date,
+          eventStartTime: row.event_start_time,
+          eventEndTime: row.event_end_time,
+          eventType: row.event_type,
+          eventLocation: row.event_location,
+          eventStatus: computeEventStatus(row.event_start_time, row.event_end_time),
+          icalUrl: row.ical_url,
+          icalLastSynced: row.ical_last_synced,
+          updatedAt: row.updated_at,
+        })));
+      }
+    );
+  });
+}
+
+// ============================================================================
+// CAMERA QUEUE OPERATIONS
+// ============================================================================
+
+export interface QueueConfig {
+  cameraId: string;
+  enabled: boolean;
+  maxSlotDuration: number;  // seconds
+  minSlotDuration: number;  // seconds
+  location: string | null;  // owner-set address/location
+  updatedAt: number;
+}
+
+export interface QueueEntry {
+  id: string;
+  cameraId: string;
+  walletAddress: string;
+  displayName: string | null;
+  title: string | null;       // user-chosen session name
+  requestedDuration: number;  // seconds
+  position: number;
+  status: 'waiting' | 'active' | 'completed' | 'left';
+  joinedAt: number;
+  startedAt: number | null;
+  expiresAt: number | null;
+  completedAt: number | null;
+}
+
+const DEFAULT_QUEUE_CONFIG: Omit<QueueConfig, 'cameraId' | 'updatedAt'> = {
+  enabled: true,
+  maxSlotDuration: 7200,   // 2 hours
+  minSlotDuration: 1800,   // 30 minutes
+  location: null,
+};
+
+export async function getQueueConfig(cameraId: string): Promise<QueueConfig> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.get(
+      `SELECT camera_id, enabled, max_slot_duration, min_slot_duration, location, updated_at
+       FROM camera_queue_config WHERE camera_id = ?`,
+      [cameraId],
+      (err: any, row: any) => {
+        if (err) { reject(err); return; }
+        if (!row) {
+          resolve({
+            cameraId,
+            ...DEFAULT_QUEUE_CONFIG,
+            updatedAt: 0,
+          });
+          return;
+        }
+        resolve({
+          cameraId: row.camera_id,
+          enabled: !!row.enabled,
+          maxSlotDuration: row.max_slot_duration,
+          minSlotDuration: row.min_slot_duration,
+          location: row.location || null,
+          updatedAt: row.updated_at,
+        });
+      }
+    );
+  });
+}
+
+export async function saveQueueConfig(config: QueueConfig): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.run(
+      `INSERT OR REPLACE INTO camera_queue_config
+       (camera_id, enabled, max_slot_duration, min_slot_duration, location, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [config.cameraId, config.enabled ? 1 : 0, config.maxSlotDuration, config.minSlotDuration, config.location || null, Date.now()],
+      (err: Error | null) => {
+        if (err) { reject(err); } else { resolve(); }
+      }
+    );
+  });
+}
+
+export async function getQueueEntries(cameraId: string, status?: string): Promise<QueueEntry[]> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    const where = status
+      ? `WHERE camera_id = ? AND status = ?`
+      : `WHERE camera_id = ? AND status IN ('waiting', 'active')`;
+    const params = status ? [cameraId, status] : [cameraId];
+
+    db.all(
+      `SELECT id, camera_id, wallet_address, display_name, title, requested_duration,
+              position, status, joined_at, started_at, expires_at, completed_at
+       FROM camera_queue_entries ${where} ORDER BY position ASC`,
+      params,
+      (err: any, rows: any[]) => {
+        if (err) { reject(err); return; }
+        resolve((rows || []).map(row => ({
+          id: row.id,
+          cameraId: row.camera_id,
+          walletAddress: row.wallet_address,
+          displayName: row.display_name,
+          title: row.title || null,
+          requestedDuration: row.requested_duration,
+          position: row.position,
+          status: row.status,
+          joinedAt: row.joined_at,
+          startedAt: row.started_at,
+          expiresAt: row.expires_at,
+          completedAt: row.completed_at,
+        })));
+      }
+    );
+  });
+}
+
+export async function getActiveQueueEntry(cameraId: string): Promise<QueueEntry | null> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.get(
+      `SELECT id, camera_id, wallet_address, display_name, title, requested_duration,
+              position, status, joined_at, started_at, expires_at, completed_at
+       FROM camera_queue_entries WHERE camera_id = ? AND status = 'active' LIMIT 1`,
+      [cameraId],
+      (err: any, row: any) => {
+        if (err) { reject(err); return; }
+        if (!row) { resolve(null); return; }
+        resolve({
+          id: row.id,
+          cameraId: row.camera_id,
+          walletAddress: row.wallet_address,
+          displayName: row.display_name,
+          title: row.title || null,
+          requestedDuration: row.requested_duration,
+          position: row.position,
+          status: row.status,
+          joinedAt: row.joined_at,
+          startedAt: row.started_at,
+          expiresAt: row.expires_at,
+          completedAt: row.completed_at,
+        });
+      }
+    );
+  });
+}
+
+export async function insertQueueEntry(entry: QueueEntry): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.run(
+      `INSERT INTO camera_queue_entries
+       (id, camera_id, wallet_address, display_name, title, requested_duration, position, status, joined_at, started_at, expires_at, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [entry.id, entry.cameraId, entry.walletAddress, entry.displayName, entry.title,
+       entry.requestedDuration, entry.position, entry.status, entry.joinedAt, entry.startedAt, entry.expiresAt, entry.completedAt],
+      (err: Error | null) => {
+        if (err) { reject(err); } else { resolve(); }
+      }
+    );
+  });
+}
+
+export async function updateQueueEntryStatus(
+  id: string,
+  status: QueueEntry['status'],
+  updates?: { startedAt?: number; expiresAt?: number; completedAt?: number }
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    const setClauses = ['status = ?'];
+    const params: any[] = [status];
+
+    if (updates?.startedAt !== undefined) { setClauses.push('started_at = ?'); params.push(updates.startedAt); }
+    if (updates?.expiresAt !== undefined) { setClauses.push('expires_at = ?'); params.push(updates.expiresAt); }
+    if (updates?.completedAt !== undefined) { setClauses.push('completed_at = ?'); params.push(updates.completedAt); }
+
+    params.push(id);
+
+    db.run(
+      `UPDATE camera_queue_entries SET ${setClauses.join(', ')} WHERE id = ?`,
+      params,
+      (err: Error | null) => {
+        if (err) { reject(err); } else { resolve(); }
+      }
+    );
+  });
+}
+
+export async function reorderQueuePositions(cameraId: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    // Get all waiting entries ordered by current position
+    db.all(
+      `SELECT id FROM camera_queue_entries WHERE camera_id = ? AND status = 'waiting' ORDER BY position ASC`,
+      [cameraId],
+      (err: any, rows: any[]) => {
+        if (err) { reject(err); return; }
+        if (!rows || rows.length === 0) { resolve(); return; }
+
+        // Reassign positions sequentially starting from 0
+        let completed = 0;
+        rows.forEach((row, idx) => {
+          db!.run(
+            `UPDATE camera_queue_entries SET position = ? WHERE id = ?`,
+            [idx, row.id],
+            (err2: Error | null) => {
+              if (err2) { reject(err2); return; }
+              completed++;
+              if (completed === rows.length) resolve();
+            }
+          );
+        });
+      }
+    );
+  });
+}
+
+export async function getNextQueuePosition(cameraId: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.get(
+      `SELECT MAX(position) as max_pos FROM camera_queue_entries WHERE camera_id = ? AND status = 'waiting'`,
+      [cameraId],
+      (err: any, row: any) => {
+        if (err) { reject(err); return; }
+        resolve(row?.max_pos != null ? row.max_pos + 1 : 0);
+      }
+    );
+  });
+}
+
+export async function getQueueEntryByWallet(cameraId: string, walletAddress: string): Promise<QueueEntry | null> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.get(
+      `SELECT id, camera_id, wallet_address, display_name, title, requested_duration,
+              position, status, joined_at, started_at, expires_at, completed_at
+       FROM camera_queue_entries
+       WHERE camera_id = ? AND wallet_address = ? AND status IN ('waiting', 'active')
+       LIMIT 1`,
+      [cameraId, walletAddress],
+      (err: any, row: any) => {
+        if (err) { reject(err); return; }
+        if (!row) { resolve(null); return; }
+        resolve({
+          id: row.id,
+          cameraId: row.camera_id,
+          walletAddress: row.wallet_address,
+          displayName: row.display_name,
+          title: row.title || null,
+          requestedDuration: row.requested_duration,
+          position: row.position,
+          status: row.status,
+          joinedAt: row.joined_at,
+          startedAt: row.started_at,
+          expiresAt: row.expires_at,
+          completedAt: row.completed_at,
+        });
+      }
+    );
+  });
+}
+
+export async function getAllActiveQueueEntries(): Promise<QueueEntry[]> {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error('Database not initialized')); return; }
+
+    db.all(
+      `SELECT id, camera_id, wallet_address, display_name, title, requested_duration,
+              position, status, joined_at, started_at, expires_at, completed_at
+       FROM camera_queue_entries WHERE status = 'active'`,
+      (err: any, rows: any[]) => {
+        if (err) { reject(err); return; }
+        resolve((rows || []).map(row => ({
+          id: row.id,
+          cameraId: row.camera_id,
+          walletAddress: row.wallet_address,
+          displayName: row.display_name,
+          title: row.title || null,
+          requestedDuration: row.requested_duration,
+          position: row.position,
+          status: row.status as 'active',
+          joinedAt: row.joined_at,
+          startedAt: row.started_at,
+          expiresAt: row.expires_at,
+          completedAt: row.completed_at,
+        })));
       }
     );
   });

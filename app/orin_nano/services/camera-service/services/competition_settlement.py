@@ -60,7 +60,7 @@ from solders.system_program import ID as SYSTEM_PROGRAM_ID
 logger = logging.getLogger(__name__)
 
 # Competition Escrow Program ID (devnet)
-PROGRAM_ID = Pubkey.from_string("32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ")
+PROGRAM_ID = Pubkey.from_string("EpczQBF7WmPcyzTtYJfzrPNXSVxM3YJsND7Vx8zpTLAj")
 
 # Backend fee payer public key (the backend wallet that pays for settlement transactions)
 BACKEND_PAYER_PUBKEY = Pubkey.from_string("9k5MGiM9Xqx8f2362M1B2rH5uMKFFVNuXaCDKyTsFXep")

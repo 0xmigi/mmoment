@@ -20,16 +20,8 @@ const connection = new Connection(
   "confirmed"
 );
 
-// Import gas sponsorship service
-import {
-  initializeGasSponsorshipService,
-  sponsorTransaction,
-  getUserSponsorshipStatus,
-  getSponsorshipStats,
-  resetUserSponsorship,
-  clearAllSponsorships,
-  checkFeePayerBalance
-} from './gas-sponsorship';
+// Gas sponsorship now handled by Kora (separate service)
+import { initializeGasSponsorshipService } from './gas-sponsorship';
 
 // Import session cleanup cron service
 import {
@@ -77,8 +69,18 @@ import {
   getWalrusFilesForWallet,
   getWalrusFilesWithAccess,
   deleteWalrusFile,
-  WalrusFileMapping
+  WalrusFileMapping,
+  // Camera events
+  getCameraEvent,
+  saveCameraEvent,
+  getAllCameraEventsWithIcal,
+  computeEventStatus,
+  CameraEvent,
+  getActiveCheckIns,
 } from './database';
+import { fetchAndParseIcal } from './ical-parser';
+import { initCameraState, onWalletCheckIn, onWalletCheckOut, wasApiCapture, getRecentTimelineEvents, getCheckedInUsers } from './camera-state';
+import { initQueueManager, getQueueState, joinQueue, leaveQueue, skipCurrent, updateConfig as updateQueueConfig } from './queue-manager';
 
 // Import Sui storage service for Walrus blob ownership
 import {
@@ -353,10 +355,10 @@ const io = new Server(httpServer, {
 // Trust proxy and handle HTTPS
 app.enable("trust proxy");
 
-// Block bots/crawlers from the backend
+// Block bots/crawlers from the backend, but allow agent skill file + proxied media
 app.get("/robots.txt", (_req, res) => {
   res.type("text/plain");
-  res.send("User-agent: *\nDisallow: /\n");
+  res.send("User-agent: *\nAllow: /agent-skill.md\nAllow: /v1/media/\nDisallow: /\n");
 });
 
 // Mount consumer API (/v1/*)
@@ -1347,139 +1349,14 @@ app.get("/api/pipe/gallery/:walletAddress", async (req, res) => {
   }
 });
 
-// ========================================
-// GAS SPONSORSHIP ENDPOINTS
-// ========================================
-
-// Sponsor a transaction for a user
-app.post("/api/sponsor-transaction", async (req, res) => {
-  try {
-    const { userWallet, transaction, action } = req.body;
-
-    if (!userWallet || !transaction || !action) {
-      return res.status(400).json({
-        success: false,
-        error: 'userWallet, transaction, and action are required'
-      });
-    }
-
-    console.log(`📝 Sponsorship request from ${userWallet.slice(0, 8)}... for action: ${action}`);
-
-    const result = await sponsorTransaction(userWallet, transaction, action);
-
-    if (result.success) {
-      res.json({
-        success: true,
-        transaction: result.transaction,
-        remaining: result.remaining,
-        message: `Transaction sponsored! ${result.remaining} free interactions remaining.`
-      });
-    } else {
-      res.status(400).json({
-        success: false,
-        error: result.error,
-        requiresUserPayment: result.error?.includes('used all')
-      });
-    }
-  } catch (error) {
-    console.error('Sponsor transaction error:', error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to sponsor transaction'
-    });
-  }
-});
-
-// Check user's sponsorship status
-app.get("/api/sponsorship-status/:userWallet", (req, res) => {
-  try {
-    const { userWallet } = req.params;
-
-    if (!userWallet) {
-      return res.status(400).json({ error: 'userWallet is required' });
-    }
-
-    const status = getUserSponsorshipStatus(userWallet);
-    res.json(status);
-  } catch (error) {
-    console.error('Get sponsorship status error:', error);
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Failed to get sponsorship status'
-    });
-  }
-});
-
-// Get sponsorship statistics (for monitoring)
-app.get("/api/sponsorship-stats", (_req, res) => {
-  try {
-    const stats = getSponsorshipStats();
-    res.json(stats);
-  } catch (error) {
-    console.error('Get sponsorship stats error:', error);
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Failed to get sponsorship stats'
-    });
-  }
-});
-
-// Check fee payer balance
-app.get("/api/fee-payer-balance", async (_req, res) => {
-  try {
-    const balance = await checkFeePayerBalance();
-    res.json({
-      balance,
-      publicKey: process.env.FEE_PAYER_SECRET_KEY
-        ? '9k5MGiM9Xqx8f2362M1B2rH5uMKFFVNuXaCDKyTsFXep'
-        : 'Not configured'
-    });
-  } catch (error) {
-    console.error('Check fee payer balance error:', error);
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Failed to check balance'
-    });
-  }
-});
-
-// Reset user sponsorship (for testing only - should be protected in production)
-app.post("/api/reset-sponsorship/:userWallet", (req, res) => {
-  try {
-    const { userWallet } = req.params;
-    const existed = resetUserSponsorship(userWallet);
-    res.json({
-      success: true,
-      message: existed
-        ? `Reset sponsorship for ${userWallet.slice(0, 8)}...`
-        : `No sponsorship data found for ${userWallet.slice(0, 8)}...`
-    });
-  } catch (error) {
-    console.error('Reset sponsorship error:', error);
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Failed to reset sponsorship'
-    });
-  }
-});
-
-// Clear all sponsorships (for testing only - should be protected in production)
-app.post("/api/clear-all-sponsorships", (_req, res) => {
-  try {
-    const count = clearAllSponsorships();
-    res.json({
-      success: true,
-      message: `Cleared sponsorship data for ${count} users`
-    });
-  } catch (error) {
-    console.error('Clear sponsorships error:', error);
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Failed to clear sponsorships'
-    });
-  }
-});
+// Gas sponsorship is now handled by Kora (app/backend/kora/)
+// Old sponsorship endpoints removed — all user transactions go through Kora
 
 // ============================================================================
 // COMPETITION SETTLEMENT ENDPOINT
 // ============================================================================
 
-const COMPETITION_ESCROW_PROGRAM_ID = '32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ';
+const COMPETITION_ESCROW_PROGRAM_ID = 'EpczQBF7WmPcyzTtYJfzrPNXSVxM3YJsND7Vx8zpTLAj';
 
 // Settle competition - receives camera-signed transaction, adds payer signature, submits
 app.post("/api/competition/settle", async (req, res) => {
@@ -1854,6 +1731,9 @@ interface DeviceClaim {
 const cameraRooms = new Map<string, Set<string>>();
 const pendingClaims = new Map<string, DeviceClaim>();
 
+// Initialize shared state for developer API (avoids circular imports)
+initCameraState(timelineEvents, cameraRooms);
+
 // Helper function to add timeline events (used by both Socket.IO handlers and cron bot)
 // Now saves to database for persistence and enriches with user profiles
 async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: Server) {
@@ -1929,18 +1809,19 @@ async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: 
     }
 
     // Enrich user data with profile if found - preserve all fields from event
-    if (profile) {
+    const safeProfile = sanitizeProfile(profile);
+    if (safeProfile) {
       enrichedUser = {
         address: event.user.address,
-        displayName: profile.displayName || incomingUser.displayName,
-        username: profile.username || incomingUser.username,
-        pfpUrl: profile.profileImage || incomingUser.pfpUrl,
-        provider: profile.provider || incomingUser.provider,
+        displayName: safeProfile.displayName || incomingUser.displayName,
+        username: safeProfile.username || incomingUser.username,
+        pfpUrl: safeProfile.profileImage || incomingUser.pfpUrl,
+        provider: safeProfile.provider || incomingUser.provider,
         // Pass through any additional fields from the original event
         ...(event.user as any)
       };
 
-      console.log(`✅ Enriched timeline event with profile for ${event.user.address.slice(0, 8)}... (${profile.displayName || profile.username})`);
+      console.log(`✅ Enriched timeline event with profile for ${event.user.address.slice(0, 8)}... (${safeProfile.displayName || safeProfile.username})`);
     } else {
       // No profile in DB, just use incoming event data
       enrichedUser = { ...incomingUser };
@@ -1959,6 +1840,15 @@ async function addTimelineEvent(event: Omit<TimelineEvent, "id">, socketServer: 
 
   // Store the event in memory
   timelineEvents.push(newEvent);
+
+  // Update per-wallet session state for agent API
+  if (newEvent.cameraId && newEvent.user.address) {
+    if (newEvent.type === 'check_in') {
+      onWalletCheckIn(newEvent.user.address, newEvent.cameraId);
+    } else if (newEvent.type === 'check_out' || newEvent.type === 'auto_check_out') {
+      onWalletCheckOut(newEvent.user.address);
+    }
+  }
 
   // Save to session_activity_buffers for persistence
   // Map event type to activity_type (matches Solana ActivityType enum)
@@ -3116,7 +3006,7 @@ app.get("/api/database/debug", async (_req, res) => {
     res.json({
       success: true,
       timestamp: new Date().toISOString(),
-      databasePath: process.env.DATABASE_PATH || '/tmp/mmoment.db',
+      databasePath: process.env.DATABASE_PATH || (process.env.RAILWAY_ENVIRONMENT ? '/app/data/mmoment.db' : './mmoment.db'),
       data: {
         realtimeEvents: {
           count: recentTimeline.length,
@@ -3152,7 +3042,7 @@ app.get("/api/database/debug", async (_req, res) => {
 // USER PROFILE ENDPOINTS (for Camera Service)
 // ============================================================================
 
-// Save or update user profile (called by camera service when users check in)
+// Save or update user profile (progressive enrichment: fill gaps, never overwrite)
 app.post("/api/profile/save", async (req, res) => {
   try {
     const { walletAddress, displayName, username, profileImage, provider } = req.body;
@@ -3164,12 +3054,18 @@ app.post("/api/profile/save", async (req, res) => {
       });
     }
 
+    // Fetch existing profile to merge (progressive enrichment)
+    const existing = await getUserProfile(walletAddress);
+
+    // Never store email addresses as username (Google oauthUsername = email)
+    const safeUsername = username?.includes('@') ? undefined : username;
+
     const profile: DBUserProfile = {
       walletAddress,
-      displayName,
-      username,
-      profileImage,
-      provider,
+      displayName: existing?.displayName || displayName,
+      username: existing?.username || safeUsername,
+      profileImage: existing?.profileImage || profileImage,
+      provider: existing?.provider || provider,
       lastUpdated: new Date()
     };
 
@@ -3179,7 +3075,7 @@ app.post("/api/profile/save", async (req, res) => {
     // Update cache
     userProfilesCache.set(walletAddress, profile);
 
-    console.log(`✅ Saved user profile for ${walletAddress.slice(0, 8)}... (${displayName || username || 'no name'})`);
+    console.log(`✅ Saved user profile for ${walletAddress.slice(0, 8)}... (${profile.displayName || profile.username || 'no name'})`);
 
     res.json({
       success: true,
@@ -3195,6 +3091,16 @@ app.post("/api/profile/save", async (req, res) => {
 });
 
 // Get user profile by wallet address
+// Strip email addresses from profile data before returning to clients.
+// Google OAuth sets oauthUsername = email, which must never be exposed publicly.
+function sanitizeProfile(profile: DBUserProfile | null | undefined): typeof profile {
+  if (!profile) return profile;
+  if (profile.provider === 'google' && profile.username?.includes('@')) {
+    return { ...profile, username: undefined as any };
+  }
+  return profile;
+}
+
 app.get("/api/profile/:walletAddress", async (req, res) => {
   try {
     const { walletAddress } = req.params;
@@ -3214,7 +3120,7 @@ app.get("/api/profile/:walletAddress", async (req, res) => {
     if (profile) {
       res.json({
         success: true,
-        profile
+        profile: sanitizeProfile(profile)
       });
     } else {
       res.status(404).json({
@@ -3251,10 +3157,10 @@ app.post("/api/profile/batch", async (req, res) => {
       userProfilesCache.set(address, profile);
     }
 
-    // Convert map to object for JSON response
+    // Convert map to object for JSON response, sanitizing email leaks
     const profiles: Record<string, DBUserProfile> = {};
     for (const [address, profile] of profilesMap.entries()) {
-      profiles[address] = profile;
+      profiles[address] = sanitizeProfile(profile)!;
     }
 
     res.json({
@@ -3400,7 +3306,7 @@ app.post("/api/session/activity", async (req, res) => {
       let ciProvider: string | undefined;
       if (!displayName) {
         try {
-          const storedProfile = await getUserProfile(userPubkey);
+          const storedProfile = sanitizeProfile(await getUserProfile(userPubkey));
           if (storedProfile) {
             ciDisplayName = storedProfile.displayName;
             ciUsername = storedProfile.username;
@@ -3449,6 +3355,13 @@ app.post("/api/session/activity", async (req, res) => {
       // Keep only last 500 events in memory
       if (timelineEvents.length > 500) {
         timelineEvents.shift();
+      }
+
+      // Update per-wallet session state for agent API
+      if (eventType === 'check_in') {
+        onWalletCheckIn(userPubkey, cameraId);
+      } else if (eventType === 'check_out' || eventType === 'auto_check_out') {
+        onWalletCheckOut(userPubkey);
       }
 
       // Broadcast to camera room
@@ -3512,7 +3425,7 @@ app.post("/api/session/activity", async (req, res) => {
     let enrichedProvider: string | undefined;
     if (!displayName) {
       try {
-        const storedProfile = await getUserProfile(userPubkey);
+        const storedProfile = sanitizeProfile(await getUserProfile(userPubkey));
         if (storedProfile) {
           enrichedDisplayName = storedProfile.displayName;
           enrichedUsername = storedProfile.username;
@@ -3556,6 +3469,12 @@ app.post("/api/session/activity", async (req, res) => {
     if (cvActivityMeta && activityType === 50) {
       timelineEvent.cvActivity = cvActivityMeta;
       console.log(`   🏋️ Including CV activity meta: ${cvActivityMeta.app_name}, ${cvActivityMeta.participant_count} participants`);
+    }
+
+    // Tag API-triggered captures (photos taken via agent/developer API)
+    if (activityType === 2 && wasApiCapture(userPubkey, cameraId)) {
+      timelineEvent.triggeredBy = 'api';
+      console.log(`   🤖 Tagged as API-triggered capture`);
     }
 
     // Broadcast to camera room
@@ -3924,6 +3843,89 @@ app.get("/api/user/:walletAddress/sessions", async (req, res) => {
   }
 });
 
+// Serve agent skill file (public, no auth)
+app.get("/agent-skill.md", (_req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const skillPath = path.join(__dirname, '..', 'public', 'agent-skill.md');
+  try {
+    const content = fs.readFileSync(skillPath, 'utf-8');
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.send(content);
+  } catch {
+    res.status(404).send('Skill file not found');
+  }
+});
+
+// Get camera event info (public, no auth)
+app.get("/api/camera/:cameraId/event", async (req, res) => {
+  try {
+    const { cameraId } = req.params;
+    const event = await getCameraEvent(cameraId);
+
+    // Compute accurate stats from in-memory timeline
+    const recentEvents = getRecentTimelineEvents(cameraId, 500);
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayMs = todayStart.getTime();
+    const todayEvents = recentEvents.filter(e => e.timestamp >= todayMs);
+    const checkedIn = getCheckedInUsers(cameraId);
+
+    res.json({
+      success: true,
+      event: event || null,
+      stats: {
+        checkIns: todayEvents.filter(e => e.type === 'check_in').length,
+        photos: todayEvents.filter(e => e.type === 'photo_captured' || e.type === 'video_recorded').length,
+        activeNow: checkedIn.length,
+      },
+    });
+  } catch (error) {
+    console.error('Failed to get camera event:', error);
+    res.status(500).json({ success: false, error: 'Failed to get camera event' });
+  }
+});
+
+// Save/update camera event info
+app.put("/api/camera/:cameraId/event", async (req, res) => {
+  try {
+    const { cameraId } = req.params;
+    const {
+      eventName, eventDescription, eventDate,
+      eventStartTime, eventEndTime, eventType, eventLocation,
+      icalUrl,
+    } = req.body;
+
+    // If iCal URL provided, fetch and auto-populate fields
+    let icalData: { name?: string; description?: string; startTime?: number; endTime?: number; location?: string } = {};
+    if (icalUrl) {
+      const parsed = await fetchAndParseIcal(icalUrl);
+      if (parsed) {
+        icalData = parsed;
+      }
+    }
+
+    await saveCameraEvent({
+      cameraId,
+      eventName: eventName || icalData.name || undefined,
+      eventDescription: eventDescription || icalData.description || undefined,
+      eventDate: eventDate || undefined,
+      eventStartTime: eventStartTime || icalData.startTime || undefined,
+      eventEndTime: eventEndTime || icalData.endTime || undefined,
+      eventType: eventType || undefined,
+      eventLocation: eventLocation || icalData.location || undefined,
+      icalUrl: icalUrl || undefined,
+      icalLastSynced: icalUrl ? Date.now() : undefined,
+      updatedAt: Date.now(),
+    });
+    const saved = await getCameraEvent(cameraId);
+    res.json({ success: true, event: saved });
+  } catch (error) {
+    console.error('Failed to save camera event:', error);
+    res.status(500).json({ success: false, error: 'Failed to save camera event' });
+  }
+});
+
 // Get all activities for a camera
 app.get("/api/camera/:cameraId/activities", async (req, res) => {
   try {
@@ -3964,6 +3966,100 @@ app.get("/api/camera/:cameraId/activities", async (req, res) => {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to get camera activities'
     });
+  }
+});
+
+// ============================================================================
+// QUEUE ENDPOINTS (frontend-facing, no API key)
+// ============================================================================
+
+// Get queue state (public)
+app.get("/api/camera/:cameraId/queue", async (req, res) => {
+  try {
+    const state = await getQueueState(req.params.cameraId);
+    res.json({ success: true, ...state });
+  } catch (error) {
+    console.error('Failed to get queue state:', error);
+    res.status(500).json({ success: false, error: 'Failed to get queue state' });
+  }
+});
+
+// Join queue
+app.post("/api/camera/:cameraId/queue/join", async (req, res) => {
+  try {
+    const { cameraId } = req.params;
+    const { wallet_address, duration, display_name, title } = req.body;
+
+    if (!wallet_address) {
+      return res.status(400).json({ success: false, error: 'wallet_address is required' });
+    }
+    if (!duration || typeof duration !== 'number') {
+      return res.status(400).json({ success: false, error: 'duration (seconds) is required' });
+    }
+
+    const entry = await joinQueue(cameraId, wallet_address, duration, display_name, title);
+    res.json({ success: true, entry });
+  } catch (error: any) {
+    if (error.message === 'Already in queue' || error.message?.includes('Duration must be') || error.message === 'Queue is not enabled for this camera') {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    console.error('Failed to join queue:', error);
+    res.status(500).json({ success: false, error: 'Failed to join queue' });
+  }
+});
+
+// Leave queue
+app.delete("/api/camera/:cameraId/queue/leave", async (req, res) => {
+  try {
+    const { cameraId } = req.params;
+    const wallet_address = req.query.wallet_address as string || req.body?.wallet_address;
+
+    if (!wallet_address) {
+      return res.status(400).json({ success: false, error: 'wallet_address is required' });
+    }
+
+    const removed = await leaveQueue(cameraId, wallet_address);
+    if (!removed) {
+      return res.status(404).json({ success: false, error: 'Not in queue' });
+    }
+    res.json({ success: true, left: true });
+  } catch (error) {
+    console.error('Failed to leave queue:', error);
+    res.status(500).json({ success: false, error: 'Failed to leave queue' });
+  }
+});
+
+// Update queue config (owner only — frontend passes wallet, we check ownership)
+app.put("/api/camera/:cameraId/queue/config", async (req, res) => {
+  try {
+    const { cameraId } = req.params;
+    const { max_slot_duration, min_slot_duration, enabled, location } = req.body;
+
+    const config = await updateQueueConfig(cameraId, {
+      location,
+      enabled: enabled !== undefined ? !!enabled : undefined,
+      maxSlotDuration: max_slot_duration,
+      minSlotDuration: min_slot_duration,
+    });
+    res.json({ success: true, config });
+  } catch (error) {
+    console.error('Failed to update queue config:', error);
+    res.status(500).json({ success: false, error: 'Failed to update queue config' });
+  }
+});
+
+// Skip current (owner only)
+app.post("/api/camera/:cameraId/queue/skip", async (req, res) => {
+  try {
+    const { cameraId } = req.params;
+    const skipped = await skipCurrent(cameraId);
+    if (!skipped) {
+      return res.status(404).json({ success: false, error: 'No active slot to skip' });
+    }
+    res.json({ success: true, skipped: true });
+  } catch (error) {
+    console.error('Failed to skip queue:', error);
+    res.status(500).json({ success: false, error: 'Failed to skip queue entry' });
   }
 });
 
@@ -4664,9 +4760,9 @@ httpServer.listen(port, "0.0.0.0", async () => {
   // Initialize SQLite database and load persisted data
   try {
     console.log('\n📦 Initializing SQLite database...');
-    // Use Railway's writable /tmp directory for ephemeral storage
+    // Use Railway's persistent volume at /app/data for data that survives restarts
     const dbPath = process.env.DATABASE_PATH ||
-                   (process.env.RAILWAY_ENVIRONMENT ? '/tmp/mmoment.db' : './mmoment.db');
+                   (process.env.RAILWAY_ENVIRONMENT ? '/app/data/mmoment.db' : './mmoment.db');
     console.log(`📍 Database path: ${dbPath}`);
     await initializeDatabase(dbPath);
 
@@ -4695,6 +4791,24 @@ httpServer.listen(port, "0.0.0.0", async () => {
     // It starts empty on server restart - historical data is queried from session_activity_buffers
     console.log('📥 Timeline events use session_activity_buffers for persistence');
 
+    // Hydrate wallet sessions from database (survive server restarts)
+    try {
+      const activeCheckIns = await getActiveCheckIns();
+      for (const { userPubkey, cameraId } of activeCheckIns) {
+        onWalletCheckIn(userPubkey, cameraId);
+      }
+      console.log(`📥 Hydrated ${activeCheckIns.length} active wallet sessions from database`);
+    } catch (err) {
+      console.error('Failed to hydrate wallet sessions:', err);
+    }
+
+    // Initialize queue manager (recovers active slots from DB)
+    try {
+      await initQueueManager(io);
+    } catch (err) {
+      console.error('Failed to initialize queue manager:', err);
+    }
+
     // Get database stats
     const stats = await getDatabaseStats();
     console.log('📊 Database statistics:', {
@@ -4706,6 +4820,32 @@ httpServer.listen(port, "0.0.0.0", async () => {
     });
 
     console.log('✅ Database initialized and data loaded successfully!\n');
+
+    // Periodic iCal re-sync (every 15 minutes)
+    setInterval(async () => {
+      try {
+        const eventsWithIcal = await getAllCameraEventsWithIcal();
+        for (const event of eventsWithIcal) {
+          if (!event.icalUrl) continue;
+          const parsed = await fetchAndParseIcal(event.icalUrl);
+          if (parsed) {
+            await saveCameraEvent({
+              ...event,
+              eventName: parsed.name,
+              eventDescription: parsed.description || event.eventDescription,
+              eventStartTime: parsed.startTime,
+              eventEndTime: parsed.endTime,
+              eventLocation: parsed.location || event.eventLocation,
+              icalLastSynced: Date.now(),
+            });
+            console.log(`[ical-sync] Updated event for camera ${event.cameraId}`);
+          }
+        }
+      } catch (err) {
+        console.error('[ical-sync] Periodic sync failed:', err);
+      }
+    }, 15 * 60 * 1000);
+
   } catch (dbError) {
     console.error('❌ Failed to initialize database:', dbError);
     console.warn('⚠️  Server will continue without persistence');

@@ -100,6 +100,8 @@ export interface TimelineEvent {
   shared?: boolean;
   /** CV activity metadata (only present for cv_activity events) */
   cvActivity?: CVActivityMetadata;
+  /** How this action was triggered — 'api' if via agent/developer API */
+  triggeredBy?: string;
 }
   
 export interface TimelineState {

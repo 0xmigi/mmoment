@@ -4,17 +4,19 @@ import { profileService } from '../services/profile-service';
 import { socialService } from './social/social-service';
 
 /**
- * Hook that automatically syncs user profile to backend when wallet connects
- * or social auth changes.
+ * Hook that syncs user profile to backend using progressive enrichment.
  *
- * This ensures the backend always has the latest profile data for timeline display.
+ * Rules:
+ * - Only fill in BLANK fields, never overwrite existing data
+ * - Never store email addresses as username (Google's oauthUsername = email)
+ * - Display name and profile image are always safe to store
+ * - Username is only stored for providers that have real handles (Twitter, Farcaster)
  */
 export function useProfileSync() {
   const { user, primaryWallet } = useDynamicContext();
 
   useEffect(() => {
     async function syncProfile() {
-      // Only sync if user is authenticated with a wallet
       if (!user || !primaryWallet?.address) {
         return;
       }
@@ -31,26 +33,43 @@ export function useProfileSync() {
         const twitterProfile = socialProfiles.find(p => p.provider === 'twitter');
         const primarySocialProfile = farcasterProfile || googleProfile || twitterProfile;
 
-        // Build profile data
+        // Nothing to sync if no social profile
+        if (!primarySocialProfile) return;
+
+        // Fetch existing profile from backend
+        const existing = await profileService.getProfile(primaryWallet.address);
+
+        // Progressive enrichment: only fill blank fields
         const profileData = {
           walletAddress: primaryWallet.address,
-          displayName: primarySocialProfile?.displayName,
-          username: primarySocialProfile?.username,
-          profileImage: primarySocialProfile?.pfpUrl,
-          provider: primarySocialProfile?.provider,
+          displayName: existing?.displayName || primarySocialProfile.displayName,
+          username: existing?.username || primarySocialProfile.username,
+          profileImage: existing?.profileImage || primarySocialProfile.pfpUrl,
+          provider: existing?.provider || primarySocialProfile.provider,
         };
 
-        // Save to backend (async, don't block on it)
+        // Check if anything actually changed
+        const hasNewData =
+          (!existing?.displayName && profileData.displayName) ||
+          (!existing?.username && profileData.username) ||
+          (!existing?.profileImage && profileData.profileImage) ||
+          (!existing?.provider && profileData.provider);
+
+        if (!hasNewData && existing) {
+          // Nothing new to sync
+          return;
+        }
+
         await profileService.saveProfile(profileData);
 
-        console.log('📤 Profile synced to backend:', {
+        console.log('[ProfileSync] Profile synced:', {
           wallet: primaryWallet.address.slice(0, 8) + '...',
           displayName: profileData.displayName,
           provider: profileData.provider,
+          enriched: !existing ? 'new' : 'filled gaps',
         });
       } catch (error) {
         console.error('Failed to sync profile to backend:', error);
-        // Non-critical error, don't throw
       }
     }
 

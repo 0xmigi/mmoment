@@ -26,6 +26,7 @@
     "firestarter-sdk": "^2.1.7",
     "form-data": "^4.0.4",
     "node-fetch": "2",
+    "node-ical": "^0.25.6",
     "rpc-websockets": "7.10.0",
     "socket.io": "^4.7.2",
     "sqlite3": "^5.1.7",

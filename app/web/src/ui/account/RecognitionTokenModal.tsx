@@ -6,6 +6,7 @@ import { useProgram } from '../../anchor/setup';
 import { useState, useMemo } from 'react';
 import { PublicKey, Transaction } from '@solana/web3.js';
 import { useConnection } from '@solana/wallet-adapter-react';
+import { buildAndSubmitSponsored } from '../../services/kora-client';
 
 interface RecognitionTokenModalProps {
   isOpen: boolean;
@@ -71,40 +72,28 @@ export function RecognitionTokenModal({ isOpen, onClose, status, onStatusUpdate 
       console.log('[DeleteToken] User:', userPublicKey.toString());
       console.log('[DeleteToken] Recognition Token PDA:', recognitionTokenPda.toString());
 
-      // Build the transaction instruction - DO NOT use .rpc()
-      const instruction = await (program.methods as any)
-        .deleteRecognitionToken()
-        .accounts({
-          user: userPublicKey,
-          recognitionToken: recognitionTokenPda,
-        })
-        .instruction();
+      // Build and submit via Kora (gasless for user)
+      const walletSigner = await (primaryWallet as any).getSigner();
+      const result = await buildAndSubmitSponsored(
+        userPublicKey,
+        walletSigner,
+        async () => {
+          const instruction = await (program.methods as any)
+            .deleteRecognitionToken()
+            .accounts({
+              user: userPublicKey,
+              recognitionToken: recognitionTokenPda,
+            })
+            .instruction();
 
-      // Create transaction with recent blockhash
-      const { blockhash } = await connection.getLatestBlockhash();
-      const transaction = new Transaction({
-        feePayer: userPublicKey,
-        blockhash,
-        lastValidBlockHeight: (await connection.getLatestBlockhash()).lastValidBlockHeight,
-      }).add(instruction);
+          return new Transaction().add(instruction);
+        },
+        connection,
+        'delete_recognition_token'
+      );
 
-      console.log('[DeleteToken] Transaction built, signing with Dynamic wallet...');
-
-      // Sign transaction using Dynamic's getSigner() - EXACT pattern from working enrollment code
-      const signer = await (primaryWallet as any).getSigner();
-      const signedTx = await signer.signTransaction(transaction);
-
-      console.log('[DeleteToken] Transaction signed successfully');
-
-      // Submit signed transaction to Solana
-      console.log('[DeleteToken] Submitting transaction to Solana...');
-      const signature = await connection.sendRawTransaction(signedTx.serialize());
-      console.log('[DeleteToken] Transaction sent! Signature:', signature);
-
-      // Wait for confirmation
-      console.log('[DeleteToken] Waiting for confirmation...');
-      await connection.confirmTransaction(signature, 'confirmed');
-      console.log('[DeleteToken] ✅ Recognition token deleted successfully!');
+      if (!result.success) throw new Error(result.error || 'Transaction failed');
+      console.log('[DeleteToken] Recognition token deleted:', result.signature);
 
       // Close the modal and refresh status
       onClose();

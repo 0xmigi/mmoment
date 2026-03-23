@@ -1,0 +1,11 @@
+# Kora Signer Configuration for MMOMENT
+# Uses the authority keypair as the fee payer
+
+[signer_pool]
+strategy = "round_robin"
+
+[[signers]]
+name = "mmoment_fee_payer"
+type = "memory"
+private_key_env = "KORA_PRIVATE_KEY"
+weight = 1

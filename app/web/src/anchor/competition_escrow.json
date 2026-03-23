@@ -1,5 +1,5 @@
 {
-  "address": "32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ",
+  "address": "EpczQBF7WmPcyzTtYJfzrPNXSVxM3YJsND7Vx8zpTLAj",
   "metadata": {
     "name": "competition_escrow",
     "version": "0.1.0",
@@ -43,41 +43,10 @@
           "docs": [
             "The escrow account"
           ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  109,
-                  112,
-                  101,
-                  116,
-                  105,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "escrow.camera",
-                "account": "CompetitionEscrow"
-              },
-              {
-                "kind": "account",
-                "path": "escrow.created_at",
-                "account": "CompetitionEscrow"
-              }
-            ]
-          }
+          "writable": true
         },
         {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
+          "name": "system_program"
         }
       ],
       "args": [
@@ -127,39 +96,10 @@
           "docs": [
             "The escrow account to create"
           ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  109,
-                  112,
-                  101,
-                  116,
-                  105,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "camera"
-              },
-              {
-                "kind": "arg",
-                "path": "created_at"
-              }
-            ]
-          }
+          "writable": true
         },
         {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
+          "name": "system_program"
         }
       ],
       "args": [
@@ -205,37 +145,7 @@
           "docs": [
             "The escrow account"
           ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  109,
-                  112,
-                  101,
-                  116,
-                  105,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "escrow.camera",
-                "account": "CompetitionEscrow"
-              },
-              {
-                "kind": "account",
-                "path": "escrow.created_at",
-                "account": "CompetitionEscrow"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": []
@@ -269,41 +179,10 @@
           "docs": [
             "The escrow account"
           ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  109,
-                  112,
-                  101,
-                  116,
-                  105,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "escrow.camera",
-                "account": "CompetitionEscrow"
-              },
-              {
-                "kind": "account",
-                "path": "escrow.created_at",
-                "account": "CompetitionEscrow"
-              }
-            ]
-          }
+          "writable": true
         },
         {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
+          "name": "system_program"
         }
       ],
       "args": []
@@ -352,37 +231,7 @@
           "docs": [
             "The escrow account holding the funds"
           ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  109,
-                  112,
-                  101,
-                  116,
-                  105,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "escrow.camera",
-                "account": "CompetitionEscrow"
-              },
-              {
-                "kind": "account",
-                "path": "escrow.created_at",
-                "account": "CompetitionEscrow"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "camera_owner",
@@ -393,8 +242,7 @@
           "writable": true
         },
         {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
+          "name": "system_program"
         }
       ],
       "args": [
@@ -439,37 +287,7 @@
           "docs": [
             "The escrow account"
           ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  109,
-                  112,
-                  101,
-                  116,
-                  105,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "escrow.camera",
-                "account": "CompetitionEscrow"
-              },
-              {
-                "kind": "account",
-                "path": "escrow.created_at",
-                "account": "CompetitionEscrow"
-              }
-            ]
-          }
+          "writable": true
         }
       ],
       "args": []

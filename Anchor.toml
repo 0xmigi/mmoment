@@ -7,11 +7,11 @@ skip-lint = true
 
 [programs.devnet]
 camera_network = "E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL"
-competition_escrow = "32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ"
+competition_escrow = "EpczQBF7WmPcyzTtYJfzrPNXSVxM3YJsND7Vx8zpTLAj"
 
 [programs.localnet]
 camera_network = "E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL"
-competition_escrow = "32jXEKF2GDjbezk4x8SkgddeVNMYkFjEh5PiAJijxqLJ"
+competition_escrow = "EpczQBF7WmPcyzTtYJfzrPNXSVxM3YJsND7Vx8zpTLAj"
 
 [registry]
 url = "https://api.apr.dev"

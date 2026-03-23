@@ -7,9 +7,13 @@ pub struct UpsertRecognitionToken<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
 
+    /// The account paying rent for token creation. Can be the user or a sponsor (e.g. Kora fee payer).
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
     #[account(
         init_if_needed,
-        payer = user,
+        payer = payer,
         space = 8 + 32 + 4 + 1024 + 8 + 1 + 1 + 4 + 64 + 1, // 1147 bytes - standard size for single transaction
         seeds = [b"recognition-token", user.key().as_ref()],
         bump
