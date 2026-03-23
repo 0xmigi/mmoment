@@ -427,6 +427,14 @@
           "signer": true
         },
         {
+          "name": "payer",
+          "docs": [
+            "The account paying rent for token creation. Can be the user or a sponsor (e.g. Kora fee payer)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
           "name": "recognition_token",
           "writable": true
         },

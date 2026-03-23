@@ -408,6 +408,7 @@ def mint_recognition_token():
         wallet_address = data.get('wallet_address')
         face_embedding = data.get('face_embedding')  # This is the encrypted NFT package
         biometric_session_id = data.get('biometric_session_id')
+        payer_address = data.get('payer_address')  # Optional: sponsor pays rent (e.g. Kora fee payer)
 
         if not wallet_address or not face_embedding:
             return jsonify({"error": "wallet_address and face_embedding are required"}), 400
@@ -468,20 +469,24 @@ def mint_recognition_token():
 
         # Convert wallet address to Pubkey
         user_pubkey = Pubkey.from_string(wallet_address)
+        payer_pubkey = Pubkey.from_string(payer_address) if payer_address else user_pubkey
         program_id = Pubkey.from_string(CAMERA_PROGRAM_ID)
         system_program = Pubkey.from_string("11111111111111111111111111111111")
 
-        # ✅ NEW: Derive recognition_token PDA (changed from face-nft)
+        # Derive recognition_token PDA
         recognition_token_seeds = [b"recognition-token", bytes(user_pubkey)]
         recognition_token_pda, bump = Pubkey.find_program_address(recognition_token_seeds, program_id)
 
         logger.info(f"[TRANSACTION] User: {user_pubkey}")
+        logger.info(f"[TRANSACTION] Payer: {payer_pubkey}")
         logger.info(f"[TRANSACTION] Recognition Token PDA: {recognition_token_pda}")
         logger.info(f"[TRANSACTION] Program ID: {program_id}")
 
         # Create instruction with accounts in the correct order
+        # Matches UpsertRecognitionToken: user, payer, recognition_token, system_program
         accounts = [
-            AccountMeta(pubkey=user_pubkey, is_signer=True, is_writable=True),  # user (signer, mut)
+            AccountMeta(pubkey=user_pubkey, is_signer=True, is_writable=True),    # user (signer, mut)
+            AccountMeta(pubkey=payer_pubkey, is_signer=True, is_writable=True),   # payer (signer, mut)
             AccountMeta(pubkey=recognition_token_pda, is_signer=False, is_writable=True),  # recognition_token (mut)
             AccountMeta(pubkey=system_program, is_signer=False, is_writable=False),  # system_program
         ]
@@ -498,10 +503,10 @@ def mint_recognition_token():
 
         logger.info(f"[TRANSACTION] Recent blockhash: {recent_blockhash}")
 
-        # Create transaction
+        # Create transaction (payer covers both tx fee and account rent)
         message = Message.new_with_blockhash(
             [instruction],
-            user_pubkey,  # Fee payer
+            payer_pubkey,  # Fee payer (Kora sponsor or user)
             recent_blockhash
         )
 

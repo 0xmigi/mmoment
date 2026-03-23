@@ -1420,6 +1420,7 @@ def register_routes(app):
             # Check for image data in both possible field names
             image_data = data.get("image") or data.get("image_data")
             wallet_address = data.get("wallet_address")
+            payer_address = data.get("payer_address")  # Optional: sponsor pays rent (e.g. Kora fee payer)
             encrypt = data.get("encrypt", False)  # Whether to encrypt the embedding
 
             if not image_data:
@@ -1664,13 +1665,17 @@ def register_routes(app):
                                         f"Successfully encrypted embedding for {wallet_address[:8]}..."
                                     )
 
-                                    solana_response = requests.post(
-                                        "http://solana-middleware:5001/api/blockchain/mint-recognition-token",
-                                        json={
+                                    solana_payload = {
                                             "wallet_address": wallet_address,
                                             "face_embedding": token_package,
                                             "biometric_session_id": session_id,
-                                        },
+                                        }
+                                    if payer_address:
+                                        solana_payload["payer_address"] = payer_address
+
+                                    solana_response = requests.post(
+                                        "http://solana-middleware:5001/api/blockchain/mint-recognition-token",
+                                        json=solana_payload,
                                         timeout=30,
                                     )
 
@@ -1873,13 +1878,17 @@ def register_routes(app):
                                         f"Successfully encrypted embedding for {wallet_address[:8]}..."
                                     )
 
-                                    solana_response = requests.post(
-                                        "http://solana-middleware:5001/api/blockchain/mint-recognition-token",
-                                        json={
+                                    solana_payload = {
                                             "wallet_address": wallet_address,
                                             "face_embedding": token_package,
                                             "biometric_session_id": session_id,
-                                        },
+                                        }
+                                    if payer_address:
+                                        solana_payload["payer_address"] = payer_address
+
+                                    solana_response = requests.post(
+                                        "http://solana-middleware:5001/api/blockchain/mint-recognition-token",
+                                        json=solana_payload,
                                         timeout=30,
                                     )
 

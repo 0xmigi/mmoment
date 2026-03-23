@@ -159,7 +159,7 @@ class FaceProcessingService {
   async processFacialEmbedding(
     imageData: string,
     cameraUrl?: string,
-    options: { encrypt?: boolean; requestQuality?: boolean; walletAddress?: string; buildTransaction?: boolean } = {}
+    options: { encrypt?: boolean; requestQuality?: boolean; walletAddress?: string; buildTransaction?: boolean; payerAddress?: string } = {}
   ): Promise<EnhancedFaceProcessingResult> {
     try {
       // MUST have a Jetson camera URL - no fake local processing
@@ -187,7 +187,7 @@ class FaceProcessingService {
   private async processWithJetsonEndpoint(
     imageData: string,
     cameraUrl: string,
-    options: { encrypt?: boolean; requestQuality?: boolean; walletAddress?: string; buildTransaction?: boolean } = {}
+    options: { encrypt?: boolean; requestQuality?: boolean; walletAddress?: string; buildTransaction?: boolean; payerAddress?: string } = {}
   ): Promise<EnhancedFaceProcessingResult> {
     try {
       console.log('[FaceProcessing] Using enhanced Jetson endpoint:', cameraUrl);
@@ -237,6 +237,11 @@ class FaceProcessingService {
       // Add transaction building option if requested
       if (options.buildTransaction) {
         payload.build_transaction = true;
+      }
+
+      // Add payer address for gasless transactions (Kora sponsor pays rent)
+      if (options.payerAddress) {
+        payload.payer_address = options.payerAddress;
       }
 
       // Call the enhanced Jetson endpoint

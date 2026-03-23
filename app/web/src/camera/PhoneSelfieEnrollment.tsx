@@ -4,7 +4,7 @@ import { Transaction } from "@solana/web3.js";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { Camera, X, RotateCcw, Check, Wifi } from "lucide-react";
 import { useState, useRef, useCallback, useEffect } from "react";
-import { getKoraFeePayer, koraSignTransaction, isKoraAvailable } from "../services/kora-client";
+import { getKoraFeePayer, koraSignTransaction } from "../services/kora-client";
 
 interface PhoneSelfieEnrollmentProps {
   cameraId: string;
@@ -252,14 +252,26 @@ export function PhoneSelfieEnrollment({
     try {
       console.log('[PhoneSelfieEnrollment] 🔍 ENROLLMENT DEBUG: connectedCameraUrl =', connectedCameraUrl);
       console.log('[PhoneSelfieEnrollment] 🔍 ENROLLMENT DEBUG: walletAddress =', primaryWallet.address);
+
+      // Get Kora fee payer for gasless transaction (sponsor pays rent + tx fee)
+      let payerAddress: string | undefined;
+      try {
+        const koraFeePayer = await getKoraFeePayer();
+        payerAddress = koraFeePayer.toBase58();
+        console.log('[PhoneSelfieEnrollment] Kora fee payer:', payerAddress);
+      } catch {
+        console.log('[PhoneSelfieEnrollment] Kora unavailable, user will pay');
+      }
+
       console.log('[PhoneSelfieEnrollment] 📞 CALLING faceProcessingService.processFacialEmbedding FOR ENROLLMENT');
 
       // Send image to Jetson for secure embedding extraction AND transaction building
       // Jetson will handle all biometric processing and return a pre-built transaction
+      // If payerAddress is set, the Jetson builds the tx with Kora as payer for account rent
       const result = await faceProcessingService.processFacialEmbedding(
         capturedImage,
         connectedCameraUrl,
-        { encrypt: true, requestQuality: true, walletAddress: primaryWallet.address, buildTransaction: true }
+        { encrypt: true, requestQuality: true, walletAddress: primaryWallet.address, buildTransaction: true, payerAddress }
       );
 
       console.log('[PhoneSelfieEnrollment] 📞 ENROLLMENT RESULT from faceProcessingService:', result);
@@ -339,20 +351,16 @@ export function PhoneSelfieEnrollment({
 
       let signature: string;
 
-      // Try Kora-sponsored flow first (gasless for user)
-      const koraAvailable = await isKoraAvailable();
-
-      if (koraAvailable) {
+      if (payerAddress) {
+        // Kora-sponsored flow: tx already built with Kora as payer + fee payer
         console.log('[PhoneSelfieEnrollment] Using Kora for gasless transaction');
         setProgress("Sponsoring transaction (gasless)...");
 
-        // Swap fee payer to Kora
-        const koraFeePayer = await getKoraFeePayer();
-        transaction.feePayer = koraFeePayer;
+        // Fresh blockhash for the transaction
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
         transaction.recentBlockhash = blockhash;
 
-        // Kora signs as fee payer
+        // Kora signs as fee payer + rent payer
         const sponsoredTx = await koraSignTransaction(transaction);
 
         // User signs
@@ -369,9 +377,12 @@ export function PhoneSelfieEnrollment({
         await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
         console.log('[PhoneSelfieEnrollment] Transaction confirmed!');
       } else {
-        // Fallback: user pays (original flow)
+        // Fallback: user pays (Kora was unavailable, tx built with user as payer)
         console.log('[PhoneSelfieEnrollment] Kora unavailable, user pays gas');
         setProgress("Signing transaction...");
+
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+        transaction.recentBlockhash = blockhash;
 
         const signer = await (primaryWallet as any).getSigner();
         const signedTx = await signer.signTransaction(transaction);
@@ -380,7 +391,7 @@ export function PhoneSelfieEnrollment({
         signature = await connection.sendRawTransaction(signedTx.serialize());
 
         setProgress("Waiting for confirmation...");
-        await connection.confirmTransaction(signature, 'confirmed');
+        await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
       }
 
       // Notify Jetson that enrollment succeeded (for local storage/cleanup)
