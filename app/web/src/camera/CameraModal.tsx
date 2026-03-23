@@ -11,7 +11,7 @@ import { useUserSessionChain, fetchAuthorityPublicKey } from '../hooks/useUserSe
 import { useProgram, findUserSessionChainPDA } from '../anchor/setup';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, SystemProgram } from '@solana/web3.js';
-import { buildAndSubmitSponsored } from '../services/kora-client';
+import { buildAndSubmitSponsored, getKoraFeePayer } from '../services/kora-client';
 
 interface CameraModalProps {
   isOpen: boolean;
@@ -372,7 +372,8 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       console.log('[CameraModal] User:', userPublicKey.toString());
       console.log('[CameraModal] Authority:', authority.toString());
 
-      // Build and submit via Kora (gasless for user)
+      // Build and submit via Kora (gasless for user — Kora pays rent + tx fee)
+      const koraFeePayer = await getKoraFeePayer();
       const walletSigner = await (primaryWallet as any).getSigner();
       const result = await buildAndSubmitSponsored(
         userPublicKey,
@@ -382,6 +383,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
             .createUserSessionChain()
             .accounts({
               user: userPublicKey,
+              feePayer: koraFeePayer,
               authority: authority,
               userSessionChain: sessionChainPda,
               systemProgram: SystemProgram.programId,
@@ -405,7 +407,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
       if (error.message?.includes('User rejected')) {
         errorMessage = 'Transaction cancelled. Please try again.';
       } else if (error.message?.includes('insufficient funds')) {
-        errorMessage = 'Insufficient SOL for transaction (~0.003 SOL needed)';
+        errorMessage = 'Transaction sponsorship failed. Please try again.';
       } else if (error.message?.includes('already in use')) {
         errorMessage = 'Session keychain already exists!';
         // Refresh to update UI
@@ -632,7 +634,7 @@ export function CameraModal({ isOpen, onClose, onCheckStatusChange, camera }: Ca
                         Create your Session Keychain to ensure your camera history is permanently stored on-chain.
                       </p>
                       <p className="text-xs text-amber-700">
-                        This is a one-time action (~0.003 SOL) that enables decentralized access to your session history.
+                        This is a free, one-time action that enables decentralized access to your session history.
                       </p>
                     </div>
 
