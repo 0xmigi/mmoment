@@ -191,6 +191,7 @@ export async function getQueueState(cameraId: string): Promise<{
       enabled: config.enabled,
       maxSlotDuration: config.maxSlotDuration,
       minSlotDuration: config.minSlotDuration,
+      location: config.location,
     },
     active: activeWithCountdown,
     queue: waiting.map(enrichEntry),
@@ -200,7 +201,7 @@ export async function getQueueState(cameraId: string): Promise<{
 
 export async function updateConfig(
   cameraId: string,
-  updates: { enabled?: boolean; maxSlotDuration?: number; minSlotDuration?: number }
+  updates: { enabled?: boolean; maxSlotDuration?: number; minSlotDuration?: number; location?: string | null }
 ): Promise<QueueConfig> {
   const existing = await getQueueConfig(cameraId);
   const config: QueueConfig = {
@@ -208,6 +209,7 @@ export async function updateConfig(
     enabled: updates.enabled ?? existing.enabled,
     maxSlotDuration: updates.maxSlotDuration ?? existing.maxSlotDuration,
     minSlotDuration: updates.minSlotDuration ?? existing.minSlotDuration,
+    location: updates.location !== undefined ? updates.location : existing.location,
     updatedAt: Date.now(),
   };
 

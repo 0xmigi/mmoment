@@ -4033,9 +4033,10 @@ app.delete("/api/camera/:cameraId/queue/leave", async (req, res) => {
 app.put("/api/camera/:cameraId/queue/config", async (req, res) => {
   try {
     const { cameraId } = req.params;
-    const { max_slot_duration, min_slot_duration, enabled } = req.body;
+    const { max_slot_duration, min_slot_duration, enabled, location } = req.body;
 
     const config = await updateQueueConfig(cameraId, {
+      location,
       enabled: enabled !== undefined ? !!enabled : undefined,
       maxSlotDuration: max_slot_duration,
       minSlotDuration: min_slot_duration,

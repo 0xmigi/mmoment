@@ -7,7 +7,7 @@ interface QueueConfigModalProps {
   isOpen: boolean;
   onClose: () => void;
   config: QueueConfig;
-  onSave: (config: Partial<{ enabled: boolean; maxSlotDuration: number; minSlotDuration: number }>) => Promise<void>;
+  onSave: (config: Partial<{ enabled: boolean; maxSlotDuration: number; minSlotDuration: number; location: string | null }>) => Promise<void>;
 }
 
 const DURATION_PRESETS = [
@@ -22,6 +22,7 @@ export function QueueConfigModal({ isOpen, onClose, config, onSave }: QueueConfi
   const [maxDuration, setMaxDuration] = useState(config.maxSlotDuration);
   const [minDuration, setMinDuration] = useState(config.minSlotDuration);
   const [enabled, setEnabled] = useState(config.enabled);
+  const [location, setLocation] = useState(config.location || '');
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
@@ -31,6 +32,7 @@ export function QueueConfigModal({ isOpen, onClose, config, onSave }: QueueConfi
         enabled,
         maxSlotDuration: maxDuration,
         minSlotDuration: minDuration,
+        location: location.trim() || null,
       });
       onClose();
     } finally {
@@ -51,6 +53,18 @@ export function QueueConfigModal({ isOpen, onClose, config, onSave }: QueueConfi
               <button onClick={onClose} className="p-1 hover:bg-[#F3F3EF] rounded">
                 <X className="w-4 h-4 text-[#8A8A82]" />
               </button>
+            </div>
+
+            {/* Location */}
+            <div className="mb-6">
+              <label className="text-xs font-semibold tracking-[0.1em] uppercase text-[#8A8A82] mb-2 block">Location (address)</label>
+              <input
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="e.g. Saltoniškių g. 29, Vilnius"
+                className="w-full px-3 py-2 text-sm text-[#1A1A18] bg-white border border-[#E8E8E3] rounded-lg outline-none focus:border-[#8A8A82] transition-colors"
+              />
             </div>
 
             {/* Enable/Disable */}

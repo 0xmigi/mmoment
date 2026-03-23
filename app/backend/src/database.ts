@@ -273,6 +273,13 @@ export async function initializeDatabase(dbPath: string = './mmoment.db'): Promi
           )
         `);
 
+        // Add location column to queue config (migration for existing DBs)
+        try {
+          await runQuery(`ALTER TABLE camera_queue_config ADD COLUMN location TEXT`);
+        } catch (_) {
+          // Column already exists
+        }
+
         // Create camera_queue_entries table
         await runQuery(`
           CREATE TABLE IF NOT EXISTS camera_queue_entries (
@@ -1861,6 +1868,7 @@ export interface QueueConfig {
   enabled: boolean;
   maxSlotDuration: number;  // seconds
   minSlotDuration: number;  // seconds
+  location: string | null;  // owner-set address/location
   updatedAt: number;
 }
 
@@ -1883,6 +1891,7 @@ const DEFAULT_QUEUE_CONFIG: Omit<QueueConfig, 'cameraId' | 'updatedAt'> = {
   enabled: true,
   maxSlotDuration: 7200,   // 2 hours
   minSlotDuration: 1800,   // 30 minutes
+  location: null,
 };
 
 export async function getQueueConfig(cameraId: string): Promise<QueueConfig> {
@@ -1890,7 +1899,7 @@ export async function getQueueConfig(cameraId: string): Promise<QueueConfig> {
     if (!db) { reject(new Error('Database not initialized')); return; }
 
     db.get(
-      `SELECT camera_id, enabled, max_slot_duration, min_slot_duration, updated_at
+      `SELECT camera_id, enabled, max_slot_duration, min_slot_duration, location, updated_at
        FROM camera_queue_config WHERE camera_id = ?`,
       [cameraId],
       (err: any, row: any) => {
@@ -1908,6 +1917,7 @@ export async function getQueueConfig(cameraId: string): Promise<QueueConfig> {
           enabled: !!row.enabled,
           maxSlotDuration: row.max_slot_duration,
           minSlotDuration: row.min_slot_duration,
+          location: row.location || null,
           updatedAt: row.updated_at,
         });
       }
@@ -1921,9 +1931,9 @@ export async function saveQueueConfig(config: QueueConfig): Promise<void> {
 
     db.run(
       `INSERT OR REPLACE INTO camera_queue_config
-       (camera_id, enabled, max_slot_duration, min_slot_duration, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-      [config.cameraId, config.enabled ? 1 : 0, config.maxSlotDuration, config.minSlotDuration, Date.now()],
+       (camera_id, enabled, max_slot_duration, min_slot_duration, location, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [config.cameraId, config.enabled ? 1 : 0, config.maxSlotDuration, config.minSlotDuration, config.location || null, Date.now()],
       (err: Error | null) => {
         if (err) { reject(err); } else { resolve(); }
       }

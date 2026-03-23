@@ -35,6 +35,7 @@ export interface QueueConfig {
   enabled: boolean;
   maxSlotDuration: number;
   minSlotDuration: number;
+  location: string | null;
 }
 
 export interface QueueState {
@@ -188,7 +189,7 @@ export function useQueue(cameraId: string | null) {
     }
   }, [cameraId, walletAddress]);
 
-  const updateConfig = useCallback(async (config: Partial<{ enabled: boolean; maxSlotDuration: number; minSlotDuration: number }>) => {
+  const updateConfig = useCallback(async (config: Partial<{ enabled: boolean; maxSlotDuration: number; minSlotDuration: number; location: string | null }>) => {
     if (!cameraId) return;
     try {
       const res = await fetch(`${CONFIG.BACKEND_URL}/api/camera/${cameraId}/queue/config`, {
@@ -198,6 +199,7 @@ export function useQueue(cameraId: string | null) {
           enabled: config.enabled,
           max_slot_duration: config.maxSlotDuration,
           min_slot_duration: config.minSlotDuration,
+          location: config.location,
         }),
       });
       const data = await res.json();
