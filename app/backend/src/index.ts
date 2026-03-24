@@ -2277,6 +2277,7 @@ app.post("/api/walrus/upload", async (req, res) => {
       fileType: metadata.fileType,
       timestamp: metadata.timestamp || Date.now(),
       accessGrantsCount: parsedAccessGrants.length,
+      accessGrantPubkeys: parsedAccessGrants.map((g: any) => g.pubkey),
       suiOwner: metadata.suiOwner,
       uploadMethod: 'relay'
     });
@@ -2376,6 +2377,7 @@ app.post("/api/walrus/register-local", async (req, res) => {
       fileType: fileType || 'video',
       timestamp: timestamp || Date.now(),
       accessGrantsCount: parsedAccessGrants.length,
+      accessGrantPubkeys: parsedAccessGrants.map((g: any) => g.pubkey),
       isLocal: true,  // Flag to indicate this is served from Jetson
       filename
     });
@@ -2533,6 +2535,7 @@ app.post("/api/walrus/upload-complete", async (req, res) => {
       fileType,
       timestamp: timestamp || Date.now(),
       accessGrantsCount: parsedAccessGrants.length,
+      accessGrantPubkeys: parsedAccessGrants.map((g: any) => g.pubkey),
       suiOwner
     });
 
