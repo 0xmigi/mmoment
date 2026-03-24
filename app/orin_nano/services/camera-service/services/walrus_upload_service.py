@@ -28,8 +28,8 @@ WALRUS_AGGREGATOR_URL = os.environ.get(
     "WALRUS_AGGREGATOR_URL", "https://aggregator.walrus-mainnet.walrus.space"
 )
 
-# Default storage duration (5 epochs for testing, increase for production)
-DEFAULT_EPOCHS = 5
+# Storage duration: 1 epoch ≈ 2 weeks on mainnet, max 53 epochs (~2 years)
+DEFAULT_EPOCHS = 7  # ~3 months
 
 
 class WalrusUploadService:
@@ -371,7 +371,7 @@ class WalrusUploadService:
         Args:
             encrypted_data: Encrypted file content
             user_sui_address: If provided, transfers blob ownership to this Sui address
-            epochs: Storage duration (183 = ~1 year max)
+            epochs: Storage duration (1 epoch ≈ 2 weeks, max 53 ≈ 2 years)
             deletable: Whether blob can be deleted by owner
 
         Returns:

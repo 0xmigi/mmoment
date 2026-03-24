@@ -491,6 +491,18 @@ export default function MediaViewer({
                       {media.type}
                     </span>
                   </div>
+                  {"originalSize" in media && media.originalSize && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">File Size</span>
+                      <span className="text-gray-700">
+                        {media.originalSize < 1024
+                          ? `${media.originalSize} B`
+                          : media.originalSize < 1024 * 1024
+                          ? `${(media.originalSize / 1024).toFixed(1)} KB`
+                          : `${(media.originalSize / (1024 * 1024)).toFixed(1)} MB`}
+                      </span>
+                    </div>
+                  )}
                   {media.provider === "pipe" && "name" in media && media.name && (
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-500">File Name</span>

@@ -2593,7 +2593,9 @@ app.get("/api/walrus/gallery/:walletAddress", async (req, res) => {
         suiOwner: file.suiOwner,
         accessGrants: JSON.parse(file.accessGrants || '[]'),
         isOwned: true,
-        provider: 'walrus'
+        provider: 'walrus',
+        originalSize: file.originalSize,
+        encryptedSize: file.encryptedSize
       })),
       ...sharedFiles.map(file => ({
         id: file.blobId,
@@ -2608,7 +2610,9 @@ app.get("/api/walrus/gallery/:walletAddress", async (req, res) => {
         ownerWallet: file.walletAddress,
         accessGrants: JSON.parse(file.accessGrants || '[]'),
         isOwned: false,
-        provider: 'walrus'
+        provider: 'walrus',
+        originalSize: file.originalSize,
+        encryptedSize: file.encryptedSize
       }))
     ];
 
