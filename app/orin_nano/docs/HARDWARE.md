@@ -1,7 +1,5 @@
 # Jetson Camera Hardware Setup
 
-This document provides information about the hardware setup for the Jetson Camera system.
-
 ## Hardware Components
 
 ### Main Components
@@ -9,125 +7,90 @@ This document provides information about the hardware setup for the Jetson Camer
 1. **NVIDIA Jetson Orin Nano Developer Kit**
    - Processor: NVIDIA Jetson Orin Nano (8GB)
    - Memory: 8GB LPDDR5
-   - Storage: 64GB eMMC
+   - Storage: 64GB eMMC + NVMe SSD for media (`/mnt/nvme/`)
 
 2. **Logitech StreamCam**
    - Resolution: 1080p/60fps
    - Connection: USB-C
-   - Field of View: 78° diagonal
-   - Connected to: `/dev/video1` and `/dev/video2`
+   - Field of View: 78 diagonal
+   - Mounted as: `/dev/video0` and `/dev/video1`
 
 3. **Jetson IMX477 Camera** (Optional)
    - Resolution: 4032x3040
-   - Connection: MIPI CSI-2
-   - Connected to: `/dev/video0`
+   - Connection: MIPI CSI-2 (requires nvargus-daemon socket)
 
 ### Environment Requirements
 
-- **Power**: 5V DC, 4A power supply
+- **Power**: 19V barrel jack or USB-C PD (the Developer Kit requires ~25W)
 - **Connectivity**: Ethernet or WiFi
 - **Cooling**: Active cooling recommended for extended operation
 
-## Camera Setup
+## Camera Configuration
 
-### Primary Camera Configuration
+### Primary Camera
 
-The system uses the Logitech StreamCam as the primary camera for face recognition and gesture detection. The camera is configured in the following way:
+The system uses the Logitech StreamCam as the primary camera. Configured in `docker-compose.yml`:
 
-- **Device Path**: `/dev/video1`
-- **Resolution**: 1280x720
-- **Frame Rate**: 30fps
-
-### Secondary/Backup Camera
-
-If the Logitech StreamCam is not available, the system can fall back to using the Jetson IMX477 camera:
-
-- **Device Path**: `/dev/video0`
-- **Resolution**: 4032x3040 (will be scaled down for processing)
-
-### Camera Environment Variables
-
-The camera device can be changed by setting the `CAMERA_DEVICE` environment variable in the systemd service file:
-
-```ini
-Environment="CAMERA_DEVICE=/dev/video1"  # Logitech StreamCam
+```yaml
+devices:
+  # Logitech StreamCam on video0/video1
+  - /dev/video0:/dev/video0
+  - /dev/video1:/dev/video1
 ```
 
-## Hardware Installation
+Operating at 1280x720, 15fps target for CV processing.
 
-### Camera Position
+### Changing Camera Device
 
-For optimal face recognition and gesture detection:
+Set the camera device in `docker-compose.yml` environment variables or override at runtime. The buffer service auto-detects available cameras on startup.
 
-1. Place the camera at eye level
-2. Ensure good, consistent lighting on the user's face
-3. Mount camera on a stable surface to reduce motion blur
+## Camera Position
 
-### Network Setup
+For optimal face recognition:
+1. Place at eye level
+2. Ensure consistent lighting on faces
+3. Mount on a stable surface to reduce motion blur
 
-1. Connect the Jetson Orin Nano to your network via Ethernet for the most stable connection
-2. Alternatively, configure WiFi using the NetworkManager:
+## Network Setup
+
+1. Ethernet preferred for stability
+2. WiFi via NetworkManager:
    ```bash
    nmcli device wifi connect YOUR_SSID password YOUR_PASSWORD
    ```
 
-## Performance Considerations
+## Performance
 
 ### Thermal Management
+Monitor temperatures:
+```bash
+tegrastats
+```
 
-The Jetson Orin Nano can generate significant heat when running intensive tasks like face recognition and gesture detection. To manage this:
+### Power Modes
+```bash
+# Maximum performance (25W)
+sudo nvpmodel -m 0
+sudo jetson_clocks
 
-1. Ensure proper ventilation around the device
-2. Use the included fan or consider a larger cooling solution for extended operation
-3. Monitor temperatures with:
-   ```bash
-   tegrastats
-   ```
+# Power saving (15W)
+sudo nvpmodel -m 1
+```
 
-### Power Management
-
-To optimize performance vs. power consumption:
-
-1. Default power mode: 15W (balanced performance)
-2. For maximum performance:
-   ```bash
-   sudo nvpmodel -m 0
-   sudo jetson_clocks
-   ```
-3. For power saving:
-   ```bash
-   sudo nvpmodel -m 1
-   ```
-
-## Troubleshooting Hardware Issues
+## Troubleshooting
 
 ### Camera Not Detected
-
-1. Check physical connections
-2. Verify camera device paths:
+1. Check physical USB connections
+2. List camera devices:
    ```bash
    v4l2-ctl --list-devices
    ```
-3. Test camera with:
+3. Test camera capture:
    ```bash
-   v4l2-ctl --device=/dev/video1 --set-fmt-video=width=1280,height=720,pixelformat=MJPG --stream-mmap
+   v4l2-ctl --device=/dev/video0 --set-fmt-video=width=1280,height=720,pixelformat=MJPG --stream-mmap
    ```
 
 ### Performance Issues
-
-1. Check CPU/GPU utilization:
-   ```bash
-   htop
-   ```
-2. Verify thermal throttling is not occurring:
-   ```bash
-   tegrastats | grep CPU
-   ```
-
-## Upgrading Hardware
-
-The system can be upgraded with:
-
-1. **External SSD** - Connect via USB 3.0 for faster storage and less wear on the eMMC
-2. **Additional Memory** - Not possible on the Orin Nano Developer Kit
-3. **Higher Quality Camera** - Any USB camera supported by V4L2 should work 
+1. Check utilization: `htop`
+2. Check for thermal throttling: `tegrastats | grep CPU`
+3. Ensure NVMe is mounted: `df -h /mnt/nvme`

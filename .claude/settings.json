@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "permissions": {
+    "allow": [
+      "Bash(cd app/web && yarn *)",
+      "Bash(cd app/backend && yarn *)",
+      "Bash(anchor build)",
+      "Bash(anchor test)",
+      "Bash(anchor keys sync)",
+      "Bash(cargo *)",
+      "Bash(python3 -m json.tool)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(rm target/deploy/*keypair*)",
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(app/web/.env)",
+      "Read(app/web/.env.*)",
+      "Read(app/backend/.env)",
+      "Read(app/backend/.env.*)"
+    ]
+  }
+}

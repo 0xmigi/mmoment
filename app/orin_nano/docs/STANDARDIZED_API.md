@@ -15,7 +15,7 @@ Most endpoints require a valid **session** established via Ed25519 signature ver
 ---
 
 ## 🌐 PUBLIC FRONTEND ENDPOINTS
-**(Accessible via jetson.mmoment.xyz/api/...)**
+**(Accessible via `[camera-pda].mmoment.xyz/api/...`)**
 
 All these endpoints are accessible to your frontend application and are the **ONLY ones** you should use in your frontend code.
 
@@ -42,8 +42,9 @@ All these endpoints are accessible to your frontend application and are the **ON
 - `GET /videos/{filename}` - Get specific video (currently public - signed URLs planned)
 
 ### Computer Vision (Session Required)
-- `POST /api/face/enroll` - Enroll face for recognition
-- `POST /recognize_face` - Recognize faces in current frame
+- `POST /api/face/extract-embedding` - Extract face embedding from a base64 image (step 1 of enrollment)
+- `POST /api/face/enroll/confirm` - Confirm enrollment with extracted embedding (step 2 of enrollment)
+- `POST /api/face/recognize` - Recognize faces in current frame
 - `POST /toggle_face_detection` - Toggle face detection
 - `POST /toggle_face_visualization` - Toggle face visualization
 - `POST /toggle_face_boxes` - Toggle face boxes
@@ -320,7 +321,7 @@ await fetch('/api/checkout', {
 
 ### ✅ Frontend Architecture
 ```
-Frontend → jetson.mmoment.xyz/api/* → Camera Service (Port 5002)
+Frontend -> [camera-pda].mmoment.xyz/api/* -> Camera Service (Port 5002)
                                    ↓
                               Internal Services:
                               - Solana Middleware (Port 5001)

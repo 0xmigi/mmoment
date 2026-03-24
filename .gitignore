@@ -206,3 +206,10 @@ upload_queue.db
 # Device credentials (sensitive)
 device-keypair.enc
 .env.nfc
+
+# Claude Code — personal config (not committed)
+CLAUDE.local.md
+.claude/settings.local.json
+
+# Claude Code — team config (committed)
+!.claude/settings.json
