@@ -2277,6 +2277,7 @@ app.post("/api/walrus/upload", async (req, res) => {
       fileType: metadata.fileType,
       timestamp: metadata.timestamp || Date.now(),
       accessGrantsCount: parsedAccessGrants.length,
+      accessGrantPubkeys: parsedAccessGrants.map((g: any) => g.pubkey),
       suiOwner: metadata.suiOwner,
       uploadMethod: 'relay'
     });
@@ -2376,6 +2377,7 @@ app.post("/api/walrus/register-local", async (req, res) => {
       fileType: fileType || 'video',
       timestamp: timestamp || Date.now(),
       accessGrantsCount: parsedAccessGrants.length,
+      accessGrantPubkeys: parsedAccessGrants.map((g: any) => g.pubkey),
       isLocal: true,  // Flag to indicate this is served from Jetson
       filename
     });
@@ -2533,6 +2535,7 @@ app.post("/api/walrus/upload-complete", async (req, res) => {
       fileType,
       timestamp: timestamp || Date.now(),
       accessGrantsCount: parsedAccessGrants.length,
+      accessGrantPubkeys: parsedAccessGrants.map((g: any) => g.pubkey),
       suiOwner
     });
 
@@ -2590,7 +2593,9 @@ app.get("/api/walrus/gallery/:walletAddress", async (req, res) => {
         suiOwner: file.suiOwner,
         accessGrants: JSON.parse(file.accessGrants || '[]'),
         isOwned: true,
-        provider: 'walrus'
+        provider: 'walrus',
+        originalSize: file.originalSize,
+        encryptedSize: file.encryptedSize
       })),
       ...sharedFiles.map(file => ({
         id: file.blobId,
@@ -2605,7 +2610,9 @@ app.get("/api/walrus/gallery/:walletAddress", async (req, res) => {
         ownerWallet: file.walletAddress,
         accessGrants: JSON.parse(file.accessGrants || '[]'),
         isOwned: false,
-        provider: 'walrus'
+        provider: 'walrus',
+        originalSize: file.originalSize,
+        encryptedSize: file.encryptedSize
       }))
     ];
 

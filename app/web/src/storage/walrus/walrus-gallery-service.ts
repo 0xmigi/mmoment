@@ -58,9 +58,19 @@ class WalrusGalleryService {
   // Active polling intervals for pending uploads
   private pollIntervals: Map<number, NodeJS.Timeout> = new Map();
 
+  // Current user's wallet — set via setCurrentWallet(), used by socket handler for shared photo detection
+  private currentWalletAddress: string | null = null;
+
   constructor() {
     this.backendUrl = CONFIG.BACKEND_URL;
     this.initializeWebSocket();
+  }
+
+  /**
+   * Set the current user's wallet address so the service can detect shared photos in real-time.
+   */
+  setCurrentWallet(walletAddress: string | null) {
+    this.currentWalletAddress = walletAddress;
   }
 
   /**
@@ -242,12 +252,10 @@ class WalrusGalleryService {
       this.socket.on('walrus:upload:complete', (data: any) => {
         console.log('📸 [Walrus] Upload complete notification:', data);
 
-        // Try to match by timestamp + cameraId if we don't have jobId
-        // This handles cases where we missed the initial capture
         if (data.blobId && data.downloadUrl) {
-          // Check if we already have this item
           if (!this.mediaCache.has(data.blobId)) {
-            // Look for matching pending item by timestamp
+            // Try to match against an existing pending item (our own capture)
+            let matched = false;
             for (const [, item] of this.mediaCache.entries()) {
               if (!item.backedUp && item.cameraId === data.cameraId) {
                 const timeDiff = Math.abs(item.timestamp - (data.timestamp || 0));
@@ -256,8 +264,38 @@ class WalrusGalleryService {
                     blobId: data.blobId,
                     downloadUrl: data.downloadUrl,
                   });
+                  matched = true;
                   break;
                 }
+              }
+            }
+
+            // If not matched and this is someone else's shared photo that we have access to,
+            // insert it into our gallery immediately
+            if (!matched && this.currentWalletAddress && data.walletAddress !== this.currentWalletAddress) {
+              const grantPubkeys: string[] = data.accessGrantPubkeys || [];
+              if (grantPubkeys.includes(this.currentWalletAddress)) {
+                const isVideo = data.fileType === 'video';
+                const sharedItem: WalrusGalleryItem = {
+                  id: data.blobId,
+                  blobId: data.blobId,
+                  name: data.filename || data.blobId,
+                  url: data.downloadUrl,
+                  type: isVideo ? 'video' : 'image',
+                  mimeType: isVideo ? 'video/mp4' : 'image/jpeg',
+                  timestamp: data.timestamp || Date.now(),
+                  walletAddress: data.walletAddress,
+                  provider: 'walrus',
+                  cameraId: data.cameraId,
+                  encrypted: false,
+                  isOwned: false,
+                  ownerWallet: data.walletAddress,
+                  backedUp: !data.isLocal,
+                  localUrl: data.isLocal ? data.downloadUrl : undefined,
+                  decryptedUrl: data.downloadUrl,
+                };
+                this.mediaCache.set(data.blobId, sharedItem);
+                console.log(`📸 [Walrus] Shared ${sharedItem.type} from ${data.walletAddress.slice(0, 8)}... added to gallery`);
               }
             }
           }

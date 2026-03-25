@@ -789,15 +789,14 @@ def register_routes(app):
 
         # Get request parameters
         wallet_address = request.json.get("wallet_address")
-        duration = request.json.get("duration", 0)  # Default to 0 (indefinite until stopped)
+        duration = request.json.get("duration", 5)
         action = request.json.get("action")  # 'start', 'stop', or None
         share_with_session = request.json.get("share_with_session", False)
 
-        # Enforce maximum duration limit to prevent runaway recordings
-        # duration=0 means "record until stopped" (valid for action='start')
-        MAX_DURATION = 300  # 5 minutes maximum
-        if duration < 0 or duration > MAX_DURATION:
-            duration = 0  # Default to indefinite for invalid durations
+        # Cap recording duration at 3 minutes
+        MAX_RECORDING_SECONDS = 180
+        if duration <= 0 or duration > MAX_RECORDING_SECONDS:
+            duration = MAX_RECORDING_SECONDS
 
         # Get services
         buffer_service = get_services()["buffer"]
@@ -3790,6 +3789,40 @@ def register_routes(app):
                 "local_url": f"/photos/{photo_info['filename']}",
             }
             photo_info["pipe_upload"] = photo_info["storage_upload"]
+
+            # Register local file with backend so shared photos appear in other users' galleries immediately
+            if share_with_session:
+                try:
+                    backend_url = os.getenv("BACKEND_URL", "https://mmoment-production.up.railway.app")
+                    local_photo_url = f"https://{camera_pda.lower()}.mmoment.xyz/photos/{photo_info['filename']}"
+
+                    checked_in_users = list(get_checked_in_users())
+                    if wallet_address not in checked_in_users:
+                        checked_in_users.append(wallet_address)
+
+                    register_response = requests.post(
+                        f"{backend_url}/api/walrus/register-local",
+                        json={
+                            "walletAddress": wallet_address,
+                            "localUrl": local_photo_url,
+                            "cameraId": camera_pda,
+                            "deviceSignature": device_signature,
+                            "fileType": "photo",
+                            "timestamp": photo_info.get("timestamp", int(time.time() * 1000)),
+                            "originalSize": len(image_data),
+                            "filename": photo_info["filename"],
+                            "accessGrants": [{"pubkey": user} for user in checked_in_users]
+                        },
+                        timeout=10
+                    )
+
+                    if register_response.ok:
+                        register_data = register_response.json()
+                        logger.info(f"📁 Shared photo registered with backend: {register_data.get('blobId', 'unknown')[:20]}...")
+                    else:
+                        logger.warning(f"Failed to register shared photo with backend: {register_response.status_code}")
+                except Exception as register_err:
+                    logger.warning(f"Failed to register shared photo with backend: {register_err}")
 
             # Buffer to timeline
             try:

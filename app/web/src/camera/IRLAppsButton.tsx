@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Lock, Zap, X, ActivitySquare, UserPlus, TrendingUp, Dumbbell, ListOrdered } from 'lucide-react';
+import { Lock, X, ActivitySquare, UserPlus, ScanFace, ScanLine, TrendingUp, Dumbbell, ListOrdered } from 'lucide-react';
 import { useFacialEmbeddingStatus } from '../hooks/useFacialEmbeddingStatus';
 import { useQueue, QueueEntry } from '../hooks/useQueue';
 import { PhoneSelfieEnrollment } from './PhoneSelfieEnrollment';
@@ -139,7 +139,11 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete, d
         className="flex items-center space-x-2 bg-gray-800/70 hover:bg-gray-800/90 text-white px-1.5 py-0.5 rounded shadow-lg backdrop-blur-sm transition-colors text-xs"
         title="Apps"
       >
-        <Zap className="w-3.5 h-3.5" />
+        {effectiveHasEmbedding ? (
+          <ScanFace className="w-3.5 h-3.5 text-green-400" />
+        ) : (
+          <ScanLine className="w-3.5 h-3.5 text-red-400" />
+        )}
         <span className="font-medium">Apps</span>
       </button>
 
@@ -148,7 +152,23 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete, d
         <div className="fixed inset-0 bg-[#FAFAF8] z-50">
           <div className="max-w-md mx-auto pt-8 px-5">
             <div className="flex items-center justify-between mb-6">
-              <h1 className="text-xl font-semibold text-[#1A1A18]">Apps</h1>
+              <div className="flex items-center gap-3">
+                <h1 className="text-xl font-semibold text-[#1A1A18]">Apps</h1>
+                <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full ${
+                  effectiveHasEmbedding ? 'bg-green-50' : 'bg-[#F3F3EF]'
+                }`}>
+                  {effectiveHasEmbedding ? (
+                    <ScanFace className="w-3 h-3 text-green-600" />
+                  ) : (
+                    <ScanLine className="w-3 h-3 text-[#8A8A82]" />
+                  )}
+                  <span className={`text-[10px] font-medium ${
+                    effectiveHasEmbedding ? 'text-green-700' : 'text-[#8A8A82]'
+                  }`}>
+                    {effectiveHasEmbedding ? 'Recognized' : 'Not recognized'}
+                  </span>
+                </div>
+              </div>
               <button
                 onClick={() => setShowAppsModal(false)}
                 className="p-2 rounded-lg hover:bg-[#F3F3EF] transition-colors"
@@ -220,7 +240,7 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete, d
                 <div className="border border-[#E8E8E3] rounded-xl p-4 bg-white">
                   <div className="text-sm font-medium text-[#1A1A18] mb-1">Recognition Token</div>
                   <p className="text-xs text-[#8A8A82] mb-3">
-                    Create a token to unlock all apps and enable hands-free check-in
+                    Create a token so the camera can recognize you and unlock all apps
                   </p>
                   <button
                     onClick={() => {
@@ -232,13 +252,6 @@ export function IRLAppsButton({ cameraId, walletAddress, onEnrollmentComplete, d
                     Create Recognition Token
                   </button>
                 </div>
-              </div>
-            )}
-
-            {effectiveHasEmbedding && !devMode && (
-              <div className="mt-8 flex items-center gap-2 px-1">
-                <div className="w-2 h-2 rounded-full bg-[#2F7D3E]" />
-                <span className="text-xs text-[#8A8A82]">Recognition token active</span>
               </div>
             )}
           </div>

@@ -21,69 +21,158 @@ function truncateAddress(address: string): string {
 
 // --- Slide Components ---
 
+
 function SlideHero() {
   return (
     <div className="flex flex-col justify-center h-full px-10 py-8">
       <div className="flex-1 flex flex-col justify-center max-w-2xl">
         <div className="text-xs font-semibold tracking-[0.25em] uppercase text-[#8A8A82] mb-6">
-          Moment
+          What Is Moment?
         </div>
-        <h1 className="text-5xl lg:text-6xl xl:text-7xl font-black tracking-tighter text-[#1A1A18] leading-[1.05] mb-6">
-          You're here.
+        <h1 className="text-5xl font-black tracking-tighter text-[#1A1A18] leading-[1.05] mb-6">
+          A camera DePIN for
           <br />
-          <span className="text-[#D97706]">That means something.</span>
+          <span className="text-[#D97706]">proof of physical presence.</span>
         </h1>
-        <p className="text-lg lg:text-xl text-[#5C5C56] leading-relaxed max-w-lg">
-          Moment cameras turn physical presence into proof. The more people who show up, the stronger the record. Think of it as a witness that never forgets.
-        </p>
+        <div className="space-y-3 max-w-lg">
+          <p className="text-base text-[#5C5C56] leading-relaxed flex items-start gap-3">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#D97706] mt-2 flex-shrink-0" />
+            Photo booth economics and market, bigger — venue buys the hardware, it adds value to the space — "booth" is ambient, always-on, and programmable
+          </p>
+          <p className="text-base text-[#5C5C56] leading-relaxed flex items-start gap-3">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#D97706] mt-2 flex-shrink-0" />
+            Built for IRL organizers — events, fitness, community spaces. Place a camera anywhere, it stays public to people present
+          </p>
+          <p className="text-base text-[#5C5C56] leading-relaxed flex items-start gap-3">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#D97706] mt-2 flex-shrink-0" />
+            Founder — Azuolas
+          </p>
+        </div>
       </div>
     </div>
   );
 }
 
-function SlideHowItWorks() {
-  const steps = [
-    {
-      number: "01",
-      title: "Tap the tag",
-      description: "There's an NFC tag near this screen. It opens check-in on your phone.",
-    },
-    {
-      number: "02",
-      title: "Check in",
-      description: "Sign up in seconds. Start capturing photos and videos — sent straight to your own cloud account.",
-    },
-    {
-      number: "03",
-      title: "It remembers you",
-      description: "Come back and the camera recognizes you automatically. Your content, your history, all in one place. Opt-in only.",
-    },
-  ];
-
+function ProductSpectrum() {
   return (
-    <div className="flex flex-col justify-center h-full px-10 py-8">
-      <div className="flex-1 flex flex-col justify-center max-w-2xl">
-        <div className="text-xs font-semibold tracking-[0.25em] uppercase text-[#8A8A82] mb-6">
-          Try It Now
+    <div className="w-full flex justify-center">
+      <style>{`
+        @keyframes fadeInDevice {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes questionResolve {
+          0%, 40% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0; transform: scale(0.8); }
+          60%, 100% { opacity: 0; transform: scale(0.8); }
+        }
+        @keyframes cameraAppear {
+          0%, 50% { opacity: 0; transform: scale(0.6); }
+          70% { opacity: 1; transform: scale(1.05); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+        @keyframes momentLabelAppear {
+          0%, 60% { opacity: 0; }
+          80%, 100% { opacity: 1; }
+        }
+      `}</style>
+      <div className="flex items-end gap-12">
+        {/* Phone — small */}
+        <div className="flex flex-col items-center gap-2" style={{ animation: 'fadeInDevice 0.6s ease-out both' }}>
+          <div className="w-7 h-12 rounded-md bg-[#1A1A18] flex items-center justify-center">
+            <div className="w-5 h-9 rounded-sm bg-[#2A2A28]" />
+          </div>
+          <span className="text-[11px] text-[#8A8A82] font-medium">Smartphone</span>
+          <span className="text-[10px] text-[#B0B0A8]">~$1,000</span>
         </div>
-        <div className="space-y-8">
-          {steps.map((step) => (
-            <div key={step.number} className="flex gap-6 items-start">
-              <div className="text-3xl font-bold text-[#E8E8E3] tabular-nums flex-shrink-0 w-12">
-                {step.number}
-              </div>
-              <div>
-                <h3 className="text-xl lg:text-2xl font-black tracking-tight text-[#1A1A18] mb-1">
-                  {step.title}
-                </h3>
-                <p className="text-base text-[#5C5C56] leading-relaxed">
-                  {step.description}
-                </p>
-              </div>
-            </div>
-          ))}
+
+        {/* Arrow */}
+        <div className="text-[#E8E8E3] text-lg mb-8">→</div>
+
+        {/* Moment camera — replaces question mark */}
+        <div className="flex flex-col items-center gap-2 relative">
+          {/* Question mark that fades out */}
+          <div
+            className="w-14 h-14 rounded-full border-2 border-dashed border-[#D97706] flex items-center justify-center"
+            style={{ animation: 'questionResolve 4s ease-in-out infinite' }}
+          >
+            <span className="text-xl font-bold text-[#D97706]">?</span>
+          </div>
+          {/* Camera that fades in */}
+          <div
+            className="absolute top-0 w-14 h-14 rounded-full bg-[#1A1A18] flex items-center justify-center"
+            style={{ animation: 'cameraAppear 4s ease-out infinite' }}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+              <circle cx="12" cy="13" r="4" fill="#1A1A18" />
+            </svg>
+          </div>
+          <span className="text-[11px] text-[#D97706] font-semibold mt-1" style={{ animation: 'momentLabelAppear 4s ease-out infinite' }}>Moment</span>
+          <span className="text-[10px] text-[#B0B0A8]">~$500</span>
+        </div>
+
+        {/* Arrow */}
+        <div className="text-[#E8E8E3] text-lg mb-8">→</div>
+
+        {/* Photo booth — big */}
+        <div className="flex flex-col items-center gap-2" style={{ animation: 'fadeInDevice 0.6s ease-out 0.2s both' }}>
+          <svg width="72" height="88" viewBox="0 0 48 64" fill="none">
+            {/* Booth frame */}
+            <rect x="4" y="0" width="40" height="8" rx="2" fill="#8A8A82" />
+            {/* Side walls */}
+            <rect x="4" y="8" width="4" height="56" fill="#B0B0A8" />
+            <rect x="40" y="8" width="4" height="56" fill="#B0B0A8" />
+            {/* Back wall */}
+            <rect x="8" y="8" width="32" height="48" fill="#E8E8E3" />
+            {/* Screen/lens */}
+            <circle cx="24" cy="24" r="6" fill="#B0B0A8" stroke="#8A8A82" strokeWidth="1.5" />
+            <circle cx="24" cy="24" r="2.5" fill="#8A8A82" />
+            {/* Seat */}
+            <rect x="10" y="48" width="28" height="4" rx="1" fill="#D4D4CE" />
+            {/* Curtain lines */}
+            <path d="M 8 56 Q 14 52, 20 56 Q 26 60, 32 56 Q 38 52, 40 56" stroke="#B0B0A8" strokeWidth="1.5" fill="none" />
+          </svg>
+          <span className="text-[11px] text-[#8A8A82] font-medium">Photo booth</span>
+          <span className="text-[10px] text-[#B0B0A8]">~$10,000+</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+function SlideProblem() {
+  return (
+    <div className="flex flex-col justify-between h-full px-10 py-8">
+      <div className="flex-1 flex flex-col justify-center max-w-2xl">
+        <div className="text-xs font-semibold tracking-[0.25em] uppercase text-[#8A8A82] mb-6">
+          Why Does This Work?
+        </div>
+        <h2 className="text-5xl font-black tracking-tighter text-[#1A1A18] leading-[1.05] mb-6">
+          "In-person" has value.
+          <br />
+          <span className="text-[#D97706]">Not enough of it is being captured.</span>
+        </h2>
+        <div className="space-y-3 max-w-lg">
+          <p className="text-base text-[#5C5C56] leading-relaxed flex items-start gap-3">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#D97706] mt-2 flex-shrink-0" />
+            Strava: 55M → 120M users post-COVID — people want their physical activity tracked and shared
+          </p>
+          <p className="text-base text-[#5C5C56] leading-relaxed flex items-start gap-3">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#D97706] mt-2 flex-shrink-0" />
+            Korea: photo booths 3x in one year — people pay to capture physical moments
+          </p>
+          <p className="text-base text-[#5C5C56] leading-relaxed flex items-start gap-3">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#D97706] mt-2 flex-shrink-0" />
+            But both are narrow — one tracks runs, the other takes photos. No general infrastructure exists for physical presence.
+          </p>
+          <p className="text-base text-[#5C5C56] leading-relaxed flex items-start gap-3">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#D97706] mt-2 flex-shrink-0" />
+            Hardware sale + platform fee on transactions — photo booth economics, proven model
+          </p>
+        </div>
+      </div>
+      <ProductSpectrum />
     </div>
   );
 }
@@ -171,15 +260,15 @@ function SlidePlatform() {
       {/* Top: text */}
       <div className="flex-1 flex flex-col justify-center max-w-2xl">
         <div className="text-xs font-semibold tracking-[0.25em] uppercase text-[#8A8A82] mb-6">
-          Your Agent Can See Your World
+          What Can Be Built On This?
         </div>
-        <h2 className="text-3xl lg:text-4xl xl:text-5xl font-black tracking-tighter text-[#1A1A18] leading-[1.1] mb-6">
+        <h2 className="text-5xl font-black tracking-tighter text-[#1A1A18] leading-[1.05] mb-6">
           One API call away from
           <br />
           <span className="text-[#D97706]">physical context.</span>
         </h2>
         <p className="text-base lg:text-lg text-[#5C5C56] leading-relaxed max-w-lg">
-          Every Moment camera is an API endpoint. Agents, apps, and platforms plug into physical context the same way they plug into any other service.
+          Every Moment camera is an API endpoint. Agents, apps, and platforms plug into physical context the same way they plug into any other service. All organically access controlled by physical presence.
         </p>
       </div>
 
@@ -189,34 +278,51 @@ function SlidePlatform() {
   );
 }
 
-function SlideRaise() {
-  const funds = [
-    "Run a semi-permanent pilot at a fitness venue",
-    "Release a developer kit like device to early audience",
-    "Hire a GTM/Strategy person",
-    "Legal \u2014 formation, contracts",
+function SlideWhyNow() {
+  const forces = [
+    {
+      title: "Demand for tracking/content is bigger than ever",
+      description: "People want their physical lives recorded, shared, and owned — from fitness to social to events.",
+    },
+    {
+      title: "People want to get out",
+      description: "Post-COVID appetite for IRL is real, but no infrastructure exists to give it a digital footprint.",
+    },
+    {
+      title: "Edge AI is finally viable",
+      description: "Real-time computer vision on a $500 device — wasn't possible two years ago.",
+    },
+    {
+      title: "Crypto rails are ready",
+      description: "Speed, low fees, gasless UX — users never need to touch a token.",
+    },
   ];
 
   return (
     <div className="flex flex-col justify-center h-full px-10 py-8">
       <div className="flex-1 flex flex-col justify-center max-w-2xl">
         <div className="text-xs font-semibold tracking-[0.25em] uppercase text-[#8A8A82] mb-6">
-          Pre-Seed
+          Why Now And Why Hardware?
         </div>
-        <h2 className="text-4xl lg:text-5xl xl:text-6xl font-black tracking-tighter text-[#1A1A18] leading-[1.05] mb-3">
-          $300K SAFE
+        <h2 className="text-5xl font-black tracking-tighter text-[#1A1A18] leading-[1.05] mb-10">
+          This just
+          <br />
+          <span className="text-[#D97706]">became possible.</span>
         </h2>
-        <p className="text-xl lg:text-2xl text-[#5C5C56] mb-10">
-          $2.5M cap &middot; ~12% dilution &middot; 12–18 months runway
-        </p>
-        <div className="text-xs font-semibold tracking-[0.25em] uppercase text-[#8A8A82] mb-4">
-          Use of Funds
-        </div>
-        <div className="space-y-4">
-          {funds.map((item, i) => (
+        <div className="space-y-6">
+          {forces.map((item, i) => (
             <div key={i} className="flex items-start gap-4">
-              <div className="w-1.5 h-1.5 rounded-full bg-[#D97706] mt-2 flex-shrink-0" />
-              <p className="text-base lg:text-lg text-[#1A1A18]">{item}</p>
+              <div className="text-2xl font-bold text-[#E8E8E3] tabular-nums flex-shrink-0 w-8">
+                {String(i + 1).padStart(2, "0")}
+              </div>
+              <div>
+                <h3 className="text-lg lg:text-xl font-black tracking-tight text-[#1A1A18] mb-1">
+                  {item.title}
+                </h3>
+                <p className="text-sm lg:text-base text-[#5C5C56] leading-relaxed">
+                  {item.description}
+                </p>
+              </div>
             </div>
           ))}
         </div>
@@ -225,30 +331,33 @@ function SlideRaise() {
   );
 }
 
-function SlideTeam() {
-  const highlights = [
-    "3 hardware iterations shipped \u2014 Pi Zero \u2192 Pi 5 \u2192 Jetson Orin Nano",
-    "Full-stack: computer vision pipeline, smart contracts, frontend, hardware",
-    "Seeking: GTM co-founder, advisors with hardware or consumer experience",
+function SlideStack() {
+  const points = [
+    "User physical presence literally prints out the default access controls",
+    "Business model copies photo booths as we know them — except networked and monetizable",
+    "Jetson Orin Nano board, HQ 9:16 (vertical) camera, case/battery",
+    "Sensitive data encrypted locally with the user's own keys before it leaves the device",
+    "Session history and content ownership go on Solana — user-owned, permanent",
+    "Every camera is an endpoint — anything can plug in",
   ];
 
   return (
     <div className="flex flex-col justify-center h-full px-10 py-8">
       <div className="flex-1 flex flex-col justify-center max-w-2xl">
         <div className="text-xs font-semibold tracking-[0.25em] uppercase text-[#8A8A82] mb-6">
-          Team
+          How Does It Work?
         </div>
-        <h2 className="text-4xl lg:text-5xl xl:text-6xl font-black tracking-tighter text-[#1A1A18] leading-[1.05] mb-3">
-          Solo founder.
+        <h2 className="text-5xl font-black tracking-tighter text-[#1A1A18] leading-[1.05] mb-8">
+          Network of nodes,
           <br />
-          <span className="text-[#D97706]">16 months in.</span>
+          <span className="text-[#D97706]">presence gated access.</span>
         </h2>
-        <div className="mt-8 space-y-5">
-          {highlights.map((item, i) => (
-            <div key={i} className="flex items-start gap-4">
-              <div className="w-1.5 h-1.5 rounded-full bg-[#D97706] mt-2 flex-shrink-0" />
-              <p className="text-base lg:text-lg text-[#5C5C56] leading-relaxed">{item}</p>
-            </div>
+        <div className="space-y-3">
+          {points.map((point, i) => (
+            <p key={i} className="text-base text-[#5C5C56] leading-relaxed flex items-start gap-3">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#D97706] mt-2 flex-shrink-0" />
+              {point}
+            </p>
           ))}
         </div>
       </div>
@@ -354,8 +463,8 @@ export function DesktopEventPanel({ cameraId, isOwner }: DesktopEventPanelProps)
     <div className="flex flex-col justify-between h-full px-10 py-8">
       {/* Top: Camera identity + active session */}
       <div className="flex-1 flex flex-col justify-center max-w-xl">
-        <div className="text-xs font-semibold tracking-[0.2em] uppercase text-[#8A8A82] mb-1">
-          Live Camera
+        <div className="text-xs font-semibold tracking-[0.25em] uppercase text-[#8A8A82] mb-1">
+          What's Happening Right Now?
         </div>
         {queueState?.config.location && (
           <p className="text-sm text-[#8A8A82] mb-4">{queueState.config.location}</p>
@@ -424,13 +533,13 @@ export function DesktopEventPanel({ cameraId, isOwner }: DesktopEventPanelProps)
 
   const pitchSlides = [
     <SlideHero key="hero" />,
-    <SlideHowItWorks key="how" />,
+    <SlideProblem key="problem" />,
     <SlidePlatform key="platform" />,
   ];
 
   const investorSlides = [
-    <SlideRaise key="raise" />,
-    <SlideTeam key="team" />,
+    <SlideWhyNow key="whynow" />,
+    <SlideStack key="stack" />,
   ];
 
   const slides = investorMode

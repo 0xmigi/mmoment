@@ -90,12 +90,12 @@ export function isWalrusRelayEnabled(): boolean {
  * Upload an encrypted blob to Walrus via the upload relay
  *
  * @param encryptedData - The encrypted file data
- * @param epochs - Number of epochs to store (default 5)
+ * @param epochs - Number of epochs to store (1 epoch ≈ 2 weeks on mainnet, max 53)
  * @returns Upload result with blob ID and download URL
  */
 export async function uploadToWalrus(
   encryptedData: Buffer,
-  epochs: number = 5
+  epochs: number = 26  // ~1 year
 ): Promise<WalrusUploadResult> {
   if (!walrusClient || !backendKeypair) {
     throw new Error('Walrus upload relay not initialized. Set BACKEND_SUI_PRIVATE_KEY.');

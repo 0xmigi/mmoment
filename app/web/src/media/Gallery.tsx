@@ -58,6 +58,12 @@ export default function MediaGallery({
     };
   }, []);
 
+  // Keep walrus gallery service aware of current wallet for real-time shared photo detection
+  useEffect(() => {
+    walrusGalleryService.setCurrentWallet(primaryWallet?.address || null);
+    return () => walrusGalleryService.setCurrentWallet(null);
+  }, [primaryWallet?.address]);
+
   // Check storage type preference on mount and when it changes
   useEffect(() => {
     const checkStorageType = () => {
