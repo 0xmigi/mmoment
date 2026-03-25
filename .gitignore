@@ -213,3 +213,4 @@ CLAUDE.local.md
 
 # Claude Code — team config (committed)
 !.claude/settings.json
+.vercel

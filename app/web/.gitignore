@@ -28,3 +28,4 @@ dist-ssr
 .env.*
 !.env.example
 !pinata.env.example
+.vercel
