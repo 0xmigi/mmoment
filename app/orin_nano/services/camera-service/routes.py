@@ -793,8 +793,8 @@ def register_routes(app):
         action = request.json.get("action")  # 'start', 'stop', or None
         share_with_session = request.json.get("share_with_session", False)
 
-        # Cap recording duration at 5 seconds (short-form video for Walrus upload)
-        MAX_RECORDING_SECONDS = 5
+        # Cap recording duration at 3 minutes
+        MAX_RECORDING_SECONDS = 180
         if duration <= 0 or duration > MAX_RECORDING_SECONDS:
             duration = MAX_RECORDING_SECONDS
 

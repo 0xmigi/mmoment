@@ -1185,21 +1185,21 @@ export function CameraView() {
       return;
     }
 
-    // START RECORDING - 5 second short-form video
+    // START RECORDING - up to 3 minutes, user clicks again to stop
     try {
       setIsRecording(true);
-      updateToast("info", "Recording 5s video...");
+      updateToast("info", "Starting video recording...");
 
       // Read share preference from localStorage (set in CameraModal)
       const shareWithSession = localStorage.getItem(`share_with_session_${currentCameraId}`) === 'true';
-      // Start recording with 5s duration (auto-stops)
-      const recordResponse = await unifiedCameraService.startVideoRecording(currentCameraId, { duration: 5, shareWithSession });
+      // Start recording with 3 min max (auto-stops at limit, or user clicks stop)
+      const recordResponse = await unifiedCameraService.startVideoRecording(currentCameraId, { duration: 180, shareWithSession });
 
       if (!recordResponse.success) {
         throw new Error(`Failed to start recording: ${recordResponse.error}`);
       }
 
-      updateToast("success", "Recording 5s...");
+      updateToast("success", "Recording... Click again to stop (3 min max)");
     } catch (error) {
       updateToast(
         "error",
