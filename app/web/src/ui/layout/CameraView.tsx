@@ -183,6 +183,8 @@ export function CameraView() {
   }>(null);
   const [cameraAccount, setCameraAccount] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const recordingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordingCameraIdRef = useRef<string | null>(null);
   const [currentToast, setCurrentToast] = useState<ToastMessage | null>(null);
   const [loading] = useState(false);
   const [, setIsMobileView] = useState(window.innerWidth <= 768);
@@ -1079,6 +1081,80 @@ export function CameraView() {
     }
   };
 
+  const stopAndSaveRecording = async (cameraId: string) => {
+    setIsRecording(false);
+    recordingCameraIdRef.current = null;
+
+    try {
+      updateToast("info", "Stopping video recording...");
+
+      const stopResponse = await unifiedCameraService.stopVideoRecording(cameraId);
+
+      if (!stopResponse.success) {
+        throw new Error(stopResponse.error || "Failed to stop recording");
+      }
+
+      const videoBlob = stopResponse.data?.blob;
+      const filename = stopResponse.data?.filename;
+      const storageUpload = stopResponse.data?.storage_upload;
+
+      if (!videoBlob || !filename) {
+        updateToast("error", "Recording stopped but no video was returned");
+        return;
+      }
+
+      if (videoBlob.size < 100000) {
+        updateToast("error", "Video file appears to be corrupted. Try recording again.");
+        return;
+      }
+
+      updateToast("success", "Video recorded!");
+
+      // Add video to gallery immediately (local-first) using job_id from response
+      const cameraApiUrl = unifiedCameraService.getCameraApiUrl(cameraId);
+      if (cameraApiUrl && primaryWallet?.address) {
+        try {
+          const jobId = storageUpload?.job_id;
+          const localUrl = storageUpload?.local_url
+            ? `${cameraApiUrl}${storageUpload.local_url}`
+            : `${cameraApiUrl}/videos/${filename}`;
+
+          if (jobId) {
+            walrusGalleryService.addLocalPhoto({
+              filename: filename,
+              localUrl: localUrl,
+              blob: videoBlob,
+              jobId: jobId,
+              walletAddress: primaryWallet.address,
+              cameraId: cameraId,
+              timestamp: stopResponse.data?.timestamp || Date.now(),
+              type: 'video',
+            });
+            console.log(`[CameraView] Added video to gallery: ${filename} (job #${jobId})`);
+          } else {
+            walrusGalleryService.addLocalPhoto({
+              filename: filename,
+              localUrl: localUrl,
+              blob: videoBlob,
+              walletAddress: primaryWallet.address,
+              cameraId: cameraId,
+              timestamp: stopResponse.data?.timestamp || Date.now(),
+              type: 'video',
+            });
+            console.warn(`[CameraView] Added video without jobId - upload status won't be tracked`);
+          }
+        } catch (err) {
+          console.error('[CameraView] Error adding video to gallery:', err);
+        }
+      }
+    } catch (error) {
+      updateToast(
+        "error",
+        `Failed to stop recording: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
+    }
+  };
+
   const handleDirectVideo = async () => {
     if (!cameraAccount && !selectedCamera) {
       updateToast(
@@ -1106,88 +1182,19 @@ export function CameraView() {
 
     // ===== TOGGLE BEHAVIOR: Stop if recording, Start if not =====
     if (isRecording) {
-      // STOP RECORDING - explicitly call stopVideoRecording to get job_id
-      try {
-        updateToast("info", "Stopping video recording...");
-
-        const stopResponse = await unifiedCameraService.stopVideoRecording(currentCameraId);
-
-        if (!stopResponse.success) {
-          throw new Error(stopResponse.error || "Failed to stop recording");
-        }
-
-        const videoBlob = stopResponse.data?.blob;
-        const filename = stopResponse.data?.filename;
-        const storageUpload = stopResponse.data?.storage_upload;
-
-        if (!videoBlob || !filename) {
-          updateToast("error", "Recording stopped but no video was returned");
-          setIsRecording(false);
-          return;
-        }
-
-        if (videoBlob.size < 100000) {
-          updateToast("error", "Video file appears to be corrupted. Try recording again.");
-          setIsRecording(false);
-          return;
-        }
-
-        updateToast("success", "Video recorded!");
-
-        // Add video to gallery immediately (local-first) using job_id from response
-        const cameraApiUrl = unifiedCameraService.getCameraApiUrl(currentCameraId);
-        if (cameraApiUrl && primaryWallet?.address) {
-          try {
-            // Get job_id directly from the stop response (no need to query uploads)
-            const jobId = storageUpload?.job_id;
-            const localUrl = storageUpload?.local_url
-              ? `${cameraApiUrl}${storageUpload.local_url}`
-              : `${cameraApiUrl}/videos/${filename}`;
-
-            if (jobId) {
-              walrusGalleryService.addLocalPhoto({
-                filename: filename,
-                localUrl: localUrl,
-                blob: videoBlob,
-                jobId: jobId,
-                walletAddress: primaryWallet.address,
-                cameraId: currentCameraId,
-                timestamp: stopResponse.data?.timestamp || Date.now(),
-                type: 'video',
-              });
-              console.log(`[CameraView] Added video to gallery: ${filename} (job #${jobId})`);
-            } else {
-              // Fallback: Add to gallery without jobId (won't track upload status)
-              walrusGalleryService.addLocalPhoto({
-                filename: filename,
-                localUrl: localUrl,
-                blob: videoBlob,
-                walletAddress: primaryWallet.address,
-                cameraId: currentCameraId,
-                timestamp: stopResponse.data?.timestamp || Date.now(),
-                type: 'video',
-              });
-              console.warn(`[CameraView] Added video without jobId - upload status won't be tracked`);
-            }
-          } catch (err) {
-            console.error('[CameraView] Error adding video to gallery:', err);
-          }
-        }
-
-        setIsRecording(false);
-      } catch (error) {
-        updateToast(
-          "error",
-          `Failed to stop recording: ${error instanceof Error ? error.message : "Unknown error"}`
-        );
-        setIsRecording(false);
+      // Clear auto-stop timer since user manually stopped
+      if (recordingTimerRef.current) {
+        clearTimeout(recordingTimerRef.current);
+        recordingTimerRef.current = null;
       }
+      await stopAndSaveRecording(currentCameraId);
       return;
     }
 
     // START RECORDING - up to 3 minutes, user clicks again to stop
     try {
       setIsRecording(true);
+      recordingCameraIdRef.current = currentCameraId;
       updateToast("info", "Starting video recording...");
 
       // Read share preference from localStorage (set in CameraModal)
@@ -1200,12 +1207,19 @@ export function CameraView() {
       }
 
       updateToast("success", "Recording... Click again to stop (3 min max)");
+
+      // Auto-stop after 180s to match camera-side limit
+      recordingTimerRef.current = setTimeout(() => {
+        recordingTimerRef.current = null;
+        stopAndSaveRecording(currentCameraId);
+      }, 180_000);
     } catch (error) {
       updateToast(
         "error",
         `Recording failed: ${error instanceof Error ? error.message : "Unknown error"}`
       );
       setIsRecording(false);
+      recordingCameraIdRef.current = null;
     }
   };
 
@@ -1249,12 +1263,16 @@ export function CameraView() {
     }
   };
 
-  // Cleanup gesture monitoring on unmount
+  // Cleanup gesture monitoring and recording timer on unmount
   useEffect(() => {
     return () => {
       if (gestureCheckIntervalRef.current) {
         clearInterval(gestureCheckIntervalRef.current);
         gestureCheckIntervalRef.current = null;
+      }
+      if (recordingTimerRef.current) {
+        clearTimeout(recordingTimerRef.current);
+        recordingTimerRef.current = null;
       }
     };
   }, []);
