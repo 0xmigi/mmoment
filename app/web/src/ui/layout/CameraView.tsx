@@ -185,6 +185,8 @@ export function CameraView() {
   const [isRecording, setIsRecording] = useState(false);
   const recordingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingCameraIdRef = useRef<string | null>(null);
+  // Timestamp of last user-initiated recording state change — ignore poll updates for a grace period
+  const recordingStateLockedUntilRef = useRef<number>(0);
   const [currentToast, setCurrentToast] = useState<ToastMessage | null>(null);
   const [loading] = useState(false);
   const [, setIsMobileView] = useState(window.innerWidth <= 768);
@@ -537,15 +539,18 @@ export function CameraView() {
         isRecording: status.isRecording,
         lastUpdated: Date.now(),
       });
-      // Reconcile local recording state with hardware truth
-      // If camera says not recording but we think it is, sync down
-      // If camera says recording but we think it isn't (e.g. navigated away and back), sync up
-      setIsRecording(prev => {
-        if (prev !== status.isRecording) {
-          console.log(`[CameraView] Recording state reconciled: ${prev} → ${status.isRecording}`);
-        }
-        return status.isRecording;
-      });
+      // Reconcile local recording state with hardware truth — but respect user actions.
+      // After the user starts/stops recording, ignore contradicting polls for 15s
+      // to avoid a race where the camera hasn't updated yet.
+      const now = Date.now();
+      if (now > recordingStateLockedUntilRef.current) {
+        setIsRecording(prev => {
+          if (prev !== status.isRecording) {
+            console.log(`[CameraView] Recording state reconciled: ${prev} → ${status.isRecording}`);
+          }
+          return status.isRecording;
+        });
+      }
     });
 
     // Cleanup
@@ -1101,6 +1106,7 @@ export function CameraView() {
   const stopAndSaveRecording = async (cameraId: string) => {
     setIsRecording(false);
     recordingCameraIdRef.current = null;
+    recordingStateLockedUntilRef.current = Date.now() + 15_000;
 
     try {
       updateToast("info", "Stopping video recording...");
@@ -1212,6 +1218,7 @@ export function CameraView() {
     try {
       setIsRecording(true);
       recordingCameraIdRef.current = currentCameraId;
+      recordingStateLockedUntilRef.current = Date.now() + 15_000;
       updateToast("info", "Starting video recording...");
 
       // Read share preference from localStorage (set in CameraModal)
