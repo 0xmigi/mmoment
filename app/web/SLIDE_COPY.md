@@ -20,7 +20,7 @@
 - Bullets:
   - 2023 Strava: 55M → 120M users in 6 months? post Covid — people want their physical activity tracked and shared
   - Korea: photo booths 1,000 → 3,000 locations in a year — people pay to capture physical moments (small numbers, ither there better data or just no numbers?)
-  - But both are narrow — one tracks runs, the other takes photos. No general infrastructure exists for physical presence.
+  - But both are narrow — one tracks runs, the other takes photos. No open infrastructure exists to capture it.
 
 ## SLIDE 3 — AGENTS + API
 
@@ -47,11 +47,10 @@
 ## SLIDE 6 — THE STACK (locked, Shift+I)
 
 - Label: HOW DOES IT WORK?
-- Headline: Network of nodes, presence gated access controls.
+- Headline: Self-contained nodes. Trusted by design. Open by default.
+- Hardware callout (single line): Jetson Orin Nano · HQ 9:16 camera · standalone case + battery — ~$500
 - Bullets:
-  - User physical presents literally prints out the default access controls
-  - Business model copies photobooths as we know them except networked and monitizable
-  - Jetson Orin Nano board, HQ 9:16(vertical) camera, case/battery 
-  - Sensitive data encrypted locally with the user's own keys before it leaves the device
+  - Physical presence is the access control — no logins, no invite links, just be there
+  - Data is encrypted locally with the user's own keys before it leaves the device
   - Session history and content ownership go on Solana — user-owned, permanent
   - Every camera is an endpoint — anything can plug in
