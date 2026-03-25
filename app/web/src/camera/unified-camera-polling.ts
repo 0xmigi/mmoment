@@ -11,6 +11,7 @@ export interface CameraStatusData {
   owner: string;
   isLive: boolean;
   isStreaming: boolean;
+  isRecording: boolean;
   status: 'ok' | 'error' | 'offline';
   lastSeen?: number;
   hardwareState?: {
@@ -186,6 +187,7 @@ class UnifiedCameraPollingService {
           owner: statusData.owner || '',
           isLive: statusData.isOnline,
           isStreaming: streamData?.isActive || false,
+          isRecording: statusData.isRecording || false,
           status: statusData.isOnline ? 'ok' : 'offline',
           lastSeen: statusData.lastSeen
         };
@@ -195,6 +197,7 @@ class UnifiedCameraPollingService {
           owner: '',
           isLive: false,
           isStreaming: false,
+          isRecording: false,
           status: 'offline',
           lastSeen: Date.now()
         };
@@ -205,6 +208,7 @@ class UnifiedCameraPollingService {
         owner: '',
         isLive: false,
         isStreaming: false,
+        isRecording: false,
         status: 'error',
         lastSeen: Date.now()
       };

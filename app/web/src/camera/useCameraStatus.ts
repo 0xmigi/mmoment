@@ -10,6 +10,7 @@ export function useCameraStatus(cameraId: string): CameraStatusData {
     owner: '',
     isLive: false,
     isStreaming: false,
+    isRecording: false,
     status: 'offline'
   });
 
@@ -19,6 +20,7 @@ export function useCameraStatus(cameraId: string): CameraStatusData {
         owner: '',
         isLive: false,
         isStreaming: false,
+        isRecording: false,
         status: 'offline'
       });
       return;

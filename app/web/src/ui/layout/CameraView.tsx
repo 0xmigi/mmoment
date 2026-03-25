@@ -523,11 +523,28 @@ export function CameraView() {
 
     console.log('[CameraView] Subscribing to unified polling for hardware state');
 
+    // Immediately check recording state on mount (don't wait for next poll interval)
+    unifiedCameraService.isCurrentlyRecording(cameraAccount).then(recording => {
+      if (recording) {
+        console.log('[CameraView] Camera is already recording — syncing state');
+        setIsRecording(true);
+      }
+    }).catch(() => {});
+
     const unsubscribe = unifiedCameraPolling.subscribe(cameraAccount, (status: CameraStatusData) => {
       setHardwareState({
         isStreaming: status.isStreaming,
-        isRecording: false, // TODO: Add isRecording to unified polling status
+        isRecording: status.isRecording,
         lastUpdated: Date.now(),
+      });
+      // Reconcile local recording state with hardware truth
+      // If camera says not recording but we think it is, sync down
+      // If camera says recording but we think it isn't (e.g. navigated away and back), sync up
+      setIsRecording(prev => {
+        if (prev !== status.isRecording) {
+          console.log(`[CameraView] Recording state reconciled: ${prev} → ${status.isRecording}`);
+        }
+        return status.isRecording;
       });
     });
 
@@ -1203,6 +1220,13 @@ export function CameraView() {
       const recordResponse = await unifiedCameraService.startVideoRecording(currentCameraId, { duration: 180, shareWithSession });
 
       if (!recordResponse.success) {
+        // If camera says "already recording", sync state and let user stop it
+        if (recordResponse.error?.includes('already recording') || recordResponse.error?.includes('Already recording')) {
+          setIsRecording(true);
+          recordingCameraIdRef.current = currentCameraId;
+          updateToast("info", "Recording in progress. Click again to stop.");
+          return;
+        }
         throw new Error(`Failed to start recording: ${recordResponse.error}`);
       }
 
