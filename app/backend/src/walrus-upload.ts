@@ -95,7 +95,7 @@ export function isWalrusRelayEnabled(): boolean {
  */
 export async function uploadToWalrus(
   encryptedData: Buffer,
-  epochs: number = 7  // ~3 months
+  epochs: number = 26  // ~1 year
 ): Promise<WalrusUploadResult> {
   if (!walrusClient || !backendKeypair) {
     throw new Error('Walrus upload relay not initialized. Set BACKEND_SUI_PRIVATE_KEY.');

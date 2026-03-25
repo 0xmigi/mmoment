@@ -29,7 +29,7 @@ WALRUS_AGGREGATOR_URL = os.environ.get(
 )
 
 # Storage duration: 1 epoch ≈ 2 weeks on mainnet, max 53 epochs (~2 years)
-DEFAULT_EPOCHS = 7  # ~3 months
+DEFAULT_EPOCHS = 26  # ~1 year
 
 
 class WalrusUploadService:

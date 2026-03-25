@@ -525,6 +525,7 @@ export class JetsonCamera implements ICamera {
       // Use the standardized /api/record endpoint with action parameter
       const response = await this.makeApiCall('/api/record', 'POST', {
         action: 'start',
+        duration: options?.duration ?? 5,
         wallet_address: this.currentSession.walletAddress,
         session_id: this.currentSession.sessionId,
         share_with_session: options?.shareWithSession ?? false

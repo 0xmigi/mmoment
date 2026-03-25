@@ -91,8 +91,8 @@ services:
       - STORAGE_PROVIDER=walrus
       - WALRUS_PUBLISHER_URL=https://walrus-mainnet-publisher-1.staketab.org
       - WALRUS_AGGREGATOR_URL=https://aggregator.walrus-mainnet.walrus.space
-      # Testing: Skip video uploads to Walrus (set to "true" to disable)
-      - SKIP_VIDEO_UPLOAD=true
+      # Video uploads to Walrus (set to "true" to disable)
+      - SKIP_VIDEO_UPLOAD=false
       # Auto-checkout timeout configuration (in seconds)
       # Face timeout: how long user can be absent from frame before auto-checkout (default: 14400 = 4 hours)
       # Activity timeout: how long user can be inactive before auto-checkout (default: 14400 = 4 hours)

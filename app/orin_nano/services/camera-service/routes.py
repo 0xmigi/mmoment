@@ -789,15 +789,14 @@ def register_routes(app):
 
         # Get request parameters
         wallet_address = request.json.get("wallet_address")
-        duration = request.json.get("duration", 0)  # Default to 0 (indefinite until stopped)
+        duration = request.json.get("duration", 5)
         action = request.json.get("action")  # 'start', 'stop', or None
         share_with_session = request.json.get("share_with_session", False)
 
-        # Enforce maximum duration limit to prevent runaway recordings
-        # duration=0 means "record until stopped" (valid for action='start')
-        MAX_DURATION = 300  # 5 minutes maximum
-        if duration < 0 or duration > MAX_DURATION:
-            duration = 0  # Default to indefinite for invalid durations
+        # Cap recording duration at 5 seconds (short-form video for Walrus upload)
+        MAX_RECORDING_SECONDS = 5
+        if duration <= 0 or duration > MAX_RECORDING_SECONDS:
+            duration = MAX_RECORDING_SECONDS
 
         # Get services
         buffer_service = get_services()["buffer"]

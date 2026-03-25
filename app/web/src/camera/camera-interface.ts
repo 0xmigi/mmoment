@@ -81,6 +81,8 @@ export interface CameraSession {
 export interface CaptureOptions {
   /** When true, content is shared with all session participants. Default: false (private). */
   shareWithSession?: boolean;
+  /** Recording duration in seconds. Server enforces max of 5s. */
+  duration?: number;
 }
 
 /**
