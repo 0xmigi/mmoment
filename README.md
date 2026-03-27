@@ -2,7 +2,7 @@
 
 Mmoment solves the friction in capturing valuable social content by creating an identity-aware camera network strategically positioned where social content naturally occurs. This solution transforms predictable interaction points into seamless content-capture opportunities, eliminating the technical barriers between experiencing moments and sharing them—all while generating a social graph of real-world human interactions.
 
-<video src="assets/demo.mp4" controls width="100%"></video>
+https://github.com/0xmigi/mmoment/raw/development/assets/demo.mp4
 
 ## Project Overview
 
