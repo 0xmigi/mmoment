@@ -1,0 +1,18 @@
+[Unit]
+Description=MMOMENT Camera Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/mmoment/app/pi_zero_2w
+EnvironmentFile=-/home/pi/.mmoment/device.env
+ExecStart=/home/pi/mmoment/venv/bin/python -m camera_service.main
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
