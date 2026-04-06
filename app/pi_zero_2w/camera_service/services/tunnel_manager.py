@@ -2,38 +2,44 @@
 Tunnel Manager — Pi Zero 2W
 
 Manages the Cloudflare tunnel config that maps {pda}.mmoment.xyz → localhost:5002.
-Same flow as Orin Nano but no Docker — cloudflared runs as a systemd service.
+Tunnel credentials are provisioned by the backend during device onboarding —
+no Cloudflare API tokens needed on the device.
 """
 
+import json
 import logging
 import os
 import subprocess
-import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import requests
 import yaml
 
 logger = logging.getLogger(__name__)
 
-CLOUDFLARED_CONFIG = Path(os.path.expanduser("~/.cloudflared/config.yml"))
+CLOUDFLARED_DIR = Path(os.path.expanduser("~/.cloudflared"))
+CLOUDFLARED_CONFIG = CLOUDFLARED_DIR / "config.yml"
 SERVICE_PORT = 5002
 
 
 class TunnelManager:
     def __init__(self):
-        self.tunnel_id = os.getenv("CLOUDFLARE_TUNNEL_ID")
-        if not self.tunnel_id:
-            logger.warning("CLOUDFLARE_TUNNEL_ID not set — tunnel manager disabled")
-        self.credentials_file = (
-            Path(os.path.expanduser(f"~/.cloudflared/{self.tunnel_id}.json"))
-            if self.tunnel_id else None
-        )
+        self.tunnel_id: Optional[str] = os.getenv("CLOUDFLARE_TUNNEL_ID")
+        self.credentials_file: Optional[Path] = None
+        if self.tunnel_id:
+            self.credentials_file = CLOUDFLARED_DIR / f"{self.tunnel_id}.json"
+
+    def set_tunnel_credentials(self, tunnel_id: str, credentials: dict):
+        """Write backend-provisioned tunnel credentials to disk."""
+        self.tunnel_id = tunnel_id
+        CLOUDFLARED_DIR.mkdir(parents=True, exist_ok=True)
+        self.credentials_file = CLOUDFLARED_DIR / f"{tunnel_id}.json"
+        self.credentials_file.write_text(json.dumps(credentials))
+        logger.info(f"Tunnel credentials written to {self.credentials_file}")
 
     def configure_tunnel(self, full_domain: str) -> bool:
-        if not self.tunnel_id:
-            logger.error("No CLOUDFLARE_TUNNEL_ID set")
+        if not self.tunnel_id or not self.credentials_file:
+            logger.error("No tunnel ID or credentials — cannot configure tunnel")
             return False
         try:
             config = {
@@ -44,7 +50,7 @@ class TunnelManager:
                     {"service": "http_status:404"},
                 ],
             }
-            CLOUDFLARED_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+            CLOUDFLARED_DIR.mkdir(parents=True, exist_ok=True)
             with open(CLOUDFLARED_CONFIG, "w") as f:
                 yaml.dump(config, f, default_flow_style=False)
             logger.info(f"Tunnel config written for {full_domain}")
@@ -80,6 +86,7 @@ class TunnelManager:
             return False
 
     def test_connectivity(self, domain: str) -> bool:
+        import requests
         try:
             r = requests.get(f"https://{domain}/api/health", timeout=10)
             return r.status_code == 200
@@ -87,7 +94,7 @@ class TunnelManager:
             return False
 
     def get_status(self) -> Dict[str, Any]:
-        status = {
+        status: Dict[str, Any] = {
             "tunnel_id": self.tunnel_id,
             "config_exists": CLOUDFLARED_CONFIG.exists(),
             "running": False,

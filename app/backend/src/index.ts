@@ -1726,6 +1726,13 @@ interface DeviceClaim {
   status: "pending" | "claimed" | "expired";
   devicePubkey?: string;
   deviceModel?: string;
+  assignedPda?: string;
+  transactionId?: string;
+  pdaAssignedAt?: number;
+  tunnelId?: string;
+  tunnelCredentials?: { AccountTag: string; TunnelID: string; TunnelSecret: string };
+  tunnelError?: string;
+  dnsRecordId?: string;
 }
 
 const cameraRooms = new Map<string, Set<string>>();
@@ -2040,8 +2047,8 @@ app.get("/api/claim/:token/status", (req, res) => {
   }
 });
 
-// 4. Notify device of its assigned PDA for Cloudflare tunnel configuration
-app.post("/api/claim/:token/assign-pda", (req, res) => {
+// 4. Notify device of its assigned PDA + provision Cloudflare tunnel
+app.post("/api/claim/:token/assign-pda", async (req, res) => {
   try {
     const { token } = req.params;
     const { camera_pda, transaction_id } = req.body;
@@ -2062,25 +2069,91 @@ app.post("/api/claim/:token/assign-pda", (req, res) => {
         .json({ error: "Device has not claimed this token yet" });
     }
 
-    // Store PDA assignment in claim for device to retrieve
-    (claim as any).assignedPda = camera_pda;
-    (claim as any).transactionId = transaction_id;
-    (claim as any).pdaAssignedAt = Date.now();
+    // Store PDA assignment
+    claim.assignedPda = camera_pda;
+    claim.transactionId = transaction_id;
+    claim.pdaAssignedAt = Date.now();
+
+    const subdomain = camera_pda.toLowerCase();
+    const fullDomain = `${subdomain}.mmoment.xyz`;
 
     console.log(
       `Assigned PDA ${camera_pda} to device ${claim.devicePubkey} (token: ${token})`,
     );
 
-    // In a real implementation, you might want to:
-    // 1. Store this in a database
-    // 2. Push notify the device via webhook/WebSocket
-    // 3. Send to device management service
+    // Provision Cloudflare tunnel + DNS record
+    const cfApiToken = process.env.CLOUDFLARE_API_TOKEN;
+    const cfAccountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+    const cfZoneId = process.env.CLOUDFLARE_ZONE_ID;
+
+    if (cfApiToken && cfAccountId && cfZoneId) {
+      try {
+        const crypto = await import("crypto");
+        const tunnelSecret = crypto.randomBytes(32).toString("base64");
+        const cfHeaders = { Authorization: `Bearer ${cfApiToken}`, "Content-Type": "application/json" };
+
+        // Create Cloudflare tunnel
+        const tunnelResp = await axios.post(
+          `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/cfd_tunnel`,
+          { name: subdomain, tunnel_secret: tunnelSecret },
+          { headers: cfHeaders },
+        );
+
+        if (!tunnelResp.data.success) {
+          throw new Error(`Tunnel creation failed: ${JSON.stringify(tunnelResp.data.errors)}`);
+        }
+
+        const tunnelId = tunnelResp.data.result.id;
+        const accountTag = tunnelResp.data.result.account_tag;
+
+        console.log(`Created Cloudflare tunnel ${tunnelId} for ${fullDomain}`);
+
+        // Create DNS CNAME record
+        const dnsResp = await axios.post(
+          `https://api.cloudflare.com/client/v4/zones/${cfZoneId}/dns_records`,
+          {
+            type: "CNAME",
+            name: subdomain,
+            content: `${tunnelId}.cfargotunnel.com`,
+            ttl: 1,
+            proxied: true,
+          },
+          { headers: cfHeaders },
+        );
+
+        if (!dnsResp.data.success) {
+          console.warn(`DNS record creation warning: ${JSON.stringify(dnsResp.data.errors)}`);
+        }
+
+        const dnsRecordId = dnsResp.data.result?.id;
+
+        console.log(`Created DNS CNAME: ${fullDomain} → ${tunnelId}.cfargotunnel.com`);
+
+        // Store tunnel data on claim
+        claim.tunnelId = tunnelId;
+        claim.tunnelCredentials = {
+          AccountTag: accountTag,
+          TunnelID: tunnelId,
+          TunnelSecret: tunnelSecret,
+        };
+        claim.dnsRecordId = dnsRecordId;
+
+      } catch (cfError: any) {
+        console.error(`Cloudflare provisioning failed: ${cfError.message}`);
+        claim.tunnelError = cfError.message;
+      }
+    } else {
+      console.warn("Cloudflare env vars not set — skipping tunnel provisioning");
+      claim.tunnelError = "Cloudflare credentials not configured on backend";
+    }
 
     res.json({
       success: true,
       message: "PDA assigned to device",
       camera_pda,
-      subdomain: `${camera_pda.toLowerCase()}.mmoment.xyz`,
+      subdomain: fullDomain,
+      tunnel_id: claim.tunnelId,
+      tunnel_error: claim.tunnelError,
     });
   } catch (error) {
     console.error("Error assigning PDA to device:", error);
@@ -2110,9 +2183,7 @@ app.get("/api/device/:device_pubkey/config", (req, res) => {
       });
     }
 
-    const assignedPda = (foundClaim as any).assignedPda;
-
-    if (!assignedPda) {
+    if (!foundClaim.assignedPda) {
       return res.status(202).json({
         status: "pending",
         message: "Device claimed but PDA not yet assigned",
@@ -2121,25 +2192,42 @@ app.get("/api/device/:device_pubkey/config", (req, res) => {
       });
     }
 
+    const assignedPda = foundClaim.assignedPda;
+    const subdomain = assignedPda.toLowerCase();
+    const fullDomain = `${subdomain}.mmoment.xyz`;
+
     // Return configuration for device to use
-    const config = {
+    const config: Record<string, any> = {
       device_pubkey,
       camera_pda: assignedPda,
-      subdomain: assignedPda.toLowerCase(),
-      full_domain: `${assignedPda.toLowerCase()}.mmoment.xyz`,
-      transaction_id: (foundClaim as any).transactionId,
-      assigned_at: (foundClaim as any).pdaAssignedAt,
+      subdomain,
+      full_domain: fullDomain,
+      transaction_id: foundClaim.transactionId,
+      assigned_at: foundClaim.pdaAssignedAt,
       user_wallet: foundClaim.userWallet,
       api_endpoints: {
-        camera_info: `https://${assignedPda.toLowerCase()}.mmoment.xyz/api/camera/info`,
-        health: `https://${assignedPda.toLowerCase()}.mmoment.xyz/api/health`,
-        status: `https://${assignedPda.toLowerCase()}.mmoment.xyz/api/camera/status`,
-        stream: `https://${assignedPda.toLowerCase()}.mmoment.xyz/api/camera/stream`,
+        camera_info: `https://${fullDomain}/api/camera/info`,
+        health: `https://${fullDomain}/api/health`,
+        status: `https://${fullDomain}/api/camera/status`,
+        stream: `https://${fullDomain}/api/camera/stream`,
       },
     };
 
+    // Include tunnel credentials if provisioned
+    if (foundClaim.tunnelId && foundClaim.tunnelCredentials) {
+      config.tunnel = {
+        tunnel_id: foundClaim.tunnelId,
+        credentials: foundClaim.tunnelCredentials,
+      };
+    } else {
+      config.tunnel_status = foundClaim.tunnelError ? "error" : "pending";
+      if (foundClaim.tunnelError) {
+        config.tunnel_error = foundClaim.tunnelError;
+      }
+    }
+
     console.log(
-      `Device ${device_pubkey} retrieved config for PDA ${assignedPda}`,
+      `Device ${device_pubkey} retrieved config for PDA ${assignedPda} (tunnel: ${foundClaim.tunnelId ? "provisioned" : "pending"})`,
     );
 
     res.json(config);

@@ -103,6 +103,18 @@ class DeviceRegistrationService:
 
         # Write env file so systemd picks up CAMERA_PDA on restart
         env_content = f"CAMERA_PDA={config['camera_pda']}\n"
+
+        # Apply backend-provisioned tunnel credentials
+        tunnel_data = config.get("tunnel")
+        if tunnel_data and tunnel_data.get("tunnel_id") and tunnel_data.get("credentials"):
+            tunnel_id = tunnel_data["tunnel_id"]
+            self.tunnel_manager.set_tunnel_credentials(tunnel_id, tunnel_data["credentials"])
+            env_content += f"CLOUDFLARE_TUNNEL_ID={tunnel_id}\n"
+            logger.info(f"Tunnel credentials received from backend: {tunnel_id}")
+        else:
+            tunnel_status = config.get("tunnel_status", "unknown")
+            logger.warning(f"No tunnel credentials in config (status: {tunnel_status})")
+
         ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
         ENV_PATH.write_text(env_content)
         logger.info(f"Env file written: {ENV_PATH}")
