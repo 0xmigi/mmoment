@@ -70,19 +70,24 @@ class BufferService:
 
         # Use a temp file — Pi's ffmpeg mjpeg encoder fails with image2pipe.
         # Skip -sseof which also breaks the mjpeg encoder on this build.
+        # Use rawvideo output to avoid mjpeg encode overhead on the slow Pi,
+        # then let cv2 handle JPEG encoding if needed by the caller.
         tmp_path = "/tmp/mmoment_frame.jpg"
         try:
             result = subprocess.run(
                 [
                     "ffmpeg", "-y",
+                    "-probesize", "500000",
+                    "-analyzeduration", "500000",
                     "-i", str(seg),
                     "-frames:v", "1",
+                    "-an", "-sn",
                     "-update", "1",
                     "-q:v", "5",
                     tmp_path,
                 ],
                 capture_output=True,
-                timeout=5,
+                timeout=10,
             )
             if result.returncode == 0 and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
                 with open(tmp_path, "rb") as f:
