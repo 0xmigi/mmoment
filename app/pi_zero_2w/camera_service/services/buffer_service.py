@@ -65,6 +65,8 @@ class BufferService:
         if not seg:
             return None
 
+        # Use a temp file — Pi's ffmpeg mjpeg encoder fails with image2pipe
+        tmp_path = "/tmp/mmoment_frame.jpg"
         try:
             result = subprocess.run(
                 [
@@ -72,16 +74,16 @@ class BufferService:
                     "-sseof", "-1",  # Seek to 1s before end of file
                     "-i", str(seg),
                     "-frames:v", "1",
-                    "-f", "image2pipe",
-                    "-vcodec", "mjpeg",
+                    "-update", "1",
                     "-q:v", "5",
-                    "pipe:1",
+                    tmp_path,
                 ],
                 capture_output=True,
                 timeout=5,
             )
-            if result.returncode == 0 and result.stdout:
-                return result.stdout
+            if result.returncode == 0 and os.path.exists(tmp_path):
+                with open(tmp_path, "rb") as f:
+                    return f.read()
         except Exception as e:
             logger.error(f"Frame decode failed: {e}")
 
