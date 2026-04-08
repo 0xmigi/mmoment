@@ -1,9 +1,5 @@
 flask
 flask-cors
-picamera2
-aiortc
-aiohttp
-av
 opencv-python-headless
 numpy
 cryptography

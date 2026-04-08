@@ -35,7 +35,7 @@ from .services.buffer_service import get_buffer_service
 from .services.capture_event_signer import sign_capture
 from .services.device_registration import get_registration_service
 from .services.device_signer import get_device_signer
-from .services.whip_publisher import get_whip_publisher
+from .services.stream_manager import get_stream_manager
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ def register_routes(app: Flask):
             "status": "ok",
             "camera_pda": _get_camera_pda(),
             "buffer": buf.get_status(),
-            "whip": get_whip_publisher().get_status(),
+            "whip": get_stream_manager().get_status(),
         })
 
     # ── Device info / discovery ─────────────────────────────────────────────
@@ -108,7 +108,7 @@ def register_routes(app: Flask):
                 "pose_detection": False,
             },
             "stream": {
-                "whep_url": get_whip_publisher().whep_url if get_whip_publisher().stream_name else None,
+                "whep_url": get_stream_manager().whep_url if get_stream_manager().stream_name else None,
                 "resolution": status["resolution"],
                 "fps": status["fps"],
             },
@@ -118,7 +118,7 @@ def register_routes(app: Flask):
     @app.route("/api/status")
     def api_status():
         buf = get_buffer_service()
-        whip = get_whip_publisher()
+        whip = get_stream_manager()
         reg = get_registration_service()
         with _sessions_lock:
             session_count = len(_sessions)
@@ -131,8 +131,9 @@ def register_routes(app: Flask):
         })
 
     @app.route("/api/stream/whip/status")
-    def api_whip_status():
-        return jsonify(get_whip_publisher().get_status())
+    @app.route("/api/stream/status")
+    def api_stream_status():
+        return jsonify(get_stream_manager().get_status())
 
     # ── Registration / setup ────────────────────────────────────────────────
 
@@ -240,11 +241,12 @@ def register_routes(app: Flask):
         reg = get_registration_service()
         reg._apply_config(config)
 
-        # Update WHIP stream name
-        whip = get_whip_publisher()
-        whip.set_stream_name(camera_pda)
-        if not whip.running:
-            whip.start()
+        # Start streaming with the assigned PDA
+        stream = get_stream_manager()
+        stream.set_stream_name(camera_pda)
+        if not stream.is_streaming():
+            stream.stop()
+            stream.start(camera_pda)
 
         return jsonify({"success": True, "camera_pda": camera_pda})
 

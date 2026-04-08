@@ -1,6 +1,6 @@
 """
 Camera Service — Pi Zero 2W
-Entry point. Starts buffer, WHIP publisher, registration, and Flask API.
+Entry point. Starts stream manager, buffer service, registration, and Flask API.
 """
 
 import json
@@ -21,7 +21,7 @@ from .routes import register_routes
 from .services.buffer_service import get_buffer_service
 from .services.device_registration import get_registration_service
 from .services.device_signer import get_device_signer
-from .services.whip_publisher import get_whip_publisher
+from .services.stream_manager import get_stream_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,24 +58,26 @@ def main():
         logger.info("No PDA configured — waiting for organizer to scan setup QR")
         reg.start_polling()
 
-    # Frame buffer (starts camera immediately)
-    logger.info("Starting frame buffer...")
-    buf = get_buffer_service()
-    # Give the camera a moment to produce frames
-    time.sleep(2)
-    status = buf.get_status()
-    logger.info(f"Buffer: {status['resolution']} @ {status['fps']}fps, temp={status['temperature']:.1f}°C")
-
-    # WHIP publisher
+    # Stream manager — starts rpicam-vid + ffmpeg pipeline
+    stream = get_stream_manager()
     if camera_pda:
-        whip = get_whip_publisher()
-        whip.set_stream_name(camera_pda)
-        whip.set_buffer_service(buf)
-        whip.start()
-        logger.info(f"WHIP publishing: {whip.whip_url}")
+        stream.start(camera_pda)
+        logger.info(f"Streaming to {stream.rtsp_url}")
     else:
-        logger.info("WHIP publisher deferred until PDA assigned")
-        # Auto-scan for registration QR codes when unregistered
+        # Start camera + segments without RTSP push (no stream name yet)
+        stream.start()
+        logger.info("Camera started (segments only, no RTSP — waiting for PDA)")
+
+    # Give segments a moment to start
+    time.sleep(3)
+
+    # Buffer service — reads from segment files
+    buf = get_buffer_service()
+    status = buf.get_status()
+    logger.info(f"Buffer: {status['resolution']}, temp={status['temperature']:.1f}°C")
+
+    # Auto-scan for registration QR codes when unregistered
+    if not camera_pda:
         _start_qr_scanner(buf, signer)
 
     # Flask API
@@ -101,19 +103,16 @@ def _start_qr_scanner(buf, signer):
             try:
                 time.sleep(2)  # Scan every 2 seconds to save CPU
 
-                jpeg = buf.get_jpeg_frame()
-                if not jpeg:
-                    continue
-
-                frame = cv2.imdecode(
-                    np.frombuffer(jpeg, dtype=np.uint8),
-                    cv2.IMREAD_GRAYSCALE,  # Grayscale is faster for QR detection
-                )
+                frame = buf.get_latest_frame()
                 if frame is None:
                     continue
 
                 # Downscale to 360x640 for faster QR detection
-                small = cv2.resize(frame, (360, 640))
+                if len(frame.shape) == 3:
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                else:
+                    gray = frame
+                small = cv2.resize(gray, (360, 640))
                 data, _, _ = detector.detectAndDecode(small)
                 if not data:
                     continue
@@ -134,7 +133,7 @@ def _start_qr_scanner(buf, signer):
                     logger.warning("QR code expired, ignoring")
                     continue
 
-                logger.info(f"Registration QR detected! Claiming...")
+                logger.info("Registration QR detected! Claiming...")
 
                 # POST to claim endpoint
                 claim_resp = req.post(
