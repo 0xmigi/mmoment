@@ -254,15 +254,19 @@ class StreamManager:
         logger.info(f"ffmpeg RTSP push started → {self.rtsp_url} (PID {self._ffmpeg_rtsp_proc.pid})")
 
     def _watchdog(self):
+        # Give pipeline time to initialize before first check
+        time.sleep(10)
+
         while not self._stop_event.is_set():
-            time.sleep(3)
+            time.sleep(5)
 
             if not self._running:
                 break
 
             # Check if core processes are alive
             rpicam_alive = self._rpicam_proc and self._rpicam_proc.poll() is None
-            tee_alive = self._tee_proc and self._tee_proc.poll() is None
+            # tee only runs when streaming (with stream_name)
+            tee_alive = self._tee_proc is None or self._tee_proc.poll() is None
             segment_alive = self._ffmpeg_segment_proc and self._ffmpeg_segment_proc.poll() is None
 
             if not (rpicam_alive and tee_alive and segment_alive):
