@@ -154,10 +154,9 @@ def _qr_scan_loop(signer):
                 time.sleep(1)
                 continue
 
-            # Downscale for faster QR detection
+            # Use grayscale at full resolution — downscaling kills QR detail
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            small = cv2.resize(gray, (360, 640))
-            data, _, _ = detector.detectAndDecode(small)
+            data, _, _ = detector.detectAndDecode(gray)
             if not data:
                 time.sleep(0.5)
                 continue

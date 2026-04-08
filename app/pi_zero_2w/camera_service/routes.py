@@ -180,8 +180,7 @@ def register_routes(app: Flask):
                     continue
 
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                small = cv2.resize(gray, (360, 640))
-                data, _, _ = detector.detectAndDecode(small)
+                data, _, _ = detector.detectAndDecode(gray)
                 if not data:
                     time.sleep(0.5)
                     continue
