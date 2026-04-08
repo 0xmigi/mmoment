@@ -1,11 +1,15 @@
 """
 Camera Service — Pi Zero 2W
-Entry point. Starts stream manager, buffer service, registration, and Flask API.
+
+Two-mode startup:
+  ONBOARDING (no PDA): rpicam-still for fast QR scanning, no streaming.
+  STREAMING  (has PDA): rpicam-vid + ffmpeg H.264 pipeline, no QR scanning.
 """
 
 import json
 import logging
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -18,10 +22,8 @@ from flask_cors import CORS
 
 from .config.settings import Settings
 from .routes import register_routes
-from .services.buffer_service import get_buffer_service
 from .services.device_registration import get_registration_service
 from .services.device_signer import get_device_signer
-from .services.stream_manager import get_stream_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +31,11 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("main")
+
+# rpicam-still capture settings for onboarding mode
+_STILL_WIDTH = 720
+_STILL_HEIGHT = 1280
+_STILL_PATH = "/tmp/mmoment_onboard.jpg"
 
 
 def create_app() -> Flask:
@@ -53,113 +60,147 @@ def main():
     camera_pda = reg.get_camera_pda() or os.getenv("CAMERA_PDA")
 
     if camera_pda:
-        logger.info(f"Camera PDA: {camera_pda}")
+        _start_streaming_mode(camera_pda)
     else:
-        logger.info("No PDA configured — waiting for organizer to scan setup QR")
-        reg.start_polling()
+        _start_onboarding_mode(signer)
 
-    # Stream manager — starts rpicam-vid + ffmpeg pipeline
-    stream = get_stream_manager()
-    if camera_pda:
-        stream.start(camera_pda)
-        logger.info(f"Streaming to {stream.rtsp_url}")
-    else:
-        # Start camera + segments without RTSP push (no stream name yet)
-        stream.start()
-        logger.info("Camera started (segments only, no RTSP — waiting for PDA)")
-
-    # Give segments a moment to start
-    time.sleep(3)
-
-    # Buffer service — reads from segment files
-    buf = get_buffer_service()
-    status = buf.get_status()
-    logger.info(f"Buffer: {status['resolution']}, temp={status['temperature']:.1f}°C")
-
-    # Auto-scan for registration QR codes when unregistered
-    if not camera_pda:
-        _start_qr_scanner(buf, signer)
-
-    # Flask API
+    # Flask API (both modes)
     app = create_app()
     logger.info(f"API listening on {Settings.HOST}:{Settings.PORT}")
     app.run(host=Settings.HOST, port=Settings.PORT, threaded=True)
 
 
-def _start_qr_scanner(buf, signer):
-    """Background thread that scans camera frames for a registration QR code."""
+# ── Streaming mode ────────────────────────────────────────────────────────────
 
-    def scan_loop():
-        detector = cv2.QRCodeDetector()
-        logger.info("QR scanner started — waiting for registration QR code")
+def _start_streaming_mode(camera_pda: str):
+    """Registered device: full H.264 pipeline + segment buffer."""
+    from .services.buffer_service import get_buffer_service
+    from .services.stream_manager import get_stream_manager
 
-        while True:
-            # Stop scanning once registered
-            reg = get_registration_service()
-            if reg.is_registered():
-                logger.info("QR scanner stopped — device is registered")
-                return
+    logger.info(f"Camera PDA: {camera_pda} — starting streaming mode")
+
+    stream = get_stream_manager()
+    stream.start(camera_pda)
+    logger.info(f"Streaming to {stream.rtsp_url}")
+
+    # Give segments time to start
+    time.sleep(3)
+
+    buf = get_buffer_service()
+    status = buf.get_status()
+    logger.info(f"Buffer: {status['resolution']}, temp={status['temperature']:.1f}°C")
+
+
+# ── Onboarding mode ──────────────────────────────────────────────────────────
+
+def _start_onboarding_mode(signer):
+    """Unregistered device: lightweight QR scanning via rpicam-still."""
+    reg = get_registration_service()
+
+    logger.info("No PDA configured — entering onboarding mode")
+    logger.info("Using rpicam-still for fast QR scanning (no streaming pipeline)")
+    reg.start_polling()
+
+    thread = threading.Thread(
+        target=_qr_scan_loop, args=(signer,), daemon=True, name="QRScanner"
+    )
+    thread.start()
+
+
+def _capture_still() -> np.ndarray | None:
+    """Capture a single JPEG via rpicam-still and return as numpy array."""
+    try:
+        result = subprocess.run(
+            [
+                "rpicam-still",
+                "--width", str(_STILL_WIDTH),
+                "--height", str(_STILL_HEIGHT),
+                "--quality", "60",
+                "--immediate",
+                "--nopreview",
+                "-o", _STILL_PATH,
+            ],
+            capture_output=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            logger.warning(f"rpicam-still failed: {result.stderr.decode(errors='replace')[:200]}")
+            return None
+
+        if not os.path.exists(_STILL_PATH) or os.path.getsize(_STILL_PATH) == 0:
+            return None
+
+        frame = cv2.imread(_STILL_PATH)
+        return frame
+    except Exception as e:
+        logger.error(f"Still capture error: {e}")
+        return None
+
+
+def _qr_scan_loop(signer):
+    """Scan for registration QR codes using rpicam-still."""
+    detector = cv2.QRCodeDetector()
+    logger.info("QR scanner started — rpicam-still mode")
+
+    while True:
+        reg = get_registration_service()
+        if reg.is_registered():
+            logger.info("QR scanner stopped — device is registered")
+            return
+
+        try:
+            frame = _capture_still()
+            if frame is None:
+                time.sleep(1)
+                continue
+
+            # Downscale for faster QR detection
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            small = cv2.resize(gray, (360, 640))
+            data, _, _ = detector.detectAndDecode(small)
+            if not data:
+                time.sleep(0.5)
+                continue
 
             try:
-                time.sleep(2)  # Scan every 2 seconds to save CPU
+                qr_data = json.loads(data)
+            except json.JSONDecodeError:
+                time.sleep(0.5)
+                continue
 
-                frame = buf.get_latest_frame()
-                if frame is None:
-                    continue
+            if "claim_endpoint" not in qr_data or "user_wallet" not in qr_data:
+                time.sleep(0.5)
+                continue
 
-                # Downscale to 360x640 for faster QR detection
-                if len(frame.shape) == 3:
-                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                else:
-                    gray = frame
-                small = cv2.resize(gray, (360, 640))
-                data, _, _ = detector.detectAndDecode(small)
-                if not data:
-                    continue
+            expires = qr_data.get("expires", 0)
+            if expires and time.time() * 1000 > expires:
+                logger.warning("QR code expired, ignoring")
+                time.sleep(1)
+                continue
 
-                # Try to parse as registration QR
-                try:
-                    qr_data = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
+            logger.info("Registration QR detected! Claiming...")
 
-                # Validate required fields
-                if "claim_endpoint" not in qr_data or "user_wallet" not in qr_data:
-                    continue
+            claim_resp = req.post(
+                qr_data["claim_endpoint"],
+                json={
+                    "device_pubkey": signer.get_public_key(),
+                    "device_model": "pi_zero_2w",
+                    "user_wallet": qr_data["user_wallet"],
+                },
+                timeout=10,
+            )
 
-                # Check expiry
-                expires = qr_data.get("expires", 0)
-                if expires and time.time() * 1000 > expires:
-                    logger.warning("QR code expired, ignoring")
-                    continue
+            if claim_resp.status_code in (200, 201):
+                logger.info("Claim successful — polling for PDA assignment")
+                reg.start_polling()
+                return
+            else:
+                logger.warning(f"Claim failed: {claim_resp.status_code} {claim_resp.text}")
+                time.sleep(5)
 
-                logger.info("Registration QR detected! Claiming...")
-
-                # POST to claim endpoint
-                claim_resp = req.post(
-                    qr_data["claim_endpoint"],
-                    json={
-                        "device_pubkey": signer.get_public_key(),
-                        "device_model": "pi_zero_2w",
-                        "user_wallet": qr_data["user_wallet"],
-                    },
-                    timeout=10,
-                )
-
-                if claim_resp.status_code in (200, 201):
-                    logger.info("Claim successful — polling for PDA assignment")
-                    reg.start_polling()
-                    return
-                else:
-                    logger.warning(f"Claim failed: {claim_resp.status_code} {claim_resp.text}")
-                    time.sleep(5)
-
-            except Exception as e:
-                logger.error(f"QR scanner error: {e}")
-                time.sleep(2)
-
-    thread = threading.Thread(target=scan_loop, daemon=True, name="QRScanner")
-    thread.start()
+        except Exception as e:
+            logger.error(f"QR scanner error: {e}")
+            time.sleep(2)
 
 
 if __name__ == "__main__":

@@ -78,13 +78,16 @@ def register_routes(app: Flask):
     @app.route("/api/health")
     @app.route("/health")
     def api_health():
-        buf = get_buffer_service()
-        return jsonify({
+        reg = get_registration_service()
+        resp = {
             "status": "ok",
             "camera_pda": _get_camera_pda(),
-            "buffer": buf.get_status(),
-            "whip": get_stream_manager().get_status(),
-        })
+            "mode": "streaming" if reg.is_registered() else "onboarding",
+        }
+        if reg.is_registered():
+            resp["buffer"] = get_buffer_service().get_status()
+            resp["stream"] = get_stream_manager().get_status()
+        return jsonify(resp)
 
     # ── Device info / discovery ─────────────────────────────────────────────
 
@@ -95,44 +98,48 @@ def register_routes(app: Flask):
 
     @app.route("/api/camera/info")
     def api_camera_info():
-        buf = get_buffer_service()
-        status = buf.get_status()
+        reg = get_registration_service()
+        stream_info = {"whep_url": None, "resolution": "720x1280", "fps": 15.0}
+        if reg.is_registered():
+            sm = get_stream_manager()
+            stream_info["whep_url"] = sm.whep_url if sm.stream_name else None
         return jsonify({
             "camera_pda": _get_camera_pda(),
             "device_type": "pi_zero_2w",
             "capabilities": {
-                "photo": True,
-                "video": True,
-                "live_stream": True,
+                "photo": reg.is_registered(),
+                "video": reg.is_registered(),
+                "live_stream": reg.is_registered(),
                 "face_recognition": False,
                 "pose_detection": False,
             },
-            "stream": {
-                "whep_url": get_stream_manager().whep_url if get_stream_manager().stream_name else None,
-                "resolution": status["resolution"],
-                "fps": status["fps"],
-            },
+            "stream": stream_info,
             "online": True,
+            "mode": "streaming" if reg.is_registered() else "onboarding",
         })
 
     @app.route("/api/status")
     def api_status():
-        buf = get_buffer_service()
-        whip = get_stream_manager()
         reg = get_registration_service()
         with _sessions_lock:
             session_count = len(_sessions)
-        return jsonify({
+        resp = {
             "camera_pda": _get_camera_pda(),
             "registered": reg.is_registered(),
-            "buffer": buf.get_status(),
-            "whip": whip.get_status(),
+            "mode": "streaming" if reg.is_registered() else "onboarding",
             "active_sessions": session_count,
-        })
+        }
+        if reg.is_registered():
+            resp["buffer"] = get_buffer_service().get_status()
+            resp["stream"] = get_stream_manager().get_status()
+        return jsonify(resp)
 
     @app.route("/api/stream/whip/status")
     @app.route("/api/stream/status")
     def api_stream_status():
+        reg = get_registration_service()
+        if not reg.is_registered():
+            return jsonify({"running": False, "streaming": False, "mode": "onboarding"})
         return jsonify(get_stream_manager().get_status())
 
     # ── Registration / setup ────────────────────────────────────────────────
@@ -141,79 +148,92 @@ def register_routes(app: Flask):
     def api_scan_registration_qr():
         """
         Scans a QR code from the camera and extracts registration data.
-        The web app displays a QR containing WiFi + claim endpoint JSON.
-        Device camera scans it, parses the JSON, connects to WiFi, claims identity.
+        Uses rpicam-still for direct JPEG capture (works in onboarding mode).
         """
-        import base64
         import json as _json
+        import subprocess
 
         timeout = request.json.get("timeout", 60) if request.json else 60
-        buf = get_buffer_service()
+        still_path = "/tmp/mmoment_qr_scan.jpg"
 
         deadline = time.time() + timeout
+        detector = cv2.QRCodeDetector()
+
         while time.time() < deadline:
-            jpeg = buf.get_jpeg_frame()
-            if jpeg:
-                frame = cv2.imdecode(
-                    __import__("numpy").frombuffer(jpeg, dtype=__import__("numpy").uint8),
-                    cv2.IMREAD_COLOR,
+            try:
+                result = subprocess.run(
+                    [
+                        "rpicam-still",
+                        "--width", "720", "--height", "1280",
+                        "--quality", "60", "--immediate", "--nopreview",
+                        "-o", still_path,
+                    ],
+                    capture_output=True, timeout=10,
                 )
-                if frame is not None:
-                    detector = cv2.QRCodeDetector()
-                    data, _, _ = detector.detectAndDecode(frame)
-                    if data:
-                        try:
-                            qr_data = _json.loads(data)
-                            logger.info(f"QR scanned: {list(qr_data.keys())}")
+                if result.returncode != 0:
+                    time.sleep(0.5)
+                    continue
 
-                            required = ["claim_endpoint", "user_wallet"]
-                            for field in required:
-                                if field not in qr_data:
-                                    return jsonify({"success": False, "error": f"Missing QR field: {field}"}), 400
+                frame = cv2.imread(still_path)
+                if frame is None:
+                    time.sleep(0.5)
+                    continue
 
-                            # Check expiry
-                            expires = qr_data.get("expires", 0)
-                            if expires and time.time() * 1000 > expires:
-                                return jsonify({"success": False, "error": "QR code expired"}), 400
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                small = cv2.resize(gray, (360, 640))
+                data, _, _ = detector.detectAndDecode(small)
+                if not data:
+                    time.sleep(0.5)
+                    continue
 
-                            # Connect to WiFi if credentials provided
-                            ssid = qr_data.get("wifi_ssid")
-                            password = qr_data.get("wifi_password")
-                            if ssid:
-                                _connect_wifi(ssid, password)
+                qr_data = _json.loads(data)
+                logger.info(f"QR scanned: {list(qr_data.keys())}")
 
-                            # POST to claim endpoint
-                            signer = get_device_signer()
-                            claim_resp = req.post(
-                                qr_data["claim_endpoint"],
-                                json={
-                                    "device_pubkey": signer.get_public_key(),
-                                    "device_model": "pi_zero_2w",
-                                    "user_wallet": qr_data["user_wallet"],
-                                },
-                                timeout=10,
-                            )
+                required = ["claim_endpoint", "user_wallet"]
+                for field in required:
+                    if field not in qr_data:
+                        return jsonify({"success": False, "error": f"Missing QR field: {field}"}), 400
 
-                            if claim_resp.status_code in (200, 201):
-                                # Start polling for PDA assignment
-                                reg = get_registration_service()
-                                reg.start_polling()
-                                return jsonify({
-                                    "success": True,
-                                    "message": "Claimed successfully, polling for PDA",
-                                    "device_pubkey": signer.get_public_key(),
-                                })
-                            else:
-                                return jsonify({
-                                    "success": False,
-                                    "error": f"Claim failed: {claim_resp.status_code}",
-                                }), 400
+                expires = qr_data.get("expires", 0)
+                if expires and time.time() * 1000 > expires:
+                    return jsonify({"success": False, "error": "QR code expired"}), 400
 
-                        except _json.JSONDecodeError:
-                            # Not a registration QR, keep scanning
-                            pass
+                ssid = qr_data.get("wifi_ssid")
+                password = qr_data.get("wifi_password")
+                if ssid:
+                    _connect_wifi(ssid, password)
 
-            time.sleep(0.2)
+                signer = get_device_signer()
+                claim_resp = req.post(
+                    qr_data["claim_endpoint"],
+                    json={
+                        "device_pubkey": signer.get_public_key(),
+                        "device_model": "pi_zero_2w",
+                        "user_wallet": qr_data["user_wallet"],
+                    },
+                    timeout=10,
+                )
+
+                if claim_resp.status_code in (200, 201):
+                    reg = get_registration_service()
+                    reg.start_polling()
+                    return jsonify({
+                        "success": True,
+                        "message": "Claimed successfully, polling for PDA",
+                        "device_pubkey": signer.get_public_key(),
+                    })
+                else:
+                    return jsonify({
+                        "success": False,
+                        "error": f"Claim failed: {claim_resp.status_code}",
+                    }), 400
+
+            except _json.JSONDecodeError:
+                time.sleep(0.5)
+                continue
+            except Exception as e:
+                logger.error(f"QR scan error: {e}")
+                time.sleep(1)
 
         return jsonify({"success": False, "error": "No QR code detected within timeout"}), 408
 
@@ -397,6 +417,10 @@ def register_routes(app: Flask):
 
     @app.route("/api/capture", methods=["POST"])
     def api_capture():
+        reg = get_registration_service()
+        if not reg.is_registered():
+            return jsonify({"success": False, "error": "Device not registered (onboarding mode)"}), 503
+
         data = request.json or {}
         wallet = data.get("wallet_address")
 
@@ -456,6 +480,10 @@ def register_routes(app: Flask):
 
     @app.route("/api/record", methods=["POST"])
     def api_record():
+        reg = get_registration_service()
+        if not reg.is_registered():
+            return jsonify({"success": False, "error": "Device not registered (onboarding mode)"}), 503
+
         data = request.json or {}
         wallet = data.get("wallet_address")
         duration = min(int(data.get("duration", 10)), 60)  # cap at 60s for Zero 2W
