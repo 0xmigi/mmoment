@@ -134,6 +134,32 @@ def register_routes(app: Flask):
             resp["stream"] = get_stream_manager().get_status()
         return jsonify(resp)
 
+    @app.route("/api/stream/info")
+    def api_stream_info():
+        """Stream discovery endpoint — matches Jetson's /api/stream/info."""
+        reg = get_registration_service()
+        camera_pda = _get_camera_pda()
+
+        if not reg.is_registered() or not camera_pda:
+            return jsonify({"success": False, "error": "Not registered"}), 503
+
+        sm = get_stream_manager()
+        return jsonify({
+            "success": True,
+            "camera_pda": camera_pda,
+            "streams": {
+                "clean": {
+                    "description": "Hardware H.264 stream from Pi Zero 2W",
+                    "whep": {
+                        "available": sm.is_streaming(),
+                        "url": sm.whep_url,
+                        "running": sm.is_streaming(),
+                        "connected": sm.is_streaming(),
+                    },
+                },
+            },
+        })
+
     @app.route("/api/stream/whip/status")
     @app.route("/api/stream/status")
     def api_stream_status():
