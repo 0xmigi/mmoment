@@ -98,6 +98,7 @@ class StreamManager:
             self._setup_fifos()
             self._start_pipeline()
             self._running = True
+            self._restart_count = 0
             self._stop_event.clear()
 
             self._watchdog_thread = threading.Thread(
@@ -150,6 +151,8 @@ class StreamManager:
 
     def _start_pipeline(self):
         # 1. rpicam-vid: HW H.264 encode → stdout
+        # rpicam-vid at 720x1280 portrait — the ISP handles the crop.
+        # No --rotation needed; the sensor outputs the requested dimensions.
         rpicam_cmd = [
             "rpicam-vid", "-t", "0",
             "--width", str(WIDTH),
@@ -159,7 +162,6 @@ class StreamManager:
             "--profile", "baseline",
             "--bitrate", str(BITRATE),
             "--inline",
-            "--rotation", "90",
             "-n",  # No preview
             "-o", "-",
         ]
