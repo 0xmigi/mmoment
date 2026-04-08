@@ -135,9 +135,11 @@ class StreamManager:
 
     def _setup_fifos(self):
         self._cleanup_fifos()
-        for fifo in (FIFO_STREAM, FIFO_SEGMENTS):
-            os.mkfifo(str(fifo))
         SEGMENT_DIR.mkdir(parents=True, exist_ok=True)
+        # Only create FIFOs when we need tee (i.e., streaming + segments)
+        if self.stream_name:
+            for fifo in (FIFO_STREAM, FIFO_SEGMENTS):
+                os.mkfifo(str(fifo))
 
     def _cleanup_fifos(self):
         for fifo in (FIFO_STREAM, FIFO_SEGMENTS):
@@ -168,43 +170,63 @@ class StreamManager:
         )
         logger.info(f"rpicam-vid started (PID {self._rpicam_proc.pid})")
 
-        # 2. tee: split rpicam-vid output to two FIFOs
-        # tee writes to FIFO_STREAM, stdout goes to FIFO_SEGMENTS
-        self._tee_proc = subprocess.Popen(
-            ["tee", str(FIFO_STREAM)],
-            stdin=self._rpicam_proc.stdout,
-            stdout=open(str(FIFO_SEGMENTS), "wb"),
-            stderr=subprocess.DEVNULL,
-        )
-        # Allow rpicam-vid to receive SIGPIPE if tee dies
-        self._rpicam_proc.stdout.close()
-        logger.info(f"tee started (PID {self._tee_proc.pid})")
-
-        # 3. ffmpeg segment writer: rolling H.264 segments
         segment_pattern = str(SEGMENT_DIR / "seg%03d.ts")
         segment_cmd = [
             "ffmpeg", "-y",
             "-fflags", "nobuffer",
             "-f", "h264",
-            "-i", str(FIFO_SEGMENTS),
-            "-c:v", "copy",
-            "-f", "segment",
-            "-segment_time", str(SEGMENT_DURATION),
-            "-segment_wrap", str(SEGMENT_WRAP),
-            "-reset_timestamps", "1",
-            segment_pattern,
         ]
-        self._ffmpeg_segment_proc = subprocess.Popen(
-            segment_cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        logger.info(f"ffmpeg segment writer started (PID {self._ffmpeg_segment_proc.pid})")
 
-        # 4. ffmpeg RTSP push (only if we have a stream name)
         if self.stream_name:
+            # Full pipeline: tee to RTSP + segments via FIFOs
+            # Open FIFOs in background threads to avoid blocking
+            self._tee_proc = subprocess.Popen(
+                ["tee", str(FIFO_STREAM)],
+                stdin=self._rpicam_proc.stdout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            self._rpicam_proc.stdout.close()
+            logger.info(f"tee started (PID {self._tee_proc.pid})")
+
+            # Segment writer reads from tee's stdout
+            self._ffmpeg_segment_proc = subprocess.Popen(
+                segment_cmd + [
+                    "-i", "pipe:0",
+                    "-c:v", "copy",
+                    "-f", "segment",
+                    "-segment_time", str(SEGMENT_DURATION),
+                    "-segment_wrap", str(SEGMENT_WRAP),
+                    "-reset_timestamps", "1",
+                    segment_pattern,
+                ],
+                stdin=self._tee_proc.stdout,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._tee_proc.stdout.close()
+            logger.info(f"ffmpeg segment writer started (PID {self._ffmpeg_segment_proc.pid})")
+
+            # RTSP push reads from FIFO
             self._start_rtsp_push()
+        else:
+            # Segments only: pipe rpicam-vid directly to ffmpeg segment writer
+            self._ffmpeg_segment_proc = subprocess.Popen(
+                segment_cmd + [
+                    "-i", "pipe:0",
+                    "-c:v", "copy",
+                    "-f", "segment",
+                    "-segment_time", str(SEGMENT_DURATION),
+                    "-segment_wrap", str(SEGMENT_WRAP),
+                    "-reset_timestamps", "1",
+                    segment_pattern,
+                ],
+                stdin=self._rpicam_proc.stdout,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._rpicam_proc.stdout.close()
+            logger.info(f"ffmpeg segment writer started — segments only (PID {self._ffmpeg_segment_proc.pid})")
 
     def _start_rtsp_push(self):
         if not self.stream_name:
