@@ -13,7 +13,7 @@ class Settings:
     VIDEOS_DIR = VIDEOS_DIR
 
     # Backend
-    BACKEND_URL = os.getenv("BACKEND_URL", "https://api.mmoment.xyz")
+    BACKEND_URL = os.getenv("BACKEND_URL", "https://mmoment-production.up.railway.app")
 
     # MediaMTX relay (Oracle VPS)
     MEDIAMTX_URL = os.getenv("MEDIAMTX_URL", "http://129.80.99.75:8889")
