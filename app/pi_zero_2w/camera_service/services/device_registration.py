@@ -136,7 +136,7 @@ class DeviceRegistrationService:
     def _restart_self(self):
         try:
             result = subprocess.run(
-                ["sudo", "systemctl", "restart", "camera-service"],
+                ["sudo", "systemctl", "restart", "camera_service"],
                 capture_output=True, text=True, timeout=30,
             )
             if result.returncode == 0:
