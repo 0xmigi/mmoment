@@ -30,7 +30,7 @@ class DeviceRegistrationService:
     def __init__(self):
         self.device_signer = get_device_signer()
         self.tunnel_manager = get_tunnel_manager()
-        self.backend_url = os.getenv("BACKEND_URL", "https://mmoment-backend-production.up.railway.app")
+        self.backend_url = os.getenv("BACKEND_URL", "https://api.mmoment.xyz")
         self.device_config: Optional[Dict[str, Any]] = None
         self._stop = False
         self._thread: Optional[threading.Thread] = None
