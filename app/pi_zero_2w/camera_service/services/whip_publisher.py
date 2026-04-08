@@ -199,6 +199,18 @@ class WHIPPublisher:
         await self.pc.setRemoteDescription(RTCSessionDescription(sdp=answer_sdp, type="answer"))
         logger.info(f"WHIP live → {self.whep_url}")
 
+        # Wait for DTLS handshake to complete (state: new → connecting → connected)
+        wait_start = time.time()
+        while self.running and self.pc.connectionState in ("new", "connecting"):
+            if time.time() - wait_start > 15:
+                raise Exception("WHIP connection timed out waiting for DTLS")
+            await asyncio.sleep(0.2)
+
+        if self.pc.connectionState != "connected":
+            raise Exception(f"WHIP connection failed: state={self.pc.connectionState}")
+
+        logger.info(f"WHIP connected → {self.whep_url}")
+
         while self.running and self.pc.connectionState == "connected":
             await asyncio.sleep(1)
 
