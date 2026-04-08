@@ -77,7 +77,7 @@ class StreamManager:
         if not self.stream_name:
             return None
         # MediaMTX RTSP port is typically 8554
-        base = self.mediamtx_url.replace(":8889", ":8554")
+        base = self.mediamtx_url.replace(":8889", ":8554").replace("http://", "rtsp://")
         return f"{base}/{self.stream_name}"
 
     @property
