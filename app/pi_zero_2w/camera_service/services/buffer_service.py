@@ -55,9 +55,12 @@ class BufferService:
         return segments
 
     def _get_latest_segment(self) -> Optional[Path]:
-        """Return the most recently written segment."""
+        """Return the most recent *completed* segment (second-to-last by mtime).
+        The last segment is still being written by ffmpeg and will block reads."""
         segments = self._get_segments()
-        return segments[-1] if segments else None
+        if len(segments) >= 2:
+            return segments[-2]
+        return segments[0] if segments else None
 
     def get_jpeg_frame(self) -> Optional[bytes]:
         """Decode 1 frame from the latest segment. Returns JPEG bytes or None."""
