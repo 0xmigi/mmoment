@@ -225,13 +225,20 @@ def register_routes(app: Flask):
         if not camera_pda or not full_domain:
             return jsonify({"success": False, "error": "camera_pda and full_domain required"}), 400
 
-        reg = get_registration_service()
-        reg._apply_config({
+        config = {
             "device_pubkey": get_device_signer().get_public_key(),
             "camera_pda": camera_pda,
             "subdomain": full_domain.split(".")[0],
             "full_domain": full_domain,
-        })
+        }
+
+        # Pass through tunnel credentials if provided
+        tunnel = data.get("tunnel")
+        if tunnel:
+            config["tunnel"] = tunnel
+
+        reg = get_registration_service()
+        reg._apply_config(config)
 
         # Update WHIP stream name
         whip = get_whip_publisher()

@@ -99,41 +99,39 @@ def _start_qr_scanner(buf, signer):
                 return
 
             try:
+                time.sleep(2)  # Scan every 2 seconds to save CPU
+
                 jpeg = buf.get_jpeg_frame()
                 if not jpeg:
-                    time.sleep(1)
                     continue
 
                 frame = cv2.imdecode(
                     np.frombuffer(jpeg, dtype=np.uint8),
-                    cv2.IMREAD_COLOR,
+                    cv2.IMREAD_GRAYSCALE,  # Grayscale is faster for QR detection
                 )
                 if frame is None:
-                    time.sleep(0.5)
                     continue
 
-                data, _, _ = detector.detectAndDecode(frame)
+                # Downscale to 360x640 for faster QR detection
+                small = cv2.resize(frame, (360, 640))
+                data, _, _ = detector.detectAndDecode(small)
                 if not data:
-                    time.sleep(0.5)
                     continue
 
                 # Try to parse as registration QR
                 try:
                     qr_data = json.loads(data)
                 except json.JSONDecodeError:
-                    time.sleep(0.5)
                     continue
 
                 # Validate required fields
                 if "claim_endpoint" not in qr_data or "user_wallet" not in qr_data:
-                    time.sleep(0.5)
                     continue
 
                 # Check expiry
                 expires = qr_data.get("expires", 0)
                 if expires and time.time() * 1000 > expires:
                     logger.warning("QR code expired, ignoring")
-                    time.sleep(2)
                     continue
 
                 logger.info(f"Registration QR detected! Claiming...")
