@@ -30,7 +30,7 @@ export function CameraRegisterPage() {
     // Optionally navigate to camera view
     setTimeout(() => {
       // Calculate camera PDA from registration
-      navigate(`/app/camera/${cameraData.device.deviceId}`);
+      navigate(`/app/camera/${cameraData.cameraPda}`);
     }, 3000);
   };
 
@@ -76,7 +76,7 @@ export function CameraRegisterPage() {
 
           <div className="space-y-3">
             <button
-              onClick={() => navigate(`/app/camera/${registeredCamera.device.deviceId}`)}
+              onClick={() => navigate(`/app/camera/${registeredCamera.cameraPda}`)}
               className="w-full bg-primary text-white py-2 px-4 rounded-md hover:bg-primary-hover"
             >
               Go to Camera View

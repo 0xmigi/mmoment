@@ -1,0 +1,10 @@
+flask
+flask-cors
+opencv-python-headless
+numpy
+cryptography
+PyNaCl
+base58
+solders
+requests
+pyyaml

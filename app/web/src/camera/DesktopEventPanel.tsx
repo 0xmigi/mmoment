@@ -164,7 +164,7 @@ function SlideProblem() {
           </p>
           <p className="text-base text-[#5C5C56] leading-relaxed flex items-start gap-3">
             <span className="w-1.5 h-1.5 rounded-full bg-[#D97706] mt-2 flex-shrink-0" />
-            But both are narrow — one tracks runs, the other takes photos. No general infrastructure exists for physical presence.
+            But both are narrow — one tracks runs, the other takes photos. No open infrastructure exists to capture it.
           </p>
           <p className="text-base text-[#5C5C56] leading-relaxed flex items-start gap-3">
             <span className="w-1.5 h-1.5 rounded-full bg-[#D97706] mt-2 flex-shrink-0" />
@@ -333,10 +333,8 @@ function SlideWhyNow() {
 
 function SlideStack() {
   const points = [
-    "User physical presence literally prints out the default access controls",
-    "Business model copies photo booths as we know them — except networked and monetizable",
-    "Jetson Orin Nano board, HQ 9:16 (vertical) camera, case/battery",
-    "Sensitive data encrypted locally with the user's own keys before it leaves the device",
+    "Physical presence is the access control — no logins, no invite links, just be there",
+    "Data is encrypted locally with the user's own keys before it leaves the device",
     "Session history and content ownership go on Solana — user-owned, permanent",
     "Every camera is an endpoint — anything can plug in",
   ];
@@ -347,11 +345,14 @@ function SlideStack() {
         <div className="text-xs font-semibold tracking-[0.25em] uppercase text-[#8A8A82] mb-6">
           How Does It Work?
         </div>
-        <h2 className="text-5xl font-black tracking-tighter text-[#1A1A18] leading-[1.05] mb-8">
-          Network of nodes,
+        <h2 className="text-5xl font-black tracking-tighter text-[#1A1A18] leading-[1.05] mb-6">
+          Self-contained nodes.
           <br />
-          <span className="text-[#D97706]">presence gated access.</span>
+          <span className="text-[#D97706]">Trusted by design. Open by default.</span>
         </h2>
+        <p className="text-xs font-medium text-[#8A8A82] tracking-wide mb-6">
+          Jetson Orin Nano · HQ 9:16 camera · standalone case + battery — ~$500
+        </p>
         <div className="space-y-3">
           {points.map((point, i) => (
             <p key={i} className="text-base text-[#5C5C56] leading-relaxed flex items-start gap-3">
