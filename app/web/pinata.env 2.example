@@ -1,0 +1,18 @@
+# Pinata IPFS Configuration for Production
+# Replace these with your actual credentials from Pinata dashboard
+# https://app.pinata.cloud/developers/keys
+#
+# For local development, the app uses credentials stored in your browser's localStorage.
+# You can update these credentials through the settings interface in the app.
+# For production, set these environment variables in your hosting platform.
+
+# JWT Token - preferred authentication method
+VITE_PINATA_JWT=your_jwt_token
+
+# API Key and Secret - fallback authentication method
+VITE_PINATA_API_KEY=your_api_key
+VITE_PINATA_API_SECRET=your_api_secret
+
+# IMPORTANT: Never commit .env files to your repository!
+# Add .env to your .gitignore file
+# For production, set these environment variables in your deployment platform (e.g., Vercel)
