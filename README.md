@@ -1,238 +1,119 @@
-# MOMENT: ambient photo booth for IRL presents
+# MOMENT: ambient photo booth for IRL presence
 
-Mmoment solves the friction in capturing valuable social content by creating an identity-aware camera network strategically positioned where social content naturally occurs. This solution transforms predictable interaction points into seamless content-capture opportunities, eliminating the technical barriers between experiencing moments and sharing them—all while generating a social graph of real-world human interactions.
+Mmoment is an ambient photo booth system that captures content automatically when users check in at physical locations. Identity-aware cameras handle face recognition, streaming, and media capture on-device — users just tap in and the camera does the rest. All user data is encrypted and stored on-chain (Solana), owned by the user.
 
 https://github.com/user-attachments/assets/7d560159-c1f3-4f4b-b32c-5c44a421203d
 
-## Project Overview
+## Architecture
 
-Despite smartphone ubiquity, recording meaningful moments remains cumbersome—requiring device setup, perfect timing, and navigating complex sharing preferences. Mmoment addresses this by placing intelligent cameras in locations where social activities naturally occur:
+```
+[User taps in via NFC/QR] → [Camera device] → [On-device CV processing]
+                                                       ↓
+                                             [Encrypted on-chain PDAs]
+                                                       ↓
+                                             [Backend decrypts if authorized]
+                                                       ↓
+                                             [Frontend displays content]
+```
 
-- Fitness enthusiasts use the same equipment
-- Diners occupy the same tables
-- Event attendees gather at the same booths
-
-These predictable interaction points are transformed into effortless content-capture opportunities through the identity-aware camera network.
+User data lives on-chain in encrypted Solana PDAs (CameraTimeline, UserSessionChain). The backend is a decryption and coordination layer, not a data store.
 
 ## Repository Structure
 
 ```
 mmoment/
-├── app/                        # Main application code
-│   ├── orin_nano/              # NVIDIA Jetson Orin Nano implementation
-│   ├── raspberry_pi/           # Raspberry Pi implementation
-│   ├── web/                    # Web frontend application
-│   └── backend/                # Backend services
-├── programs/                   # Solana smart contracts
-│   └── camera-network/         # Main camera network program
-├── scripts/                    # Utility scripts
-└── tests/                      # Testing framework
+├── app/
+│   ├── orin_nano/          # NVIDIA Jetson Orin Nano camera
+│   ├── pi_zero_2w/         # Raspberry Pi Zero 2W camera
+│   ├── pi_5/               # Raspberry Pi 5 camera (legacy)
+│   ├── web/                # React frontend
+│   └── backend/            # Node.js backend (Express, Socket.IO)
+├── programs/
+│   ├── camera-network/     # Core Solana program (cameras, identity, sessions)
+│   └── competition-escrow/ # Competition escrow program
+└── scripts/
 ```
 
-## Core Components
+## Camera Devices
 
-### 1. Camera Hardware (app/orin_nano, app/raspberry_pi)
+Two camera implementations are actively used.
 
-The camera network evolved through multiple iterations:
+### NVIDIA Jetson Orin Nano (`app/orin_nano/`)
 
-- **Raspberry Pi Zero 2 W** (Initial Prototype)  
-  Simple, low-cost device for proof of concept.
+GPU-accelerated camera running containerized microservices:
 
-- **Raspberry Pi 5** (Enhanced Version)  
-  Improved performance and connectivity for production-ready devices.
+- Real-time face detection/recognition (YOLOv8 + InsightFace via TensorRT)
+- Pose estimation and gesture detection
+- Native C++ inference pipeline (RetinaFace, ArcFace, OSNet)
+- Encrypted facial embedding storage
+- H.264 live streaming
+- On-device Solana wallet integration
 
-- **NVIDIA Jetson Orin Nano** (Current Version)  
-  Advanced computer vision capabilities with on-device ML for facial recognition, gesture detection, and high-quality video processing.
+### Raspberry Pi Zero 2W (`app/pi_zero_2w/`)
 
-### 2. Camera Service (app/orin_nano/camera_service_new)
+Lightweight Python Flask camera service:
 
-The core vision processing system built on the Jetson platform:
+- Dual-mode: QR scanning for onboarding, H.264 streaming via `rpicam-vid` + ffmpeg
+- Auto-provisioned Cloudflare tunnels for remote access
+- Device-level Solana signing for check-in/checkout
 
-- High-performance frame buffer (30fps)
-- Face recognition and gesture detection
-- Media capture (photos and videos)
-- Real-time video streaming
+### Raspberry Pi 5 (`app/pi_5/`) — Legacy
 
-### 3. Camera Service API (app/orin_nano/camera_service)
+Earlier iteration kept as reference. Superseded by the above.
 
-Direct RESTful API for connecting camera systems to web applications:
+## Web Frontend (`app/web/`)
 
-- High-performance video streaming
-- Face recognition and gesture detection
-- Photo/video capture with user attribution
-- Session management and blockchain integration
+React + TypeScript + Tailwind CSS + Vite
 
-### 4. Solana Blockchain Integration (app/orin_nano/solana_middleware)
+- Solana wallet auth (Dynamic Labs, Privy, Phantom)
+- Camera discovery, live stream viewing, and session management
+- Media timeline with photo/video browsing
+- Decentralized storage integration (Walrus on Sui, Pinata)
+- NFC-based check-in flow
+- Livepeer streaming integration
 
-Decentralized authentication and content ownership:
+## Backend (`app/backend/`)
 
-- Wallet connection management
-- On-chain identity verification via encrypted facial embeddings
-- Recording moments on-chain with verifiable attribution
-- Secure content authorization
+Node.js + Express + Socket.IO
 
-### 5. Web Application (app/web)
+- Decryption service for on-chain content (authorized access only)
+- File storage relay (Walrus blob storage with AES-256-GCM encryption)
+- Gas sponsorship for user transactions (Kora)
+- Competition API for escrow settlement
+- Real-time session coordination via WebSockets
+- Camera device config and relay status
+- Session cleanup cron jobs and timeline write operations
 
-User-facing interface for interacting with the camera network:
+## Solana Programs (`programs/`)
 
-- Wallet integration (Solana)
-- Camera discovery and connection
-- Content browsing and sharing
-- User profile management
+Built with the Anchor framework, deployed on devnet.
 
-### 6. Solana Smart Contracts (programs/camera-network)
+### camera-network (`E67WTa1NpFVoapXwYYQmXzru3pyhaN9Kj3wPdZEyyZsL`)
 
-On-chain logic for the decentralized camera network:
+- Camera registration and management
+- User identity enrollment with encrypted face embeddings
+- On-chain session tracking with access keys
+- Compressed timeline entries via Light Protocol
+- Moment metadata and content attribution
 
-- Camera registry for device authentication
-- Content ownership verification
-- Access control mechanisms
-- Social graph relationships
+### competition-escrow (`EpczQBF7WmPcyzTtYJfzrPNXSVxM3YJsND7Vx8zpTLAj`)
 
-#### Smart Contract Architecture
+- Competition creation with invited participants
+- Stake deposits and withdrawals
+- Settlement with configurable payout rules (winner-take-all, split)
 
-The Solana program is built on the Anchor framework and implements:
+## Stack
 
-1. **Camera Registry** - A global PDA that tracks all cameras in the network
-2. **User Registry** - Stores user identities and their associated face embeddings (encrypted)
-3. **Moment Records** - On-chain content ownership with metadata linking to captured moments
-4. **Access Control** - Permission system for camera access and session management
-5. **Social Graph** - On-chain representation of real-world interactions
-
-Example of registering a new camera:
-```rust
-pub fn register_camera(ctx: Context<RegisterCamera>, camera_id: String) -> Result<()> {
-    let camera = &mut ctx.accounts.camera;
-    camera.owner = ctx.accounts.authority.key();
-    camera.camera_id = camera_id;
-    camera.active = true;
-    camera.created_at = Clock::get()?.unix_timestamp;
-    Ok(())
-}
-```
-
-## Key Features
-
-### Identity Awareness
-
-The system recognizes users through:
-
-- Facial recognition (privacy-preserving with on-device processing)
-- Solana wallet authentication
-- On-chain session management and access control
-
-### Gesture Detection
-
-Natural interaction with cameras through:
-
-- Hand gesture recognition
-- Pose estimation
-- Intent-based capture triggers
-
-### Seamless Content Capture
-
-Automatic content recording based on:
-
-- User presence detection
-- Activity recognition
-- Social context awareness
-
-### Blockchain-Verified Ownership
-
-All captured content is:
-
-- Verifiably attributed to the user on-chain
-- Cryptographically linked to wallet identity
-- Securely shareable with privacy controls
-
-## Real-World Applications
-
-### Fitness Centers
-
-Mmoment cameras positioned at key equipment stations automatically capture:
-- Personal records and achievements
-- Form checks and improvements
-- Before/after transformation documentation
-
-### Restaurants & Culinary Experiences
-
-Strategically placed cameras allow diners to:
-- Capture dish presentations without interrupting the experience
-- Record chef's table interactions and cooking demonstrations
-- Create food review content without phone distractions
-
-### Event Venues
-
-Cameras at photo-worthy locations enable:
-- Automatic photo booth functionality without the booth
-- Action shots during activities/experiences
-- Group photos without excluding the photographer
-
-### Social Graph Generation
-
-The system creates a privacy-preserving social graph by:
-- Mapping real-world interactions between users
-- Creating connection points based on shared experiences
-- Building communities around common activities and locations
-
-## Development Roadmap
-
-### Phase 1: Single Camera Prototype ✅
-- Raspberry Pi Zero 2 W implementation
-- Basic camera streaming
-- Simple web interface
-
-### Phase 2: Enhanced Camera System ✅
-- Raspberry Pi 5 implementation
-- Improved image quality
-- Cloud connectivity
-
-### Phase 3: Computer Vision Integration ✅
-- NVIDIA Jetson Orin Nano implementation
-- Face recognition
-- Gesture detection
-- Real-time processing
-
-### Phase 4: Decentralized Identity ✅
-- Solana wallet integration
-- On-chain identity verification via encrypted embeddings
-- Blockchain-verified content attribution
-
-### Phase 5: Livepeer Streaming Integration ✅
-- Migrated from MJPEG to Livepeer streaming for improved performance
-- Low-latency streaming with WebRTC support
-- Unified streaming architecture across all camera devices
-
-### Phase 6: Deployment & Scaling 🚧
-- Production-ready hardware
-- Multi-camera network support
-- Commercial venue partnerships
-
-## Future Vision
-
-### Enhanced Computer Vision
-
-- **Emotion Recognition**: Automatically capture content during peak emotional moments
-- **Activity Classification**: Smart recording triggered by specific activities or achievements
-- **Multi-Person Interactions**: Detect group dynamics and social connections
-
-### Decentralized Camera Network
-
-- **Token-Incentivized Hardware**: Economic model for commercial camera deployments
-- **Revenue Sharing**: Venue and creator revenue models for captured content
-
-### Privacy Innovations
-
-- **Selective Disclosure**: Users control exactly what data is shared and when
-- **Self-Sovereign Identity**: Complete user ownership of all identity data
-
-## Technical Documentation
-
-- [API Endpoints](app/orin_nano/docs/API_ENDPOINTS.md) - Complete reference of all available API endpoints
-- [System Setup](app/orin_nano/docs/SYSTEM_SETUP.md) - How to set up the system from scratch
-- [Frontend Integration](app/orin_nano/docs/FRONTEND_INTEGRATION.md) - Guide for frontend developers
-- [Hardware Setup](app/orin_nano/docs/HARDWARE.md) - Information about hardware requirements and setup
-
+| Layer | Tech |
+|-------|------|
+| Frontend | React, TypeScript, Tailwind CSS, Vite |
+| Backend | Node.js, Express, Socket.IO, SQLite |
+| Smart Contracts | Anchor (Rust), Light Protocol |
+| Primary Camera | Python, OpenCV, YOLOv8, InsightFace, TensorRT, Docker |
+| Lightweight Camera | Python, Flask, rpicam-vid, ffmpeg |
+| Storage | Walrus (Sui), Pinata, on-chain PDAs |
+| Auth | Dynamic Labs, Privy, Phantom, Solana wallets |
+| Streaming | Livepeer, H.264/WebRTC |
 
 ## License
 
