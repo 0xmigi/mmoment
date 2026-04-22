@@ -1,6 +1,6 @@
 # MOMENT: ambient photo booth for IRL presence
 
-Mmoment is an ambient photo booth system that captures content automatically when users check in at physical locations. Identity-aware cameras handle face recognition, streaming, and media capture on-device — users just tap in and the camera does the rest. All user data is encrypted and stored on-chain (Solana), owned by the user.
+Mmoment is an ambient photo booth system that can captures content conditionally for users once they are checked in at physical locations. Identity-aware cameras handle face recognition, streaming, and media capture on-device — users just tap in and the camera does the rest. All user data is encrypted and stored on-chain (Solana), owned by the user.
 
 https://github.com/user-attachments/assets/7d560159-c1f3-4f4b-b32c-5c44a421203d
 
